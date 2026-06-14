@@ -1,0 +1,33 @@
+import type { LocalizedString, Theme, Locale } from "@dialog/config";
+
+export interface PublicField {
+  key: string;
+  label: LocalizedString;
+  required: boolean;
+}
+export interface PublicDocument {
+  key: string;
+  label: LocalizedString;
+  requirement: "mandatory" | "conditional" | "optional";
+  acceptedFormats: string[];
+  maxSizeMb: number;
+}
+export interface PublicStep {
+  key: string;
+  title: LocalizedString;
+  fields: PublicField[];
+  documents: PublicDocument[];
+}
+export interface PublicJourney {
+  key: string;
+  title: LocalizedString;
+  steps: PublicStep[];
+}
+export interface PublicAgent {
+  slug: string;
+  name: string;
+  locales: Locale[];
+  greeting: LocalizedString;
+  theme: Theme;
+  journeys: PublicJourney[];
+}

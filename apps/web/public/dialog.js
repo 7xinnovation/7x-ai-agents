@@ -1,0 +1,24 @@
+"use strict";var DialogEmbed=(()=>{var s="dialog-embed-style";function c(){let e=document.currentScript??document.querySelector("script[data-agent]"),n=e?.dataset??{},t=n.host||new URL(e?.src||location.href).origin;return{agent:n.agent||"default",host:t,locale:n.locale||"en",position:n.position==="bottom-left"?"bottom-left":"bottom-right"}}function d(e){if(document.getElementById(s))return;let n=e.position==="bottom-left"?"left: 24px;":"right: 24px;",t=`
+  :root{--dlg-accent:#1330F0;--dlg-accent-2:#3a52ff;--dlg-accent-fg:#fff}
+  .dlg-launcher{position:fixed;bottom:24px;${n}z-index:2147483000;width:58px;height:58px;border-radius:9999px;border:none;cursor:pointer;padding:0;
+    background:linear-gradient(140deg,var(--dlg-accent-2),var(--dlg-accent));color:var(--dlg-accent-fg);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 10px 30px rgba(16,24,40,.28),0 2px 8px rgba(16,24,40,.16),inset 0 1px 0 rgba(255,255,255,.28);
+    transition:transform .22s cubic-bezier(.16,1,.3,1),box-shadow .22s ease;will-change:transform;animation:dlg-pop .4s cubic-bezier(.16,1,.3,1) both}
+  .dlg-launcher:hover{transform:translateY(-2px) scale(1.05);box-shadow:0 16px 40px rgba(16,24,40,.34),0 4px 12px rgba(16,24,40,.2)}
+  .dlg-launcher:active{transform:scale(.95)}
+  .dlg-launcher svg{position:absolute;transition:opacity .2s ease,transform .28s cubic-bezier(.16,1,.3,1)}
+  .dlg-launcher .ic-x{opacity:0;transform:rotate(-90deg) scale(.6)}
+  .dlg-launcher.open .ic-chat{opacity:0;transform:rotate(90deg) scale(.6)}
+  .dlg-launcher.open .ic-x{opacity:1;transform:none}
+  .dlg-frame{position:fixed;border:none;z-index:2147483001;background:transparent;border-radius:20px;
+    box-shadow:0 30px 80px rgba(16,24,40,.30),0 8px 24px rgba(16,24,40,.18);
+    opacity:0;visibility:hidden;transform:translateY(14px) scale(.98);transform-origin:bottom ${e.position==="bottom-left"?"left":"right"};
+    transition:opacity .3s cubic-bezier(.16,1,.3,1),transform .3s cubic-bezier(.16,1,.3,1),visibility .3s,width .3s ease,height .3s ease,border-radius .3s ease}
+  .dlg-frame.widget{bottom:96px;${n}width:404px;height:640px;max-height:calc(100vh - 120px)}
+  .dlg-frame.full{inset:0;width:100vw;height:100vh;border-radius:0;transform-origin:center}
+  .dlg-frame.open{opacity:1;visibility:visible;transform:none}
+  @media (max-width:640px){.dlg-frame.widget{inset:0;width:100vw;height:100vh;border-radius:0}}
+  @media (prefers-reduced-motion:reduce){.dlg-launcher{animation:none}.dlg-launcher,.dlg-launcher svg,.dlg-frame{transition:opacity .15s linear}}
+  @keyframes dlg-pop{from{opacity:0;transform:translateY(10px) scale(.8)}to{opacity:1;transform:none}}
+  `,o=document.createElement("style");o.id=s,o.textContent=t,document.head.appendChild(o)}async function g(e){try{let n=await fetch(`${e.host}/api/agents/${encodeURIComponent(e.agent)}`);if(!n.ok)return;let t=await n.json(),o=t?.theme?.colors?.primary,a=t?.theme?.colors?.primaryForeground;o&&(document.documentElement.style.setProperty("--dlg-accent",o),document.documentElement.style.setProperty("--dlg-accent-2",`color-mix(in srgb, ${o} 78%, white)`)),a&&document.documentElement.style.setProperty("--dlg-accent-fg",a)}catch{}}var m='<svg class="ic-chat" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/></svg>',p='<svg class="ic-x" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';function l(){let e=c();d(e),g(e);let n="closed",t=document.createElement("iframe");t.className="dlg-frame widget",t.title="Dialog assistant",t.allow="clipboard-write; microphone",t.src=`${e.host}/embed/${encodeURIComponent(e.agent)}?locale=${e.locale}&embedded=1`;let o=document.createElement("button");o.className="dlg-launcher",o.setAttribute("aria-label","Open assistant"),o.innerHTML=m+p;function a(i){n=i,t.classList.toggle("open",i!=="closed"),t.classList.toggle("full",i==="full"),t.classList.toggle("widget",i==="widget"),o.classList.toggle("open",i!=="closed"),o.style.display=i==="full"?"none":"flex",document.documentElement.style.overflow=i==="full"?"hidden":""}o.addEventListener("click",()=>a(n==="closed"?"widget":"closed")),window.addEventListener("message",i=>{if(i.origin!==e.host)return;let r=i.data;r?.source==="dialog"&&(r.action==="expand"?a("full"):r.action==="collapse"?a("widget"):r.action==="close"&&a("closed"))}),document.body.appendChild(t),document.body.appendChild(o)}document.readyState==="loading"?document.addEventListener("DOMContentLoaded",l):l();})();

@@ -1,0 +1,25 @@
+{
+  "name": "dialog-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant conversational AI platform — floating widget + full-page split-screen with a realtime case builder. EPGL Dialog is tenant #1.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspace apps/web",
+    "db:generate": "npm run generate --workspace @dialog/db",
+    "db:push": "npm run push --workspace @dialog/db",
+    "db:seed": "npm run seed --workspace @dialog/db",
+    "embed:build": "npm run build --workspace @dialog/embed",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

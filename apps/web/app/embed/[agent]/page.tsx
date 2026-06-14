@@ -1,0 +1,48 @@
+import { notFound } from "next/navigation";
+import { getAgentBySlug } from "@/lib/agents";
+import { Experience } from "./Experience";
+import type { PublicAgent } from "./types";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export default async function EmbedPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ agent: string }>;
+  searchParams: Promise<{ locale?: string; embedded?: string; cid?: string }>;
+}) {
+  const { agent: slug } = await params;
+  const { locale, cid } = await searchParams;
+  const agent = await getAgentBySlug(slug);
+  if (!agent) notFound();
+
+  const d = agent.definition;
+  const pub: PublicAgent = {
+    slug: d.slug,
+    name: d.name,
+    locales: d.locales,
+    greeting: d.greeting,
+    theme: d.theme,
+    journeys: d.journeys.map((j) => ({
+      key: j.key,
+      title: j.title,
+      steps: j.steps.map((s) => ({
+        key: s.key,
+        title: s.title,
+        fields: s.fields.map((f) => ({ key: f.key, label: f.label, required: f.validation.required })),
+        documents: s.documents.map((doc) => ({
+          key: doc.key,
+          label: doc.label,
+          requirement: doc.requirement,
+          acceptedFormats: doc.acceptedFormats,
+          maxSizeMb: doc.maxSizeMb,
+        })),
+      })),
+    })),
+  };
+
+  const initialLocale = (locale === "ar" || locale === "en" ? locale : d.locales[0]) ?? "en";
+  return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} />;
+}

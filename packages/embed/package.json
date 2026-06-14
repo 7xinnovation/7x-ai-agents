@@ -1,0 +1,14 @@
+{
+  "name": "@dialog/embed",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/dialog.js",
+  "scripts": {
+    "build": "tsup src/index.ts --format iife --global-name DialogEmbed --minify --out-dir dist --no-dts && mv dist/index.global.js dist/dialog.js",
+    "dev": "tsup src/index.ts --format iife --global-name DialogEmbed --watch --out-dir dist"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3"
+  }
+}
