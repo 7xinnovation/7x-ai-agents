@@ -12,6 +12,8 @@ interface EnvDetail { specUrl: string; baseUrl: string; authType: string; hasAut
 interface Integration { id: string; name: string; enabled: boolean; environments: Partial<Record<"staging" | "production", EnvDetail>> }
 
 const METHOD_COLOR: Record<string, string> = { GET: "text-emerald-600", POST: "text-blue-600", PUT: "text-amber-600", PATCH: "text-amber-600", DELETE: "text-rose-600" };
+const authLabel = (a?: string) =>
+  a === "uaepass_live" ? " · UAE PASS (live)" : a === "uaepass_test" ? " · UAE PASS (test)" : a === "bearer" ? " · bearer" : a === "apiKey" ? " · api key" : "";
 
 export function IntegrationsManager({ slug }: { slug: string }) {
   const [items, setItems] = useState<Integration[]>([]);
@@ -21,7 +23,7 @@ export function IntegrationsManager({ slug }: { slug: string }) {
   const [specUrl, setSpecUrl] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [name, setName] = useState("");
-  const [authType, setAuthType] = useState<"none" | "bearer" | "apiKey">("none");
+  const [authType, setAuthType] = useState<"none" | "bearer" | "apiKey" | "uaepass_test" | "uaepass_live">("none");
   const [authValue, setAuthValue] = useState("");
   const [authHeader, setAuthHeader] = useState("");
   const [busy, setBusy] = useState(false);
@@ -61,7 +63,7 @@ export function IntegrationsManager({ slug }: { slug: string }) {
         {isActive && <Badge tone="live" dot>active</Badge>}
         {d ? (
           <>
-            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted">{d.baseUrl} · {d.operationCount} ops{d.hasAuth ? " · auth" : ""}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted">{d.baseUrl} · {d.operationCount} ops{authLabel(d.authType)}</span>
             <button onClick={() => removeEnv(it.id, env)} aria-label={`Remove ${env}`} className="grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-white hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
           </>
         ) : (
@@ -92,10 +94,27 @@ export function IntegrationsManager({ slug }: { slug: string }) {
             <Field label="OpenAPI / Swagger URL"><Input value={specUrl} onChange={(e) => setSpecUrl(e.target.value)} placeholder="https://box.emiratespost.ae/services/pobox/openapi.json" /></Field>
             <Field label="Base URL (optional)" hint="Override the spec server."><Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://box-stg.emiratespost.ae" /></Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Auth"><Select value={authType} onChange={(e) => setAuthType(e.target.value as any)}><option value="none">None</option><option value="bearer">Bearer token</option><option value="apiKey">API key header</option></Select></Field>
-              {authType !== "none" && <Field label={authType === "bearer" ? "Token" : "API key value"}><Input type="password" value={authValue} onChange={(e) => setAuthValue(e.target.value)} placeholder="••••••" /></Field>}
+              <Field label="Auth">
+                <Select value={authType} onChange={(e) => setAuthType(e.target.value as any)}>
+                  <option value="none">None</option>
+                  <option value="bearer">Bearer token</option>
+                  <option value="apiKey">API key header</option>
+                  <option value="uaepass_live">UAE PASS (Live)</option>
+                  <option value="uaepass_test">UAE PASS (Test)</option>
+                </Select>
+              </Field>
+              {(authType === "bearer" || authType === "apiKey" || authType === "uaepass_test") && (
+                <Field label={authType === "uaepass_test" ? "UAE PASS test token" : authType === "bearer" ? "Token" : "API key value"}>
+                  <Input type="password" value={authValue} onChange={(e) => setAuthValue(e.target.value)} placeholder="••••••" />
+                </Field>
+              )}
             </div>
             {authType === "apiKey" && <Field label="Header name"><Input value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} placeholder="X-API-Key" /></Field>}
+            {authType === "uaepass_live" && (
+              <div className="rounded-lg border border-[var(--color-ring)] bg-[color-mix(in_srgb,var(--color-brand)_5%,white)] px-3.5 py-2.5 text-[12.5px] text-ink-2">
+                Calls use the <b>UAE PASS session of the site</b> where the widget is embedded — the host passes the session token through automatically. No token is stored here. Use <b>UAE PASS (Test)</b> with a token to try it before a live session exists.
+              </div>
+            )}
             {msg && <div className={cn("rounded-lg px-3.5 py-2.5 text-[13px]", msg.k === "ok" ? "border border-emerald-200 bg-emerald-50 text-emerald-700" : "border border-rose-200 bg-rose-50 text-rose-700")}>{msg.t}</div>}
             <Button onClick={importSpec} disabled={busy || !specUrl.trim() || !name.trim()}><Plus className="h-4 w-4" /> {busy ? "Importing…" : "Import & connect"}</Button>
           </CardContent>

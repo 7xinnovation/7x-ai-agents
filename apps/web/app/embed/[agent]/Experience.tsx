@@ -91,11 +91,14 @@ export function Experience({
   agent,
   initialLocale,
   initialConversationId,
+  uaePassToken,
 }: {
   agent: PublicAgent;
   initialLocale: Locale;
   initialConversationId?: string;
+  uaePassToken?: string;
 }) {
+  const uaePass = useRef<string | undefined>(uaePassToken);
   const [locale, setLocale] = useState<Locale>(initialLocale);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [caseState, setCaseState] = useState<CaseState | null>(null);
@@ -176,6 +179,16 @@ export function Experience({
     [agent.slug]
   );
 
+  // Host site can push/refresh the UAE PASS session token at any time.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const m = e.data as { source?: string; uaePassToken?: string };
+      if (m?.source === "dialog-host" && typeof m.uaePassToken === "string") uaePass.current = m.uaePassToken;
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
   // Resume a prior session for this agent (PRD: partial-application retention).
   useEffect(() => {
     const saved =
@@ -230,6 +243,7 @@ export function Experience({
           conversationId: convId.current ?? undefined,
           locale,
           authenticated,
+          uaePassToken: uaePass.current,
         }),
       });
       if (!res.body) throw new Error("no stream");

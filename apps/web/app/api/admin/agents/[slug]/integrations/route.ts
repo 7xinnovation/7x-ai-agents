@@ -34,7 +34,7 @@ const ImportBody = z.object({
   environment: z.enum(["staging", "production"]),
   specUrl: z.string().url(),
   baseUrl: z.string().url().optional(),
-  authType: z.enum(["none", "bearer", "apiKey"]).default("none"),
+  authType: z.enum(["none", "bearer", "apiKey", "uaepass_test", "uaepass_live"]).default("none"),
   authValue: z.string().optional(),
   authHeader: z.string().optional(),
 });

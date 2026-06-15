@@ -20,6 +20,7 @@ interface BootConfig {
   host: string;
   locale: string;
   position: "bottom-right" | "bottom-left";
+  uaePassToken?: string;
 }
 
 const STYLE_ID = "dialog-embed-style";
@@ -35,6 +36,7 @@ function readConfig(): BootConfig {
     host,
     locale: d.locale || "en",
     position: d.position === "bottom-left" ? "bottom-left" : "bottom-right",
+    uaePassToken: d.uaepassToken || undefined,
   };
 }
 
@@ -105,7 +107,14 @@ function boot() {
   frame.className = "dlg-frame widget";
   frame.title = "Dialog assistant";
   frame.allow = "clipboard-write; microphone";
-  frame.src = `${cfg.host}/embed/${encodeURIComponent(cfg.agent)}?locale=${cfg.locale}&embedded=1`;
+  const upt = cfg.uaePassToken ? `&upt=${encodeURIComponent(cfg.uaePassToken)}` : "";
+  frame.src = `${cfg.host}/embed/${encodeURIComponent(cfg.agent)}?locale=${cfg.locale}&embedded=1${upt}`;
+
+  // Host can refresh the UAE PASS session token at runtime (e.g. after sign-in):
+  //   window.Dialog.setUaePassToken("<token>")
+  (window as unknown as { Dialog?: Record<string, unknown> }).Dialog = {
+    setUaePassToken: (token: string) => frame.contentWindow?.postMessage({ source: "dialog-host", uaePassToken: token }, cfg.host),
+  };
 
   const launcher = document.createElement("button");
   launcher.className = "dlg-launcher";

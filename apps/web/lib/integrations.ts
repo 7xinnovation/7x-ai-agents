@@ -5,10 +5,14 @@ import type { ApiOperation } from "./openapi";
 
 export type EnvKey = "staging" | "production";
 
+export type AuthType = "none" | "bearer" | "apiKey" | "uaepass_test" | "uaepass_live";
+
 export interface EnvSpec {
   specUrl: string;
   baseUrl: string;
-  authType: "none" | "bearer" | "apiKey";
+  // uaepass_test: use the stored token (authValue) as the session bearer.
+  // uaepass_live: use the UAE PASS session token forwarded by the embedding site.
+  authType: AuthType;
   authValue: string | null;
   authHeader: string | null;
   operations: ApiOperation[];
@@ -77,7 +81,8 @@ const prefix = (name: string) => name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 14).
  */
 export async function buildApiTools(
   agentId: string,
-  activeEnv: EnvKey
+  activeEnv: EnvKey,
+  uaePassToken?: string
 ): Promise<{
   tools: Anthropic.Tool[];
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
@@ -105,7 +110,7 @@ export async function buildApiTools(
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
-    return executeOperation(entry.spec, entry.op, input ?? {});
+    return executeOperation(entry.spec, entry.op, input ?? {}, uaePassToken);
   };
 
   return { tools, exec };
@@ -114,9 +119,19 @@ export async function buildApiTools(
 export async function executeOperation(
   spec: EnvSpec,
   op: ApiOperation,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  uaePassToken?: string
 ): Promise<{ result: string; isError?: boolean }> {
   try {
+    // UAE PASS (live) requires the session token forwarded by the embedding site.
+    if (spec.authType === "uaepass_live" && !uaePassToken) {
+      return {
+        result:
+          "This action requires an active UAE PASS session, which isn't available here. Ask the customer to sign in with UAE PASS on the website, or offer a callback.",
+        isError: true,
+      };
+    }
+
     let path = op.path;
     const query = new URLSearchParams();
     const headers: Record<string, string> = { Accept: "application/json" };
@@ -129,7 +144,14 @@ export async function executeOperation(
       else if (p.in === "header") headers[p.name] = String(v);
     }
 
-    if (spec.authType === "bearer" && spec.authValue) headers["Authorization"] = `Bearer ${spec.authValue}`;
+    // Bearer comes from: explicit bearer, UAE PASS test token, or the live UAE PASS session.
+    const bearer =
+      spec.authType === "bearer" || spec.authType === "uaepass_test"
+        ? spec.authValue
+        : spec.authType === "uaepass_live"
+          ? uaePassToken
+          : null;
+    if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
     if (spec.authType === "apiKey" && spec.authValue) headers[spec.authHeader || "X-API-Key"] = spec.authValue;
 
     let body: string | undefined;

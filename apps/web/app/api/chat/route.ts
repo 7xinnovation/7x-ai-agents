@@ -20,6 +20,8 @@ const Body = z.object({
   locale: Locale.default("en"),
   authenticated: z.boolean().default(false),
   userRef: z.string().optional(),
+  // UAE PASS session token forwarded by the embedding site (for uaepass_live auth).
+  uaePassToken: z.string().optional(),
 });
 
 function sse(event: unknown): string {
@@ -48,7 +50,8 @@ export async function POST(req: NextRequest) {
   // Dynamic tools from the agent's API integrations for the ACTIVE environment.
   const { tools: extraTools, exec: runExtraTool } = await buildApiTools(
     agent.id,
-    agent.definition.activeEnvironment ?? "production"
+    agent.definition.activeEnvironment ?? "production",
+    body.uaePassToken
   );
 
   const session = await getOrCreateSession({

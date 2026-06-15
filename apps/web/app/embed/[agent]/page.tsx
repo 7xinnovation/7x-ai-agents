@@ -11,10 +11,10 @@ export default async function EmbedPage({
   searchParams,
 }: {
   params: Promise<{ agent: string }>;
-  searchParams: Promise<{ locale?: string; embedded?: string; cid?: string }>;
+  searchParams: Promise<{ locale?: string; embedded?: string; cid?: string; upt?: string }>;
 }) {
   const { agent: slug } = await params;
-  const { locale, cid } = await searchParams;
+  const { locale, cid, upt } = await searchParams;
   const agent = await getAgentBySlug(slug);
   if (!agent) notFound();
 
@@ -44,5 +44,5 @@ export default async function EmbedPage({
   };
 
   const initialLocale = (locale === "ar" || locale === "en" ? locale : d.locales[0]) ?? "en";
-  return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} />;
+  return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} uaePassToken={upt} />;
 }
