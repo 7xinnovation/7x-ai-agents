@@ -152,7 +152,7 @@ const epgl: AgentDefinition = AgentDefinition.parse({
   ],
 });
 
-const KB: { title: string; source: string; content: string }[] = [
+const KB: { title: string; source: string; content: string; locale?: "en" | "ar" }[] = [
   {
     title: "Courier license eligibility",
     source: "EPGL Licensing Guide §1",
@@ -188,6 +188,50 @@ const KB: { title: string; source: string; content: string }[] = [
     source: "EPGL Licensing Guide §6",
     content:
       "If you need assistance from an EPGL agent, you can request a callback at any time. Provide your name, phone number, and the reason, and EPGL will follow up with a reference number.",
+  },
+  // Arabic mirror of the knowledge base so Arabic queries retrieve grounded
+  // passages too (AR/EN parity — surfaced by the eval harness).
+  {
+    title: "أهلية رخصة البريد السريع",
+    source: "EPGL Licensing Guide §1",
+    locale: "ar",
+    content:
+      "للتقدم بطلب رخصة بريد سريع من مجموعة بريد الإمارات للترخيص (EPGL)، يجب أن يكون مقدم الطلب شركة تحمل رخصة تجارية سارية في الإمارات، وأن يسمح نشاط الرخصة بخدمات البريد السريع أو التوصيل. تُعالَج الطلبات الجديدة والتجديدات عبر EPGL.",
+  },
+  {
+    title: "المستندات المطلوبة لرخصة بريد سريع جديدة",
+    source: "EPGL Licensing Guide §2",
+    locale: "ar",
+    content:
+      "يتطلب طلب رخصة بريد سريع جديدة: نسخة من الرخصة التجارية للشركة، والهوية الإماراتية للمفوّض بالتوقيع، وتفاصيل المساهمين بنسب ملكية مجموعها 100٪. وقد يُطلب عقد التأسيس لبعض أنواع الشركات. ويجب أن تكون المستندات نسخاً واضحة بصيغة PDF أو PNG أو JPG.",
+  },
+  {
+    title: "عملية التجديد",
+    source: "EPGL Licensing Guide §3",
+    locale: "ar",
+    content:
+      "يجدّد حاملو الرخص الحاليون رخصهم بتأكيد بيانات الرخصة الحالية، وتحديث أي معلومات اتصال متغيّرة، ورفع رخصة تجارية محدّثة. وتقوم EPGL بتعبئة المعلومات المتوفرة مسبقاً حتى لا يعيد المتقدم إدخال بيانات تملكها EPGL. ويُنصح بتقديم التجديد قبل تاريخ انتهاء الرخصة لتفادي الغرامات.",
+  },
+  {
+    title: "المعالجة والحالة",
+    source: "EPGL Licensing Guide §4",
+    locale: "ar",
+    content:
+      "بعد التقديم، تُنشئ EPGL حالة وتعيد رقماً مرجعياً. ويمكن للمتقدمين متابعة حالة طلبهم أو تجديدهم في أي وقت بعد تسجيل الدخول. وإذا كانت هناك مستندات ناقصة، تُعرض العناصر المتبقية والخطوات التالية.",
+  },
+  {
+    title: "تسجيل الدخول والتحقق",
+    source: "EPGL Licensing Guide §5",
+    locale: "ar",
+    content:
+      "يمكن لأي شخص طرح أسئلة الترخيص وطلب معاودة الاتصال دون تسجيل الدخول. أما تقديم طلب أو تجديد، أو رفع المستندات، أو الاستعلام عن حالة الطلب الشخصي فيتطلب تسجيل الدخول عبر نظام الهوية الرقمية UAE PASS المعتمد لدى EPGL.",
+  },
+  {
+    title: "الحصول على مساعدة بشرية",
+    source: "EPGL Licensing Guide §6",
+    locale: "ar",
+    content:
+      "إذا كنت بحاجة إلى مساعدة من موظف EPGL، يمكنك طلب معاودة الاتصال في أي وقت. قدّم اسمك ورقم هاتفك وسبب الطلب، وستتواصل معك EPGL مع رقم مرجعي.",
   },
 ];
 
@@ -286,7 +330,7 @@ const SIBLING_KB: { title: string; source: string; content: string }[] = [
 async function seedAgent(
   def: AgentDefinition,
   tenantName: string,
-  kb: { title: string; source: string; content: string }[]
+  kb: { title: string; source: string; content: string; locale?: "en" | "ar" }[]
 ) {
   const db = getDb();
   const [tenant] = await db
@@ -305,7 +349,7 @@ async function seedAgent(
   for (const item of kb) {
     const [doc] = await db
       .insert(kbDocuments)
-      .values({ agentId: agent!.id, title: item.title, source: item.source, version: "1", locale: "en" })
+      .values({ agentId: agent!.id, title: item.title, source: item.source, version: "1", locale: item.locale ?? "en" })
       .returning();
     await db.insert(kbChunks).values({
       agentId: agent!.id,

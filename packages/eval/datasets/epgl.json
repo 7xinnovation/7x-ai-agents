@@ -1,0 +1,31 @@
+{
+  "agentSlug": "epgl-dialog",
+  "intentCases": [
+    { "message": "I want to apply for a new courier license.", "locale": "en", "expected": "new_license" },
+    { "message": "How do I get a courier license for my company?", "locale": "en", "expected": "new_license" },
+    { "message": "أريد التقدم بطلب رخصة بريد سريع جديدة", "locale": "ar", "expected": "new_license" },
+    { "message": "I need to renew my courier license.", "locale": "en", "expected": "renewal" },
+    { "message": "My license is expiring soon, how do I renew it?", "locale": "en", "expected": "renewal" },
+    { "message": "كيف أجدد رخصتي الحالية؟", "locale": "ar", "expected": "renewal" },
+    { "message": "What is a courier license exactly?", "locale": "en", "expected": "licensing_info" },
+    { "message": "Am I eligible to apply for licensing?", "locale": "en", "expected": "licensing_info" },
+    { "message": "ما هي متطلبات الترخيص؟", "locale": "ar", "expected": "licensing_info" },
+    { "message": "Can I talk to a real person please?", "locale": "en", "expected": "human_help" },
+    { "message": "I'd like a callback from an EPGL agent.", "locale": "en", "expected": "human_help" },
+    { "message": "أريد التحدث مع موظف", "locale": "ar", "expected": "human_help" }
+  ],
+  "groundingCases": [
+    { "message": "What documents are required for a new courier license?", "scope": "in_scope" },
+    { "message": "How does the license renewal process work?", "scope": "in_scope" },
+    { "message": "Who is eligible to apply for a courier license?", "scope": "in_scope" },
+    { "message": "Can you give me legal advice about a contract dispute with a supplier?", "scope": "out_of_scope" },
+    { "message": "What is the corporate tax rate in the UAE this year?", "scope": "out_of_scope" },
+    { "message": "How do I submit a Form 09 and prepare for an audit?", "scope": "out_of_scope" },
+    { "message": "What's the weather forecast in Dubai this weekend?", "scope": "out_of_scope" }
+  ],
+  "parityQuestions": [
+    { "en": "What documents are required for a new courier license?", "ar": "ما المستندات المطلوبة لرخصة بريد سريع جديدة؟" },
+    { "en": "How does the license renewal process work?", "ar": "كيف تتم عملية تجديد الرخصة؟" },
+    { "en": "Who is eligible to apply for a courier license?", "ar": "من المؤهل للتقدم بطلب رخصة بريد سريع؟" }
+  ]
+}

@@ -7,8 +7,13 @@ import type { NextRequest } from "next/server";
  * under /admin and /api/admin requires it. Scaffold-grade (opaque shared
  * secret) — swap for real SSO before a serious deployment.
  */
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // Embed is public, but locked to each agent's approved origins via CSP.
+  if (pathname.startsWith("/embed/")) {
+    return embedCsp(req);
+  }
 
   // Always allow the login surface itself.
   if (pathname === "/admin/login" || pathname === "/api/admin/login") {
@@ -29,6 +34,29 @@ export function middleware(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
+/**
+ * Set per-agent `frame-ancestors` from the agent's allowedOrigins. Empty list =
+ * allow any host (dev default); a configured list restricts which sites may
+ * embed that agent's widget.
+ */
+async function embedCsp(req: NextRequest) {
+  const slug = req.nextUrl.pathname.split("/")[2] ?? "";
+  let ancestors = "*";
+  try {
+    const r = await fetch(new URL(`/api/agents/${encodeURIComponent(slug)}`, req.nextUrl.origin));
+    if (r.ok) {
+      const cfg = await r.json();
+      const origins: string[] = Array.isArray(cfg.allowedOrigins) ? cfg.allowedOrigins : [];
+      if (origins.length) ancestors = ["'self'", ...origins].join(" ");
+    }
+  } catch {
+    /* fall back to allow-all */
+  }
+  const res = NextResponse.next();
+  res.headers.set("Content-Security-Policy", `frame-ancestors ${ancestors}`);
+  return res;
+}
+
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*"],
+  matcher: ["/admin/:path*", "/api/admin/:path*", "/embed/:path*"],
 };

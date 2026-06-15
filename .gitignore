@@ -9,3 +9,4 @@ out
 .env*.local
 .DS_Store
 coverage
+packages/eval/report.json
