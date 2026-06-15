@@ -4,7 +4,7 @@ import "../admin-tw.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Space_Grotesk } from "next/font/google";
-import { LayoutGrid, MessagesSquare, Activity, ArrowUpRight, LogOut } from "lucide-react";
+import { LayoutGrid, MessagesSquare, Activity, Search, ArrowUpRight, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const grotesk = Space_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-grotesk", display: "swap" });
@@ -17,22 +17,26 @@ const NAV = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (pathname === "/admin/login") return <div className={cn(grotesk.variable, "tw min-h-dvh bg-bg")}>{children}</div>;
+  if (pathname === "/admin/login") return <div className={cn(grotesk.variable, "tw min-h-dvh bg-[var(--color-canvas)]")}>{children}</div>;
   const on = (h: string, exact: boolean) => (exact ? pathname === h : pathname === h || pathname.startsWith(h + "/"));
 
   return (
-    <div className={cn(grotesk.variable, "tw flex min-h-dvh bg-bg [background-image:radial-gradient(120%_80%_at_100%_-10%,rgba(0,32,245,.05),transparent_55%)]")}>
-      <aside className="sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-r border-[var(--color-line)] bg-white/85 p-4 backdrop-blur-xl">
-        <div className="flex items-center gap-3 px-1 pb-6 pt-1">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#0020f5] shadow-[0_8px_22px_-6px_rgba(0,32,245,.6)]">
-            <img src="/7xlogo.svg" alt="7X" className="h-[17px] w-auto" />
+    <div className={cn(grotesk.variable, "tw flex min-h-dvh bg-[var(--color-canvas)] text-ink")}>
+      <aside className="sticky top-0 flex h-dvh w-[262px] shrink-0 flex-col border-r border-[var(--color-line)] bg-surface px-4 py-5">
+        <div className="flex items-center gap-2.5 px-1">
+          <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[#0020f5]">
+            <img src="/7xlogo.svg" alt="7X" className="h-[15px] w-auto" />
           </span>
-          <span className="flex flex-col leading-none">
-            <span className="text-[17px] font-bold tracking-tight">Dialog</span>
-            <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">7X Platform</span>
-          </span>
+          <span className="text-[16px] font-bold tracking-tight">Dialog</span>
         </div>
-        <nav className="flex flex-col gap-1">
+
+        <div className="mt-5 flex h-10 items-center gap-2 rounded-lg border border-[var(--color-line)] bg-surface px-3 text-muted shadow-[var(--shadow-xs)]">
+          <Search className="h-4 w-4" />
+          <span className="text-sm">Search</span>
+          <kbd className="ml-auto rounded-md border border-[var(--color-line)] bg-[var(--color-canvas)] px-1.5 py-0.5 font-sans text-[11px] font-medium text-muted">⌘K</kbd>
+        </div>
+
+        <nav className="mt-5 flex flex-col gap-0.5">
           {NAV.map((n) => {
             const I = n.icon;
             const active = on(n.href, n.exact);
@@ -41,24 +45,34 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 key={n.href}
                 href={n.href}
                 className={cn(
-                  "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
-                  active
-                    ? "bg-[linear-gradient(90deg,color-mix(in_srgb,var(--color-brand)_13%,white),color-mix(in_srgb,var(--color-brand)_5%,white))] text-[var(--color-brand)]"
-                    : "text-muted hover:bg-bg hover:text-ink"
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition-colors",
+                  active ? "bg-[var(--color-line-soft)] text-ink" : "text-ink-2 hover:bg-[var(--color-line-soft)]"
                 )}
               >
-                {active && <span className="absolute -left-4 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-[linear-gradient(180deg,var(--color-brand-2),var(--color-brand))] shadow-[0_0_10px_rgba(0,32,245,.6)]" />}
-                <I className="h-[18px] w-[18px]" /> {n.label}
+                <I className={cn("h-[18px] w-[18px]", active ? "text-[var(--color-brand)]" : "text-muted")} /> {n.label}
               </Link>
             );
           })}
         </nav>
+
         <div className="mt-auto flex flex-col gap-1 border-t border-[var(--color-line)] pt-3">
-          <a className="flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-muted hover:bg-bg hover:text-ink" href="/" target="_blank" rel="noreferrer"><ArrowUpRight className="h-4 w-4" /> View site</a>
-          <a className="flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium text-muted hover:bg-bg hover:text-ink" href="/api/admin/logout"><LogOut className="h-4 w-4" /> Sign out</a>
+          <a className="flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium text-muted hover:bg-[var(--color-line-soft)] hover:text-ink" href="/" target="_blank" rel="noreferrer">
+            <ArrowUpRight className="h-4 w-4" /> View site
+          </a>
+          <div className="mt-1 flex items-center gap-3 rounded-lg px-2 py-2">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-[linear-gradient(140deg,#2b46ff,#0020f5)] text-[13px] font-bold text-white">A</span>
+            <span className="min-w-0 flex-1 leading-tight">
+              <span className="block truncate text-[13.5px] font-semibold text-ink">Admin</span>
+              <span className="block truncate text-[12px] text-muted">7X Console</span>
+            </span>
+            <a href="/api/admin/logout" aria-label="Sign out" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-[var(--color-line-soft)] hover:text-ink">
+              <LogOut className="h-4 w-4" />
+            </a>
+          </div>
         </div>
       </aside>
-      <main className="min-w-0 flex-1 px-8 py-8 max-w-[1240px]">{children}</main>
+
+      <main className="min-w-0 flex-1 px-10 py-8 max-w-[1280px]">{children}</main>
     </div>
   );
 }

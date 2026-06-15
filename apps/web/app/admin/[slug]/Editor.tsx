@@ -80,7 +80,7 @@ export function Editor({ slug }: { slug: string }) {
 
   return (
     <>
-      <header className="sticky top-0 z-10 -mx-8 -mt-8 mb-6 flex items-center justify-between gap-4 border-b border-[var(--color-line)] bg-bg/80 px-8 py-4 backdrop-blur-xl">
+      <header className="sticky top-0 z-10 -mx-10 -mt-8 mb-6 flex items-center justify-between gap-4 border-b border-[var(--color-line)] bg-surface/85 px-10 py-4 backdrop-blur-xl">
         <div>
           <h1 className="text-[20px] font-extrabold tracking-tight">{isNew ? "New agent" : def.name || slug}</h1>
           <p className="mt-0.5 flex items-center gap-1 text-[13px] text-muted"><Link href="/admin/agents" className="font-semibold text-[var(--color-brand)]">Agents</Link><ChevronRight className="h-3.5 w-3.5" />{isNew ? "new" : def.slug}</p>
@@ -93,9 +93,9 @@ export function Editor({ slug }: { slug: string }) {
 
       {msg && <div className={cn("mb-5 rounded-xl px-4 py-3 text-[13.5px]", msg.k === "ok" ? "border border-emerald-200 bg-emerald-50 text-emerald-700" : "border border-rose-200 bg-rose-50 text-rose-700")}>{msg.t}</div>}
 
-      <div className="mb-6 inline-flex gap-1 rounded-xl border border-[var(--color-line)] bg-surface p-1 shadow-sm">
+      <div className="mb-6 inline-flex gap-1 rounded-xl border border-[var(--color-line)] bg-[var(--color-canvas)] p-1">
         {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={cn("rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-colors", tab === t ? "bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] text-white shadow-[0_6px_16px_-6px_rgba(0,32,245,.5)]" : "text-muted hover:bg-bg hover:text-ink")}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={cn("rounded-lg px-3.5 py-1.5 text-[13.5px] font-semibold transition-all", tab === t ? "bg-surface text-ink shadow-[var(--shadow-xs)]" : "text-muted hover:text-ink")}>{t}</button>
         ))}
       </div>
 

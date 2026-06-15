@@ -2,18 +2,25 @@
 @import "tw-animate-css";
 
 /* Premium light theme tokens for the admin console (shadcn-compatible). */
-/* 7X brand: primary #0020f5, black + white, Space Grotesk. Clean & modern. */
+/* 7X brand: primary #0020f5, black + white, Space Grotesk. Untitled UI / Stripe-clean. */
 @theme {
-  --color-bg: #f7f8fa;
+  --color-bg: #ffffff;
+  --color-canvas: #fcfcfd;
   --color-surface: #ffffff;
-  --color-ink: #000000;
-  --color-muted: #5b616e;
-  --color-line: #ebecf0;
+  --color-ink: #0a0a0a;
+  --color-ink-2: #344054;
+  --color-muted: #667085;
+  --color-line: #eaecf0;
+  --color-line-soft: #f2f4f7;
   --color-brand: #0020f5;
   --color-brand-2: #2b46ff;
-  --color-ring: #b9c3ff;
-  --radius: 0.9rem;
+  --color-ring: #c7cdff;
+  --color-pos: #079455;
+  --radius: 0.75rem;
   --font-sans: var(--font-grotesk), "SF Pro Display", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.07), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 8px -2px rgba(16, 24, 40, 0.08), 0 2px 4px -2px rgba(16, 24, 40, 0.04);
 }
 
 /* Scope a premium baseline to the admin shell so the embed CSS is untouched. */
@@ -22,8 +29,8 @@
   color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
   /* Legacy tokens so remaining .sa-* pages (activity, transcripts) keep their style. */
-  --accent: #0020f5; --accent-2: #2b46ff; --ink: #000; --muted: #5b616e;
-  --line: #ebecf0; --surface: #fff; --bg: #f7f8fa; --radius: 14px; --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --accent: #0020f5; --accent-2: #2b46ff; --ink: #0a0a0a; --muted: #667085;
+  --line: #eaecf0; --surface: #fff; --bg: #fcfcfd; --radius: 12px; --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 .tw *, .tw *::before, .tw *::after { box-sizing: border-box; }
 .tw ::selection { background: color-mix(in srgb, var(--color-brand) 22%, transparent); }
