@@ -26,5 +26,9 @@ export const Integrations = z.object({
   storage: AdapterBinding.optional(),
   // Outbound notifications (future: WhatsApp, email).
   notifications: AdapterBinding.optional(),
+  // Payment gateway for chargeable services (e.g. Network International).
+  payment: AdapterBinding.optional(),
+  // Read-only lookups into backend systems (e.g. shipment tracking).
+  lookup: AdapterBinding.optional(),
 });
 export type Integrations = z.infer<typeof Integrations>;

@@ -7,6 +7,8 @@ import type {
   KBAdapter,
   StorageAdapter,
   NotificationAdapter,
+  PaymentAdapter,
+  LookupAdapter,
 } from "./types";
 
 type Capability = keyof AdapterBundle;
@@ -17,6 +19,8 @@ type FactoryMap = {
   knowledge: () => KBAdapter;
   storage: () => StorageAdapter;
   notifications: () => NotificationAdapter;
+  payment: () => PaymentAdapter;
+  lookup: () => LookupAdapter;
 };
 
 // provider name -> factory, per capability.
@@ -26,6 +30,8 @@ const registries: { [K in Capability]: Map<string, FactoryMap[K]> } = {
   knowledge: new Map(),
   storage: new Map(),
   notifications: new Map(),
+  payment: new Map(),
+  lookup: new Map(),
 };
 
 export function registerAdapter<K extends Capability>(
@@ -55,6 +61,8 @@ export function resolveAdapters(agent: AgentDefinition): AdapterBundle {
   bind("knowledge", agent.integrations.knowledge);
   bind("storage", agent.integrations.storage);
   bind("notifications", agent.integrations.notifications);
+  bind("payment", agent.integrations.payment);
+  bind("lookup", agent.integrations.lookup);
   return bundle;
 }
 

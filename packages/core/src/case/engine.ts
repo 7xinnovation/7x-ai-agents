@@ -141,6 +141,11 @@ export function recomputeReadiness(agent: AgentDefinition, state: CaseState): Ca
   return { ...state, readiness: { complete, missing }, status };
 }
 
+/** Update payment state on the case. */
+export function setPayment(state: CaseState, payment: Partial<CaseState["payment"]>): CaseState {
+  return { ...state, payment: { ...state.payment, ...payment } };
+}
+
 /** Set the active journey and reset step to the first. */
 export function setJourney(agent: AgentDefinition, state: CaseState, journeyKey: string): CaseState {
   const journey = findJourney(agent, journeyKey);

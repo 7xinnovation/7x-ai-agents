@@ -83,6 +83,10 @@ export const kbDocuments = pgTable(
     source: text("source"),
     version: text("version").notNull().default("1"),
     locale: text("locale", { enum: ["en", "ar"] }).default("en").notNull(),
+    // Publishing lifecycle (PRD: only published content is retrieved).
+    status: text("status", { enum: ["draft", "published", "archived"] })
+      .default("published")
+      .notNull(),
     createdAt: ts(),
   },
   (t) => ({ agentIdx: index("kb_docs_agent_idx").on(t.agentId) })
@@ -192,6 +196,42 @@ export const escalations = pgTable("escalations", {
   externalRef: text("external_ref"),
   createdAt: ts(),
 });
+
+/** Payment transactions through the gateway (PRD: payment lifecycle + reconciliation). */
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    caseId: uuid("case_id").references(() => cases.id, { onDelete: "set null" }),
+    conversationId: uuid("conversation_id"),
+    agentId: uuid("agent_id"),
+    reference: text("reference").notNull().unique(),
+    amount: integer("amount").notNull(), // minor units or whole AED; demo uses whole
+    currency: text("currency").default("AED").notNull(),
+    status: text("status", { enum: ["initiated", "paid", "failed"] }).default("initiated").notNull(),
+    gatewayRef: text("gateway_ref"),
+    createdAt: ts(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({ refIdx: index("payments_ref_idx").on(t.reference) })
+);
+
+/** Standardized analytics events across all journeys (PRD: analytics taxonomy). */
+export const analyticsEvents = pgTable(
+  "analytics_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id"),
+    conversationId: uuid("conversation_id"),
+    type: text("type").notNull(), // conversation.started, journey.completed, payment.completed, ...
+    attributes: jsonb("attributes").$type<Record<string, unknown>>().default({}).notNull(),
+    createdAt: ts(),
+  },
+  (t) => ({
+    typeIdx: index("analytics_type_idx").on(t.type),
+    agentIdx: index("analytics_agent_idx").on(t.agentId),
+  })
+);
 
 /** Audit trail for every critical AI/transactional action (PRD: audit logging). */
 export const auditLog = pgTable(

@@ -75,12 +75,38 @@ export interface NotificationAdapter {
   notify(ctx: AdapterContext, input: { to: string; template: string; data: Record<string, unknown> }): Promise<void>;
 }
 
+/**
+ * Payment gateway (e.g. Network International). Dialog never stores card data;
+ * it initiates payment (saved method or secure link), then a webhook confirms
+ * the outcome. getStatus supports reconciliation/recovery.
+ */
+export interface PaymentAdapter {
+  initiate(
+    ctx: AdapterContext,
+    input: { caseId: string; amount: number; currency: string; description: string; userRef?: string }
+  ): Promise<{ reference: string; link?: string; status: "initiated" | "paid" }>;
+  getStatus(ctx: AdapterContext, input: { reference: string }): Promise<{ status: "initiated" | "paid" | "failed" }>;
+}
+
+/**
+ * Read-only lookups into backend systems (e.g. shipment tracking). Returns a
+ * generic record the agent summarizes; never a source of truth Dialog invents.
+ */
+export interface LookupAdapter {
+  lookup(
+    ctx: AdapterContext,
+    input: { kind: string; identifier: string; locale: string }
+  ): Promise<Record<string, unknown> | null>;
+}
+
 export interface AdapterBundle {
   crm?: CRMAdapter;
   auth?: AuthAdapter;
   knowledge?: KBAdapter;
   storage?: StorageAdapter;
   notifications?: NotificationAdapter;
+  payment?: PaymentAdapter;
+  lookup?: LookupAdapter;
 }
 
 export type { CaseState };

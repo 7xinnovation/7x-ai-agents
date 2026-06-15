@@ -6,6 +6,8 @@ import type {
   AuthAdapter,
   KBAdapter,
   StorageAdapter,
+  PaymentAdapter,
+  LookupAdapter,
   KBResult,
 } from "./types";
 
@@ -70,9 +72,55 @@ const mockStorage: StorageAdapter = {
   },
 };
 
+/**
+ * Mock payment gateway: returns a secure-link + "initiated" status. The mock
+ * webhook (/api/payments/webhook) flips it to paid/failed, mirroring a real
+ * gateway callback so the full payment lifecycle is exercised end to end.
+ */
+const mockPayment: PaymentAdapter = {
+  async initiate(_ctx, input) {
+    const reference = ref("PAY");
+    return { reference, link: `/api/payments/mock-checkout?ref=${reference}&caseId=${input.caseId}`, status: "initiated" };
+  },
+  async getStatus() {
+    return { status: "initiated" };
+  },
+};
+
+/** Mock read-only lookup: canned shipment records keyed by identifier shape. */
+const mockLookup: LookupAdapter = {
+  async lookup(_ctx, input) {
+    if (input.kind !== "shipment") return null;
+    const id = input.identifier.trim().toUpperCase();
+    // Deterministic demo states based on the last character.
+    const last = id.charCodeAt(id.length - 1) || 0;
+    const scenarios = [
+      { status: "In Transit", eta: "in 2 days", exception: null },
+      { status: "Out for Delivery", eta: "today", exception: null },
+      { status: "Delivered", eta: "delivered", exception: null },
+      { status: "Exception", eta: "delayed", exception: "Delivery attempt failed: recipient unavailable" },
+      { status: "Customs Clearance", eta: "in 3-4 days", exception: "Customs delay" },
+    ];
+    const s = scenarios[last % scenarios.length]!;
+    return {
+      tracking: id,
+      status: s.status,
+      estimatedDelivery: s.eta,
+      exception: s.exception,
+      history: [
+        { event: "Shipment created", at: "3 days ago" },
+        { event: "Accepted at facility", at: "2 days ago" },
+        { event: s.status, at: "today" },
+      ],
+    };
+  },
+};
+
 export function registerMockAdapters() {
   registerAdapter("crm", "mock", () => mockCrm);
   registerAdapter("auth", "mock", () => mockAuth);
   registerAdapter("knowledge", "mock", () => mockKb);
   registerAdapter("storage", "mock", () => mockStorage);
+  registerAdapter("payment", "mock", () => mockPayment);
+  registerAdapter("lookup", "mock", () => mockLookup);
 }

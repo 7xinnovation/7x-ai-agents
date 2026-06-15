@@ -35,6 +35,7 @@ export async function createKbDocument(input: {
   source: string;
   locale: "en" | "ar";
   content: string;
+  status?: "draft" | "published" | "archived";
 }) {
   const db = getDb();
   const [doc] = await db
@@ -45,6 +46,7 @@ export async function createKbDocument(input: {
       source: input.source || input.title,
       version: "1",
       locale: input.locale,
+      status: input.status ?? "published",
     })
     .returning();
 
@@ -78,6 +80,7 @@ export async function listKbDocuments(agentId: string) {
       title: kbDocuments.title,
       source: kbDocuments.source,
       locale: kbDocuments.locale,
+      status: kbDocuments.status,
       version: kbDocuments.version,
       createdAt: kbDocuments.createdAt,
       chunks: sql<number>`count(${kbChunks.id})::int`,
@@ -92,5 +95,16 @@ export async function listKbDocuments(agentId: string) {
 export async function deleteKbDocument(agentId: string, docId: string) {
   await getDb()
     .delete(kbDocuments)
+    .where(and(eq(kbDocuments.id, docId), eq(kbDocuments.agentId, agentId)));
+}
+
+export async function setKbStatus(
+  agentId: string,
+  docId: string,
+  status: "draft" | "published" | "archived"
+) {
+  await getDb()
+    .update(kbDocuments)
+    .set({ status })
     .where(and(eq(kbDocuments.id, docId), eq(kbDocuments.agentId, agentId)));
 }

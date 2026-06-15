@@ -39,6 +39,13 @@ export const Journey = z.object({
       action: z.string(),
       // Localized label for the readiness checklist heading.
       readinessTitle: LocalizedString.optional(),
+      // Chargeable journeys require a confirmed payment before submission
+      // (PRD: only confirmed payments trigger service completion).
+      requiresPayment: z.boolean().default(false),
+      // Fixed amount + currency for the journey (real pricing comes from backend;
+      // this is the conversational summary figure).
+      amount: z.number().optional(),
+      currency: z.string().default("AED"),
     })
     .optional(),
 });

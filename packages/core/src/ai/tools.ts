@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { AgentDefinition, CaseState } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
 import { adapterContext } from "../adapters/registry";
-import { setField, setDocument, setJourney, findJourney } from "../case/engine";
+import { setField, setDocument, setJourney, setPayment, findJourney } from "../case/engine";
 
 /** Tool schemas exposed to Claude. Generic across every agent/journey. */
 export const TOOL_DEFS: Anthropic.Tool[] = [
@@ -54,8 +54,30 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "request_payment",
+    description:
+      "Initiate payment for a chargeable journey through the payment gateway. Call after the customer confirms the summary and before submit_case. Returns a secure payment link; await confirmation before submitting.",
+    input_schema: {
+      type: "object",
+      properties: { description: { type: "string", description: "What the payment is for" } },
+    },
+  },
+  {
+    name: "lookup",
+    description:
+      "Read-only lookup into a backend system (e.g. shipment tracking). Use for status/history/ETA inquiries. Never invent results.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", description: "e.g. 'shipment'" },
+        identifier: { type: "string", description: "e.g. tracking/AWB number" },
+      },
+      required: ["kind", "identifier"],
+    },
+  },
+  {
     name: "submit_case",
-    description: "Submit the completed case to the system of record. Only call when readiness is complete and the user confirms.",
+    description: "Submit the completed case to the system of record. Only call when readiness is complete, payment (if required) is confirmed, and the user confirms.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -88,6 +110,8 @@ export type ToolEvent =
   | { type: "citation"; source: string }
   | { type: "escalation"; reference: string }
   | { type: "auth_required"; reason: string }
+  | { type: "payment_initiated"; reference: string; link?: string; amount: number; currency: string }
+  | { type: "lookup"; kind: string }
   | { type: "submitted"; reference: string };
 
 export interface DispatchInput {
@@ -98,6 +122,7 @@ export interface DispatchInput {
   userRef?: string;
   locale: string;
   agentId: string;
+  caseId: string;
 }
 
 export interface DispatchResult {
@@ -187,10 +212,67 @@ export async function dispatchTool(
       return { result: `Callback created with reference ${reference}.`, state, events };
     }
 
+    case "lookup": {
+      if (!adapters.lookup) return { result: "No lookup system configured.", state, events, isError: true };
+      const actx = adapterContext(agent, agent.integrations.lookup);
+      const rec = await adapters.lookup.lookup(actx, {
+        kind: String(input.kind ?? ""),
+        identifier: String(input.identifier ?? ""),
+        locale: ctx.locale,
+      });
+      events.push({ type: "lookup", kind: String(input.kind ?? "") });
+      if (!rec) return { result: "No record found for that identifier. Ask the customer to verify it, or offer support.", state, events };
+      return { result: JSON.stringify(rec), state, events };
+    }
+
+    case "request_payment": {
+      const journey = findJourney(agent, state.journeyKey);
+      const sub = journey?.submission;
+      if (!sub?.requiresPayment) return { result: "This journey does not require payment.", state, events };
+      if (!ctx.authenticated) {
+        events.push({ type: "auth_required", reason: "Payment requires sign-in." });
+        return { result: "User must authenticate before payment.", state, events };
+      }
+      if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
+      const amount = sub.amount ?? 0;
+      const currency = sub.currency ?? "AED";
+      const actx = adapterContext(agent, agent.integrations.payment);
+      const res = await adapters.payment.initiate(actx, {
+        caseId: ctx.caseId,
+        amount,
+        currency,
+        description: String(input.description ?? journey?.key ?? "service"),
+        userRef: ctx.userRef,
+      });
+      state = setPayment(state, {
+        status: res.status,
+        reference: res.reference,
+        link: res.link ?? null,
+        amount,
+        currency,
+      });
+      events.push({ type: "payment_initiated", reference: res.reference, link: res.link, amount, currency });
+      events.push({ type: "case", state });
+      return {
+        result: `Payment ${res.reference} initiated for ${amount} ${currency}. Share this secure link with the customer: ${res.link}. Wait for payment confirmation before calling submit_case.`,
+        state,
+        events,
+      };
+    }
+
     case "submit_case": {
       if (!ctx.authenticated) {
         events.push({ type: "auth_required", reason: "Submission requires sign-in." });
         return { result: "User must authenticate before submission.", state, events };
+      }
+      const subJourney = findJourney(agent, state.journeyKey);
+      if (subJourney?.submission?.requiresPayment && state.payment.status !== "paid") {
+        return {
+          result: `Cannot submit — payment is ${state.payment.status}. Only a confirmed (paid) payment may trigger submission.`,
+          state,
+          events,
+          isError: true,
+        };
       }
       if (!state.readiness.complete) {
         return {

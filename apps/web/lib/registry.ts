@@ -1,7 +1,7 @@
 import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery } from "@dialog/core";
 import type { KBAdapter, KBResult } from "@dialog/core";
-import { getDb, kbChunks } from "@dialog/db";
-import { and, eq, sql } from "drizzle-orm";
+import { getDb, kbChunks, kbDocuments } from "@dialog/db";
+import { and, eq, sql, inArray } from "drizzle-orm";
 
 let initialised = false;
 
@@ -20,6 +20,11 @@ export function ensureAdapters() {
     async search(_ctx, input): Promise<KBResult[]> {
       const db = getDb();
       const limit = input.limit ?? 4;
+      // Only retrieve chunks whose parent document is published (PRD lifecycle).
+      const publishedDocs = db
+        .select({ id: kbDocuments.id })
+        .from(kbDocuments)
+        .where(eq(kbDocuments.status, "published"));
 
       // Vector search when an embeddings provider is configured (pgvector cosine).
       if (embeddingsEnabled()) {
@@ -34,7 +39,13 @@ export function ensureAdapters() {
                 score: sql<number>`1 - (${kbChunks.embedding} <=> ${lit}::vector)`,
               })
               .from(kbChunks)
-              .where(and(eq(kbChunks.agentId, input.agentId), sql`${kbChunks.embedding} is not null`))
+              .where(
+                and(
+                  eq(kbChunks.agentId, input.agentId),
+                  sql`${kbChunks.embedding} is not null`,
+                  inArray(kbChunks.documentId, publishedDocs)
+                )
+              )
               .orderBy(sql`${kbChunks.embedding} <=> ${lit}::vector`)
               .limit(limit);
             if (rows.length) return rows.map((r) => ({ content: r.content, source: r.source, score: Number(r.score) }));
@@ -60,7 +71,7 @@ export function ensureAdapters() {
           score: sql<number>`ts_rank(${tsv}, ${tsq})`,
         })
         .from(kbChunks)
-        .where(and(eq(kbChunks.agentId, input.agentId), sql`${tsv} @@ ${tsq}`))
+        .where(and(eq(kbChunks.agentId, input.agentId), sql`${tsv} @@ ${tsq}`, inArray(kbChunks.documentId, publishedDocs)))
         .orderBy(sql`ts_rank(${tsv}, ${tsq}) DESC`)
         .limit(input.limit ?? 4);
       return rows.map((r) => ({ content: r.content, source: r.source, score: Number(r.score) }));

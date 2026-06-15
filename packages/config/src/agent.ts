@@ -54,6 +54,17 @@ export const AgentDefinition = z.object({
   journeys: z.array(Journey).default([]),
   guardrails: Guardrails.default({}),
   integrations: Integrations.default({}),
+  // Business operating hours drive escalation/support routing (PRD: working-hours
+  // routing). Empty = always treated as open. Days: 0=Sun..6=Sat. Times "HH:MM"
+  // in the given IANA timezone.
+  businessHours: z
+    .object({
+      timezone: z.string().default("Asia/Dubai"),
+      days: z
+        .array(z.object({ day: z.number().min(0).max(6), open: z.string(), close: z.string() }))
+        .default([]),
+    })
+    .optional(),
   model: z.string().optional(), // override DIALOG_MODEL per agent
 });
 export type AgentDefinition = z.infer<typeof AgentDefinition>;

@@ -27,6 +27,16 @@ export const CaseState = z.object({
       z.object({ key: z.string(), kind: z.enum(["field", "document"]) })
     ),
   }),
+  // Payment state for chargeable journeys (PRD: payment lifecycle tracking).
+  payment: z
+    .object({
+      status: z.enum(["none", "initiated", "paid", "failed"]).default("none"),
+      reference: z.string().nullable().default(null),
+      amount: z.number().nullable().default(null),
+      currency: z.string().default("AED"),
+      link: z.string().nullable().default(null),
+    })
+    .default({ status: "none", reference: null, amount: null, currency: "AED", link: null }),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   status: z.enum(["draft", "ready", "submitted", "escalated"]),
@@ -40,6 +50,7 @@ export function emptyCase(): CaseState {
     data: {},
     documents: [],
     readiness: { complete: false, missing: [] },
+    payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },
     reference: null,
     status: "draft",
   };

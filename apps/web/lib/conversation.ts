@@ -84,8 +84,8 @@ export async function saveCase(caseId: string, state: CaseState) {
 }
 
 export async function audit(input: {
-  agentId: string;
-  conversationId: string;
+  agentId?: string;
+  conversationId?: string;
   actor: "user" | "agent" | "system";
   action: string;
   payload?: Record<string, unknown>;

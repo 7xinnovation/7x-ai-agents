@@ -12,7 +12,8 @@ export function buildSystemPrompt(
   agent: AgentDefinition,
   state: CaseState,
   locale: Locale,
-  authenticated: boolean
+  authenticated: boolean,
+  businessOpen?: boolean
 ): string {
   const journey = findJourney(agent, state.journeyKey);
   const g = agent.guardrails;
@@ -64,10 +65,23 @@ ${g.requireGroundedAnswers
 - If you are not confident (below the configured threshold), say so plainly and offer escalation rather than guessing.
 - Offer "talk to a person" quietly whenever the user is stuck, frustrated, or asks. Use request_escalation to file it.
 
+# Transactions, payment & lookups
+- Use backend systems as the source of truth for transactional information; never invent pricing, statuses, or reference numbers.
+- For read-only inquiries (e.g. shipment tracking), call lookup with the kind and identifier, then explain the result in plain, customer-friendly language. If nothing is found or the system is unavailable, say so and offer support — do not guess.
+${journey?.submission?.requiresPayment
+      ? `- This journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment, share the secure link, and WAIT for confirmation. Only call submit_case once payment status is "paid".`
+      : "- This journey has no payment step."}
+
+# Escalation & support hours
+${businessOpen === false
+      ? "Support teams are currently OUTSIDE business hours. If the user needs a human, explain that agents are unavailable now and offer to create a callback request (request_escalation) so they are contacted when support reopens."
+      : "Support is within business hours. Offer a human callback (request_escalation) whenever the user is stuck, asks, or a transaction cannot be completed."}
+
 # Current case state
 ${journeyBlock}
 Collected data: ${JSON.stringify(state.data)}
 Documents: ${JSON.stringify(state.documents)}
+Payment: ${JSON.stringify(state.payment)}
 Submission readiness: ${state.readiness.complete ? "READY" : `NOT READY — missing ${JSON.stringify(state.readiness.missing)}`}
-When the case is ready and the user confirms, call submit_case. Before submitting, run a final check and tell the user the reference number you receive.`;
+When the case is ready (and paid, if required) and the user confirms, call submit_case. Before submitting, run a final check and tell the user the reference number you receive.`;
 }

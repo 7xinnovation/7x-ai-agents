@@ -13,6 +13,7 @@ export interface TurnMessage {
 export interface RunTurnInput {
   agent: AgentDefinition;
   agentId: string;
+  caseId: string;
   history: TurnMessage[];
   userMessage: string;
   case: CaseState;
@@ -20,6 +21,8 @@ export interface RunTurnInput {
   authenticated: boolean;
   userRef?: string;
   adapters: AdapterBundle;
+  // Whether the request is within configured business hours (drives escalation).
+  businessOpen?: boolean;
 }
 
 export type OrchestratorEvent =
@@ -28,6 +31,8 @@ export type OrchestratorEvent =
   | { type: "citation"; source: string }
   | { type: "escalation"; reference: string }
   | { type: "auth_required"; reason: string }
+  | { type: "payment_initiated"; reference: string; link?: string; amount: number; currency: string }
+  | { type: "lookup"; kind: string }
   | { type: "submitted"; reference: string }
   | { type: "done"; message: string; state: CaseState }
   | { type: "error"; message: string };
@@ -54,7 +59,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const system = buildSystemPrompt(agent, state, locale, authenticated);
+      const system = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen);
       const stream = client.messages.stream({
         model,
         max_tokens: 1500,
@@ -90,6 +95,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         const res = await dispatchTool(tu.name, tu.input as Record<string, unknown>, {
           agent,
           agentId: input.agentId,
+          caseId: input.caseId,
           state,
           adapters: input.adapters,
           authenticated,
@@ -102,6 +108,9 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           else if (e.type === "citation") yield { type: "citation", source: e.source };
           else if (e.type === "escalation") yield { type: "escalation", reference: e.reference };
           else if (e.type === "auth_required") yield { type: "auth_required", reason: e.reason };
+          else if (e.type === "payment_initiated")
+            yield { type: "payment_initiated", reference: e.reference, link: e.link, amount: e.amount, currency: e.currency };
+          else if (e.type === "lookup") yield { type: "lookup", kind: e.kind };
           else if (e.type === "submitted") yield { type: "submitted", reference: e.reference };
         }
         toolResults.push({
