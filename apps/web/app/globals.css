@@ -1636,6 +1636,17 @@ body {
 .sa-feeditem + .sa-feeditem {
   border-top: 1px solid var(--line);
 }
+.sa-feeditem-link {
+  text-decoration: none;
+  color: inherit;
+  border-radius: 8px;
+  margin: 0 -6px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.sa-feeditem-link:hover {
+  background: var(--bg);
+}
 .sa-feed-main {
   display: flex;
   flex-direction: column;
@@ -1859,6 +1870,108 @@ body {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* Knowledge manager */
+.sa-kb-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 4px;
+}
+.sa-kb-row + .sa-kb-row {
+  border-top: 1px solid var(--line);
+}
+.sa-kb-locale {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: 7px;
+  padding: 4px 7px;
+}
+.sa-iconbtn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 9px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.sa-iconbtn:hover {
+  color: #b3392b;
+  border-color: #f3c7c0;
+  background: #fdecea;
+}
+.sa-kb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 36px 20px;
+  color: var(--muted);
+}
+.sa-kb-empty p {
+  margin: 0;
+  font-size: 13.5px;
+  max-width: 34ch;
+  line-height: 1.5;
+}
+
+/* Transcript viewer */
+.sa-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sa-tmsg {
+  display: flex;
+  max-width: 80%;
+}
+.sa-tmsg.user {
+  align-self: flex-end;
+}
+.sa-tbubble {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.sa-tmsg.assistant .sa-tbubble {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-top-left-radius: 5px;
+}
+.sa-tmsg.user .sa-tbubble {
+  background: var(--accent);
+  color: #fff;
+  border-top-right-radius: 5px;
+}
+.sa-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.sa-kv + .sa-kv {
+  border-top: 1px dashed var(--line);
+}
+.sa-kv span:first-child {
+  color: var(--muted);
+}
+.sa-kv span:last-child {
+  font-weight: 600;
+  text-align: right;
 }
 
 /* Branding preview */

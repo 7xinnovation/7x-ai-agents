@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { getDb, conversations, agents, auditLog } from "@dialog/db";
 
@@ -60,7 +61,7 @@ export default async function Activity() {
           <div className="sa-feed">
             {convs.length === 0 ? <p className="sa-empty-line">No conversations yet.</p> : null}
             {convs.map((c) => (
-              <div className="sa-feeditem" key={c.id}>
+              <Link className="sa-feeditem sa-feeditem-link" href={`/admin/conversations/${c.id}`} key={c.id}>
                 <span className={`sa-dot ${c.authenticated ? "ok" : ""}`} />
                 <span className="sa-feed-main">
                   <strong>{c.agentName ?? "—"}</strong>
@@ -69,7 +70,7 @@ export default async function Activity() {
                   </span>
                 </span>
                 <span className="sa-feed-time">{timeAgo(c.createdAt)}</span>
-              </div>
+              </Link>
             ))}
           </div>
         </section>

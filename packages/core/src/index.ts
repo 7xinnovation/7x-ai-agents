@@ -5,5 +5,6 @@ export * from "./case/engine";
 export * from "./ai/anthropic";
 export * from "./ai/prompt";
 export * from "./ai/intent";
+export * from "./ai/embeddings";
 export * from "./ai/tools";
 export * from "./ai/orchestrator";

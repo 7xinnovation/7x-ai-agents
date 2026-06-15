@@ -1,4 +1,4 @@
-import { registerMockAdapters, registerAdapter } from "@dialog/core";
+import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery } from "@dialog/core";
 import type { KBAdapter, KBResult } from "@dialog/core";
 import { getDb, kbChunks } from "@dialog/db";
 import { and, eq, sql } from "drizzle-orm";
@@ -19,6 +19,31 @@ export function ensureAdapters() {
   const neonKb: KBAdapter = {
     async search(_ctx, input): Promise<KBResult[]> {
       const db = getDb();
+      const limit = input.limit ?? 4;
+
+      // Vector search when an embeddings provider is configured (pgvector cosine).
+      if (embeddingsEnabled()) {
+        try {
+          const qvec = await embedQuery(input.query);
+          if (qvec) {
+            const lit = `[${qvec.join(",")}]`;
+            const rows = await db
+              .select({
+                content: kbChunks.content,
+                source: sql<string>`coalesce(${kbChunks.metadata} ->> 'source', 'knowledge-base')`,
+                score: sql<number>`1 - (${kbChunks.embedding} <=> ${lit}::vector)`,
+              })
+              .from(kbChunks)
+              .where(and(eq(kbChunks.agentId, input.agentId), sql`${kbChunks.embedding} is not null`))
+              .orderBy(sql`${kbChunks.embedding} <=> ${lit}::vector`)
+              .limit(limit);
+            if (rows.length) return rows.map((r) => ({ content: r.content, source: r.source, score: Number(r.score) }));
+          }
+        } catch {
+          // fall through to full-text on any embedding/query error
+        }
+      }
+
       // English gets stemming; Arabic falls back to 'simple' (no AR stemmer by default).
       const cfg = input.locale === "ar" ? "simple" : "english";
       // OR-match significant terms (>=3 chars), so a natural-language question

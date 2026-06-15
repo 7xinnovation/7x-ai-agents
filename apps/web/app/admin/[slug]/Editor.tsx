@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Copy, Check, ArrowSquareOut, Sparkle } from "@phosphor-icons/react";
+import { KbManager } from "./KbManager";
 
 const TEMPLATE = {
   slug: "",
@@ -45,7 +46,7 @@ const TEMPLATE = {
 };
 
 type Def = typeof TEMPLATE & Record<string, unknown>;
-type Tab = "identity" | "branding" | "config" | "embed";
+type Tab = "identity" | "branding" | "knowledge" | "config" | "embed";
 
 export function Editor({ slug }: { slug: string }) {
   const router = useRouter();
@@ -177,7 +178,7 @@ export function Editor({ slug }: { slug: string }) {
       {msg ? <div className={`sa-msg ${msg.kind}`}>{msg.text}</div> : null}
 
       <div className="sa-tabs">
-        {(["identity", "branding", "config", "embed"] as Tab[]).map((t) => (
+        {(["identity", "branding", "knowledge", "config", "embed"] as Tab[]).map((t) => (
           <button key={t} className={`sa-tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
             {t === "config" ? "Configuration" : t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
@@ -325,6 +326,16 @@ export function Editor({ slug }: { slug: string }) {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {tab === "knowledge" ? (
+        isNew ? (
+          <div className="sa-panel">
+            <p className="sa-help">Save the agent first, then add knowledge-base documents here.</p>
+          </div>
+        ) : (
+          <KbManager slug={def.slug} />
+        )
       ) : null}
 
       {tab === "config" ? (
