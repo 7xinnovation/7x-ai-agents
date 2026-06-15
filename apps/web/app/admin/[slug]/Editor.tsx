@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Textarea, Select, Label } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 import { KbManager } from "./KbManager";
+import { IntegrationsManager } from "./IntegrationsManager";
 
 const TEMPLATE = {
   slug: "", tenantSlug: "", name: "",
@@ -20,7 +21,7 @@ const TEMPLATE = {
   integrations: { crm: { provider: "mock", settings: {}, secretRefs: [] }, auth: { provider: "mock", settings: {}, secretRefs: [] }, knowledge: { provider: "neon", settings: {}, secretRefs: [] }, storage: { provider: "mock", settings: {}, secretRefs: [] } },
 };
 type Def = typeof TEMPLATE & Record<string, unknown>;
-const TABS = ["Identity", "Branding", "Knowledge", "Configuration", "Embed"] as const;
+const TABS = ["Identity", "Branding", "Knowledge", "Integrations", "Configuration", "Embed"] as const;
 type Tab = (typeof TABS)[number];
 
 export function Editor({ slug }: { slug: string }) {
@@ -156,6 +157,8 @@ export function Editor({ slug }: { slug: string }) {
       )}
 
       {tab === "Knowledge" && (isNew ? <Card><CardContent className="pt-5 text-sm text-muted">Save the agent first, then add knowledge-base documents here.</CardContent></Card> : <KbManager slug={def.slug} />)}
+
+      {tab === "Integrations" && (isNew ? <Card><CardContent className="pt-5 text-sm text-muted">Save the agent first, then connect API integrations here.</CardContent></Card> : <IntegrationsManager slug={def.slug} />)}
 
       {tab === "Configuration" && (
         <Card><CardHeader><CardTitle>Journeys · Intents · Guardrails · Integrations</CardTitle></CardHeader><CardContent>

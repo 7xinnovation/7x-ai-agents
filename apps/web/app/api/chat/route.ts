@@ -8,6 +8,7 @@ import { ensureAdapters } from "@/lib/registry";
 import { getOrCreateSession, appendMessage, saveCase, audit } from "@/lib/conversation";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
+import { buildApiTools } from "@/lib/integrations";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -44,6 +45,8 @@ export async function POST(req: NextRequest) {
   const adapters = resolveAdapters(agent.definition);
   const businessOpen = isBusinessOpen(agent.definition);
   const isNewSession = !body.conversationId;
+  // Dynamic tools from the agent's API integrations (imported from OpenAPI).
+  const { tools: extraTools, exec: runExtraTool } = await buildApiTools(agent.id);
 
   const session = await getOrCreateSession({
     agentId: agent.id,
@@ -82,6 +85,8 @@ export async function POST(req: NextRequest) {
           userRef: body.userRef,
           adapters,
           businessOpen,
+          extraTools,
+          runExtraTool,
         })) {
           send(ev);
           if (ev.type === "case") finalState = ev.state;

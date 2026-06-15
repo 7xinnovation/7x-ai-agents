@@ -23,6 +23,9 @@ export interface RunTurnInput {
   adapters: AdapterBundle;
   // Whether the request is within configured business hours (drives escalation).
   businessOpen?: boolean;
+  // Dynamic tools from the agent's API integrations (imported from OpenAPI).
+  extraTools?: Anthropic.Tool[];
+  runExtraTool?: (name: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
 }
 
 export type OrchestratorEvent =
@@ -33,6 +36,7 @@ export type OrchestratorEvent =
   | { type: "auth_required"; reason: string }
   | { type: "payment_initiated"; reference: string; link?: string; amount: number; currency: string }
   | { type: "lookup"; kind: string }
+  | { type: "integration"; tool: string }
   | { type: "submitted"; reference: string }
   | { type: "done"; message: string; state: CaseState }
   | { type: "error"; message: string };
@@ -56,6 +60,8 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
 
   const client = getAnthropic();
   const model = resolveModel(agent.model);
+  const builtin = new Set(TOOL_DEFS.map((t) => t.name));
+  const tools = input.extraTools?.length ? [...TOOL_DEFS, ...input.extraTools] : TOOL_DEFS;
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -64,7 +70,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         model,
         max_tokens: 1500,
         system,
-        tools: TOOL_DEFS,
+        tools,
         messages,
       });
 
@@ -92,6 +98,13 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
 
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
+        // Route integration (non-builtin) tools to the dynamic handler.
+        if (!builtin.has(tu.name) && input.runExtraTool) {
+          yield { type: "integration", tool: tu.name };
+          const r = await input.runExtraTool(tu.name, tu.input as Record<string, unknown>);
+          toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: r.result, is_error: r.isError });
+          continue;
+        }
         const res = await dispatchTool(tu.name, tu.input as Record<string, unknown>, {
           agent,
           agentId: input.agentId,

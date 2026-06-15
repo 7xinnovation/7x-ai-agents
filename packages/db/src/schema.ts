@@ -248,5 +248,29 @@ export const auditLog = pgTable(
   (t) => ({ agentIdx: index("audit_agent_idx").on(t.agentId) })
 );
 
+/**
+ * API integrations imported from an OpenAPI/Swagger spec. Each integration's
+ * operations become callable tools the agent can use during a conversation.
+ */
+export const agentIntegrations = pgTable(
+  "agent_integrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    specUrl: text("spec_url").notNull(),
+    baseUrl: text("base_url").notNull(),
+    authType: text("auth_type", { enum: ["none", "bearer", "apiKey"] }).default("none").notNull(),
+    authValue: text("auth_value"), // token / api key (scaffold: stored as-is)
+    authHeader: text("auth_header"), // header name for apiKey auth
+    operations: jsonb("operations").$type<Record<string, unknown>[]>().default([]).notNull(),
+    enabled: boolean("enabled").default(true).notNull(),
+    createdAt: ts(),
+  },
+  (t) => ({ agentIdx: index("integrations_agent_idx").on(t.agentId) })
+);
+
 // Ensure the pgvector extension exists (applied via raw SQL in push/seed).
 export const ensureVectorExtension = sql`CREATE EXTENSION IF NOT EXISTS vector;`;
