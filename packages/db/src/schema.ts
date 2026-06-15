@@ -260,12 +260,10 @@ export const agentIntegrations = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    specUrl: text("spec_url").notNull(),
-    baseUrl: text("base_url").notNull(),
-    authType: text("auth_type", { enum: ["none", "bearer", "apiKey"] }).default("none").notNull(),
-    authValue: text("auth_value"), // token / api key (scaffold: stored as-is)
-    authHeader: text("auth_header"), // header name for apiKey auth
-    operations: jsonb("operations").$type<Record<string, unknown>[]>().default([]).notNull(),
+    // Per-environment specs: { staging?: EnvSpec, production?: EnvSpec }. Each
+    // EnvSpec = { specUrl, baseUrl, authType, authValue, authHeader, operations }.
+    // The agent's activeEnvironment selects which one the chat uses.
+    environments: jsonb("environments").$type<Record<string, unknown>>().default({}).notNull(),
     enabled: boolean("enabled").default(true).notNull(),
     createdAt: ts(),
   },

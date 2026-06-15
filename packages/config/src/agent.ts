@@ -54,6 +54,10 @@ export const AgentDefinition = z.object({
   journeys: z.array(Journey).default([]),
   guardrails: Guardrails.default({}),
   integrations: Integrations.default({}),
+  // Which environment of the agent's API integrations is active (staging vs
+  // production). Chosen in the agent's main settings; drives which Swagger
+  // baseURL/operations the chat uses.
+  activeEnvironment: z.enum(["staging", "production"]).default("production"),
   // Business operating hours drive escalation/support routing (PRD: working-hours
   // routing). Empty = always treated as open. Days: 0=Sun..6=Sat. Times "HH:MM"
   // in the given IANA timezone.

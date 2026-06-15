@@ -45,8 +45,11 @@ export async function POST(req: NextRequest) {
   const adapters = resolveAdapters(agent.definition);
   const businessOpen = isBusinessOpen(agent.definition);
   const isNewSession = !body.conversationId;
-  // Dynamic tools from the agent's API integrations (imported from OpenAPI).
-  const { tools: extraTools, exec: runExtraTool } = await buildApiTools(agent.id);
+  // Dynamic tools from the agent's API integrations for the ACTIVE environment.
+  const { tools: extraTools, exec: runExtraTool } = await buildApiTools(
+    agent.id,
+    agent.definition.activeEnvironment ?? "production"
+  );
 
   const session = await getOrCreateSession({
     agentId: agent.id,

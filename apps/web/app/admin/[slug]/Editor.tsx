@@ -15,7 +15,7 @@ const TEMPLATE = {
   slug: "", tenantSlug: "", name: "",
   persona: "You are a calm, professional, accurate assistant. Guide users step by step and route to a human when needed.",
   locales: ["en"], allowedOrigins: [] as string[],
-  greeting: { en: "Hi, how can I help you today?", ar: "" }, model: "",
+  greeting: { en: "Hi, how can I help you today?", ar: "" }, model: "", activeEnvironment: "production",
   theme: { brandName: "", logoUrl: "", colors: { primary: "#1330F0", primaryForeground: "#FFFFFF", surface: "#FFFFFF", surfaceMuted: "#F4F6FB", text: "#0B1020", textMuted: "#5B6478", border: "#E2E6F0", success: "#0F9D58", warning: "#E8A100", danger: "#D23F31" }, radius: "soft", fontFamily: "Inter, system-ui, sans-serif", launcher: { position: "bottom-right", label: "" } },
   intents: [], journeys: [], guardrails: { confidenceThreshold: 0.6, refusalTopics: [], requireGroundedAnswers: true },
   integrations: { crm: { provider: "mock", settings: {}, secretRefs: [] }, auth: { provider: "mock", settings: {}, secretRefs: [] }, knowledge: { provider: "neon", settings: {}, secretRefs: [] }, storage: { provider: "mock", settings: {}, secretRefs: [] } },
@@ -120,6 +120,12 @@ export function Editor({ slug }: { slug: string }) {
             <Field label="Model override (optional)"><Input value={def.model} onChange={(e) => patch({ model: e.target.value })} placeholder="claude-opus-4-8" /></Field>
             <Field label="Allowed origins (comma-separated)" hint="Restricts which sites may embed this agent."><Input value={def.allowedOrigins.join(", ")} onChange={(e) => patch({ allowedOrigins: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} placeholder="https://example.com" /></Field>
           </div>
+          <Field label="Active integration environment" hint="Which Swagger environment the chat calls — staging or production.">
+            <Select value={def.activeEnvironment} onChange={(e) => patch({ activeEnvironment: e.target.value })}>
+              <option value="production">Production</option>
+              <option value="staging">Staging</option>
+            </Select>
+          </Field>
           <Field label="Greeting (English)"><Input value={def.greeting.en} onChange={(e) => patch({ greeting: { ...def.greeting, en: e.target.value } })} /></Field>
           {def.locales.includes("ar") && <Field label="Greeting (Arabic)"><Input dir="rtl" value={def.greeting.ar} onChange={(e) => patch({ greeting: { ...def.greeting, ar: e.target.value } })} /></Field>}
         </CardContent></Card>

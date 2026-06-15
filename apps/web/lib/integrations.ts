@@ -3,16 +3,22 @@ import { getDb, agentIntegrations } from "@dialog/db";
 import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
 
-export interface IntegrationRow {
-  id: string;
-  name: string;
+export type EnvKey = "staging" | "production";
+
+export interface EnvSpec {
   specUrl: string;
   baseUrl: string;
   authType: "none" | "bearer" | "apiKey";
   authValue: string | null;
   authHeader: string | null;
   operations: ApiOperation[];
+}
+
+export interface IntegrationRow {
+  id: string;
+  name: string;
   enabled: boolean;
+  environments: Partial<Record<EnvKey, EnvSpec>>;
 }
 
 export async function listIntegrations(agentId: string): Promise<IntegrationRow[]> {
@@ -21,25 +27,28 @@ export async function listIntegrations(agentId: string): Promise<IntegrationRow[
     .from(agentIntegrations)
     .where(eq(agentIntegrations.agentId, agentId))
     .orderBy(desc(agentIntegrations.createdAt));
-  return rows as unknown as IntegrationRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    enabled: r.enabled,
+    environments: (r.environments ?? {}) as Partial<Record<EnvKey, EnvSpec>>,
+  }));
 }
 
-export async function createIntegration(agentId: string, input: Omit<IntegrationRow, "id" | "enabled">) {
-  const [row] = await getDb()
+/** Add or replace one environment's spec on an integration (matched by name). */
+export async function upsertEnvironment(agentId: string, name: string, env: EnvKey, spec: EnvSpec) {
+  const db = getDb();
+  const existing = (await listIntegrations(agentId)).find((i) => i.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    const environments = { ...existing.environments, [env]: spec };
+    await db.update(agentIntegrations).set({ environments }).where(eq(agentIntegrations.id, existing.id));
+    return existing.id;
+  }
+  const [row] = await db
     .insert(agentIntegrations)
-    .values({
-      agentId,
-      name: input.name,
-      specUrl: input.specUrl,
-      baseUrl: input.baseUrl,
-      authType: input.authType,
-      authValue: input.authValue,
-      authHeader: input.authHeader,
-      operations: input.operations as unknown as Record<string, unknown>[],
-      enabled: true,
-    })
+    .values({ agentId, name, environments: { [env]: spec }, enabled: true })
     .returning();
-  return row;
+  return row!.id;
 }
 
 export async function setIntegrationEnabled(agentId: string, id: string, enabled: boolean) {
@@ -50,26 +59,41 @@ export async function deleteIntegration(agentId: string, id: string) {
   await getDb().delete(agentIntegrations).where(and(eq(agentIntegrations.id, id), eq(agentIntegrations.agentId, agentId)));
 }
 
+/** Remove a single environment from an integration (deletes the integration if none left). */
+export async function deleteEnvironment(agentId: string, id: string, env: EnvKey) {
+  const it = (await listIntegrations(agentId)).find((i) => i.id === id);
+  if (!it) return;
+  const environments = { ...it.environments };
+  delete environments[env];
+  if (Object.keys(environments).length === 0) return deleteIntegration(agentId, id);
+  await getDb().update(agentIntegrations).set({ environments }).where(and(eq(agentIntegrations.id, id), eq(agentIntegrations.agentId, agentId)));
+}
+
 const prefix = (name: string) => name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 14).toLowerCase() || "api";
 
 /**
- * Build Claude tools + an executor from an agent's enabled integrations.
- * Each OpenAPI operation becomes a tool; calling it performs the HTTP request.
+ * Build Claude tools + executor for the agent's ACTIVE environment. Each enabled
+ * integration that has a spec for `activeEnv` contributes its operations.
  */
-export async function buildApiTools(agentId: string): Promise<{
+export async function buildApiTools(
+  agentId: string,
+  activeEnv: EnvKey
+): Promise<{
   tools: Anthropic.Tool[];
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
-  const map = new Map<string, { intg: IntegrationRow; op: ApiOperation }>();
+  const map = new Map<string, { spec: EnvSpec; op: ApiOperation }>();
 
   for (const intg of integrations) {
+    const spec = intg.environments[activeEnv];
+    if (!spec) continue; // no spec for the active environment
     const pfx = prefix(intg.name);
-    for (const op of intg.operations) {
+    for (const op of spec.operations) {
       const toolName = `${pfx}__${op.toolName}`.slice(0, 64);
       if (map.has(toolName)) continue;
-      map.set(toolName, { intg, op });
+      map.set(toolName, { spec, op });
       tools.push({
         name: toolName,
         description: `[${intg.name}] ${op.summary}`.slice(0, 380),
@@ -81,14 +105,14 @@ export async function buildApiTools(agentId: string): Promise<{
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
-    return executeOperation(entry.intg, entry.op, input ?? {});
+    return executeOperation(entry.spec, entry.op, input ?? {});
   };
 
   return { tools, exec };
 }
 
 export async function executeOperation(
-  intg: IntegrationRow,
+  spec: EnvSpec,
   op: ApiOperation,
   input: Record<string, unknown>
 ): Promise<{ result: string; isError?: boolean }> {
@@ -105,8 +129,8 @@ export async function executeOperation(
       else if (p.in === "header") headers[p.name] = String(v);
     }
 
-    if (intg.authType === "bearer" && intg.authValue) headers["Authorization"] = `Bearer ${intg.authValue}`;
-    if (intg.authType === "apiKey" && intg.authValue) headers[intg.authHeader || "X-API-Key"] = intg.authValue;
+    if (spec.authType === "bearer" && spec.authValue) headers["Authorization"] = `Bearer ${spec.authValue}`;
+    if (spec.authType === "apiKey" && spec.authValue) headers[spec.authHeader || "X-API-Key"] = spec.authValue;
 
     let body: string | undefined;
     if (op.hasBody && input.body !== undefined) {
@@ -115,7 +139,7 @@ export async function executeOperation(
     }
 
     const qs = query.toString();
-    const url = `${intg.baseUrl}${path}${qs ? `?${qs}` : ""}`;
+    const url = `${spec.baseUrl}${path}${qs ? `?${qs}` : ""}`;
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
