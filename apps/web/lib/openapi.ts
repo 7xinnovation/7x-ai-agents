@@ -62,12 +62,95 @@ function deriveBaseUrl(spec: any, specUrl: string): string {
   }
 }
 
+function tryJson(text: string): any | null {
+  try {
+    const j = JSON.parse(text);
+    return j && typeof j === "object" ? j : null;
+  } catch {
+    return null;
+  }
+}
+const isSpec = (j: any) => j && (j.openapi || j.swagger || j.paths);
+const resolve = (href: string, base: string) => {
+  try {
+    return new URL(href, base).toString();
+  } catch {
+    return null;
+  }
+};
+
+/** Extract candidate spec URLs referenced inside an HTML/JS document. */
+function refsIn(text: string, base: string): string[] {
+  const out: string[] = [];
+  const add = (h: string | undefined) => { if (!h) return; const u = resolve(h, base); if (u) out.push(u); };
+  let m: RegExpExecArray | null;
+  const fileRe = /["'`]([^"'`\s]+?\.(?:json|ya?ml))(?:[?#"'`])/gi;
+  while ((m = fileRe.exec(text))) add(m[1]);
+  const urlCfg = /\burls?\s*:\s*(?:\[\s*\{[^}]*url\s*:\s*)?["'`]([^"'`]+)["'`]/gi;
+  while ((m = urlCfg.exec(text))) add(m[1]);
+  return out;
+}
+
+function conventionUrls(specUrl: string): string[] {
+  const dir = specUrl.replace(/[^/]*$/, "");
+  const origin = (() => { try { return new URL(specUrl).origin; } catch { return ""; } })();
+  const conv = ["openapi.json", "swagger.json", "v3/api-docs", "api-docs", "swagger/v1/swagger.json", "v2/api-docs", "openapi"];
+  const out: string[] = [];
+  for (const c of conv) {
+    const a = resolve(c, dir);
+    if (a) out.push(a);
+    if (origin) out.push(`${origin}/${c}`);
+  }
+  return out;
+}
+
+async function loadSpec(specUrl: string): Promise<{ spec: any; resolvedUrl: string }> {
+  const res = await fetch(specUrl, { headers: { Accept: "application/json, application/yaml;q=0.9, */*;q=0.5" } });
+  if (!res.ok) throw new Error(`Could not fetch the URL (HTTP ${res.status}).`);
+  const text = await res.text();
+  const direct = tryJson(text);
+  if (isSpec(direct)) return { spec: direct, resolvedUrl: specUrl };
+
+  // Likely a Swagger-UI HTML page — discover the real spec.
+  const candidates = new Set<string>(refsIn(text, specUrl));
+  // Swagger UI keeps the spec URL in swagger-initializer.js / config scripts.
+  const scripts = [...text.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)]
+    .map((s) => s[1])
+    .filter((s): s is string => !!s && /swagger|openapi|initializer|config|api-?docs/i.test(s))
+    .slice(0, 4);
+  for (const s of scripts) {
+    const u = resolve(s, specUrl);
+    if (!u) continue;
+    try {
+      const r = await fetch(u);
+      if (r.ok) refsIn(await r.text(), u).forEach((c) => candidates.add(c));
+    } catch {
+      /* ignore */
+    }
+  }
+  conventionUrls(specUrl).forEach((c) => candidates.add(c));
+
+  let n = 0;
+  for (const cand of candidates) {
+    if (cand === specUrl || n++ >= 14) continue;
+    try {
+      const r = await fetch(cand, { headers: { Accept: "application/json, */*;q=0.5" } });
+      if (!r.ok) continue;
+      const j = tryJson(await r.text());
+      if (isSpec(j)) return { spec: j, resolvedUrl: cand };
+    } catch {
+      /* try next */
+    }
+  }
+  throw new Error(
+    "That URL returned a web page, not an OpenAPI spec. It looks like a Swagger UI docs page — paste the spec URL itself (it usually ends in /openapi.json, /swagger.json, or /v3/api-docs)."
+  );
+}
+
 export async function parseSpec(specUrl: string, baseUrlOverride?: string): Promise<ParsedSpec> {
-  const res = await fetch(specUrl, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`Could not fetch spec (${res.status})`);
-  const spec: any = await res.json();
+  const { spec, resolvedUrl } = await loadSpec(specUrl);
   const title: string = spec.info?.title ?? "API";
-  const baseUrl = (baseUrlOverride || deriveBaseUrl(spec, specUrl)).replace(/\/$/, "");
+  const baseUrl = (baseUrlOverride || deriveBaseUrl(spec, resolvedUrl)).replace(/\/$/, "");
 
   const operations: ApiOperation[] = [];
   const paths = spec.paths ?? {};
