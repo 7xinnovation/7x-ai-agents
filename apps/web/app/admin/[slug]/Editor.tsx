@@ -94,7 +94,7 @@ export function Editor({ slug }: { slug: string }) {
 
       <div className="mb-6 inline-flex gap-1 rounded-xl border border-[var(--color-line)] bg-surface p-1 shadow-sm">
         {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={cn("rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-colors", tab === t ? "bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] text-white shadow-[0_6px_16px_-6px_rgba(19,48,240,.5)]" : "text-muted hover:bg-bg hover:text-ink")}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={cn("rounded-lg px-3.5 py-2 text-[13.5px] font-semibold transition-colors", tab === t ? "bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] text-white shadow-[0_6px_16px_-6px_rgba(0,32,245,.5)]" : "text-muted hover:bg-bg hover:text-ink")}>{t}</button>
         ))}
       </div>
 

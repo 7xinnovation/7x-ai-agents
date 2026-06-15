@@ -2,17 +2,18 @@
 @import "tw-animate-css";
 
 /* Premium light theme tokens for the admin console (shadcn-compatible). */
+/* 7X brand: primary #0020f5, black + white, Space Grotesk. Clean & modern. */
 @theme {
-  --color-bg: #f6f8fc;
+  --color-bg: #f7f8fa;
   --color-surface: #ffffff;
-  --color-ink: #0b1020;
-  --color-muted: #6b7488;
-  --color-line: #e7eaf3;
-  --color-brand: #1330f0;
-  --color-brand-2: #4763ff;
-  --color-ring: #ccd6ff;
+  --color-ink: #000000;
+  --color-muted: #5b616e;
+  --color-line: #ebecf0;
+  --color-brand: #0020f5;
+  --color-brand-2: #2b46ff;
+  --color-ring: #b9c3ff;
   --radius: 0.9rem;
-  --font-sans: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans: var(--font-grotesk), "SF Pro Display", -apple-system, "Segoe UI", system-ui, sans-serif;
 }
 
 /* Scope a premium baseline to the admin shell so the embed CSS is untouched. */
@@ -21,8 +22,8 @@
   color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
   /* Legacy tokens so remaining .sa-* pages (activity, transcripts) keep their style. */
-  --accent: #1330f0; --accent-2: #4763ff; --ink: #0b1020; --muted: #6b7488;
-  --line: #e7eaf3; --surface: #fff; --bg: #f6f8fc; --radius: 14px; --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --accent: #0020f5; --accent-2: #2b46ff; --ink: #000; --muted: #5b616e;
+  --line: #ebecf0; --surface: #fff; --bg: #f7f8fa; --radius: 14px; --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 .tw *, .tw *::before, .tw *::after { box-sizing: border-box; }
 .tw ::selection { background: color-mix(in srgb, var(--color-brand) 22%, transparent); }

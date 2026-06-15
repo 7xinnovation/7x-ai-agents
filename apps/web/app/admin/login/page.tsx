@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 
@@ -22,9 +21,9 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="grid min-h-dvh place-items-center px-4 [background-image:radial-gradient(110%_70%_at_50%_-10%,rgba(19,48,240,.08),transparent_55%)]">
+    <div className="grid min-h-dvh place-items-center px-4 [background-image:radial-gradient(110%_70%_at_50%_-10%,rgba(0,32,245,.08),transparent_55%)]">
       <form onSubmit={submit} className="w-full max-w-sm rounded-2xl border border-[var(--color-line)] bg-surface p-7 shadow-[0_1px_2px_rgba(16,24,40,.05),0_30px_60px_-20px_rgba(16,24,40,.3)]">
-        <span className="mb-4 grid h-11 w-11 place-items-center rounded-xl bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] text-white shadow-[0_10px_24px_-6px_rgba(19,48,240,.5)]"><Sparkles className="h-5 w-5" /></span>
+        <span className="mb-4 grid h-12 w-12 place-items-center rounded-xl bg-[#0020f5] shadow-[0_10px_24px_-6px_rgba(0,32,245,.5)]"><img src="/7xlogo.svg" alt="7X" className="h-5 w-auto" /></span>
         <h1 className="text-[21px] font-extrabold tracking-tight">Admin sign in</h1>
         <p className="mb-5 mt-1 text-sm text-muted">Enter the admin password to manage agents.</p>
         <Field label="Password"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus placeholder="••••••••" /></Field>

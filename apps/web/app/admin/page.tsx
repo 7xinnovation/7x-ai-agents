@@ -56,7 +56,7 @@ export default async function Overview() {
           <h1 className="text-[27px] font-extrabold tracking-tight">Overview</h1>
           <p className="mt-1 text-sm text-muted">Your conversational agents at a glance.</p>
         </div>
-        <Link href="/admin/new" className="relative inline-flex h-10 items-center gap-2 overflow-hidden rounded-xl bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_-6px_rgba(19,48,240,.5)] transition-transform hover:-translate-y-px">
+        <Link href="/admin/new" className="relative inline-flex h-10 items-center gap-2 overflow-hidden rounded-xl bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_-6px_rgba(0,32,245,.5)] transition-transform hover:-translate-y-px">
           <Plus className="h-4 w-4" /> New agent
         </Link>
       </header>

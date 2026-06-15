@@ -27,7 +27,7 @@ export default async function Agents() {
           <h1 className="text-[27px] font-extrabold tracking-tight">Agents</h1>
           <p className="mt-1 text-sm text-muted">Every embeddable assistant across your tenants. Click one to edit its configuration.</p>
         </div>
-        <Link href="/admin/new" className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_-6px_rgba(19,48,240,.5)] transition-transform hover:-translate-y-px">
+        <Link href="/admin/new" className="inline-flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_-6px_rgba(0,32,245,.5)] transition-transform hover:-translate-y-px">
           <Plus className="h-4 w-4" /> New agent
         </Link>
       </header>

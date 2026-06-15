@@ -8,7 +8,7 @@ const button = cva(
     variants: {
       variant: {
         default:
-          "text-white bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] shadow-[0_10px_24px_-6px_rgba(79,70,229,.5)] hover:-translate-y-px",
+          "text-white bg-[linear-gradient(140deg,var(--color-brand-2),var(--color-brand))] shadow-[0_10px_24px_-6px_rgba(0,32,245,.45)] hover:-translate-y-px",
         outline: "border border-[var(--color-line)] bg-surface text-ink hover:bg-bg",
         ghost: "text-muted hover:bg-bg hover:text-ink",
         subtle: "bg-bg text-ink hover:bg-[color-mix(in_srgb,var(--color-brand)_8%,var(--color-bg))]",
