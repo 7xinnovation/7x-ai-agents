@@ -1,6 +1,6 @@
-import { getDb, conversations, messages, cases, auditLog } from "@dialog/db";
+import { getDb, conversations, messages, cases, auditLog, agents } from "@dialog/db";
 import { emptyCase, type CaseState, type Locale } from "@dialog/config";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 
 export interface Session {
   conversationId: string;
@@ -104,6 +104,67 @@ export async function getCase(conversationId: string) {
   const row = await getDb().query.cases.findFirst({ where: eq(cases.conversationId, conversationId) });
   if (!row) return null;
   return { caseId: row.id, agentId: row.agentId, state: row.state };
+}
+
+export interface InboxItem {
+  id: string;
+  locale: string;
+  authenticated: boolean;
+  createdAt: string;
+  agentName: string | null;
+  agentSlug: string | null;
+  primary: string | null;
+  lastMessage: string | null;
+  lastRole: string | null;
+  messageCount: number;
+}
+
+/** Conversation list for the Messenger-style admin inbox. */
+export async function listConversations(limit = 60): Promise<InboxItem[]> {
+  const res = await getDb().execute(sql`
+    SELECT c.id, c.locale, c.authenticated, c.created_at AS "createdAt",
+      a.name AS "agentName", a.slug AS "agentSlug",
+      a.definition->'theme'->'colors'->>'primary' AS primary,
+      (SELECT m.content FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS "lastMessage",
+      (SELECT m.role FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS "lastRole",
+      (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id)::int AS "messageCount"
+    FROM conversations c LEFT JOIN agents a ON a.id = c.agent_id
+    ORDER BY c.created_at DESC LIMIT ${limit}
+  `);
+  // drizzle neon-serverless returns { rows }
+  return ((res as unknown as { rows?: InboxItem[] }).rows ?? (res as unknown as InboxItem[])) ?? [];
+}
+
+/** Full detail for the inbox thread + profile panel (admin-only). */
+export async function adminConversationDetail(id: string) {
+  const db = getDb();
+  const conv = await db.query.conversations.findFirst({ where: eq(conversations.id, id) });
+  if (!conv) return null;
+  const agent = conv.agentId ? await db.query.agents.findFirst({ where: eq(agents.id, conv.agentId) }) : null;
+  const caseRow = await db.query.cases.findFirst({ where: eq(cases.conversationId, id) });
+  const msgs = await db
+    .select({ role: messages.role, content: messages.content, createdAt: messages.createdAt })
+    .from(messages)
+    .where(eq(messages.conversationId, id))
+    .orderBy(asc(messages.createdAt));
+  const auditRows = await db
+    .select({ action: auditLog.action, actor: auditLog.actor, payload: auditLog.payload, createdAt: auditLog.createdAt })
+    .from(auditLog)
+    .where(eq(auditLog.conversationId, id))
+    .orderBy(desc(auditLog.createdAt));
+  return {
+    id: conv.id,
+    locale: conv.locale,
+    authenticated: conv.authenticated,
+    userRef: conv.userRef,
+    createdAt: conv.createdAt,
+    agent: agent
+      ? { name: agent.name, slug: agent.slug, primary: (agent.definition as { theme?: { colors?: { primary?: string } } })?.theme?.colors?.primary ?? "#0020F5" }
+      : null,
+    case: caseRow?.state ?? null,
+    messages: msgs.filter((m) => m.role === "user" || m.role === "assistant"),
+    audit: auditRows,
+  };
 }
 
 /** For the status/resume endpoint. */

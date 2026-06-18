@@ -53,6 +53,10 @@ const STR = {
     replace: "Replace",
     optional: "optional",
     upTo: "up to",
+    suggestions: "Suggested",
+    askAnything: "Ask anything, or start with",
+    enterToSend: "Enter to send",
+    poweredBy: "AI assistant",
   },
   ar: {
     placeholder: "اكتب رسالتك…",
@@ -76,6 +80,10 @@ const STR = {
     replace: "استبدال",
     optional: "اختياري",
     upTo: "حتى",
+    suggestions: "مقترحات",
+    askAnything: "اسأل أي شيء، أو ابدأ بـ",
+    enterToSend: "اضغط Enter للإرسال",
+    poweredBy: "مساعد ذكي",
   },
 } as const;
 
@@ -126,6 +134,13 @@ export function Experience({
       }
     return m;
   }, [agent, locale]);
+
+  // Conversation starters — surfaced from the agent's own journeys so the empty
+  // state guides the user toward what this assistant can actually do.
+  const starters = useMemo(
+    () => agent.journeys.slice(0, 4).map((j) => ({ key: j.key, label: tr(j.title, locale) })),
+    [agent, locale]
+  );
 
   // Submission progress for the active journey (legitimate form feedback).
   const progress = useMemo(() => {
@@ -225,8 +240,8 @@ export function Experience({
     });
   }, []);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
+  const send = useCallback(async (override?: string) => {
+    const text = (override ?? input).trim();
     if (!text || streaming) return;
     setInput("");
     setAuthReason(null);
@@ -316,6 +331,7 @@ export function Experience({
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
 
+  const fallbackFont = "'SF Pro Display', -apple-system, 'Segoe UI', system-ui, sans-serif";
   const rootStyle = {
     ["--c-primary" as string]: c.primary,
     ["--c-primary-fg" as string]: c.primaryForeground,
@@ -327,6 +343,10 @@ export function Experience({
     ["--c-success" as string]: c.success,
     ["--c-warning" as string]: c.warning,
     ["--c-danger" as string]: c.danger,
+    ["--c-font-body" as string]: agent.theme.bodyFont ? `${agent.theme.bodyFont}, ${fallbackFont}` : agent.theme.fontFamily,
+    ["--c-font-heading" as string]: agent.theme.headingFont
+      ? `${agent.theme.headingFont}, ${agent.theme.bodyFont ?? ""}, ${fallbackFont}`
+      : undefined,
   } as React.CSSProperties;
 
   const missing = caseState?.readiness.missing ?? [];
@@ -338,15 +358,15 @@ export function Experience({
     <div className={`dlg-root ${full ? "is-full" : ""}`} dir={dir} style={rootStyle}>
       <header className="dlg-header">
         <div className="dlg-brand">
-          <span className="dlg-avatar">
-            {agent.theme.logoUrl ? (
-              <img src={agent.theme.logoUrl} alt="" />
-            ) : (
+          {agent.theme.logoUrl ? (
+            <img className="dlg-header-logo" src={agent.theme.logoUrl} alt={agent.theme.brandName || agent.name} />
+          ) : (
+            <span className="dlg-avatar">
               <ChatsCircle size={19} weight="fill" />
-            )}
-          </span>
+            </span>
+          )}
           <span className="dlg-brand-text">
-            <span className="dlg-brand-name">{agent.theme.brandName || agent.name}</span>
+            {!agent.theme.logoUrl && <span className="dlg-brand-name">{agent.theme.brandName || agent.name}</span>}
             <span className="dlg-brand-status">
               <span className="dlg-dot" /> {t.online}
             </span>
@@ -393,6 +413,24 @@ export function Experience({
               </span>
               <div className="dlg-bubble">{tr(agent.greeting, locale)}</div>
             </div>
+            {messages.length === 0 && starters.length > 0 ? (
+              <div className="dlg-starters">
+                <span className="dlg-starters-label">{t.askAnything}</span>
+                <div className="dlg-starters-grid">
+                  {starters.map((s) => (
+                    <button
+                      key={s.key}
+                      className="dlg-starter"
+                      onClick={() => void send(s.label)}
+                      disabled={streaming}
+                    >
+                      <span>{s.label}</span>
+                      <ArrowRight size={14} weight="bold" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {messages.map((m, i) => (
               <div key={i} className={`dlg-msg ${m.role}`}>
                 {m.role === "assistant" ? (
@@ -457,6 +495,12 @@ export function Experience({
               <button className="dlg-send" onClick={() => void send()} disabled={streaming || !input.trim()} aria-label="Send">
                 <PaperPlaneRight size={18} weight="fill" />
               </button>
+            </div>
+            <div className="dlg-input-hint">
+              <span className="dlg-powered">
+                <Sparkle size={11} weight="fill" /> {t.poweredBy}
+              </span>
+              <span className="dlg-kbd-hint">{t.enterToSend}</span>
             </div>
           </div>
         </section>

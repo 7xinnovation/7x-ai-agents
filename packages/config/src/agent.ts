@@ -22,6 +22,18 @@ export type Intent = z.infer<typeof Intent>;
 export const Guardrails = z.object({
   // Below this answer-confidence, deflect/escalate instead of guessing.
   confidenceThreshold: z.number().min(0).max(1).default(0.6),
+  // PRD AI-governance bands. Intent resolution: ≥proceed act on the intent,
+  // between clarify..proceed ask a clarifying question, <clarify request
+  // clarification before continuing.
+  intentThresholds: z
+    .object({ proceed: z.number().min(0).max(1).default(0.85), clarify: z.number().min(0).max(1).default(0.6) })
+    .default({ proceed: 0.85, clarify: 0.6 }),
+  // PRD AI-governance bands for goal resolution that initiates TRANSACTIONAL
+  // journeys: ≥proceed orchestrate, between clarify..proceed ask a clarifying
+  // question, <clarify do NOT initiate transactional actions.
+  goalThresholds: z
+    .object({ proceed: z.number().min(0).max(1).default(0.8), clarify: z.number().min(0).max(1).default(0.6) })
+    .default({ proceed: 0.8, clarify: 0.6 }),
   // Topics the agent must refuse and offer escalation for (PRD: refusal set).
   refusalTopics: z.array(z.string()).default([]),
   // If true, licensing/compliance answers must be grounded in the KB; ungrounded

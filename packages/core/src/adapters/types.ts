@@ -35,6 +35,15 @@ export interface CRMAdapter {
     ctx: AdapterContext,
     input: { journeyKey: string; data: Record<string, unknown> }
   ): Promise<{ reference: string } | null>;
+  /**
+   * Fetch data already held about the customer to pre-fill a journey (PRD: do not
+   * re-ask for information the system already holds — e.g. renewals). Returns a
+   * flat record of field values keyed by the source name in field.prefillFrom.
+   */
+  getRecord?(
+    ctx: AdapterContext,
+    input: { journeyKey: string; userRef: string }
+  ): Promise<Record<string, unknown> | null>;
 }
 
 /** Identity provider (e.g. UAE PASS). The platform never mints its own identity. */

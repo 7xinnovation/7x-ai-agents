@@ -270,5 +270,28 @@ export const agentIntegrations = pgTable(
   (t) => ({ agentIdx: index("integrations_agent_idx").on(t.agentId) })
 );
 
+/**
+ * Admin console users with role-based access control (PRD: User Management +
+ * RBAC). Roles: owner > admin > editor > viewer. Password is scrypt-hashed;
+ * SSO users (Microsoft Entra) have a null passwordHash and authenticate via OIDC.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull().unique(),
+    name: text("name").notNull(),
+    // scrypt hash "salt:hash" (hex). Null for SSO-only accounts.
+    passwordHash: text("password_hash"),
+    role: text("role", { enum: ["owner", "admin", "editor", "viewer"] }).default("viewer").notNull(),
+    // Identity provider: "password" or "entra" (Microsoft SSO).
+    provider: text("provider", { enum: ["password", "entra"] }).default("password").notNull(),
+    active: boolean("active").default(true).notNull(),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    createdAt: ts(),
+  },
+  (t) => ({ emailIdx: index("users_email_idx").on(t.email) })
+);
+
 // Ensure the pgvector extension exists (applied via raw SQL in push/seed).
 export const ensureVectorExtension = sql`CREATE EXTENSION IF NOT EXISTS vector;`;

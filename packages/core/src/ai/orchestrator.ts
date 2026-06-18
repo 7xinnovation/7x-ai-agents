@@ -21,6 +21,8 @@ export interface RunTurnInput {
   authenticated: boolean;
   userRef?: string;
   adapters: AdapterBundle;
+  // Pre-turn intent classification (PRD AI-governance: confidence gating).
+  intent?: { intent: string; confidence: number };
   // Whether the request is within configured business hours (drives escalation).
   businessOpen?: boolean;
   // Dynamic tools from the agent's API integrations (imported from OpenAPI).
@@ -42,6 +44,19 @@ export type OrchestratorEvent =
   | { type: "error"; message: string };
 
 const MAX_TOOL_ROUNDS = 6;
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 400;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Transient API failures worth retrying (overload, rate limit, gateway, network). */
+function isTransient(err: unknown): boolean {
+  const e = err as { status?: number; name?: string } | undefined;
+  if (!e) return false;
+  if (typeof e.status === "number" && [408, 409, 429, 500, 502, 503, 504, 529].includes(e.status)) return true;
+  const n = (e.name ?? "").toLowerCase();
+  return n.includes("connection") || n.includes("timeout") || n.includes("overloaded");
+}
 
 /**
  * One conversational turn. Streams assistant text, runs any tool calls against
@@ -62,25 +77,54 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
   const model = resolveModel(agent.model);
   const builtin = new Set(TOOL_DEFS.map((t) => t.name));
   const tools = input.extraTools?.length ? [...TOOL_DEFS, ...input.extraTools] : TOOL_DEFS;
+  // Mark the last tool definition cacheable so the (static) tool schema is reused
+  // across tool rounds via Anthropic prompt caching instead of re-sent each round.
+  const cachedTools = tools.map((t, i) =>
+    i === tools.length - 1 ? ({ ...t, cache_control: { type: "ephemeral" } } as unknown as Anthropic.Tool) : t
+  );
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const system = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen);
-      const stream = client.messages.stream({
-        model,
-        max_tokens: 1500,
-        system,
-        tools,
-        messages,
-      });
+      const sys = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen, input.intent);
+      // Split system: cacheable stable prefix + small volatile tail (case state).
+      // cache_control is accepted by the GA messages endpoint at runtime; the
+      // SDK 0.32 GA types don't surface it yet, hence the cast.
+      const system = [
+        { type: "text", text: sys.stable, cache_control: { type: "ephemeral" } },
+        { type: "text", text: sys.volatile },
+      ] as unknown as Anthropic.TextBlockParam[];
 
-      for await (const ev of stream) {
-        if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
-          yield { type: "text", delta: ev.delta.text };
+      // Create + stream the round, retrying transient API errors as long as no
+      // assistant text has been emitted yet this round (safe to restart).
+      let final: Anthropic.Message;
+      let attempt = 0;
+      for (;;) {
+        let textStarted = false;
+        try {
+          const stream = client.messages.stream({
+            model,
+            max_tokens: 1500,
+            system,
+            tools: cachedTools,
+            messages,
+          });
+          for await (const ev of stream) {
+            if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+              textStarted = true;
+              yield { type: "text", delta: ev.delta.text };
+            }
+          }
+          final = await stream.finalMessage();
+          break;
+        } catch (err) {
+          if (!textStarted && isTransient(err) && attempt < MAX_RETRIES) {
+            attempt++;
+            await sleep(RETRY_BASE_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 120));
+            continue;
+          }
+          throw err;
         }
       }
-
-      const final = await stream.finalMessage();
       messages.push({ role: "assistant", content: final.content });
 
       const toolUses = final.content.filter(
@@ -114,6 +158,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           authenticated,
           userRef: input.userRef,
           locale,
+          intent: input.intent,
         });
         state = res.state;
         for (const e of res.events) {

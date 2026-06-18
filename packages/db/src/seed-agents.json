@@ -1,0 +1,1218 @@
+{
+  "exportedNote": "Live agent definitions snapshot — source of truth for re-seeding. Generated from Neon.",
+  "agents": [
+    {
+      "slug": "epgl-dialog",
+      "name": "EPGL Dialog",
+      "status": "live",
+      "tenant": "epgl",
+      "definition": {
+        "name": "EPGL Dialog",
+        "slug": "epgl-dialog",
+        "theme": {
+          "colors": {
+            "text": "#000000",
+            "border": "#e1e8f0",
+            "danger": "#D23F31",
+            "primary": "#0052a3",
+            "success": "#0F9D58",
+            "surface": "#FFFFFF",
+            "warning": "#E8A100",
+            "textMuted": "#5B6478",
+            "surfaceMuted": "#f2f6fb",
+            "primaryForeground": "#ffffff"
+          },
+          "radius": "soft",
+          "logoUrl": "/epgl-logo.svg",
+          "bodyFont": "TWRegular",
+          "launcher": {
+            "label": "Ask EPGL",
+            "position": "bottom-right"
+          },
+          "brandName": "EPGL",
+          "fontFamily": "Inter, system-ui, sans-serif",
+          "headingFont": "TWBold"
+        },
+        "intents": [
+          {
+            "key": "new_license",
+            "journey": "new_license",
+            "description": {
+              "ar": "التقدّم بطلب رخصة جديدة",
+              "en": "Apply for a new courier license"
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "renewal",
+            "journey": "renewal",
+            "description": {
+              "ar": "تجديد رخصة قائمة",
+              "en": "Renew an existing courier license"
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "licensing_info",
+            "description": {
+              "ar": "أسئلة عامة عن الترخيص والأهلية والمتطلبات",
+              "en": "Ask general questions about licensing, eligibility, and requirements"
+            },
+            "requiresAuth": false
+          },
+          {
+            "key": "human_help",
+            "description": {
+              "ar": "طلب اتصال من موظف EPGL",
+              "en": "Request a callback from an EPGL agent"
+            },
+            "requiresAuth": false
+          },
+          {
+            "key": "status_inquiry",
+            "description": {
+              "ar": "الاستعلام عن حالة طلب الترخيص",
+              "en": "Check the status or progress of an existing license application or renewal"
+            },
+            "requiresAuth": true
+          }
+        ],
+        "locales": [
+          "en",
+          "ar"
+        ],
+        "persona": "You help businesses apply for and renew courier licenses with Emirates Post Group Licensing (EPGL). You are accurate, calm, and government-grade in tone. You guide applicants step by step, collect only what applies, validate as you go, and route to a human when needed.",
+        "greeting": {
+          "ar": "مرحباً، أنا EPGL Dialog. يمكنني مساعدتك في التقدّم بطلب رخصة بريد سريع جديدة، أو تجديد رخصة قائمة، أو الإجابة عن أسئلة الترخيص. كيف يمكنني خدمتك؟",
+          "en": "Hello, I'm EPGL Dialog. I can help you apply for a new courier license, renew an existing one, or answer licensing questions. What would you like to do?"
+        },
+        "journeys": [
+          {
+            "key": "new_license",
+            "steps": [
+              {
+                "key": "company_details",
+                "title": {
+                  "ar": "تفاصيل الشركة",
+                  "en": "Company details"
+                },
+                "fields": [
+                  {
+                    "key": "company_name",
+                    "type": "text",
+                    "label": {
+                      "ar": "اسم الشركة",
+                      "en": "Company name"
+                    },
+                    "validation": {
+                      "required": true,
+                      "minLength": 2
+                    }
+                  },
+                  {
+                    "key": "trade_license_number",
+                    "type": "text",
+                    "label": {
+                      "ar": "رقم الرخصة التجارية",
+                      "en": "Trade license number"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "emirate",
+                    "type": "enum",
+                    "label": {
+                      "ar": "الإمارة",
+                      "en": "Emirate"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "ar": "أبوظبي",
+                          "en": "Abu Dhabi"
+                        },
+                        "value": "AUH"
+                      },
+                      {
+                        "label": {
+                          "ar": "دبي",
+                          "en": "Dubai"
+                        },
+                        "value": "DXB"
+                      },
+                      {
+                        "label": {
+                          "ar": "الشارقة",
+                          "en": "Sharjah"
+                        },
+                        "value": "SHJ"
+                      },
+                      {
+                        "label": {
+                          "ar": "أخرى",
+                          "en": "Other"
+                        },
+                        "value": "OTHER"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "contact_email",
+                    "type": "email",
+                    "label": {
+                      "ar": "البريد الإلكتروني",
+                      "en": "Contact email"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "contact_phone",
+                    "type": "phone",
+                    "label": {
+                      "ar": "رقم الهاتف",
+                      "en": "Contact phone"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  }
+                ],
+                "documents": [],
+                "requiresAuth": true
+              },
+              {
+                "key": "shareholders",
+                "title": {
+                  "ar": "المساهمون",
+                  "en": "Shareholders"
+                },
+                "fields": [
+                  {
+                    "key": "shareholders",
+                    "type": "group",
+                    "label": {
+                      "ar": "المساهمون",
+                      "en": "Shareholders"
+                    },
+                    "children": [
+                      {
+                        "key": "name",
+                        "type": "text",
+                        "label": {
+                          "ar": "الاسم",
+                          "en": "Name"
+                        },
+                        "validation": {
+                          "required": true
+                        }
+                      },
+                      {
+                        "key": "percentage",
+                        "type": "percentage",
+                        "label": {
+                          "ar": "نسبة الملكية ٪",
+                          "en": "Ownership %"
+                        },
+                        "validation": {
+                          "max": 100,
+                          "min": 0,
+                          "required": true
+                        }
+                      }
+                    ],
+                    "validation": {
+                      "message": {
+                        "ar": "يجب أن تبلغ نسب الملكية 100٪.",
+                        "en": "Shareholder ownership must total 100%."
+                      },
+                      "required": true,
+                      "sumChildrenEquals": 100
+                    }
+                  }
+                ],
+                "documents": [],
+                "requiresAuth": true
+              },
+              {
+                "key": "documents",
+                "title": {
+                  "ar": "المستندات",
+                  "en": "Documents"
+                },
+                "fields": [],
+                "documents": [
+                  {
+                    "key": "trade_license",
+                    "label": {
+                      "ar": "نسخة الرخصة التجارية",
+                      "en": "Trade license copy"
+                    },
+                    "maxSizeMb": 10,
+                    "requirement": "mandatory",
+                    "acceptedFormats": [
+                      "pdf",
+                      "png",
+                      "jpg"
+                    ]
+                  },
+                  {
+                    "key": "emirates_id",
+                    "label": {
+                      "ar": "الهوية الإماراتية للمفوّض",
+                      "en": "Emirates ID of signatory"
+                    },
+                    "maxSizeMb": 10,
+                    "requirement": "mandatory",
+                    "acceptedFormats": [
+                      "pdf",
+                      "png",
+                      "jpg"
+                    ]
+                  },
+                  {
+                    "key": "moa",
+                    "label": {
+                      "ar": "عقد التأسيس",
+                      "en": "Memorandum of Association"
+                    },
+                    "maxSizeMb": 10,
+                    "requirement": "optional",
+                    "acceptedFormats": [
+                      "pdf"
+                    ]
+                  }
+                ],
+                "requiresAuth": true
+              }
+            ],
+            "title": {
+              "ar": "رخصة بريد سريع جديدة",
+              "en": "New Courier License"
+            },
+            "intent": "new_license",
+            "submission": {
+              "action": "crm.createCase",
+              "readinessTitle": {
+                "ar": "جاهزية الإرسال",
+                "en": "Submission readiness"
+              }
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "renewal",
+            "steps": [
+              {
+                "key": "review",
+                "title": {
+                  "ar": "المراجعة والتحديث",
+                  "en": "Review & update"
+                },
+                "fields": [
+                  {
+                    "key": "license_number",
+                    "type": "text",
+                    "label": {
+                      "ar": "رقم الرخصة الحالية",
+                      "en": "Existing license number"
+                    },
+                    "validation": {
+                      "required": true
+                    },
+                    "prefillFrom": "crm.license"
+                  },
+                  {
+                    "key": "updated_contact_phone",
+                    "type": "phone",
+                    "label": {
+                      "ar": "رقم الهاتف المحدّث",
+                      "en": "Updated contact phone"
+                    },
+                    "validation": {
+                      "required": false
+                    }
+                  }
+                ],
+                "documents": [
+                  {
+                    "key": "updated_trade_license",
+                    "label": {
+                      "ar": "الرخصة التجارية المحدّثة",
+                      "en": "Updated trade license"
+                    },
+                    "maxSizeMb": 10,
+                    "requirement": "mandatory",
+                    "acceptedFormats": [
+                      "pdf",
+                      "png",
+                      "jpg"
+                    ]
+                  }
+                ],
+                "requiresAuth": true
+              }
+            ],
+            "title": {
+              "ar": "تجديد الرخصة",
+              "en": "License Renewal"
+            },
+            "intent": "renewal",
+            "submission": {
+              "action": "crm.createCase",
+              "readinessTitle": {
+                "ar": "جاهزية التجديد",
+                "en": "Renewal readiness"
+              }
+            },
+            "requiresAuth": true
+          }
+        ],
+        "guardrails": {
+          "refusalTopics": [
+            "legal advice",
+            "tax advice",
+            "Form 09",
+            "audits",
+            "inspections",
+            "revenue protection"
+          ],
+          "escalationOffer": {
+            "ar": "يمكنني توصيلك بموظف من EPGL إذا رغبت.",
+            "en": "I can connect you with an EPGL agent if you'd like."
+          },
+          "confidenceThreshold": 0.6,
+          "requireGroundedAnswers": true
+        },
+        "tenantSlug": "epgl",
+        "integrations": {
+          "crm": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "auth": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "storage": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "knowledge": {
+            "provider": "neon",
+            "settings": {},
+            "secretRefs": []
+          }
+        },
+        "allowedOrigins": []
+      }
+    },
+    {
+      "slug": "nxn-dialog",
+      "name": "NXN Dialog",
+      "status": "live",
+      "tenant": "nxn",
+      "definition": {
+        "name": "NXN Dialog",
+        "slug": "nxn-dialog",
+        "theme": {
+          "colors": {
+            "text": "#13132e",
+            "border": "#e4e5f1",
+            "danger": "#D23F31",
+            "primary": "#2626a1",
+            "success": "#7bdc51",
+            "surface": "#FFFFFF",
+            "warning": "#E8A100",
+            "textMuted": "#5B6478",
+            "surfaceMuted": "#f4f5fb",
+            "primaryForeground": "#ffffff"
+          },
+          "radius": "soft",
+          "logoUrl": "/nxn-logo.svg",
+          "bodyFont": "Object Sans",
+          "launcher": {
+            "label": "NXN",
+            "position": "bottom-right"
+          },
+          "brandName": "NXN",
+          "fontFamily": "Inter, system-ui, sans-serif",
+          "headingFont": "PP Valve"
+        },
+        "intents": [
+          {
+            "key": "new_personal_pobox",
+            "journey": "personal_po_box_rental",
+            "description": {
+              "ar": "استئجار صندوق بريد شخصي جديد",
+              "en": "Rent a new personal PO Box"
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "renew_personal_pobox",
+            "journey": "personal_po_box_renewal",
+            "description": {
+              "ar": "تجديد صندوق بريد شخصي",
+              "en": "Renew a personal PO Box"
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "new_corporate_pobox",
+            "journey": "corporate_po_box_rental",
+            "description": {
+              "ar": "استئجار صندوق بريد للشركات",
+              "en": "Rent a new corporate PO Box"
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "manage_pobox",
+            "journey": "manage_po_box",
+            "description": {
+              "en": "Manage an existing PO Box: authorized agent, key delivery, auto-renewal, link trade license"
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "shipment_tracking",
+            "description": {
+              "ar": "تتبع شحنة",
+              "en": "Track a shipment"
+            },
+            "requiresAuth": false
+          },
+          {
+            "key": "service_info",
+            "description": {
+              "ar": "الاستفسار عن خدمات NXN",
+              "en": "Ask about NXN services, packages, pricing, branches"
+            },
+            "requiresAuth": false
+          },
+          {
+            "key": "human_help",
+            "description": {
+              "ar": "طلب اتصال من الدعم",
+              "en": "Request a callback from support"
+            },
+            "requiresAuth": false
+          },
+          {
+            "key": "renew_corporate_pobox",
+            "journey": "corporate_po_box_renewal",
+            "description": {
+              "ar": "تجديد صندوق بريد قائم للشركات",
+              "en": "Renew an existing corporate PO Box"
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "status_inquiry",
+            "description": {
+              "ar": "الاستعلام عن حالة طلب قائم",
+              "en": "Check the status or progress of an existing request, application, or renewal"
+            },
+            "requiresAuth": true
+          }
+        ],
+        "locales": [
+          "en",
+          "ar"
+        ],
+        "persona": "You are NXN Dialog, the conversational assistant for NXN services (PO Box and shipment tracking). You are calm, professional, and efficient. You collect only what is needed, reuse information already available, validate as you go, take payment for chargeable services through the gateway, and route to a human callback when needed. You never invent pricing, shipment statuses, or reference numbers; use backend systems and the approved knowledge base.",
+        "greeting": {
+          "ar": "مرحباً بك في NXN. يمكنني مساعدتك في استئجار أو تجديد صندوق بريد، أو تتبع شحنة، أو الإجابة عن أسئلتك. كيف أساعدك؟",
+          "en": "Welcome to NXN. I can help you rent or renew a PO Box, track a shipment, or answer questions about our services. How can I help?"
+        },
+        "journeys": [
+          {
+            "key": "personal_po_box_rental",
+            "steps": [
+              {
+                "key": "details",
+                "title": {
+                  "en": "Your details"
+                },
+                "fields": [
+                  {
+                    "key": "full_name",
+                    "type": "text",
+                    "label": {
+                      "en": "Full name"
+                    },
+                    "validation": {
+                      "required": true,
+                      "minLength": 2
+                    }
+                  },
+                  {
+                    "key": "emirate",
+                    "type": "enum",
+                    "label": {
+                      "en": "Emirate"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "Abu Dhabi"
+                        },
+                        "value": "AUH"
+                      },
+                      {
+                        "label": {
+                          "en": "Dubai"
+                        },
+                        "value": "DXB"
+                      },
+                      {
+                        "label": {
+                          "en": "Sharjah"
+                        },
+                        "value": "SHJ"
+                      },
+                      {
+                        "label": {
+                          "en": "Other"
+                        },
+                        "value": "OTHER"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "branch",
+                    "type": "text",
+                    "label": {
+                      "en": "Preferred branch"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "package",
+                    "type": "enum",
+                    "label": {
+                      "en": "Package"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "MyBox"
+                        },
+                        "value": "MYBOX"
+                      },
+                      {
+                        "label": {
+                          "en": "MyHome"
+                        },
+                        "value": "MYHOME"
+                      },
+                      {
+                        "label": {
+                          "en": "MyHome Instant"
+                        },
+                        "value": "MYHOME_INSTANT"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "duration",
+                    "type": "enum",
+                    "label": {
+                      "en": "Subscription duration"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "1 year"
+                        },
+                        "value": "1_YEAR"
+                      },
+                      {
+                        "label": {
+                          "en": "2 years"
+                        },
+                        "value": "2_YEAR"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "contact_phone",
+                    "type": "phone",
+                    "label": {
+                      "en": "Contact phone"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "contact_email",
+                    "type": "email",
+                    "label": {
+                      "en": "Contact email"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  }
+                ],
+                "documents": [],
+                "requiresAuth": true
+              }
+            ],
+            "title": {
+              "ar": "صندوق بريد شخصي جديد",
+              "en": "New Personal PO Box"
+            },
+            "intent": "new_personal_pobox",
+            "submission": {
+              "action": "crm.createCase",
+              "amount": 300,
+              "currency": "AED",
+              "readinessTitle": {
+                "en": "Submission readiness"
+              },
+              "requiresPayment": true
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "personal_po_box_renewal",
+            "steps": [
+              {
+                "key": "identify",
+                "title": {
+                  "en": "Renewal details"
+                },
+                "fields": [
+                  {
+                    "key": "po_box_number",
+                    "type": "text",
+                    "label": {
+                      "en": "PO Box number"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "renewal_period",
+                    "type": "enum",
+                    "label": {
+                      "en": "Renewal period"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "1 year"
+                        },
+                        "value": "1_YEAR"
+                      },
+                      {
+                        "label": {
+                          "en": "2 years"
+                        },
+                        "value": "2_YEAR"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "updated_phone",
+                    "type": "phone",
+                    "label": {
+                      "en": "Updated contact phone"
+                    },
+                    "validation": {
+                      "required": false
+                    }
+                  }
+                ],
+                "documents": [],
+                "requiresAuth": true
+              }
+            ],
+            "title": {
+              "ar": "تجديد صندوق بريد شخصي",
+              "en": "Personal PO Box Renewal"
+            },
+            "intent": "renew_personal_pobox",
+            "submission": {
+              "action": "crm.createCase",
+              "amount": 250,
+              "currency": "AED",
+              "requiresPayment": true
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "corporate_po_box_rental",
+            "steps": [
+              {
+                "key": "company",
+                "title": {
+                  "en": "Company details"
+                },
+                "fields": [
+                  {
+                    "key": "trade_license_number",
+                    "type": "text",
+                    "label": {
+                      "en": "Trade license number"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "issuing_authority",
+                    "type": "text",
+                    "label": {
+                      "en": "Trade license issuing authority"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "emirate",
+                    "type": "enum",
+                    "label": {
+                      "en": "Emirate"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "Abu Dhabi"
+                        },
+                        "value": "AUH"
+                      },
+                      {
+                        "label": {
+                          "en": "Dubai"
+                        },
+                        "value": "DXB"
+                      },
+                      {
+                        "label": {
+                          "en": "Sharjah"
+                        },
+                        "value": "SHJ"
+                      },
+                      {
+                        "label": {
+                          "en": "Other"
+                        },
+                        "value": "OTHER"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "package",
+                    "type": "enum",
+                    "label": {
+                      "en": "Corporate package"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "Basic Box"
+                        },
+                        "value": "BASIC"
+                      },
+                      {
+                        "label": {
+                          "en": "Premium Box"
+                        },
+                        "value": "PREMIUM"
+                      },
+                      {
+                        "label": {
+                          "en": "Premium+ Box"
+                        },
+                        "value": "PREMIUM_PLUS"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "duration",
+                    "type": "enum",
+                    "label": {
+                      "en": "Subscription duration"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "1 year"
+                        },
+                        "value": "1_YEAR"
+                      },
+                      {
+                        "label": {
+                          "en": "2 years"
+                        },
+                        "value": "2_YEAR"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "contact_email",
+                    "type": "email",
+                    "label": {
+                      "en": "Contact email"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  }
+                ],
+                "documents": [],
+                "requiresAuth": true
+              }
+            ],
+            "title": {
+              "ar": "صندوق بريد للشركات",
+              "en": "New Corporate PO Box"
+            },
+            "intent": "new_corporate_pobox",
+            "submission": {
+              "action": "crm.createCase",
+              "amount": 600,
+              "currency": "AED",
+              "requiresPayment": true
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "manage_po_box",
+            "steps": [
+              {
+                "key": "manage",
+                "title": {
+                  "en": "Management request"
+                },
+                "fields": [
+                  {
+                    "key": "po_box_number",
+                    "type": "text",
+                    "label": {
+                      "en": "PO Box number"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "management_action",
+                    "type": "enum",
+                    "label": {
+                      "en": "Action"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "en": "Add authorized agent"
+                        },
+                        "value": "ADD_AGENT"
+                      },
+                      {
+                        "label": {
+                          "en": "Remove authorized agent"
+                        },
+                        "value": "REMOVE_AGENT"
+                      },
+                      {
+                        "label": {
+                          "en": "Key delivery"
+                        },
+                        "value": "KEY_DELIVERY"
+                      },
+                      {
+                        "label": {
+                          "en": "Auto-renewal"
+                        },
+                        "value": "AUTO_RENEWAL"
+                      },
+                      {
+                        "label": {
+                          "en": "Link trade license"
+                        },
+                        "value": "LINK_TRADE_LICENSE"
+                      },
+                      {
+                        "label": {
+                          "ar": "ربط صندوق بريد قائم",
+                          "en": "Link an existing PO Box"
+                        },
+                        "value": "LINK_PO_BOX"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  }
+                ],
+                "documents": [],
+                "requiresAuth": true
+              }
+            ],
+            "title": {
+              "en": "Manage Existing PO Box"
+            },
+            "intent": "manage_pobox",
+            "submission": {
+              "action": "crm.createCase",
+              "currency": "AED",
+              "requiresPayment": false
+            },
+            "requiresAuth": true
+          },
+          {
+            "key": "corporate_po_box_renewal",
+            "steps": [
+              {
+                "key": "identify",
+                "title": {
+                  "ar": "تفاصيل التجديد",
+                  "en": "Renewal details"
+                },
+                "fields": [
+                  {
+                    "key": "po_box_number",
+                    "type": "text",
+                    "label": {
+                      "ar": "رقم صندوق البريد",
+                      "en": "Corporate PO Box number"
+                    },
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "trade_license_number",
+                    "type": "text",
+                    "label": {
+                      "ar": "رقم الرخصة التجارية",
+                      "en": "Trade license number"
+                    },
+                    "validation": {
+                      "required": true
+                    },
+                    "prefillFrom": "crm.trade_license"
+                  },
+                  {
+                    "key": "renewal_period",
+                    "type": "enum",
+                    "label": {
+                      "ar": "مدة التجديد",
+                      "en": "Renewal period"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "ar": "سنة",
+                          "en": "1 year"
+                        },
+                        "value": "1_YEAR"
+                      },
+                      {
+                        "label": {
+                          "ar": "سنتان",
+                          "en": "2 years"
+                        },
+                        "value": "2_YEAR"
+                      }
+                    ],
+                    "validation": {
+                      "required": true
+                    }
+                  },
+                  {
+                    "key": "business_addon",
+                    "type": "enum",
+                    "label": {
+                      "ar": "خدمة إضافية",
+                      "en": "Optional business enhancement"
+                    },
+                    "options": [
+                      {
+                        "label": {
+                          "ar": "بدون",
+                          "en": "None"
+                        },
+                        "value": "NONE"
+                      },
+                      {
+                        "label": {
+                          "ar": "ترقية الباقة",
+                          "en": "Package upgrade"
+                        },
+                        "value": "PACKAGE_UPGRADE"
+                      },
+                      {
+                        "label": {
+                          "ar": "تجديد تلقائي",
+                          "en": "Auto-renewal"
+                        },
+                        "value": "AUTO_RENEWAL"
+                      }
+                    ],
+                    "validation": {
+                      "required": false
+                    }
+                  },
+                  {
+                    "key": "contact_email",
+                    "type": "email",
+                    "label": {
+                      "ar": "البريد الإلكتروني",
+                      "en": "Contact email"
+                    },
+                    "validation": {
+                      "required": true
+                    },
+                    "prefillFrom": "crm.email"
+                  }
+                ],
+                "documents": [],
+                "requiresAuth": true
+              }
+            ],
+            "title": {
+              "ar": "تجديد صندوق بريد للشركات",
+              "en": "Renew Corporate PO Box"
+            },
+            "intent": "renew_corporate_pobox",
+            "summary": {
+              "ar": "تجديد صندوق بريد قائم للشركات",
+              "en": "Renew an existing corporate PO Box"
+            },
+            "submission": {
+              "action": "crm.createCase",
+              "amount": 550,
+              "currency": "AED",
+              "requiresPayment": true
+            },
+            "requiresAuth": true
+          }
+        ],
+        "guardrails": {
+          "refusalTopics": [
+            "legal advice",
+            "tax advice",
+            "regulatory interpretation",
+            "unapproved pricing"
+          ],
+          "escalationOffer": {
+            "ar": "يمكنني ترتيب اتصال من دعم NXN.",
+            "en": "I can arrange a callback from NXN support."
+          },
+          "confidenceThreshold": 0.6,
+          "requireGroundedAnswers": true
+        },
+        "tenantSlug": "nxn",
+        "integrations": {
+          "crm": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "auth": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "lookup": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "payment": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "storage": {
+            "provider": "mock",
+            "settings": {},
+            "secretRefs": []
+          },
+          "knowledge": {
+            "provider": "neon",
+            "settings": {},
+            "secretRefs": []
+          }
+        },
+        "businessHours": {
+          "days": [
+            {
+              "day": 0,
+              "open": "08:00",
+              "close": "20:00"
+            },
+            {
+              "day": 1,
+              "open": "08:00",
+              "close": "20:00"
+            },
+            {
+              "day": 2,
+              "open": "08:00",
+              "close": "20:00"
+            },
+            {
+              "day": 3,
+              "open": "08:00",
+              "close": "20:00"
+            },
+            {
+              "day": 4,
+              "open": "08:00",
+              "close": "20:00"
+            },
+            {
+              "day": 6,
+              "open": "09:00",
+              "close": "17:00"
+            }
+          ],
+          "timezone": "Asia/Dubai"
+        },
+        "allowedOrigins": [],
+        "activeEnvironment": "staging"
+      }
+    }
+  ]
+}

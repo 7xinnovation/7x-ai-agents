@@ -76,6 +76,15 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_status",
+    description:
+      "Retrieve the status of the authenticated user's existing application/renewal/request from the system of record (PRD: status & progress tracking). Requires sign-in. Returns status, missing items, and next steps. Never invent status.",
+    input_schema: {
+      type: "object",
+      properties: { reference: { type: "string", description: "Optional case/application reference if the user has one" } },
+    },
+  },
+  {
     name: "submit_case",
     description: "Submit the completed case to the system of record. Only call when readiness is complete, payment (if required) is confirmed, and the user confirms.",
     input_schema: { type: "object", properties: {} },
@@ -123,6 +132,8 @@ export interface DispatchInput {
   locale: string;
   agentId: string;
   caseId: string;
+  // Pre-turn intent classification, for confidence gating (PRD AI-governance).
+  intent?: { intent: string; confidence: number };
 }
 
 export interface DispatchResult {
@@ -163,11 +174,59 @@ export async function dispatchTool(
       const key = String(input.journey_key ?? "");
       const journey = findJourney(agent, key);
       if (!journey) return { result: `Unknown journey "${key}".`, state, events, isError: true };
+      // PRD AI-governance: a TRANSACTIONAL journey (auth or payment required) may
+      // only be initiated when goal-resolution confidence ≥ proceed band. Between
+      // clarify..proceed the model must ask a clarifying question; below clarify it
+      // must not initiate. This is deterministic, not left to model discretion.
+      const transactional = journey.requiresAuth || Boolean(journey.submission);
+      const conf = ctx.intent?.confidence;
+      if (transactional && conf !== undefined) {
+        const g = agent.guardrails.goalThresholds;
+        if (conf < g.clarify) {
+          return {
+            result: `Goal confidence ${conf.toFixed(2)} is below ${g.clarify}. Do NOT initiate this transactional journey. Ask the customer a clarifying question to confirm what they want before proceeding.`,
+            state,
+            events,
+            isError: true,
+          };
+        }
+        if (conf < g.proceed) {
+          return {
+            result: `Goal confidence ${conf.toFixed(2)} is between ${g.clarify} and ${g.proceed}. Briefly confirm the customer's intent with one clarifying question before starting "${key}", then call set_journey again once confirmed.`,
+            state,
+            events,
+            isError: true,
+          };
+        }
+      }
       if (journey.requiresAuth && !ctx.authenticated) {
         events.push({ type: "auth_required", reason: `Starting ${journey.key} requires sign-in.` });
         return { result: "This journey requires an authenticated user. Ask them to sign in.", state, events };
       }
       state = setJourney(agent, state, key);
+      // Prefill fields held by the system of record (PRD: do not re-ask for data
+      // already held — renewals). Resolves field.prefillFrom via crm.getRecord.
+      if (ctx.authenticated && adapters.crm?.getRecord) {
+        const prefillFields = journey.steps.flatMap((s) => s.fields).filter((f) => f.prefillFrom);
+        if (prefillFields.length) {
+          const actx = adapterContext(agent, agent.integrations.crm);
+          const record = await adapters.crm.getRecord(actx, { journeyKey: key, userRef: ctx.userRef ?? "" });
+          if (record) {
+            let data = { ...state.data };
+            const filled: string[] = [];
+            for (const f of prefillFields) {
+              const src = f.prefillFrom!.split(".").pop()!; // e.g. "crm.license" -> "license"
+              const val = record[src] ?? record[f.key];
+              if (val !== undefined && data[f.key] === undefined) { data[f.key] = val; filled.push(f.key); }
+            }
+            if (filled.length) {
+              state = setJourney(agent, { ...state, data }, key);
+              events.push({ type: "case", state });
+              return { result: `Journey set to ${key}. Prefilled from records: ${filled.join(", ")} (do not re-ask these). First step: ${state.currentStep}.`, state, events };
+            }
+          }
+        }
+      }
       events.push({ type: "case", state });
       return { result: `Journey set to ${key}. First step: ${state.currentStep}.`, state, events };
     }
@@ -223,6 +282,26 @@ export async function dispatchTool(
       events.push({ type: "lookup", kind: String(input.kind ?? "") });
       if (!rec) return { result: "No record found for that identifier. Ask the customer to verify it, or offer support.", state, events };
       return { result: JSON.stringify(rec), state, events };
+    }
+
+    case "get_status": {
+      // PRD: status & progress tracking for an authenticated user's request.
+      if (!ctx.authenticated) {
+        events.push({ type: "auth_required", reason: "Checking your application status requires sign-in." });
+        return { result: "User must authenticate before status can be retrieved.", state, events };
+      }
+      if (!adapters.crm?.getStatus) return { result: "No system of record configured for status lookups.", state, events, isError: true };
+      const actx = adapterContext(agent, agent.integrations.crm);
+      const status = await adapters.crm.getStatus(actx, {
+        reference: (input.reference as string | undefined) ?? state.reference ?? undefined,
+        userRef: ctx.userRef ?? "",
+      });
+      if (!status) return { result: "No matching application/request was found for this customer. Offer to start a new one or a callback.", state, events };
+      return {
+        result: `Status: ${status.status}. Missing: ${status.missing.length ? status.missing.join(", ") : "none"}. Next steps: ${status.nextSteps.join("; ") || "—"}. Explain this to the customer in plain language; do not invent details.`,
+        state,
+        events,
+      };
     }
 
     case "request_payment": {

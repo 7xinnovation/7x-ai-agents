@@ -25,14 +25,34 @@ const mockCrm: CRMAdapter = {
     return { reference: ref(input.journeyKey.toUpperCase().slice(0, 3)) };
   },
   async getStatus(_ctx, input) {
-    if (!input.reference) return null;
-    return { status: "Under Review", missing: [], nextSteps: ["EPGL is reviewing your submission."] };
+    // Authenticated status lookup — returns a canned in-review record so the
+    // get_status tool demonstrates PRD status tracking without a real backend.
+    if (!input.reference && !input.userRef) return null;
+    return {
+      status: input.reference ? "Under Review" : "Submitted — awaiting review",
+      missing: [],
+      nextSteps: ["Your submission is being reviewed; you'll be notified of the outcome."],
+    };
   },
   async createCallback() {
     return { reference: ref("CB") };
   },
   async findDuplicate() {
     return null;
+  },
+  async getRecord(_ctx, input) {
+    // Canned "held" data so renewal journeys can prefill instead of re-asking
+    // (PRD: do not re-ask for data already held). Keyed by prefillFrom source.
+    if (!input.userRef) return null;
+    return {
+      license: "EPGL-2023-004821",
+      license_number: "EPGL-2023-004821",
+      company_name: "Demo Trading LLC",
+      company: "Demo Trading LLC",
+      po_box_number: "50500",
+      trade_license: "CN-1234567",
+      emirate: "Dubai",
+    };
   },
 };
 

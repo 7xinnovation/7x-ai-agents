@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { getDb, agentIntegrations } from "@dialog/db";
 import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
+import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 
 export type EnvKey = "staging" | "production";
 
@@ -39,10 +40,30 @@ export async function listIntegrations(agentId: string): Promise<IntegrationRow[
   }));
 }
 
+/** Mask an integration's stored secrets before sending to the admin UI (never leak tokens). */
+export function maskIntegrations(rows: IntegrationRow[]): IntegrationRow[] {
+  return rows.map((r) => ({
+    ...r,
+    environments: Object.fromEntries(
+      Object.entries(r.environments).map(([k, spec]) => [
+        k,
+        spec ? { ...spec, authValue: spec.authValue ? "••••••••" : null } : spec,
+      ])
+    ) as IntegrationRow["environments"],
+  }));
+}
+
 /** Add or replace one environment's spec on an integration (matched by name). */
 export async function upsertEnvironment(agentId: string, name: string, env: EnvKey, spec: EnvSpec) {
   const db = getDb();
   const existing = (await listIntegrations(agentId)).find((i) => i.name.toLowerCase() === name.toLowerCase());
+  // Encrypt the secret at rest (PRD: encryption at rest for integration tokens).
+  // A masked placeholder means "keep the existing secret" (admin re-save).
+  if (spec.authValue === "••••••••") {
+    spec = { ...spec, authValue: existing?.environments[env]?.authValue ?? null };
+  } else {
+    spec = { ...spec, authValue: encryptSecret(spec.authValue) };
+  }
   if (existing) {
     const environments = { ...existing.environments, [env]: spec };
     await db.update(agentIntegrations).set({ environments }).where(eq(agentIntegrations.id, existing.id));
@@ -110,7 +131,11 @@ export async function buildApiTools(
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
-    return executeOperation(entry.spec, entry.op, input ?? {}, uaePassToken);
+    // Decrypt the stored secret only at the moment of the outbound call.
+    const liveSpec = isEncrypted(entry.spec.authValue)
+      ? { ...entry.spec, authValue: decryptSecret(entry.spec.authValue) }
+      : entry.spec;
+    return executeOperation(liveSpec, entry.op, input ?? {}, uaePassToken);
   };
 
   return { tools, exec };

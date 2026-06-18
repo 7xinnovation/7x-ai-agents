@@ -16,6 +16,7 @@ export default async function Agents() {
     status: r.status,
     tenant: r.tenant ?? "—",
     primary: r.definition?.theme?.colors?.primary ?? "#0020F5",
+    logoUrl: r.definition?.theme?.logoUrl ?? null,
     locales: (r.definition?.locales ?? []).map((l: string) => l.toUpperCase()),
     journeys: r.definition?.journeys?.length ?? 0,
     updated: r.updatedAt ? new Date(r.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—",

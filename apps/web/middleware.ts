@@ -1,37 +1,54 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { verifySession, atLeast } from "@/lib/session";
 
 /**
- * Gate the admin console and its APIs behind a session cookie. The login route
- * sets the cookie to ADMIN_SESSION_SECRET after a password check; everything
- * under /admin and /api/admin requires it. Scaffold-grade (opaque shared
- * secret) — swap for real SSO before a serious deployment.
+ * Gate the admin console and its APIs behind a signed RBAC session (PRD: User
+ * Management + RBAC). The login route sets a signed HS256 cookie carrying the
+ * user's role; this verifies the signature/expiry in the edge runtime and
+ * enforces role requirements per route + method.
  */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const method = req.method.toUpperCase();
 
   // Embed is public, but locked to each agent's approved origins via CSP.
   if (pathname.startsWith("/embed/")) {
     return embedCsp(req);
   }
 
-  // Always allow the login surface itself.
-  if (pathname === "/admin/login" || pathname === "/api/admin/login") {
+  // Always allow the login + SSO surfaces themselves.
+  if (
+    pathname === "/admin/login" ||
+    pathname === "/api/admin/login" ||
+    pathname.startsWith("/api/admin/sso/")
+  ) {
     return NextResponse.next();
   }
 
-  const token = req.cookies.get("dlg_admin")?.value;
-  if (token && token === process.env.ADMIN_SESSION_SECRET) {
-    return NextResponse.next();
-  }
+  const claims = await verifySession(req.cookies.get("dlg_admin")?.value);
+  const deny = (status: number) => {
+    if (pathname.startsWith("/api/")) return NextResponse.json({ error: status === 403 ? "forbidden" : "unauthorized" }, { status });
+    const url = req.nextUrl.clone();
+    url.pathname = "/admin/login";
+    url.searchParams.set("next", pathname);
+    return NextResponse.redirect(url);
+  };
 
-  if (pathname.startsWith("/api/")) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!claims) return deny(401);
+
+  // RBAC: user management requires admin+; any write (non-GET) requires editor+;
+  // reads require viewer+ (any authenticated user).
+  const isUserMgmt = pathname.startsWith("/api/admin/users") || pathname === "/admin/users";
+  const isWrite = method !== "GET" && method !== "HEAD";
+  let required: "viewer" | "editor" | "admin" = "viewer";
+  if (isUserMgmt) required = "admin";
+  else if (isWrite && pathname.startsWith("/api/")) required = "editor";
+
+  if (!atLeast(claims.role, required)) {
+    return pathname.startsWith("/api/") ? deny(403) : NextResponse.next();
   }
-  const url = req.nextUrl.clone();
-  url.pathname = "/admin/login";
-  url.searchParams.set("next", pathname);
-  return NextResponse.redirect(url);
+  return NextResponse.next();
 }
 
 /**

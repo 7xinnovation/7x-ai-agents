@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { Locale } from "@dialog/config";
-import { resolveAdapters, runTurn } from "@dialog/core";
+import { resolveAdapters, runTurn, classifyIntent } from "@dialog/core";
 import { getDb, payments } from "@dialog/db";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
@@ -9,6 +9,7 @@ import { getOrCreateSession, appendMessage, saveCase, audit } from "@/lib/conver
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
+import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -76,8 +77,31 @@ export async function POST(req: NextRequest) {
         }
         await appendMessage(session.conversationId, "user", body.userMessage);
 
+        // PRD AI-governance: classify intent up front so the orchestrator can gate
+        // transactional journeys on goal confidence. Efficiency: the gate only
+        // applies when STARTING a journey, so skip the extra classification call
+        // once a journey is already active (mid-flow — intent is resolved).
+        // Best-effort: a classification failure never blocks the turn.
+        let intent: { intent: string; confidence: number } | undefined;
+        if (!session.state.journeyKey) {
+          try {
+            intent = await classifyIntent(agent.definition, body.userMessage, body.locale);
+            await emitEvent({
+              type: "intent.identified",
+              ...a,
+              customerType: body.authenticated ? "authenticated" : "guest",
+              language: body.locale,
+              outcome: intent.intent,
+              attributes: { intent: intent.intent, confidence: intent.confidence },
+            });
+          } catch {
+            /* classification is best-effort */
+          }
+        }
+
         let finalState = session.state;
         let finalText = "";
+        let citedThisTurn = false;
 
         for await (const ev of runTurn({
           agent: agent.definition,
@@ -90,17 +114,28 @@ export async function POST(req: NextRequest) {
           authenticated: body.authenticated,
           userRef: body.userRef,
           adapters,
+          intent,
           businessOpen,
           extraTools,
           runExtraTool,
         })) {
           send(ev);
+          // Standard analytics attributes shared by every event this turn.
+          const std = {
+            ...a,
+            customerType: (body.authenticated ? "authenticated" : "guest") as "authenticated" | "guest",
+            language: body.locale,
+            journeyType: finalState.journeyKey ?? undefined,
+          };
           if (ev.type === "case") finalState = ev.state;
           else if (ev.type === "done") {
             finalState = ev.state;
             finalText = ev.message;
+          } else if (ev.type === "citation" && !citedThisTurn) {
+            citedThisTurn = true;
+            await emitEvent({ type: "knowledge.retrieved", ...std, attributes: { source: ev.source } });
           } else if (ev.type === "lookup") {
-            await emitEvent({ type: "shipment.lookup", ...a, attributes: { kind: ev.kind } });
+            await emitEvent({ type: "shipment.lookup", ...std, outcome: ev.kind, attributes: { kind: ev.kind } });
           } else if (ev.type === "payment_initiated") {
             await getDb()
               .insert(payments)
@@ -114,26 +149,29 @@ export async function POST(req: NextRequest) {
                 status: "initiated",
               })
               .onConflictDoNothing();
-            await emitEvent({ type: "payment.initiated", ...a, attributes: { reference: ev.reference, amount: ev.amount } });
+            await emitEvent({ type: "payment.initiated", ...std, referenceId: ev.reference, attributes: { reference: ev.reference, amount: ev.amount } });
             await audit({ ...a, actor: "agent", action: "payment_initiated", payload: { reference: ev.reference, amount: ev.amount } });
           } else if (ev.type === "submitted") {
             await audit({ ...a, actor: "agent", action: "case_submitted", payload: { reference: ev.reference, journey: finalState.journeyKey } });
-            await emitEvent({ type: "journey.completed", ...a, attributes: { journey: finalState.journeyKey, reference: ev.reference } });
-            await emitEvent({ type: "crm.case.created", ...a, attributes: { reference: ev.reference } });
+            await emitEvent({ type: "journey.completed", ...std, outcome: "completed", referenceId: ev.reference, attributes: { journey: finalState.journeyKey, reference: ev.reference } });
+            await emitEvent({ type: "crm.case.created", ...std, referenceId: ev.reference, attributes: { reference: ev.reference } });
+            await emitEvent({ type: "conversation.completed", ...std, outcome: "resolved", referenceId: ev.reference, attributes: { journey: finalState.journeyKey } });
           } else if (ev.type === "escalation") {
             await audit({ ...a, actor: "agent", action: "escalation_created", payload: { reference: ev.reference } });
-            await emitEvent({ type: "callback.requested", ...a, attributes: { reference: ev.reference, businessOpen } });
+            await emitEvent({ type: "callback.requested", ...std, referenceId: ev.reference, attributes: { reference: ev.reference, businessOpen } });
           }
         }
 
+        const cust = (body.authenticated ? "authenticated" : "guest") as "authenticated" | "guest";
         // Journey start detection (journeyKey newly set this turn).
         if (!startJourney && finalState.journeyKey) {
-          await emitEvent({ type: "journey.started", ...a, attributes: { journey: finalState.journeyKey } });
+          await emitEvent({ type: "journey.started", ...a, customerType: cust, language: body.locale, journeyType: finalState.journeyKey, attributes: { journey: finalState.journeyKey } });
         }
 
         await appendMessage(session.conversationId, "assistant", finalText);
         await saveCase(session.caseId, finalState);
       } catch (err) {
+        log.error("chat_stream_failed", err, { agentId: agent.id, conversationId: session.conversationId });
         send({ type: "error", message: err instanceof Error ? err.message : "stream_failed" });
       } finally {
         controller.close();

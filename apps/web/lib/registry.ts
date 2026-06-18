@@ -1,4 +1,4 @@
-import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery } from "@dialog/core";
+import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery, registerSalesforceAdapter, registerNgeniusAdapter, registerUaePassAdapter } from "@dialog/core";
 import type { KBAdapter, KBResult } from "@dialog/core";
 import { getDb, kbChunks, kbDocuments } from "@dialog/db";
 import { and, eq, sql, inArray } from "drizzle-orm";
@@ -6,13 +6,19 @@ import { and, eq, sql, inArray } from "drizzle-orm";
 let initialised = false;
 
 /**
- * Register all adapter providers once per server process. Mock providers cover
- * crm/auth/storage for now; knowledge is backed by Neon so grounding is real.
- * Real providers (salesforce, uaepass, s3) slot in here without touching agents.
+ * Register all adapter providers once per server process. Mock providers let the
+ * platform run end-to-end; real providers are credential-activated and selected
+ * per agent via integrations.<cap>.provider — binding to "salesforce" / "ngenius"
+ * / "uaepass" switches that capability from mock to the real vendor with zero
+ * code change. Knowledge is always backed by Neon (pgvector) so grounding is real.
  */
 export function ensureAdapters() {
   if (initialised) return;
   registerMockAdapters();
+  // Real vendor adapters (used only when an agent's integration binds to them).
+  registerSalesforceAdapter();
+  registerNgeniusAdapter();
+  registerUaePassAdapter();
 
   // Neon-backed KB: keyword retrieval over kb_chunks (pgvector-ready). Until an
   // embeddings provider is wired, rank by term-overlap via full-text matching.

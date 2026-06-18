@@ -3,7 +3,7 @@ import { sql, desc, eq } from "drizzle-orm";
 import { getDb, agents, tenants, conversations, messages, kbChunks, escalations, auditLog, analyticsEvents } from "@dialog/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/field";
-import { Plus, ArrowUpRight, ArrowRight, Users, MessagesSquare, Database, LifeBuoy, ChevronRight } from "lucide-react";
+import { Plus, ArrowUpRight, ArrowRight, ChevronRight } from "lucide-react";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,74 +37,74 @@ export default async function Overview() {
     .from(auditLog).leftJoin(agents, eq(auditLog.agentId, agents.id)).orderBy(desc(auditLog.createdAt)).limit(7)) as any[];
 
   const stats = [
-    { label: "Agents", value: nA, hint: `${nT} tenants`, icon: Users },
-    { label: "Conversations", value: nC, hint: `${nM} messages`, icon: MessagesSquare },
-    { label: "Knowledge chunks", value: nK, hint: "grounding", icon: Database },
-    { label: "Escalations", value: nE, hint: "to humans", icon: LifeBuoy },
+    { label: "Agents", value: String(nA), hint: `across ${nT} tenants` },
+    { label: "Conversations", value: nC.toLocaleString("en-US"), hint: `${nM.toLocaleString("en-US")} messages` },
+    { label: "Knowledge chunks", value: nK.toLocaleString("en-US"), hint: "grounding the KB" },
+    { label: "Escalations", value: String(nE), hint: "routed to humans" },
   ];
   const kpis = [
-    { label: "Journey completion", value: rate(ev["journey.completed"] ?? 0, ev["journey.started"] ?? 0) },
-    { label: "Payment success", value: rate(ev["payment.completed"] ?? 0, ev["payment.initiated"] ?? 0) },
-    { label: "Self-service", value: rate(Math.max(0, (ev["conversation.started"] ?? 0) - (ev["callback.requested"] ?? 0)), ev["conversation.started"] ?? 0) },
-    { label: "Shipment lookups", value: String(ev["shipment.lookup"] ?? 0) },
+    { label: "Journey completion", value: rate(ev["journey.completed"] ?? 0, ev["journey.started"] ?? 0), good: true },
+    { label: "Payment success", value: rate(ev["payment.completed"] ?? 0, ev["payment.initiated"] ?? 0), good: true },
+    { label: "Self-service", value: rate(Math.max(0, (ev["conversation.started"] ?? 0) - (ev["callback.requested"] ?? 0)), ev["conversation.started"] ?? 0), good: true },
+    { label: "Shipment lookups", value: String(ev["shipment.lookup"] ?? 0), good: false },
   ];
 
   return (
-    <>
-      <div className="mb-1.5 flex items-center gap-1.5 text-[13px] font-medium text-muted">
+    <div data-rise>
+      <div className="mb-2 flex items-center gap-1.5 text-[12.5px] font-medium text-muted">
         <span className="grid h-5 w-5 place-items-center rounded bg-[#0020f5]"><img src="/7xlogo.svg" alt="" className="h-2 w-auto" /></span>
-        7X <ChevronRight className="h-3.5 w-3.5" /> <span className="text-ink">Overview</span>
+        7X <ChevronRight className="h-3.5 w-3.5 text-[#c4c8d0]" /> <span className="text-ink">Overview</span>
       </div>
-      <header className="mb-7 flex items-end justify-between gap-4">
+      <header className="mb-8 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-[28px] font-bold tracking-[-0.02em]">Overview</h1>
-          <p className="mt-1 text-[14px] text-muted">Your conversational agents at a glance.</p>
+          <h1 className="text-[30px] font-bold leading-[1.1] text-ink">Overview</h1>
+          <p className="mt-1.5 text-[14px] text-muted">Your conversational agents, knowledge and operations at a glance.</p>
         </div>
         <div className="flex items-center gap-2.5">
-          <a href="/" target="_blank" rel="noreferrer" className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-[var(--color-line)] bg-surface px-3.5 text-[13.5px] font-semibold text-ink-2 shadow-[var(--shadow-xs)] hover:bg-[var(--color-canvas)]"><ArrowUpRight className="h-4 w-4" /> View site</a>
-          <Link href="/admin/new" className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-brand px-3.5 text-[13.5px] font-semibold text-white shadow-[var(--shadow-xs)] hover:bg-[color-mix(in_srgb,var(--color-brand)_90%,#000)]"><Plus className="h-4 w-4" /> New agent</Link>
+          <a href="/" target="_blank" rel="noreferrer" className="inline-flex h-[38px] items-center gap-2 rounded-lg border border-[var(--color-line)] bg-surface px-3.5 text-[13.5px] font-semibold text-ink-2 shadow-[var(--shadow-xs)] transition-colors hover:bg-[var(--color-canvas)]"><ArrowUpRight className="h-4 w-4" /> View site</a>
+          <Link href="/admin/new" className="inline-flex h-[38px] items-center gap-2 rounded-lg bg-brand px-3.5 text-[13.5px] font-semibold text-white shadow-[var(--shadow-xs)] transition-[transform,background] hover:bg-[color-mix(in_srgb,var(--color-brand)_90%,#000)] active:scale-[0.98]"><Plus className="h-4 w-4" /> New agent</Link>
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
-        {stats.map((s) => {
-          const I = s.icon;
-          return (
-            <Card key={s.label} className="p-5">
-              <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-lg border border-[color-mix(in_srgb,var(--color-brand)_16%,white)] bg-[color-mix(in_srgb,var(--color-brand)_7%,white)] text-[var(--color-brand)]"><I className="h-[18px] w-[18px]" /></span>
-                <span className="text-[13.5px] font-medium text-muted">{s.label}</span>
-              </div>
-              <div className="mt-3.5 flex items-end justify-between">
-                <span className="text-[30px] font-bold leading-none tracking-tight text-ink tabular-nums">{s.value}</span>
-                <span className="mb-0.5 text-[12.5px] text-muted">{s.hint}</span>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
-      <Card className="mt-5">
-        <CardHeader><CardTitle>Performance</CardTitle><span className="text-[12.5px] text-muted">All time</span></CardHeader>
-        <div className="grid grid-cols-2 divide-x divide-y divide-[var(--color-line-soft)] sm:grid-cols-4 sm:divide-y-0">
-          {kpis.map((k) => (
-            <div key={k.label} className="px-5 py-4">
-              <div className="text-[12.5px] font-medium text-muted">{k.label}</div>
-              <div className="mt-1.5 text-[24px] font-bold tracking-tight text-ink tabular-nums">{k.value}</div>
+      {/* Metrics — one intentional panel, hairline-divided, number-forward. No icon tiles. */}
+      <section className="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]">
+        <div className="grid grid-cols-2 divide-[var(--color-line-soft)] md:grid-cols-4 md:divide-x [&>*]:border-b [&>*]:border-[var(--color-line-soft)] md:[&>*]:border-b-0 [&>*:nth-child(odd)]:border-r md:[&>*]:border-r-0">
+          {stats.map((s) => (
+            <div key={s.label} className="px-5 py-5 md:px-6 md:py-6">
+              <div className="text-[12.5px] font-medium text-muted">{s.label}</div>
+              <div className="mt-2.5 text-[32px] font-bold leading-none tracking-[-0.03em] text-ink tabular-nums">{s.value}</div>
+              <div className="mt-2 text-[12.5px] text-muted">{s.hint}</div>
             </div>
           ))}
         </div>
-      </Card>
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-[var(--color-line)] bg-[var(--color-canvas)] px-6 py-4">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Performance</span>
+          {kpis.map((k) => (
+            <div key={k.label} className="flex items-baseline gap-2">
+              <span className={`text-[17px] font-bold tabular-nums ${k.good && k.value !== "—" && k.value !== "0%" ? "text-[var(--color-pos)]" : "text-ink"}`}>{k.value}</span>
+              <span className="text-[12.5px] text-muted">{k.label}</span>
+            </div>
+          ))}
+          <Link href="/admin/analytics" className="ml-auto inline-flex items-center gap-1 text-[12.5px] font-semibold text-[var(--color-brand)] hover:underline">Full analytics <ArrowRight className="h-3.5 w-3.5" /></Link>
+        </div>
+      </section>
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader><CardTitle>Agents</CardTitle><Link href="/admin/agents" className="text-[13px] font-semibold text-[var(--color-brand)]">View all</Link></CardHeader>
           <div className="px-2 py-1.5">
             {liveAgents.map((a) => {
               const primary = a.definition?.theme?.colors?.primary ?? "#0020F5";
+              const logoUrl = a.definition?.theme?.logoUrl as string | undefined;
               return (
                 <Link key={a.slug} href={`/admin/${a.slug}`} className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-[var(--color-line-soft)]">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-bold uppercase text-white" style={{ background: primary }}>{a.name.charAt(0)}</span>
+                  {logoUrl ? (
+                    <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--color-line)] bg-white p-1.5 shadow-[var(--shadow-xs)]">
+                      <img src={logoUrl} alt={a.name} className="max-h-full max-w-full object-contain" />
+                    </span>
+                  ) : (
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-bold uppercase text-white" style={{ background: primary }}>{a.name.charAt(0)}</span>
+                  )}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] font-semibold text-ink">{a.name}</span>
                     <span className="block truncate text-[12.5px] text-muted">{a.tenant}</span>
@@ -130,11 +130,11 @@ export default async function Overview() {
                 <span className="text-[12px] text-muted">{ago(r.createdAt)}</span>
               </div>
             ))}
-            <Link href="/admin/activity" className="mt-1.5 inline-flex items-center gap-1 text-[13px] font-semibold text-[var(--color-brand)]">All activity <ArrowRight className="h-3.5 w-3.5" /></Link>
+            <Link href="/admin/activity" className="mt-1.5 inline-flex items-center gap-1 text-[13px] font-semibold text-[var(--color-brand)] hover:underline">All activity <ArrowRight className="h-3.5 w-3.5" /></Link>
           </CardContent>
         </Card>
       </div>
-    </>
+    </div>
   );
 }
 

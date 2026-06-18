@@ -12,6 +12,7 @@ export interface AgentRow {
   status: string;
   tenant: string;
   primary: string;
+  logoUrl?: string | null;
   locales: string[];
   journeys: number;
   updated: string;
@@ -59,7 +60,13 @@ export function AgentsTable({ rows }: { rows: AgentRow[] }) {
         {filtered.map((r) => (
           <div key={r.slug} className="grid grid-cols-[2.4fr_1.3fr_1fr_.8fr_.9fr_.7fr] items-center gap-3 border-b border-[var(--color-line-soft)] px-5 py-3.5 text-[13.5px] transition-colors last:border-0 hover:bg-[var(--color-canvas)]">
             <span className="flex items-center gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-bold uppercase text-white" style={{ background: r.primary }}>{r.name.charAt(0)}</span>
+              {r.logoUrl ? (
+                <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--color-line)] bg-white p-1.5 shadow-[var(--shadow-xs)]">
+                  <img src={r.logoUrl} alt={r.name} className="max-h-full max-w-full object-contain" />
+                </span>
+              ) : (
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[13px] font-bold uppercase text-white" style={{ background: r.primary }}>{r.name.charAt(0)}</span>
+              )}
               <span className="min-w-0">
                 <Link href={`/admin/${r.slug}`} className="block truncate font-semibold text-ink hover:text-[var(--color-brand)]">{r.name}</Link>
                 <span className="block truncate font-mono text-[12px] text-muted">{r.slug}</span>

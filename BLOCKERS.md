@@ -1,0 +1,81 @@
+# Dialog Platform — Blockers & Outstanding Items
+
+_Last updated: 2026-06-16_
+
+A simple running list of what's blocking progress and what's still needed.
+Items are grouped by whether they stop things working **now**, need **assets/credentials
+from the client**, or are **engineering to-dos** that aren't blocked.
+
+---
+
+## 1. Active blockers (stopping things working right now)
+
+| # | Blocker | Impact | What's needed |
+|---|---------|--------|---------------|
+| 1 | **Anthropic API credits exhausted** | Live chat, intent classification, and the eval harness all fail with `400 "credit balance is too low"`. | Top up at Anthropic **Plans & Billing**. No code change needed; everything works the moment credits return. |
+| 2 | **No hosted deployment** (local dev only) | App runs on `localhost:4500` via `next start`; the process dies when the terminal/session resets, so links break intermittently. | Decide hosting (Vercel / container) and deploy. See §3. |
+
+---
+
+## 2. Needs assets or credentials from the client
+
+### Fonts (brand typography)
+Already done: **PP Valve** (NXN headings, self-hosted) and **Tajawal** (Arabic, self-hosted).
+Still needed (currently falling back to system fonts until files are provided):
+
+| Font | Used for | Status |
+|------|----------|--------|
+| **Object Sans** | NXN body text | need `.woff2`/`.otf`/`.ttf` |
+| **TWBold** | EPGL headings | need file |
+| **TWRegular** | EPGL body text | need file |
+
+> Drop the files in `apps/web/public/fonts/` and they render immediately (one `@font-face` block each).
+
+### Live integration credentials (adapters are code-complete; default to mock)
+Each is built and selectable per agent; supplying credentials switches it from mock to live with no code change.
+
+| System | Env vars / config needed | Notes |
+|--------|--------------------------|-------|
+| **Salesforce CRM** | `SF_INSTANCE_URL`, `SF_ACCESS_TOKEN` (or `SF_CLIENT_ID/SECRET/USERNAME/PASSWORD`) | Cases, callbacks, status, duplicate guard. |
+| **Network International (N-Genius) payment** | `NGENIUS_API_KEY`, `NGENIUS_OUTLET_REF`, `NGENIUS_BASE_URL` | Hosted order + status reconciliation. |
+| **UAE PASS (OIDC)** | `UAEPASS_CLIENT_ID`, `UAEPASS_CLIENT_SECRET`, redirect URI | Note: session-token **passthrough** already works for embeds without this. |
+| **PO Box Platform API (NXN)** | OpenAPI/Swagger spec + base URL + auth | No real backend yet; reachable only via the Swagger-import integration. |
+| **Knowledge base embeddings** _(optional)_ | `VOYAGE_API_KEY` | Without it, KB falls back to full-text search (already working). |
+
+### Production secrets (set before go-live)
+| Secret | Why |
+|--------|-----|
+| `PAYMENT_WEBHOOK_SECRET` | Enables HMAC signature verification on the payment webhook (currently skipped in dev). |
+| `SECRETS_KEY` | Dedicated 32-byte key for encrypting integration secrets at rest (currently derived from `ADMIN_SESSION_SECRET`). |
+| Rotated `ADMIN_SESSION_SECRET` + strong `ADMIN_PASSWORD` | Replace the dev bootstrap values. |
+| `AZURE_AD_TENANT_ID/CLIENT_ID/CLIENT_SECRET` _(optional)_ | Enables Microsoft Entra SSO; otherwise password + RBAC is used. |
+
+### Product / content confirmations (from EPGL / NXN PRDs)
+- Exact **document matrix** per license/service type (mandatory vs conditional).
+- Final **field validation rules** (formats for trade license, Emirates ID, phone).
+- Confirmed **pricing** per journey (amounts are placeholders today).
+- Approved **knowledge-base content** owner + review cadence.
+
+---
+
+## 3. Engineering to-dos (not blocked, just not done)
+
+- [ ] **Production deployment**: hosting, managed Postgres env, domain, CDN for `dialog.js` embed loader, env-var wiring.
+- [ ] **CI/CD pipeline** + staged deploys.
+- [ ] **Formal WCAG 2.1 AA audit** (UI uses semantic HTML + aria + non-color-only status, but no tooling/contrast pass has been certified).
+- [ ] **PDPL / data-residency hardening** for production PII (retention windows, masking in logs, consent capture wording).
+- [ ] **Load/perf pass** against the NFR targets (page load < 2s, API < 500ms).
+- [ ] Re-run the **eval harness** to reconfirm quality numbers once credits are restored.
+
+---
+
+## 4. What's already done & verified (for context)
+
+- Multi-tenant platform; two live agents (EPGL, NXN) with full branding (logos, colors, fonts where available).
+- Conversational engine: intent + confidence governance, journeys, KB grounding/refusal, escalation, multilingual (EN/AR, RTL + Tajawal).
+- Engine efficiency: prompt caching (verified engaging), skip-redundant-classification, transient-error retry.
+- Security: RBAC (owner/admin/editor/viewer) + signed sessions, secret encryption at rest, payment webhook signing, reconciliation sweep.
+- Analytics: full event taxonomy + 6 dashboards. Admin console (Overview, Agents, Inbox, Analytics, Activity, Users).
+- Test harness: `e2e-test.mjs` (42 checks) + `packages/eval` (PRD success metrics). Both green when credits available.
+
+**How to run locally:** `cd apps/web && PORT=4500 npx next start` → admin at `/admin` (password from your `.env` (`ADMIN_PASSWORD`)), widgets at `/embed/nxn-dialog` and `/embed/epgl-dialog`.
