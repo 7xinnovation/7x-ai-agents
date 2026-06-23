@@ -97,16 +97,53 @@ export async function deleteEnvironment(agentId: string, id: string, env: EnvKey
 const prefix = (name: string) => name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 14).toLowerCase() || "api";
 
 /**
+ * Login/token operations are callable WITHOUT an existing session — they are how
+ * a session is obtained (e.g. UAE PASS-independent OTP: passwordLessToken →
+ * verifyPasswordLessToken). Everything else is "protected" and needs a session.
+ */
+function isAuthOperation(op: ApiOperation): boolean {
+  return /(^|\/)(token|login|sign-?in|authenticate|auth|otp|passwordless)/i.test(op.path) || /token|login|otp|passwordless/i.test(op.toolName);
+}
+
+/** Best-effort extraction of a session/bearer token from a JSON response body. */
+export function extractSessionToken(body: string): string | null {
+  let json: unknown;
+  try { json = JSON.parse(body); } catch { return null; }
+  const KEY = /(access_?token|session_?token|id_?token|auth_?token|bearer|^token$|jwt)/i;
+  let found: string | null = null;
+  const walk = (v: unknown, depth: number) => {
+    if (found || depth > 4 || v === null || typeof v !== "object") return;
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (found) return;
+      if (typeof val === "string" && KEY.test(k) && val.length >= 20) { found = val; return; }
+      if (typeof val === "object") walk(val, depth + 1);
+    }
+  };
+  walk(json, 0);
+  return found;
+}
+
+/**
  * Build Claude tools + executor for the agent's ACTIVE environment. Each enabled
  * integration that has a spec for `activeEnv` contributes its operations.
+ *
+ * Session tokens (auth):
+ *  - `uaePassToken`  : a live UAE PASS session forwarded by the embedding site.
+ *  - `sessionToken`  : a token already obtained for THIS conversation (e.g. via the
+ *                      OTP/passwordless flow on a previous turn), persisted on the
+ *                      conversation.
+ *  - captured at runtime: if a login op returns a token mid-turn, it is captured and
+ *                      reused for subsequent protected calls; `getCapturedToken()`
+ *                      lets the caller persist it for later turns.
  */
 export async function buildApiTools(
   agentId: string,
   activeEnv: EnvKey,
-  uaePassToken?: string
+  opts: { uaePassToken?: string; sessionToken?: string } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
+  getCapturedToken: () => string | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -128,31 +165,52 @@ export async function buildApiTools(
     }
   }
 
+  // Runtime session token: a token captured this turn takes priority over one
+  // persisted from a previous turn, which takes priority over the UAE PASS passthrough.
+  let captured: string | null = null;
+  const runtimeToken = () => captured ?? opts.sessionToken ?? opts.uaePassToken ?? undefined;
+
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
-    // Decrypt the stored secret only at the moment of the outbound call.
     const liveSpec = isEncrypted(entry.spec.authValue)
       ? { ...entry.spec, authValue: decryptSecret(entry.spec.authValue) }
       : entry.spec;
-    return executeOperation(liveSpec, entry.op, input ?? {}, uaePassToken);
+    const res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken());
+    // Capture a freshly-minted session token from a login/token op for reuse.
+    if (!res.isError && isAuthOperation(entry.op)) {
+      const body = res.result.slice(res.result.indexOf("\n") + 1);
+      const tok = extractSessionToken(body);
+      if (tok) captured = tok;
+    }
+    return res;
   };
 
-  return { tools, exec };
+  return { tools, exec, getCapturedToken: () => captured };
 }
 
 export async function executeOperation(
   spec: EnvSpec,
   op: ApiOperation,
   input: Record<string, unknown>,
-  uaePassToken?: string
+  runtimeToken?: string
 ): Promise<{ result: string; isError?: boolean }> {
   try {
-    // UAE PASS (live) requires the session token forwarded by the embedding site.
-    if (spec.authType === "uaepass_live" && !uaePassToken) {
+    const tokenAuth = spec.authType === "bearer" || spec.authType === "uaepass_test" || spec.authType === "uaepass_live";
+    // Effective bearer: a runtime session (UAE PASS passthrough or OTP-minted token)
+    // wins; otherwise fall back to a stored token (bearer / uaepass_test).
+    const stored = spec.authType === "bearer" || spec.authType === "uaepass_test" ? spec.authValue : null;
+    const bearer = runtimeToken ?? stored ?? null;
+
+    // Protected operations need a session. Login/token ops are exempt (they MINT one).
+    if (tokenAuth && !bearer && !isAuthOperation(op)) {
       return {
         result:
-          "This action requires an active UAE PASS session, which isn't available here. Ask the customer to sign in with UAE PASS on the website, or offer a callback.",
+          "This action needs the customer to be signed in, but no active session is available yet. " +
+          (spec.authType === "uaepass_live"
+            ? "Ask them to sign in with UAE PASS on the website, "
+            : "Start the sign-in (one-time passcode) flow to obtain a session, ") +
+          "or offer a callback. Do not invent a result.",
         isError: true,
       };
     }
@@ -169,13 +227,6 @@ export async function executeOperation(
       else if (p.in === "header") headers[p.name] = String(v);
     }
 
-    // Bearer comes from: explicit bearer, UAE PASS test token, or the live UAE PASS session.
-    const bearer =
-      spec.authType === "bearer" || spec.authType === "uaepass_test"
-        ? spec.authValue
-        : spec.authType === "uaepass_live"
-          ? uaePassToken
-          : null;
     if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
     if (spec.authType === "apiKey" && spec.authValue) headers[spec.authHeader || "X-API-Key"] = spec.authValue;
 

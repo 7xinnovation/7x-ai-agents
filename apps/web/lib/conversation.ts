@@ -1,12 +1,20 @@
 import { getDb, conversations, messages, cases, auditLog, agents } from "@dialog/db";
 import { emptyCase, type CaseState, type Locale } from "@dialog/config";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { encryptSecret, decryptSecret } from "./crypto";
 
 export interface Session {
   conversationId: string;
   caseId: string;
   state: CaseState;
   history: { role: "user" | "assistant"; content: string }[];
+  // Decrypted backend session token (e.g. OTP-minted) for this conversation, if any.
+  sessionToken?: string;
+}
+
+/** Persist an integration session token for a conversation (encrypted at rest). */
+export async function saveSessionToken(conversationId: string, token: string) {
+  await getDb().update(conversations).set({ sessionToken: encryptSecret(token) }).where(eq(conversations.id, conversationId));
 }
 
 /**
@@ -48,6 +56,7 @@ export async function getOrCreateSession(input: {
         history: history
           .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        sessionToken: decryptSecret(conv.sessionToken) ?? undefined,
       };
     }
   }

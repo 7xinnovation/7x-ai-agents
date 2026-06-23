@@ -123,6 +123,10 @@ export const conversations = pgTable(
     // External identity once authenticated (e.g. UAE PASS subject). Null = guest.
     userRef: text("user_ref"),
     authenticated: boolean("authenticated").default(false).notNull(),
+    // Encrypted backend session token obtained for this conversation (e.g. via the
+    // OTP/passwordless flow), reused to authorize integration calls. Never exposed
+    // to the model or the client.
+    sessionToken: text("session_token"),
     createdAt: ts(),
   },
   (t) => ({ agentIdx: index("conversations_agent_idx").on(t.agentId) })

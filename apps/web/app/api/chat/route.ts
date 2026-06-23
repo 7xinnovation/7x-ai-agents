@@ -5,7 +5,7 @@ import { resolveAdapters, runTurn, classifyIntent } from "@dialog/core";
 import { getDb, payments } from "@dialog/db";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken } from "@/lib/conversation";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
@@ -48,12 +48,6 @@ export async function POST(req: NextRequest) {
   const adapters = resolveAdapters(agent.definition);
   const businessOpen = isBusinessOpen(agent.definition);
   const isNewSession = !body.conversationId;
-  // Dynamic tools from the agent's API integrations for the ACTIVE environment.
-  const { tools: extraTools, exec: runExtraTool } = await buildApiTools(
-    agent.id,
-    agent.definition.activeEnvironment ?? "production",
-    body.uaePassToken
-  );
 
   const session = await getOrCreateSession({
     agentId: agent.id,
@@ -62,6 +56,15 @@ export async function POST(req: NextRequest) {
     authenticated: body.authenticated,
     userRef: body.userRef,
   });
+
+  // Dynamic tools from the agent's API integrations for the ACTIVE environment.
+  // Auth precedence: live UAE PASS passthrough > this conversation's stored session
+  // token (e.g. from a prior OTP login) > a freshly-minted token captured this turn.
+  const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
+    uaePassToken: body.uaePassToken,
+    sessionToken: session.sessionToken,
+  });
+  const { tools: extraTools, exec: runExtraTool } = apiTools;
 
   const a = { agentId: agent.id, conversationId: session.conversationId };
   const startJourney = session.state.journeyKey;
@@ -170,6 +173,11 @@ export async function POST(req: NextRequest) {
 
         await appendMessage(session.conversationId, "assistant", finalText);
         await saveCase(session.caseId, finalState);
+        // Persist a session token minted this turn (e.g. OTP login) for later turns.
+        const captured = apiTools.getCapturedToken();
+        if (captured && captured !== session.sessionToken) {
+          await saveSessionToken(session.conversationId, captured);
+        }
       } catch (err) {
         log.error("chat_stream_failed", err, { agentId: agent.id, conversationId: session.conversationId });
         send({ type: "error", message: err instanceof Error ? err.message : "stream_failed" });
