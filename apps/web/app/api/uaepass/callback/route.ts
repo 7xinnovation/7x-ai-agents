@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, exchangeCode } from "@/lib/uaepass";
+import { uaePassConfigured, exchangeCode, resolveRedirectUri } from "@/lib/uaepass";
 import { saveSessionToken, markAuthenticated } from "@/lib/conversation";
 import { log } from "@/lib/logger";
 
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   if (!code || !state || state !== flow.state) return back({ uaepass: "invalid_state" });
 
   try {
-    const redirectUri = `${req.nextUrl.origin}/api/uaepass/callback`;
+    const redirectUri = resolveRedirectUri(req.nextUrl.origin);
     const id = await exchangeCode(code, redirectUri);
     if (flow.cid) {
       await saveSessionToken(flow.cid, id.accessToken); // becomes the bearer for protected calls

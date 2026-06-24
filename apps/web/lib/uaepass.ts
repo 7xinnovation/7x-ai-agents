@@ -9,6 +9,16 @@ export function uaePassConfigured(): boolean {
   return Boolean(process.env.UAEPASS_CLIENT_ID && process.env.UAEPASS_CLIENT_SECRET);
 }
 
+/**
+ * The redirect/callback URL. MUST exactly match a URL registered with UAE PASS
+ * for this client, or UAE PASS returns "callback.not.match". Set
+ * UAEPASS_REDIRECT_URI to the registered value; otherwise defaults to this app's
+ * own callback on the request origin.
+ */
+export function resolveRedirectUri(origin: string): string {
+  return process.env.UAEPASS_REDIRECT_URI || `${origin}/api/uaepass/callback`;
+}
+
 function cfg() {
   return {
     base: (process.env.UAEPASS_BASE || "https://stg-id.uaepass.ae").replace(/\/$/, ""),

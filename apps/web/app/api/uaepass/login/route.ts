@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, buildAuthorizeUrl } from "@/lib/uaepass";
+import { uaePassConfigured, buildAuthorizeUrl, resolveRedirectUri } from "@/lib/uaepass";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const cid = req.nextUrl.searchParams.get("cid") ?? "";
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
   const returnTo = req.nextUrl.searchParams.get("returnTo") || `${req.nextUrl.origin}/embed/${agent}`;
-  const redirectUri = `${req.nextUrl.origin}/api/uaepass/callback`;
+  const redirectUri = resolveRedirectUri(req.nextUrl.origin);
   const state = crypto.randomUUID();
 
   const res = NextResponse.redirect(buildAuthorizeUrl(redirectUri, state));

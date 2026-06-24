@@ -308,7 +308,9 @@ export async function dispatchTool(
       const journey = findJourney(agent, state.journeyKey);
       const sub = journey?.submission;
       if (!sub?.requiresPayment) return { result: "This journey does not require payment.", state, events };
-      if (!ctx.authenticated) {
+      // Only auth-required journeys (e.g. new rentals) gate payment on sign-in.
+      // Guest-allowed journeys (e.g. renewals) may pay after ownership validation.
+      if (journey?.requiresAuth && !ctx.authenticated) {
         events.push({ type: "auth_required", reason: "Payment requires sign-in." });
         return { result: "User must authenticate before payment.", state, events };
       }
@@ -340,11 +342,13 @@ export async function dispatchTool(
     }
 
     case "submit_case": {
-      if (!ctx.authenticated) {
+      const subJourney = findJourney(agent, state.journeyKey);
+      // Auth-required journeys gate submission on sign-in; guest-allowed journeys
+      // (renewals) submit after ownership validation, no account needed.
+      if (subJourney?.requiresAuth && !ctx.authenticated) {
         events.push({ type: "auth_required", reason: "Submission requires sign-in." });
         return { result: "User must authenticate before submission.", state, events };
       }
-      const subJourney = findJourney(agent, state.journeyKey);
       if (subJourney?.submission?.requiresPayment && state.payment.status !== "paid") {
         return {
           result: `Cannot submit — payment is ${state.payment.status}. Only a confirmed (paid) payment may trigger submission.`,
