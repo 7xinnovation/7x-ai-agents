@@ -45,6 +45,7 @@ const STR = {
     signedIn: "Signed in",
     expand: "Expand",
     collapse: "Collapse",
+    reset: "New chat",
     documents: "Documents",
     details: "Details",
     online: "Online",
@@ -72,6 +73,7 @@ const STR = {
     signedIn: "تم الدخول",
     expand: "توسيع",
     collapse: "تصغير",
+    reset: "محادثة جديدة",
     documents: "المستندات",
     details: "التفاصيل",
     online: "متصل",
@@ -232,6 +234,18 @@ export function Experience({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, streaming]);
+
+  // Reset: start a brand-new conversation (clears the view + the persisted session).
+  const resetChat = useCallback(() => {
+    if (streaming) return;
+    try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
+    convId.current = null;
+    setMessages([]);
+    setCaseState(null);
+    setInput("");
+    setAuthReason(null);
+    setAuthenticated(false);
+  }, [streaming, storageKey]);
 
   // Sign-in: real UAE PASS OIDC redirect when configured, else the dev mock toggle.
   const signIn = useCallback(() => {
@@ -407,6 +421,15 @@ export function Experience({
             title={authenticated ? t.signedIn : t.signIn}
           >
             {authenticated ? <UserCircleCheck size={17} weight="fill" /> : <SignIn size={16} weight={iconWeight} />}
+          </button>
+          <button
+            className="dlg-chip icon-only"
+            onClick={resetChat}
+            disabled={streaming || (messages.length === 0 && !caseState)}
+            aria-label={t.reset}
+            title={t.reset}
+          >
+            <ArrowClockwise size={16} weight={iconWeight} />
           </button>
           <button className="dlg-chip icon-only" onClick={toggleFull} aria-label={full ? t.collapse : t.expand}>
             {full ? <ArrowsInSimple size={16} weight={iconWeight} /> : <ArrowsOutSimple size={16} weight={iconWeight} />}

@@ -206,6 +206,11 @@ body {
 .dlg-chip:active {
   transform: scale(0.96);
 }
+.dlg-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
 .dlg-chip.is-on {
   background: color-mix(in srgb, var(--c-success) 12%, var(--c-surface));
   border-color: color-mix(in srgb, var(--c-success) 45%, var(--c-border));
