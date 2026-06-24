@@ -231,6 +231,22 @@ export function Experience({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Handle the return from UAE PASS sign-in (we redirect back to the chat here).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("uaepass");
+    if (!status) return;
+    if (status === "cancelled") setAuthReason(locale === "ar" ? "تم إلغاء تسجيل الدخول." : "Sign-in was cancelled.");
+    else if (status === "error" || status === "invalid_state")
+      setAuthReason(locale === "ar" ? "تعذّر إكمال تسجيل الدخول. حاول مرة أخرى." : "Sign-in could not be completed. Please try again.");
+    // Clean the status param from the URL (keep cid for resume).
+    params.delete("uaepass");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, streaming]);
