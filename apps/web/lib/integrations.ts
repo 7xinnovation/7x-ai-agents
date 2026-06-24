@@ -16,6 +16,10 @@ export interface EnvSpec {
   authType: AuthType;
   authValue: string | null;
   authHeader: string | null;
+  // Gateway/app API key sent on EVERY request (e.g. NXN guest APIs require an
+  // X-API-KEY header). Independent of the per-user session above; both can apply.
+  apiKey?: string | null;
+  apiKeyHeader?: string | null; // defaults to "X-API-KEY"
   operations: ApiOperation[];
 }
 
@@ -57,13 +61,12 @@ export function maskIntegrations(rows: IntegrationRow[]): IntegrationRow[] {
 export async function upsertEnvironment(agentId: string, name: string, env: EnvKey, spec: EnvSpec) {
   const db = getDb();
   const existing = (await listIntegrations(agentId)).find((i) => i.name.toLowerCase() === name.toLowerCase());
-  // Encrypt the secret at rest (PRD: encryption at rest for integration tokens).
+  // Encrypt secrets at rest (PRD: encryption at rest for integration tokens).
   // A masked placeholder means "keep the existing secret" (admin re-save).
-  if (spec.authValue === "••••••••") {
-    spec = { ...spec, authValue: existing?.environments[env]?.authValue ?? null };
-  } else {
-    spec = { ...spec, authValue: encryptSecret(spec.authValue) };
-  }
+  const prev = existing?.environments[env];
+  const authValue = spec.authValue === "••••••••" ? (prev?.authValue ?? null) : encryptSecret(spec.authValue);
+  const apiKey = spec.apiKey === "••••••••" ? (prev?.apiKey ?? null) : encryptSecret(spec.apiKey);
+  spec = { ...spec, authValue, apiKey };
   if (existing) {
     const environments = { ...existing.environments, [env]: spec };
     await db.update(agentIntegrations).set({ environments }).where(eq(agentIntegrations.id, existing.id));
@@ -173,9 +176,12 @@ export async function buildApiTools(
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
-    const liveSpec = isEncrypted(entry.spec.authValue)
-      ? { ...entry.spec, authValue: decryptSecret(entry.spec.authValue) }
-      : entry.spec;
+    // Decrypt stored secrets only at the moment of the outbound call.
+    const liveSpec: EnvSpec = {
+      ...entry.spec,
+      authValue: isEncrypted(entry.spec.authValue) ? decryptSecret(entry.spec.authValue) : entry.spec.authValue,
+      apiKey: isEncrypted(entry.spec.apiKey) ? decryptSecret(entry.spec.apiKey) : entry.spec.apiKey,
+    };
     const res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken());
     // Capture a freshly-minted session token from a login/token op for reuse.
     if (!res.isError && isAuthOperation(entry.op)) {
@@ -231,6 +237,8 @@ export async function executeOperation(
 
     if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
     if (spec.authType === "apiKey" && spec.authValue) headers[spec.authHeader || "X-API-Key"] = spec.authValue;
+    // Gateway/app API key sent on EVERY request when configured (e.g. NXN guest APIs).
+    if (spec.apiKey) headers[spec.apiKeyHeader || "X-API-KEY"] = spec.apiKey;
 
     let body: string | undefined;
     if (op.hasBody && input.body !== undefined) {

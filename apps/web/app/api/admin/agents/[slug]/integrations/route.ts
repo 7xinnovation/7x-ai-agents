@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
           .filter((e) => r.environments[e])
           .map((e) => {
             const s = r.environments[e]!;
-            return [e, { specUrl: s.specUrl, baseUrl: s.baseUrl, authType: s.authType, hasAuth: Boolean(s.authValue), operationCount: s.operations.length, operations: s.operations.map((o) => ({ toolName: o.toolName, method: o.method, path: o.path, summary: o.summary })) }];
+            return [e, { specUrl: s.specUrl, baseUrl: s.baseUrl, authType: s.authType, hasAuth: Boolean(s.authValue), hasApiKey: Boolean(s.apiKey), apiKeyHeader: s.apiKeyHeader ?? null, operationCount: s.operations.length, operations: s.operations.map((o) => ({ toolName: o.toolName, method: o.method, path: o.path, summary: o.summary })) }];
           })
       ),
     })),
@@ -37,6 +37,9 @@ const ImportBody = z.object({
   authType: z.enum(["none", "bearer", "apiKey", "uaepass_test", "uaepass_live"]).default("none"),
   authValue: z.string().optional(),
   authHeader: z.string().optional(),
+  // Gateway/app key sent on every request (independent of per-user session auth).
+  apiKey: z.string().optional(),
+  apiKeyHeader: z.string().optional(),
 });
 
 /** Import an OpenAPI/Swagger spec into one environment of an integration. */
@@ -63,6 +66,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
     authType: b.authType,
     authValue: b.authValue ?? null,
     authHeader: b.authHeader ?? null,
+    apiKey: b.apiKey ?? null,
+    apiKeyHeader: b.apiKeyHeader ?? null,
     operations: spec.operations,
   });
   return NextResponse.json({ ok: true, name: b.name, environment: b.environment, baseUrl: spec.baseUrl, operationCount: spec.operations.length });
