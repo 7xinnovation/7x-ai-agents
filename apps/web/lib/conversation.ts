@@ -17,6 +17,11 @@ export async function saveSessionToken(conversationId: string, token: string) {
   await getDb().update(conversations).set({ sessionToken: encryptSecret(token) }).where(eq(conversations.id, conversationId));
 }
 
+/** Mark a conversation as authenticated and record the external identity (e.g. UAE PASS sub). */
+export async function markAuthenticated(conversationId: string, userRef: string) {
+  await getDb().update(conversations).set({ authenticated: true, userRef }).where(eq(conversations.id, conversationId));
+}
+
 /**
  * Server-authoritative conversation state. The client only holds a
  * conversationId; history + case live in the DB so sessions survive reloads and

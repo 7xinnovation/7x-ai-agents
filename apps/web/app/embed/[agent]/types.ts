@@ -30,4 +30,6 @@ export interface PublicAgent {
   greeting: LocalizedString;
   theme: Theme;
   journeys: PublicJourney[];
+  // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
+  uaePassEnabled?: boolean;
 }

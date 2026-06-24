@@ -233,6 +233,20 @@ export function Experience({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, streaming]);
 
+  // Sign-in: real UAE PASS OIDC redirect when configured, else the dev mock toggle.
+  const signIn = useCallback(() => {
+    if (agent.uaePassEnabled && typeof window !== "undefined") {
+      const returnTo = window.location.href.split("?")[0] ?? window.location.href;
+      window.location.href =
+        `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
+        `&cid=${encodeURIComponent(convId.current ?? "")}` +
+        `&returnTo=${encodeURIComponent(returnTo)}`;
+    } else {
+      setAuthenticated(true);
+      setAuthReason(null);
+    }
+  }, [agent.uaePassEnabled, agent.slug]);
+
   const toggleFull = useCallback(() => {
     setFull((prev) => {
       postToParent(prev ? "collapse" : "expand");
@@ -386,8 +400,8 @@ export function Experience({
           <button
             className={`dlg-chip icon-only ${authenticated ? "is-on" : ""}`}
             onClick={() => {
-              setAuthenticated((a) => !a);
-              setAuthReason(null);
+              if (authenticated) { setAuthenticated(false); setAuthReason(null); }
+              else signIn();
             }}
             aria-label={authenticated ? t.signedIn : t.signIn}
             title={authenticated ? t.signedIn : t.signIn}
@@ -466,13 +480,7 @@ export function Experience({
             <div className="dlg-auth-banner">
               <Warning size={18} weight="fill" />
               <span>{authReason}</span>
-              <button
-                className="dlg-chip"
-                onClick={() => {
-                  setAuthenticated(true);
-                  setAuthReason(null);
-                }}
-              >
+              <button className="dlg-chip" onClick={signIn}>
                 {t.signIn}
               </button>
             </div>
