@@ -202,17 +202,19 @@ export async function executeOperation(
     const stored = spec.authType === "bearer" || spec.authType === "uaepass_test" ? spec.authValue : null;
     const bearer = runtimeToken ?? stored ?? null;
 
-    // Protected operations need a session. Login/token ops are exempt (they MINT one).
-    if (tokenAuth && !bearer && !isAuthOperation(op)) {
-      return {
-        result:
-          "This action needs the customer to be signed in, but no active session is available yet. " +
-          (spec.authType === "uaepass_live"
-            ? "Ask them to sign in with UAE PASS on the website, "
-            : "Start the sign-in (one-time passcode) flow to obtain a session, ") +
-          "or offer a callback. Do not invent a result.",
-        isError: true,
-      };
+    const signInMsg =
+      "This action needs the customer to be signed in, but no active session is available yet. " +
+      (spec.authType === "uaepass_live"
+        ? "Ask them to sign in with UAE PASS on the website, "
+        : "Start the sign-in (one-time passcode) flow to obtain a session, ") +
+      "or offer a callback. Do not invent a result.";
+
+    // Pre-gate ONLY operations the spec explicitly marks as secured (and only when
+    // we have no session and it isn't itself a login op). Guest/public endpoints —
+    // and specs that declare no security at all — are NOT blocked here; the backend
+    // decides via a 401/403, which we translate gracefully below.
+    if (tokenAuth && !bearer && op.requiresAuth && !isAuthOperation(op)) {
+      return { result: signInMsg, isError: true };
     }
 
     let path = op.path;
@@ -243,6 +245,17 @@ export async function executeOperation(
     const timer = setTimeout(() => ctrl.abort(), 15000);
     const res = await fetch(url, { method: op.method, headers, body, signal: ctrl.signal });
     clearTimeout(timer);
+
+    // Backend says auth is required/insufficient — translate to guidance instead
+    // of a raw 401/403 (the backend is the source of truth for what needs a session).
+    if ((res.status === 401 || res.status === 403) && tokenAuth && !isAuthOperation(op)) {
+      return {
+        result: bearer
+          ? "The customer's session was rejected (expired or invalid). Ask them to sign in again (one-time passcode) or offer a callback. Do not invent a result."
+          : signInMsg,
+        isError: true,
+      };
+    }
 
     const text = await res.text();
     const trimmed = text.length > 4000 ? text.slice(0, 4000) + "…(truncated)" : text;

@@ -14,6 +14,11 @@ export interface ApiOperation {
   // Parameter routing for execution.
   params: { name: string; in: "path" | "query" | "header" }[];
   hasBody: boolean;
+  // True only when the spec EXPLICITLY marks this operation as secured (global
+  // security, or a non-empty operation-level security). Specs that declare no
+  // security at all leave this false — auth is then decided by the backend (a
+  // 401/403 at call time), so public/guest endpoints are never pre-blocked.
+  requiresAuth: boolean;
 }
 
 export interface ParsedSpec {
@@ -156,6 +161,8 @@ export async function parseSpec(specUrl: string, baseUrlOverride?: string): Prom
   const paths = spec.paths ?? {};
   const methods = ["get", "post", "put", "patch", "delete"];
   const used = new Set<string>();
+  // Global security applies unless an operation overrides it. Empty/absent = none.
+  const globalSecured = Array.isArray(spec.security) && spec.security.length > 0;
 
   for (const [path, item] of Object.entries<any>(paths)) {
     if (operations.length >= MAX_OPS) break;
@@ -196,6 +203,9 @@ export async function parseSpec(specUrl: string, baseUrlOverride?: string): Prom
         if (op.requestBody?.required || sw2Body?.required) required.push("body");
       }
 
+      // Operation-level security overrides global: [] = public, [..] = secured.
+      const requiresAuth = Array.isArray(op.security) ? op.security.length > 0 : globalSecured;
+
       operations.push({
         toolName,
         method: method.toUpperCase(),
@@ -204,6 +214,7 @@ export async function parseSpec(specUrl: string, baseUrlOverride?: string): Prom
         inputSchema: { type: "object", properties, required },
         params,
         hasBody,
+        requiresAuth,
       });
     }
   }
