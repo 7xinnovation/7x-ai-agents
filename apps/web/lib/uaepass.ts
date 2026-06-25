@@ -5,8 +5,17 @@
  * Credentials come from env (UAEPASS_*), never from code. Staging base is
  * https://stg-id.uaepass.ae ; production is https://id.uaepass.ae.
  */
+/**
+ * Dev/staging-only: simulate the UAE PASS round-trip without hitting UAE PASS, so
+ * the whole sign-in → callback → authenticated-session → chat flow can be tested
+ * before the callback URL is registered with UAE PASS. Never enable in production.
+ */
+export function uaePassMock(): boolean {
+  return process.env.UAEPASS_MOCK === "1";
+}
+
 export function uaePassConfigured(): boolean {
-  return Boolean(process.env.UAEPASS_CLIENT_ID && process.env.UAEPASS_CLIENT_SECRET);
+  return uaePassMock() || Boolean(process.env.UAEPASS_CLIENT_ID && process.env.UAEPASS_CLIENT_SECRET);
 }
 
 /**

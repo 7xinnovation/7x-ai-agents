@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, buildAuthorizeUrl, resolveRedirectUri } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMock, buildAuthorizeUrl, resolveRedirectUri } from "@/lib/uaepass";
 
 export const runtime = "nodejs";
 
@@ -16,10 +16,14 @@ export async function GET(req: NextRequest) {
   const cid = req.nextUrl.searchParams.get("cid") ?? "";
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
   const returnTo = req.nextUrl.searchParams.get("returnTo") || `${req.nextUrl.origin}/embed/${agent}`;
-  const redirectUri = resolveRedirectUri(req.nextUrl.origin);
   const state = crypto.randomUUID();
+  // Mock mode: skip UAE PASS, go straight to our callback with a fake code so the
+  // full flow can be tested locally before the callback is registered with UAE PASS.
+  const target = uaePassMock()
+    ? `${req.nextUrl.origin}/api/uaepass/callback?code=MOCK_CODE&state=${state}`
+    : buildAuthorizeUrl(resolveRedirectUri(req.nextUrl.origin), state);
 
-  const res = NextResponse.redirect(buildAuthorizeUrl(redirectUri, state));
+  const res = NextResponse.redirect(target);
   res.cookies.set("uaepass_flow", JSON.stringify({ state, cid, agent, returnTo }), {
     httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 600,
   });

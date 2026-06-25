@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, exchangeCode, resolveRedirectUri } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri } from "@/lib/uaepass";
 import { saveSessionToken, markAuthenticated } from "@/lib/conversation";
 import { log } from "@/lib/logger";
 
@@ -32,8 +32,11 @@ export async function GET(req: NextRequest) {
   if (!code || !state || state !== flow.state) return back({ uaepass: "invalid_state" });
 
   try {
-    const redirectUri = resolveRedirectUri(req.nextUrl.origin);
-    const id = await exchangeCode(code, redirectUri);
+    // Mock mode: synthesize a verified identity instead of calling UAE PASS, so the
+    // sign-in → session → authenticated flow is testable without registration.
+    const id = uaePassMock()
+      ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: "uaepass-mock-001", name: "Test Persona" }
+      : await exchangeCode(code, resolveRedirectUri(req.nextUrl.origin));
     if (flow.cid) {
       await saveSessionToken(flow.cid, id.accessToken); // becomes the bearer for protected calls
       await markAuthenticated(flow.cid, id.sub);
