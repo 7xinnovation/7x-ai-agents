@@ -323,6 +323,41 @@ body {
   box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   border-start-end-radius: 7px;
 }
+/* Rendered markdown inside bubbles */
+.dlg-bubble :where(p, ul) {
+  margin: 0;
+}
+.dlg-bubble :where(p, ul) + :where(p, ul) {
+  margin-top: 8px;
+}
+.dlg-md-list {
+  padding-inline-start: 18px;
+  list-style: disc;
+}
+.dlg-md-list li {
+  margin: 3px 0;
+}
+.dlg-md-list li::marker {
+  color: color-mix(in srgb, var(--c-primary) 60%, var(--c-text-muted));
+}
+.dlg-bubble strong {
+  font-weight: 650;
+}
+.dlg-md-link {
+  color: var(--c-primary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+.dlg-md-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--c-text) 7%, var(--c-surface));
+  border: 1px solid var(--c-border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
 .dlg-sources {
   display: flex;
   flex-wrap: wrap;

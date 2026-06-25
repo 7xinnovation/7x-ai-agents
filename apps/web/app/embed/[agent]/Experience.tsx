@@ -22,6 +22,7 @@ import {
   ArrowClockwise,
 } from "@phosphor-icons/react";
 import { tr, type CaseState, type Locale } from "@dialog/config";
+import { Markdown } from "./Markdown";
 import type { PublicAgent } from "./types";
 
 interface ChatMessage {
@@ -464,7 +465,7 @@ export function Experience({
               <span className="dlg-msg-avatar">
                 <Sparkle size={15} weight="fill" />
               </span>
-              <div className="dlg-bubble">{tr(agent.greeting, locale)}</div>
+              <div className="dlg-bubble"><Markdown text={tr(agent.greeting, locale)} /></div>
             </div>
             {messages.length === 0 && starters.length > 0 ? (
               <div className="dlg-starters">
@@ -493,7 +494,7 @@ export function Experience({
                 ) : null}
                 <div className="dlg-bubble">
                   {m.content ? (
-                    m.content
+                    m.role === "assistant" ? <Markdown text={m.content} /> : m.content
                   ) : streaming && i === messages.length - 1 ? (
                     <span className="dlg-typing">
                       <span />
