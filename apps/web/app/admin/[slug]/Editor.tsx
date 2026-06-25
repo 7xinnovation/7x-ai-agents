@@ -117,7 +117,7 @@ export function Editor({ slug }: { slug: string }) {
           </div>
           <Field label="Persona (system instructions)"><Textarea rows={4} value={def.persona} onChange={(e) => patch({ persona: e.target.value })} /></Field>
           <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Model override (optional)"><Input value={def.model} onChange={(e) => patch({ model: e.target.value })} placeholder="claude-opus-4-8" /></Field>
+            <Field label="Model override (optional)"><Input value={def.model} onChange={(e) => patch({ model: e.target.value })} placeholder="claude-sonnet-4-6" /></Field>
             <Field label="Allowed origins (comma-separated)" hint="Restricts which sites may embed this agent."><Input value={def.allowedOrigins.join(", ")} onChange={(e) => patch({ allowedOrigins: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} placeholder="https://example.com" /></Field>
           </div>
           <Field label="Active integration environment" hint="Which Swagger environment the chat calls — staging or production.">

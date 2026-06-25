@@ -17,7 +17,11 @@ import type {
  * (salesforce, uaepass, neon-kb, s3) register themselves the same way.
  */
 
-let counter = 1000;
+// Seed from the current time so references stay unique across server restarts
+// (a plain reset-to-1000 counter collides with references already persisted in
+// the payments table from earlier runs, which would make a webhook match a
+// stale already-paid row instead of the current case).
+let counter = Date.now() % 1_000_000;
 const ref = (prefix: string) => `${prefix}-${++counter}`;
 
 const mockCrm: CRMAdapter = {

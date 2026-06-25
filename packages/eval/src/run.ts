@@ -8,8 +8,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(here, "../../../.env") });
 
 const BASE = process.env.EVAL_BASE ?? "http://localhost:4321";
-const JUDGE_MODEL = process.env.EVAL_JUDGE_MODEL ?? process.env.DIALOG_MODEL ?? "claude-opus-4-8";
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const JUDGE_MODEL = process.env.EVAL_JUDGE_MODEL ?? process.env.DIALOG_MODEL ?? "claude-sonnet-4-6";
+// Route the judge through Azure AI Foundry when configured (same passthrough as
+// the runtime orchestrator), falling back to the direct Anthropic API.
+const anthropic =
+  process.env.AZURE_ANTHROPIC_ENDPOINT && process.env.AZURE_ANTHROPIC_API_KEY
+    ? new Anthropic({
+        baseURL: process.env.AZURE_ANTHROPIC_ENDPOINT.replace(/\/$/, ""),
+        apiKey: process.env.AZURE_ANTHROPIC_API_KEY,
+      })
+    : new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 interface Dataset {
   agentSlug: string;

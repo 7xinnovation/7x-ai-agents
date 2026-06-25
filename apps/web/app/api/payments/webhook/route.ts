@@ -53,7 +53,16 @@ export async function POST(req: NextRequest) {
   const db = getDb();
   const [pay] = await db.select().from(payments).where(eq(payments.reference, reference)).limit(1);
   if (!pay) return NextResponse.json({ error: "unknown_reference" }, { status: 404 });
-  if (pay.status === "paid") return NextResponse.json({ ok: true, idempotent: true });
+  if (pay.status === "paid") {
+    // Already settled — but make sure the conversation's case state reflects it
+    // (a retried webhook must still leave the case submittable, even if an
+    // earlier delivery failed to advance it).
+    if (pay.conversationId) {
+      const c = await getCase(pay.conversationId);
+      if (c && c.state.payment.status !== "paid") await saveCase(c.caseId, setPayment(c.state, { status: "paid" }));
+    }
+    return NextResponse.json({ ok: true, idempotent: true });
+  }
 
   await db
     .update(payments)
