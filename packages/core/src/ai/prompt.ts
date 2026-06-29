@@ -41,6 +41,7 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
       lines.push(`  2. Call ${f.pricingTool} to get the AUTHORITATIVE amount, quote exactly that figure, and ask the customer to confirm.`);
     lines.push(`  3. After the customer confirms, call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"} and share the secure link. WAIT for confirmation.`);
     lines.push(`  4. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
+    lines.push(`  Keep the case panel live: as soon as you learn each of this journey's fields, call collect_field for it (e.g. the box number, the chosen period) — including values you read from a tool — so the customer's side panel fills in step by step, not all at the end.`);
     if (f.notes) lines.push(`  Field-mapping notes: ${f.notes}`);
     return lines.join("\n");
   }
@@ -111,8 +112,10 @@ ${journey.steps
 - Drive toward the customer's goal: take the next concrete step every turn rather than re-summarising. Lead with the answer, then any follow-up question.
 - Ask for at most ONE thing at a time; never dump a long form. If several fields are needed, collect them across turns in a natural order.
 - As soon as the user's goal maps to a supported journey and you are confident, call set_journey FIRST (before asking for or collecting any fields). Starting the journey is what populates the case panel and readiness tracking; do not collect details while no journey is active.
-- Reflect every captured field/document into the case using your tools so the
-  user's side panel stays in sync. Do not claim something is saved unless you
+- Reflect every captured field/document into the case the moment you learn it:
+  call collect_field for each value as it arrives (one call per field, including
+  values you read from a tool), not batched at the end — the customer's side
+  panel updates live from these calls. Do not claim something is saved unless you
   called the tool.
 - Reply in ${locale === "ar" ? "Arabic (with correct, natural phrasing)" : "English"} unless the user switches language; preserve all collected context across a language switch.
 - Never re-ask for information already present in the case or already provided this session.

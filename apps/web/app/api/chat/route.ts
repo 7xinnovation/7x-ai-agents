@@ -12,7 +12,9 @@ import { buildApiTools } from "@/lib/integrations";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Multi-tool turns (e.g. a renewal: details + pricing + payment) can run well past
+// 60s; allow up to 5 min so the stream isn't cut mid-turn ("connection lost").
+export const maxDuration = 300;
 
 const Body = z.object({
   agentSlug: z.string(),
@@ -94,7 +96,14 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (ev: unknown) => controller.enqueue(encoder.encode(sse(ev)));
+      let closed = false;
+      const send = (ev: unknown) => { if (!closed) controller.enqueue(encoder.encode(sse(ev))); };
+      // Heartbeat: keep the SSE connection alive while the model is thinking or a
+      // tool round is running (no bytes flow then), so browsers/proxies don't drop
+      // it as idle. SSE comment lines (": ...") are ignored by the client parser.
+      const heartbeat = setInterval(() => {
+        if (!closed) { try { controller.enqueue(encoder.encode(": ping\n\n")); } catch { /* closed */ } }
+      }, 15000);
       try {
         send({ type: "session", conversationId: session.conversationId });
         if (isNewSession) {
@@ -211,6 +220,8 @@ export async function POST(req: NextRequest) {
         log.error("chat_stream_failed", err, { agentId: agent.id, conversationId: session.conversationId });
         send({ type: "error", message: err instanceof Error ? err.message : "stream_failed" });
       } finally {
+        clearInterval(heartbeat);
+        closed = true;
         controller.close();
       }
     },
