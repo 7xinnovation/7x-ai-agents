@@ -472,9 +472,7 @@ export function Experience({
         <section className="dlg-chat">
           <div className="dlg-messages" ref={scrollRef}>
             <div className="dlg-msg assistant">
-              <span className="dlg-msg-avatar">
-                <Sparkle size={15} weight="fill" />
-              </span>
+              <span className="dlg-orb" aria-hidden="true" />
               <div className="dlg-bubble"><Markdown text={tr(agent.greeting, locale)} /></div>
             </div>
             {messages.length === 0 && starters.length > 0 ? (
@@ -498,9 +496,7 @@ export function Experience({
             {messages.map((m, i) => (
               <div key={i} className={`dlg-msg ${m.role}`}>
                 {m.role === "assistant" ? (
-                  <span className="dlg-msg-avatar">
-                    <Sparkle size={15} weight="fill" />
-                  </span>
+                  <span className="dlg-orb" aria-hidden="true" />
                 ) : null}
                 <div className="dlg-bubble">
                   {m.content ? (

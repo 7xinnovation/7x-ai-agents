@@ -298,6 +298,75 @@ body {
   background: color-mix(in srgb, var(--c-primary) 11%, var(--c-surface));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-primary) 14%, transparent);
 }
+
+/* AI orb — a small glowing sphere in the agent's brand color, used as the
+   assistant avatar in place of an icon. Depth from a radial gradient + inner
+   highlight; life from a slow drifting glow and a rotating sheen. */
+.dlg-orb {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  background:
+    radial-gradient(circle at 32% 26%,
+      color-mix(in srgb, #fff 78%, var(--c-primary)) 0%,
+      var(--c-primary) 46%,
+      color-mix(in srgb, var(--c-primary) 58%, #000) 100%);
+  box-shadow:
+    0 2px 9px -2px color-mix(in srgb, var(--c-primary) 60%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--c-primary) 22%, transparent),
+    inset 0 1px 5px color-mix(in srgb, #fff 38%, transparent),
+    inset 0 -3px 6px color-mix(in srgb, var(--c-primary) 70%, #000);
+  animation: dlg-orb-glow 4.5s var(--ease-in-out, ease-in-out) infinite;
+}
+/* Rotating sheen across the surface. */
+.dlg-orb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 210deg,
+    transparent 0deg,
+    color-mix(in srgb, #fff 55%, transparent) 60deg,
+    transparent 150deg,
+    transparent 360deg);
+  mix-blend-mode: screen;
+  opacity: 0.55;
+  animation: dlg-orb-spin 7s linear infinite;
+}
+/* Crisp specular highlight. */
+.dlg-orb::after {
+  content: "";
+  position: absolute;
+  top: 16%;
+  left: 24%;
+  width: 30%;
+  height: 24%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%);
+  filter: blur(0.3px);
+}
+@keyframes dlg-orb-glow {
+  0%, 100% { box-shadow:
+    0 2px 9px -2px color-mix(in srgb, var(--c-primary) 55%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--c-primary) 22%, transparent),
+    inset 0 1px 5px color-mix(in srgb, #fff 38%, transparent),
+    inset 0 -3px 6px color-mix(in srgb, var(--c-primary) 70%, #000); }
+  50% { box-shadow:
+    0 3px 14px -1px color-mix(in srgb, var(--c-primary) 75%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--c-primary) 30%, transparent),
+    inset 0 1px 5px color-mix(in srgb, #fff 45%, transparent),
+    inset 0 -3px 6px color-mix(in srgb, var(--c-primary) 70%, #000); }
+}
+@keyframes dlg-orb-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dlg-orb, .dlg-orb::before { animation: none; }
+}
 .dlg-bubble {
   padding: 11px 15px;
   border-radius: var(--r-card);
