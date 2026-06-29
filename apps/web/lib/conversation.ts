@@ -10,6 +10,11 @@ export interface Session {
   history: { role: "user" | "assistant"; content: string }[];
   // Decrypted backend session token (e.g. OTP-minted) for this conversation, if any.
   sessionToken?: string;
+  // Server-authoritative auth state for this conversation (sticky once signed in
+  // via UAE PASS), used for journey gating instead of the client's claim.
+  authenticated: boolean;
+  // External identity (e.g. UAE PASS sub) attached at sign-in, if any.
+  userRef?: string;
 }
 
 /** Persist an integration session token for a conversation (encrypted at rest). */
@@ -41,11 +46,15 @@ export async function getOrCreateSession(input: {
       where: and(eq(conversations.id, input.conversationId), eq(conversations.agentId, input.agentId)),
     });
     if (conv) {
-      // Keep auth state current within the resumed session.
-      if (conv.authenticated !== input.authenticated || (input.userRef && conv.userRef !== input.userRef)) {
+      // Auth is sticky and server-authoritative: once a conversation is signed in
+      // (UAE PASS callback sets authenticated + a session token), a later client
+      // request claiming "guest" must NOT downgrade it — otherwise the next
+      // message after sign-in would re-gate the journey. Client can only upgrade.
+      const effectiveAuth = conv.authenticated || input.authenticated || Boolean(conv.sessionToken);
+      if (effectiveAuth !== conv.authenticated || (input.userRef && conv.userRef !== input.userRef)) {
         await db
           .update(conversations)
-          .set({ authenticated: input.authenticated, userRef: input.userRef ?? conv.userRef })
+          .set({ authenticated: effectiveAuth, userRef: input.userRef ?? conv.userRef })
           .where(eq(conversations.id, conv.id));
       }
       const caseRow = await db.query.cases.findFirst({ where: eq(cases.conversationId, conv.id) });
@@ -62,6 +71,8 @@ export async function getOrCreateSession(input: {
           .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         sessionToken: decryptSecret(conv.sessionToken) ?? undefined,
+        authenticated: effectiveAuth,
+        userRef: input.userRef ?? conv.userRef ?? undefined,
       };
     }
   }
@@ -80,7 +91,7 @@ export async function getOrCreateSession(input: {
     .insert(cases)
     .values({ conversationId: conv!.id, agentId: input.agentId, state: emptyCase() })
     .returning();
-  return { conversationId: conv!.id, caseId: caseRow!.id, state: caseRow!.state, history: [] };
+  return { conversationId: conv!.id, caseId: caseRow!.id, state: caseRow!.state, history: [], authenticated: input.authenticated, userRef: input.userRef };
 }
 
 export async function appendMessage(

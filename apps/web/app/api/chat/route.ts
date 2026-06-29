@@ -66,6 +66,10 @@ export async function POST(req: NextRequest) {
   });
   const { tools: extraTools, exec: runExtraTool } = apiTools;
 
+  // Server-authoritative auth (sticky after UAE PASS), not the client's claim.
+  const authenticated = session.authenticated;
+  const userRef = session.userRef ?? body.userRef;
+
   const a = { agentId: agent.id, conversationId: session.conversationId };
   const startJourney = session.state.journeyKey;
 
@@ -92,7 +96,7 @@ export async function POST(req: NextRequest) {
             await emitEvent({
               type: "intent.identified",
               ...a,
-              customerType: body.authenticated ? "authenticated" : "guest",
+              customerType: authenticated ? "authenticated" : "guest",
               language: body.locale,
               outcome: intent.intent,
               attributes: { intent: intent.intent, confidence: intent.confidence },
@@ -114,8 +118,8 @@ export async function POST(req: NextRequest) {
           userMessage: body.userMessage,
           case: session.state,
           locale: body.locale,
-          authenticated: body.authenticated,
-          userRef: body.userRef,
+          authenticated,
+          userRef,
           adapters,
           intent,
           businessOpen,
@@ -126,7 +130,7 @@ export async function POST(req: NextRequest) {
           // Standard analytics attributes shared by every event this turn.
           const std = {
             ...a,
-            customerType: (body.authenticated ? "authenticated" : "guest") as "authenticated" | "guest",
+            customerType: (authenticated ? "authenticated" : "guest") as "authenticated" | "guest",
             language: body.locale,
             journeyType: finalState.journeyKey ?? undefined,
           };
@@ -171,7 +175,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const cust = (body.authenticated ? "authenticated" : "guest") as "authenticated" | "guest";
+        const cust = (authenticated ? "authenticated" : "guest") as "authenticated" | "guest";
         // Journey start detection (journeyKey newly set this turn).
         if (!startJourney && finalState.journeyKey) {
           await emitEvent({ type: "journey.started", ...a, customerType: cust, language: body.locale, journeyType: finalState.journeyKey, attributes: { journey: finalState.journeyKey } });

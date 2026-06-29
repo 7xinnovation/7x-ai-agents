@@ -238,7 +238,17 @@ export function Experience({
     const params = new URLSearchParams(window.location.search);
     const status = params.get("uaepass");
     if (!status) return;
-    if (status === "cancelled") setAuthReason(locale === "ar" ? "تم إلغاء تسجيل الدخول." : "Sign-in was cancelled.");
+    if (status === "ok") {
+      // Signed in via UAE PASS — reflect it and pin the conversation the callback
+      // attached the session to, so the next message continues authenticated.
+      setAuthenticated(true);
+      setAuthReason(null);
+      const cid = params.get("cid");
+      if (cid) {
+        convId.current = cid;
+        try { window.localStorage.setItem(storageKey, cid); } catch { /* ignore */ }
+      }
+    } else if (status === "cancelled") setAuthReason(locale === "ar" ? "تم إلغاء تسجيل الدخول." : "Sign-in was cancelled.");
     else if (status === "error" || status === "invalid_state")
       setAuthReason(locale === "ar" ? "تعذّر إكمال تسجيل الدخول. حاول مرة أخرى." : "Sign-in could not be completed. Please try again.");
     // Clean the status param from the URL (keep cid for resume).
