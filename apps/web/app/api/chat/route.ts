@@ -23,7 +23,21 @@ const Body = z.object({
   userRef: z.string().optional(),
   // UAE PASS session token forwarded by the embedding site (for uaepass_live auth).
   uaePassToken: z.string().optional(),
+  // Proactive "account pulse": fired by the embed right after sign-in. The server
+  // substitutes an internal directive (not a visible user message) that has the
+  // agent pull the customer's account data and surface what needs attention.
+  pulse: z.boolean().optional(),
 });
+
+// Internal directive used for the post-sign-in account pulse. Never shown to the
+// user as a message; it instructs the agent to assemble the pulse from real data.
+const PULSE_DIRECTIVE =
+  "(System: the customer just signed in via UAE PASS. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
+  "1) Greet them warmly (use their name once you have it from account data). " +
+  "2) Use your tools to pull everything you can about their account. " +
+  "3) Show a concise, scannable section titled \"Account Pulse\" listing anything that needs attention — PO Box renewals that are due or expiring soon (box number, emirate, expiry date, and the renewal fee from pricing) and any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
+  "4) If you do not yet know their PO Box number, briefly welcome them and ask once for the box number + emirate so you can complete the pulse. " +
+  "Use ONLY real data returned by tools — never invent boxes, dates, or fees.)";
 
 function sse(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
@@ -70,6 +84,10 @@ export async function POST(req: NextRequest) {
   const authenticated = session.authenticated;
   const userRef = session.userRef ?? body.userRef;
 
+  // Account pulse runs only for a signed-in customer; otherwise treat as normal.
+  const isPulse = Boolean(body.pulse) && authenticated;
+  const effectiveMessage = isPulse ? PULSE_DIRECTIVE : body.userMessage;
+
   const a = { agentId: agent.id, conversationId: session.conversationId };
   const startJourney = session.state.journeyKey;
 
@@ -82,7 +100,8 @@ export async function POST(req: NextRequest) {
         if (isNewSession) {
           await emitEvent({ type: "conversation.started", ...a, attributes: { locale: body.locale } });
         }
-        await appendMessage(session.conversationId, "user", body.userMessage);
+        // The pulse directive is an internal trigger — don't store it as a user message.
+        if (!isPulse) await appendMessage(session.conversationId, "user", body.userMessage);
 
         // PRD AI-governance: classify intent up front so the orchestrator can gate
         // transactional journeys on goal confidence. Efficiency: the gate only
@@ -90,7 +109,7 @@ export async function POST(req: NextRequest) {
         // once a journey is already active (mid-flow — intent is resolved).
         // Best-effort: a classification failure never blocks the turn.
         let intent: { intent: string; confidence: number } | undefined;
-        if (!session.state.journeyKey) {
+        if (!session.state.journeyKey && !isPulse) {
           try {
             intent = await classifyIntent(agent.definition, body.userMessage, body.locale);
             await emitEvent({
@@ -115,7 +134,7 @@ export async function POST(req: NextRequest) {
           agentId: agent.id,
           caseId: session.caseId,
           history: session.history,
-          userMessage: body.userMessage,
+          userMessage: effectiveMessage,
           case: session.state,
           locale: body.locale,
           authenticated,

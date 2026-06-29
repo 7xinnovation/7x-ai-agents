@@ -117,6 +117,9 @@ export function Experience({
   const [streaming, setStreaming] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [authReason, setAuthReason] = useState<string | null>(null);
+  // Resume completion + a one-shot flag to fire the account pulse after sign-in.
+  const [resumed, setResumed] = useState(false);
+  const [signedInPulse, setSignedInPulse] = useState(false);
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -212,7 +215,7 @@ export function Experience({
     const saved =
       initialConversationId ??
       (typeof window !== "undefined" ? window.localStorage.getItem(storageKey) : null);
-    if (!saved) return;
+    if (!saved) { setResumed(true); return; }
     (async () => {
       try {
         const res = await fetch(`/api/conversations/${saved}`);
@@ -227,6 +230,8 @@ export function Experience({
         setMessages(data.messages ?? []);
       } catch {
         /* ignore */
+      } finally {
+        setResumed(true);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -248,6 +253,8 @@ export function Experience({
         convId.current = cid;
         try { window.localStorage.setItem(storageKey, cid); } catch { /* ignore */ }
       }
+      // Fire the proactive account pulse once resume has settled.
+      setSignedInPulse(true);
     } else if (status === "cancelled") setAuthReason(locale === "ar" ? "تم إلغاء تسجيل الدخول." : "Sign-in was cancelled.");
     else if (status === "error" || status === "invalid_state")
       setAuthReason(locale === "ar" ? "تعذّر إكمال تسجيل الدخول. حاول مرة أخرى." : "Sign-in could not be completed. Please try again.");
@@ -295,12 +302,20 @@ export function Experience({
     });
   }, []);
 
-  const send = useCallback(async (override?: string) => {
-    const text = (override ?? input).trim();
-    if (!text || streaming) return;
-    setInput("");
+  const send = useCallback(async (override?: string, opts?: { proactive?: boolean }) => {
+    const proactive = opts?.proactive ?? false;
+    const text = proactive ? "" : (override ?? input).trim();
+    if (streaming) return;
+    if (!proactive && !text) return;
+    if (!proactive) setInput("");
     setAuthReason(null);
-    setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "", citations: [] }]);
+    // Proactive turns (e.g. the post-sign-in account pulse) add no user bubble —
+    // only the assistant's response is shown.
+    setMessages((prev) => [
+      ...prev,
+      ...(proactive ? [] : [{ role: "user" as const, content: text }]),
+      { role: "assistant" as const, content: "", citations: [] },
+    ]);
     setStreaming(true);
 
     try {
@@ -309,7 +324,8 @@ export function Experience({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug: agent.slug,
-          userMessage: text,
+          userMessage: proactive ? "account_pulse" : text,
+          pulse: proactive || undefined,
           conversationId: convId.current ?? undefined,
           locale,
           authenticated,
@@ -385,6 +401,15 @@ export function Experience({
       setStreaming(false);
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
+
+  // After sign-in, once the session has resumed, proactively run the account
+  // pulse exactly once (no user bubble — just the assistant's summary).
+  useEffect(() => {
+    if (signedInPulse && resumed && authenticated && !streaming) {
+      setSignedInPulse(false);
+      void send(undefined, { proactive: true });
+    }
+  }, [signedInPulse, resumed, authenticated, streaming, send]);
 
   const fallbackFont = "'SF Pro Display', -apple-system, 'Segoe UI', system-ui, sans-serif";
   const rootStyle = {
