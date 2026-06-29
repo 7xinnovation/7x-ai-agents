@@ -41,7 +41,7 @@ Each is built and selectable per agent; supplying credentials switches it from m
 | **Salesforce CRM** | `SF_INSTANCE_URL`, `SF_ACCESS_TOKEN` (or `SF_CLIENT_ID/SECRET/USERNAME/PASSWORD`) | Cases, callbacks, status, duplicate guard. |
 | **Network International (N-Genius) payment** | `NGENIUS_API_KEY`, `NGENIUS_OUTLET_REF`, `NGENIUS_BASE_URL` | Hosted order + status reconciliation. |
 | **UAE PASS (OIDC)** | `UAEPASS_CLIENT_ID`, `UAEPASS_CLIENT_SECRET`, redirect URI | Note: session-token **passthrough** already works for embeds without this. |
-| **PO Box Platform API (NXN)** | OpenAPI/Swagger spec + base URL + auth | No real backend yet; reachable only via the Swagger-import integration. |
+| **PO Box Platform API (NXN)** | X-API-KEY (set) + UAE PASS for authed ops | **Live** against EP staging (`box-stg.emiratespost.ae`): guest renewal Details/Pricing + rental Bundle reads work key-only. Writes (Save/ConfirmPayment) blocked — see §1 #3; authed MOE/Renewal need UAE PASS — see §1 #4. |
 | **Knowledge base embeddings** _(optional)_ | `VOYAGE_API_KEY` | Without it, KB falls back to full-text search (already working). |
 
 ### Production secrets (set before go-live)
