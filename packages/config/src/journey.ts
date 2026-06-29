@@ -43,9 +43,42 @@ export const Journey = z.object({
       // (PRD: only confirmed payments trigger service completion).
       requiresPayment: z.boolean().default(false),
       // Fixed amount + currency for the journey (real pricing comes from backend;
-      // this is the conversational summary figure).
+      // this is the conversational summary figure / fallback only).
       amount: z.number().optional(),
       currency: z.string().default("AED"),
+      // When present, the journey is completed END-TO-END through connected API
+      // integration tools (authoritative pricing, order creation on the real
+      // payment gateway, and payment confirmation) instead of the internal mock
+      // payment + CRM spine. Each phase names the integration tool the agent
+      // must call; prompt.ts renders explicit step-by-step guidance and the
+      // generic request_payment/submit_case guidance is suppressed.
+      apiFlow: z
+        .object({
+          // Human label for the backing system, used in guidance text.
+          service: z.string().optional(),
+          // Tool that fetches the record + the inputs pricing/save need.
+          detailsTool: z.string().optional(),
+          // Tool returning the authoritative price to quote.
+          pricingTool: z.string().optional(),
+          // Tool that creates the order and returns the gateway payment URL +
+          // reference number. When omitted, the journey shows real details +
+          // pricing and then completes through the internal payment spine
+          // (reliable across turns) — used while a backend write is unavailable.
+          saveTool: z.string().optional(),
+          // Tool that verifies/confirms the payment after the customer pays.
+          confirmTool: z.string().optional(),
+          // Default return URL passed to the gateway (paymentReturnUrl).
+          paymentReturnUrl: z.string().optional(),
+          // If the saveTool fails (e.g. a backend that isn't fully provisioned in
+          // staging), fall back to the internal payment so the flow still
+          // completes — using the authoritative amount already obtained from the
+          // pricing tool. Lets a demo finish end-to-end while the real write is
+          // pending; remove once the backend write is live.
+          fallbackToInternalPayment: z.boolean().default(false),
+          // Free-text field-mapping hints appended to the rendered flow.
+          notes: z.string().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });

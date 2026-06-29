@@ -56,10 +56,13 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
   {
     name: "request_payment",
     description:
-      "Initiate payment for a chargeable journey through the payment gateway. Call after the customer confirms the summary and before submit_case. Returns a secure payment link; await confirmation before submitting.",
+      "Initiate payment for a chargeable journey through the payment gateway. Call after the customer confirms the summary and before submit_case. Returns a secure payment link; await confirmation before submitting. Pass amount to charge the authoritative price you obtained from a backend pricing tool (otherwise the journey's configured amount is used).",
     input_schema: {
       type: "object",
-      properties: { description: { type: "string", description: "What the payment is for" } },
+      properties: {
+        description: { type: "string", description: "What the payment is for" },
+        amount: { type: "number", description: "Authoritative amount to charge (e.g. the figure returned by a pricing tool). Overrides the journey's configured amount." },
+      },
     },
   },
   {
@@ -315,7 +318,10 @@ export async function dispatchTool(
         return { result: "User must authenticate before payment.", state, events };
       }
       if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
-      const amount = sub.amount ?? 0;
+      // Prefer the authoritative amount the model passes (from a backend pricing
+      // tool); fall back to the journey's configured figure.
+      const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
+      const amount = overrideAmount ?? sub.amount ?? 0;
       const currency = sub.currency ?? "AED";
       const actx = adapterContext(agent, agent.integrations.payment);
       const res = await adapters.payment.initiate(actx, {

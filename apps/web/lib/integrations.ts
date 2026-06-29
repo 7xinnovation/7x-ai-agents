@@ -157,6 +157,9 @@ export async function buildApiTools(
     if (!spec) continue; // no spec for the active environment
     const pfx = prefix(intg.name);
     for (const op of spec.operations) {
+      // Operations can be explicitly disabled (e.g. a backend write that isn't
+      // provisioned, or an auth-only duplicate) so they never become a tool.
+      if ((op as { enabled?: boolean }).enabled === false) continue;
       const toolName = `${pfx}__${op.toolName}`.slice(0, 64);
       if (map.has(toolName)) continue;
       map.set(toolName, { spec, op });

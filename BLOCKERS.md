@@ -1,6 +1,6 @@
 # Dialog Platform — Blockers & Outstanding Items
 
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-29_
 
 A simple running list of what's blocking progress and what's still needed.
 Items are grouped by whether they stop things working **now**, need **assets/credentials
@@ -12,8 +12,10 @@ from the client**, or are **engineering to-dos** that aren't blocked.
 
 | # | Blocker | Impact | What's needed |
 |---|---------|--------|---------------|
-| 1 | **Anthropic API credits exhausted** | Live chat, intent classification, and the eval harness all fail with `400 "credit balance is too low"`. | Top up at Anthropic **Plans & Billing**. No code change needed; everything works the moment credits return. |
+| 1 | **Anthropic API credits** (resolved via Azure) | Previously live chat/eval failed with `credit balance too low`. | Resolved: all Claude traffic now routes through **Azure AI Foundry (Sonnet 4.6)**. |
 | 2 | **No hosted deployment** (local dev only) | App runs on `localhost:4500` via `next start`; the process dies when the terminal/session resets, so links break intermittently. | Decide hosting (Vercel / container) and deploy. See §3. |
+| 3 | **NXN guest renewal `Save` blocked on EP staging** | The real guest renewal **read + pricing** work live (`Guest/Renewal/Details`, `Guest/Renewal/Pricing` → real box + real fee, e.g. box 50500 = AED 695). But `POST /api/Guest/Renewal/Save` returns an opaque `400 {"payload":null}` even with a fully correct payload (validated: `requestSource:"Web"`, future target `expiryDate`, `totalAmount` matching Pricing, full `customerKYC`/billing). The order-creation / payment-gateway step fails server-side with no diagnostic. | **Emirates Post / NXN** to either provision the guest renewal payment gateway (Network International) in staging, confirm the exact required `Save` payload (swagger marks only 3 fields required but the backend needs more), or supply a renewable test box with the gateway enabled. **Until then:** the chatbot completes renewals with real data + real pricing through the internal secure checkout (`request_payment` → webhook → `submit_case`); the NXN write ops are disabled so the agent can't call the blocked endpoints. Re-enable `saveTool`/`confirmTool` on the renewal `apiFlow` and the `Save`/`ConfirmPayment` ops to switch to the fully-real flow once unblocked. |
+| 4 | **NXN `/api/MOE/*` and non-guest `/api/Renewal/*` need UAE PASS** | These return `401` with the X-API-KEY alone (guest auth insufficient). | Wire UAE PASS sign-in for the authenticated PO Box flows (renewal-by-account, MOE entity lookups). Guest renewal + rental bundle reads work key-only today. These ops are currently disabled for the agent. |
 
 ---
 

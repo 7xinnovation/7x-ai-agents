@@ -18,6 +18,55 @@ export interface SystemPrompt {
  * company-specific comes from the AgentDefinition, so the same builder serves
  * every tenant.
  */
+/**
+ * Renders step-by-step guidance for an API-native journey. Two modes:
+ *  - Full (saveTool set): the transaction is created + paid + confirmed entirely
+ *    through the real backend tools (live gateway). Use once the backend write is
+ *    provisioned.
+ *  - Pricing-only (no saveTool): real record lookup + authoritative pricing from
+ *    the backend, then completion through the internal payment spine (reliable
+ *    across turns). Use while the backend write/payment is unavailable.
+ */
+function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journey["submission"]>["apiFlow"]>): string {
+  const sys = f.service ? `the ${f.service} system` : "the connected backend";
+
+  // Pricing-only mode: real details + real price, then internal checkout.
+  if (!f.saveTool) {
+    const lines: string[] = [
+      `- Complete this journey using REAL data from ${sys} for everything, then take payment through the internal checkout. Never quote a price you did not get from a tool.`,
+    ];
+    if (f.detailsTool)
+      lines.push(`  1. Call ${f.detailsTool} once to fetch the record and the values you need (current expiry, bundle, customer details). Reuse them — do not re-ask the customer for what the tool returned, and do not call it again on later turns.`);
+    if (f.pricingTool)
+      lines.push(`  2. Call ${f.pricingTool} to get the AUTHORITATIVE amount, quote exactly that figure, and ask the customer to confirm.`);
+    lines.push(`  3. After the customer confirms, call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"} and share the secure link. WAIT for confirmation.`);
+    lines.push(`  4. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
+    if (f.notes) lines.push(`  Field-mapping notes: ${f.notes}`);
+    return lines.join("\n");
+  }
+
+  // Full mode: real order creation + payment + confirmation on the live gateway.
+  const lines: string[] = [
+    `- This journey is completed END-TO-END through ${sys}. Drive the integration tools below; never quote a price you did not get from a tool.`,
+  ];
+  if (f.detailsTool)
+    lines.push(`  1. Call ${f.detailsTool} to fetch the record and the values the next steps need (current expiry date, bundle, customer details). Use these — do not ask the user for data the tool already returned.`);
+  if (f.pricingTool)
+    lines.push(`  2. Call ${f.pricingTool} to get the AUTHORITATIVE amount. Quote exactly that figure, then ask the customer to confirm.`);
+  lines.push(
+    `  3. After the customer confirms, call ${f.saveTool} to create the order. It returns a gateway payment URL (e.g. paymentGateWayResponse.paymentUrl) and a reference number — share that EXACT URL as the payment link${f.paymentReturnUrl ? ` (use paymentReturnUrl "${f.paymentReturnUrl}")` : ""}. Keep the reference number.`
+  );
+  if (f.confirmTool)
+    lines.push(`  4. ONLY if ${f.saveTool} succeeded and returned a real reference number: after the customer says they have paid, call ${f.confirmTool} with that reference to verify, and confirm success only if the tool reports the payment succeeded. Never call ${f.confirmTool} with a reference that did not come from a successful ${f.saveTool}.`);
+  if (f.fallbackToInternalPayment)
+    lines.push(
+      `  If ${f.saveTool} returns an error or a null/empty payload, switch to the internal checkout and stay on it (do NOT call ${f.confirmTool ?? "the confirm tool"}): call request_payment with amount = the exact figure from ${f.pricingTool ?? "the pricing step"}, share that link, and once payment is "paid" call submit_case to finalise.`
+    );
+  else lines.push(`  If any tool returns isSuccess=false or an error, relay the displayMessage plainly and offer a human handoff — never fabricate an order or payment.`);
+  if (f.notes) lines.push(`  Field-mapping notes: ${f.notes}`);
+  return lines.join("\n");
+}
+
 export function buildSystemPrompt(
   agent: AgentDefinition,
   state: CaseState,
@@ -110,9 +159,11 @@ ${businessOpen === false
   const volatile = `# This turn${intent ? `
 - Classified intent: "${intent.intent}" (confidence ${intent.confidence.toFixed(2)}).` : ""}${suggestedJourney ? `
 - This intent maps to journey "${suggestedJourney}". If the user wants to proceed (and is authenticated when the journey requires it), call set_journey("${suggestedJourney}") NOW, then collect the fields one at a time. Do not ask for details before starting the journey.` : ""}
-${journey?.submission?.requiresPayment
-      ? `- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment, share the secure link, and WAIT for confirmation. Only call submit_case once payment status is "paid".`
-      : "- The active journey (if any) has no payment step."}
+${journey?.submission?.apiFlow
+      ? renderApiFlow(journey.submission.apiFlow)
+      : journey?.submission?.requiresPayment
+        ? `- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment, share the secure link, and WAIT for confirmation. Only call submit_case once payment status is "paid".`
+        : "- The active journey (if any) has no payment step."}
 
 # Current case state
 ${journeyBlock}
@@ -120,7 +171,9 @@ Collected data: ${JSON.stringify(state.data)}
 Documents: ${JSON.stringify(state.documents)}
 Payment: ${JSON.stringify(state.payment)}
 Submission readiness: ${state.readiness.complete ? "READY" : `NOT READY — missing ${JSON.stringify(state.readiness.missing)}`}
-When the case is ready (and paid, if required) and the user confirms, call submit_case. Before submitting, run a final check and tell the user the reference number you receive.`;
+${journey?.submission?.apiFlow
+      ? "This journey is completed through the integration tools described above — finish it there; do NOT call submit_case."
+      : "When the case is ready (and paid, if required) and the user confirms, call submit_case. Before submitting, run a final check and tell the user the reference number you receive."}`;
 
   return { stable, volatile };
 }
