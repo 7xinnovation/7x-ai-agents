@@ -130,10 +130,16 @@ export async function POST(req: NextRequest) {
             language: body.locale,
             journeyType: finalState.journeyKey ?? undefined,
           };
-          if (ev.type === "case") finalState = ev.state;
+          if (ev.type === "text") {
+            // Accumulate the full streamed reply (including text from rounds
+            // before tool calls + the inserted separators) so the persisted
+            // message matches what the user saw, not just the final round.
+            finalText += ev.delta;
+          } else if (ev.type === "case") finalState = ev.state;
           else if (ev.type === "done") {
             finalState = ev.state;
-            finalText = ev.message;
+            // Fall back to the round's text only if nothing was streamed.
+            if (!finalText) finalText = ev.message;
           } else if (ev.type === "citation" && !citedThisTurn) {
             citedThisTurn = true;
             await emitEvent({ type: "knowledge.retrieved", ...std, attributes: { source: ev.source } });

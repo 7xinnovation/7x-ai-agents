@@ -83,6 +83,12 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
     i === tools.length - 1 ? ({ ...t, cache_control: { type: "ephemeral" } } as unknown as Anthropic.Tool) : t
   );
 
+  // When the model emits text, calls a tool, then emits more text in a later
+  // round, the two text runs would otherwise concatenate with no break (e.g.
+  // "…right away!To look up…"). Insert a paragraph separator before the next
+  // round's first text so the segments read as distinct messages.
+  let pendingSeparator = false;
+
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const sys = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen, input.intent);
@@ -110,6 +116,9 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           });
           for await (const ev of stream) {
             if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+              // Break from a prior round's text before this round's first chars.
+              if (pendingSeparator && !textStarted) yield { type: "text", delta: "\n\n" };
+              pendingSeparator = false;
               textStarted = true;
               yield { type: "text", delta: ev.delta.text };
             }
@@ -126,6 +135,12 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         }
       }
       messages.push({ role: "assistant", content: final.content });
+
+      // If this round produced any assistant text, the next round's text (after
+      // the tool runs) needs a separator so they don't run together.
+      if (final.content.some((c) => c.type === "text" && c.text.trim().length > 0)) {
+        pendingSeparator = true;
+      }
 
       const toolUses = final.content.filter(
         (c): c is Anthropic.ToolUseBlock => c.type === "tool_use"
