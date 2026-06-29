@@ -27,7 +27,10 @@ export interface ParsedSpec {
   operations: ApiOperation[];
 }
 
-const MAX_OPS = 40;
+// Upper bound on operations imported from one spec. Large specs (e.g. the NXN
+// PO Box API has 48) must import fully; per-operation enable/disable then curates
+// which become tools.
+const MAX_OPS = 200;
 
 function mapType(schema: any): string {
   const t = schema?.type;
