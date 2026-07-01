@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PaperPlaneRight,
-  Translate,
+  GlobeSimple,
   SignIn,
   UserCircleCheck,
   ArrowsOutSimple,
@@ -482,8 +482,8 @@ export function Experience({
               onClick={() => setLocale(locale === "ar" ? "en" : "ar")}
               aria-label="Switch language"
             >
-              <Translate size={16} weight={iconWeight} />
-              <span className="dlg-chip-tag">{locale === "ar" ? "EN" : "ع"}</span>
+              <GlobeSimple size={16} weight={iconWeight} />
+              <span className="dlg-chip-tag">{locale === "ar" ? "EN" : "عربي"}</span>
             </button>
           ) : null}
           <button

@@ -44,13 +44,15 @@ function injectStyles(cfg: BootConfig) {
   if (document.getElementById(STYLE_ID)) return;
   const side = cfg.position === "bottom-left" ? "left: 24px;" : "right: 24px;";
   const css = `
-  :root{--dlg-accent:#2626a1;--dlg-accent-2:#1f1f86;--dlg-accent-fg:#fff}
-  .dlg-launcher{position:fixed;bottom:24px;${side}z-index:2147483000;width:54px;height:54px;border-radius:9999px;border:none;cursor:pointer;padding:0;
-    background:var(--dlg-accent);color:var(--dlg-accent-fg);
+  :root{--dlg-accent:#2626a1;--dlg-accent-2:#1c1c7d;--dlg-accent-fg:#fff}
+  .dlg-launcher{position:fixed;bottom:24px;${side}z-index:2147483000;width:56px;height:56px;border-radius:9999px;border:none;cursor:pointer;padding:0;
+    background:var(--dlg-accent);
+    background:linear-gradient(180deg,color-mix(in srgb,var(--dlg-accent) 88%,#fff),var(--dlg-accent-2));
+    color:var(--dlg-accent-fg);
     display:flex;align-items:center;justify-content:center;
-    box-shadow:0 8px 22px -6px rgba(16,24,40,.24),0 2px 6px rgba(16,24,40,.12),inset 0 1px 0 rgba(255,255,255,.14);
+    box-shadow:0 10px 26px -8px color-mix(in srgb,var(--dlg-accent) 55%,transparent),0 3px 8px rgba(16,24,40,.14),inset 0 0 0 1px rgba(255,255,255,.10),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -2px 3px color-mix(in srgb,var(--dlg-accent-2) 60%,transparent);
     transition:transform .24s cubic-bezier(.16,1,.3,1),box-shadow .24s ease;will-change:transform;animation:dlg-pop .4s cubic-bezier(.16,1,.3,1) both}
-  .dlg-launcher:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 14px 30px -8px rgba(16,24,40,.28),0 4px 10px rgba(16,24,40,.15),inset 0 1px 0 rgba(255,255,255,.14)}
+  .dlg-launcher:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 16px 34px -8px color-mix(in srgb,var(--dlg-accent) 62%,transparent),0 5px 12px rgba(16,24,40,.16),inset 0 0 0 1px rgba(255,255,255,.12),inset 0 1px 0 rgba(255,255,255,.22)}
   .dlg-launcher:active{transform:scale(.94)}
   .dlg-launcher svg{position:absolute;transition:opacity .2s ease,transform .28s cubic-bezier(.16,1,.3,1)}
   .dlg-launcher .ic-x{opacity:0;transform:rotate(-90deg) scale(.6)}
@@ -93,7 +95,7 @@ async function applyTheme(cfg: BootConfig) {
 }
 
 const CHAT_ICON =
-  '<svg class="ic-chat" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.4c0 3.8-3.6 6.9-8 6.9-1.05 0-2.05-.16-2.96-.45L4 19.5l1.16-3.32A6.5 6.5 0 0 1 4 11.4C4 7.6 7.6 4.5 12 4.5s8 3.1 8 6.9Z"/></svg>';
+  '<svg class="ic-chat" width="25" height="25" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4c-4.7 0-8.5 3-8.5 6.8 0 1.5.6 2.9 1.6 4.05-.16 1.02-.5 1.98-1.05 2.86-.2.32.02.74.4.72 1.4-.06 2.75-.42 3.9-1.06 1.1.42 2.34.65 3.65.65 4.7 0 8.5-3.05 8.5-6.87S16.7 4 12 4Zm-3.6 7.85a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm3.6 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm3.6 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Z"/></svg>';
 const X_ICON =
   '<svg class="ic-x" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
