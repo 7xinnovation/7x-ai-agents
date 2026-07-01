@@ -179,7 +179,7 @@ export function Editor({ slug }: { slug: string }) {
           <p className="mt-3 text-[12.5px] text-muted">Drop this on any approved site. The launcher adopts this agent&apos;s brand color automatically.{def.allowedOrigins.length ? ` Embedding is restricted to: ${def.allowedOrigins.join(", ")}.` : " Add Allowed origins (Identity tab) to restrict where it can be embedded."}</p>
           <div className="mt-4 flex flex-wrap gap-2.5">
             <a href={`/embed/${def.slug}`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--color-line)] bg-surface px-4 text-sm font-semibold hover:bg-bg"><ExternalLink className="h-4 w-4" /> Full-page experience</a>
-            <a href="/demo" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--color-line)] bg-surface px-4 text-sm font-semibold hover:bg-bg"><ExternalLink className="h-4 w-4" /> Host page demo</a>
+            <a href={`/demo?agent=${def.slug}`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--color-line)] bg-surface px-4 text-sm font-semibold hover:bg-bg"><ExternalLink className="h-4 w-4" /> Host page demo</a>
           </div>
         </CardContent></Card>
       )}
