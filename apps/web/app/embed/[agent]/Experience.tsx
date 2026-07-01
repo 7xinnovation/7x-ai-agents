@@ -21,7 +21,7 @@ import {
   ArrowClockwise,
 } from "@phosphor-icons/react";
 import { tr, type CaseState, type Locale } from "@dialog/config";
-import { Markdown } from "./Markdown";
+import { Markdown, TypewriterMarkdown } from "./Markdown";
 import type { PublicAgent } from "./types";
 
 interface ChatMessage {
@@ -547,7 +547,13 @@ export function Experience({
                   <span className="dlg-orb" aria-hidden="true" />
                 ) : null}
                 <div className="dlg-bubble">
-                  {m.content ? (m.role === "assistant" ? <Markdown text={m.content} /> : m.content) : null}
+                  {m.content ? (
+                    m.role === "assistant" ? (
+                      <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} />
+                    ) : (
+                      m.content
+                    )
+                  ) : null}
                   {streaming && i === messages.length - 1
                     ? toolStatus ? (
                         // Shows during a silent tool round — as a standalone line on an

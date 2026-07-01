@@ -48,6 +48,59 @@ function splitRow(line: string): string[] {
 const isTableSep = (line: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
 const isTableRow = (line: string) => /\|/.test(line) && line.trim().length > 0;
 
+/**
+ * Reveals assistant text with a smooth typewriter effect, decoupled from the
+ * network: SSE deltas grow `text`, and this animates the visible slice up to it
+ * at a steady pace, accelerating to catch up after a burst (e.g. text resuming
+ * after a tool round) so it never lags far behind. When `animate` is false
+ * (completed / resumed messages) it renders in full immediately.
+ */
+export function TypewriterMarkdown({ text, animate }: { text: string; animate: boolean }) {
+  const [shown, setShown] = React.useState(animate ? 0 : text.length);
+  const shownRef = React.useRef(shown);
+  const textRef = React.useRef(text);
+  textRef.current = text;
+
+  React.useEffect(() => {
+    if (!animate) {
+      shownRef.current = textRef.current.length;
+      setShown(textRef.current.length);
+      return;
+    }
+    let raf = 0;
+    let last = performance.now();
+    const BASE_CPS = 260; // steady typing speed
+    const tick = (now: number) => {
+      const dt = Math.min(now - last, 60) / 1000;
+      last = now;
+      const target = textRef.current.length;
+      let cur = shownRef.current;
+      if (cur < target) {
+        const gap = target - cur;
+        // Type steadily; speed up (up to ~7x) the further behind the buffer runs.
+        const cps = BASE_CPS * (1 + Math.min(gap / 55, 6));
+        cur = Math.min(target, cur + cps * dt);
+        if (Math.floor(cur) !== shownRef.current) {
+          shownRef.current = Math.floor(cur);
+          setShown(shownRef.current);
+        } else {
+          shownRef.current = cur;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [animate]);
+
+  // When the turn ends, make sure nothing is left half-revealed.
+  React.useEffect(() => {
+    if (!animate) setShown(text.length);
+  }, [animate, text]);
+
+  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} />;
+}
+
 export function Markdown({ text }: { text: string }) {
   const lines = text.split("\n");
   const nodes: React.ReactNode[] = [];
