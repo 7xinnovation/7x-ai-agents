@@ -23,6 +23,10 @@ export interface RunTurnInput {
   adapters: AdapterBundle;
   // Pre-turn intent classification (PRD AI-governance: confidence gating).
   intent?: { intent: string; confidence: number };
+  // Same, but classified concurrently with this turn so the first token isn't
+  // blocked on a separate model round-trip. Resolved after the first round (by
+  // which point it's ready), then used to gate set_journey and nudge later rounds.
+  intentPromise?: Promise<{ intent: string; confidence: number } | undefined>;
   // Whether the request is within configured business hours (drives escalation).
   businessOpen?: boolean;
   // Dynamic tools from the agent's API integrations (imported from OpenAPI).
@@ -67,6 +71,10 @@ function isTransient(err: unknown): boolean {
 export async function* runTurn(input: RunTurnInput): AsyncGenerator<OrchestratorEvent> {
   const { agent, locale, authenticated } = input;
   let state = input.case;
+  // Intent may arrive after the turn starts (classified concurrently). Resolved
+  // once, after the first round streams, so the first token isn't blocked on it.
+  let intent = input.intent;
+  let pendingIntent = input.intentPromise;
 
   const messages: Anthropic.MessageParam[] = [
     ...input.history.map((m) => ({ role: m.role, content: m.content }) as Anthropic.MessageParam),
@@ -91,7 +99,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const sys = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen, input.intent);
+      const sys = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen, intent);
       // Split system: cacheable stable prefix + small volatile tail (case state).
       // cache_control is accepted by the GA messages endpoint at runtime; the
       // SDK 0.32 GA types don't surface it yet, hence the cast.
@@ -136,6 +144,14 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
       }
       messages.push({ role: "assistant", content: final.content });
 
+      // The first round has streamed — resolve the concurrently-running intent
+      // classification now (it's ready by this point) so it gates set_journey
+      // this round and informs the prompt on later rounds.
+      if (intent === undefined && pendingIntent) {
+        intent = await pendingIntent;
+        pendingIntent = undefined;
+      }
+
       // If this round produced any assistant text, the next round's text (after
       // the tool runs) needs a separator so they don't run together.
       if (final.content.some((c) => c.type === "text" && c.text.trim().length > 0)) {
@@ -173,7 +189,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           authenticated,
           userRef: input.userRef,
           locale,
-          intent: input.intent,
+          intent,
         });
         state = res.state;
         for (const e of res.events) {

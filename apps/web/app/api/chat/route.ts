@@ -112,26 +112,26 @@ export async function POST(req: NextRequest) {
         // The pulse directive is an internal trigger — don't store it as a user message.
         if (!isPulse) await appendMessage(session.conversationId, "user", body.userMessage);
 
-        // PRD AI-governance: classify intent up front so the orchestrator can gate
-        // transactional journeys on goal confidence. Efficiency: the gate only
-        // applies when STARTING a journey, so skip the extra classification call
-        // once a journey is already active (mid-flow — intent is resolved).
-        // Best-effort: a classification failure never blocks the turn.
-        let intent: { intent: string; confidence: number } | undefined;
+        // PRD AI-governance: classify intent to gate transactional journeys on goal
+        // confidence. Run it CONCURRENTLY with the turn (not blocking) so the first
+        // token isn't delayed by an extra model round-trip; the orchestrator awaits
+        // it after the first round, by which point it's ready. The gate only matters
+        // when STARTING a journey, so skip it once a journey is active or on a pulse.
+        let intentPromise: Promise<{ intent: string; confidence: number } | undefined> | undefined;
         if (!session.state.journeyKey && !isPulse) {
-          try {
-            intent = await classifyIntent(agent.definition, body.userMessage, body.locale);
-            await emitEvent({
-              type: "intent.identified",
-              ...a,
-              customerType: authenticated ? "authenticated" : "guest",
-              language: body.locale,
-              outcome: intent.intent,
-              attributes: { intent: intent.intent, confidence: intent.confidence },
-            });
-          } catch {
-            /* classification is best-effort */
-          }
+          intentPromise = classifyIntent(agent.definition, body.userMessage, body.locale)
+            .then((intent) => {
+              void emitEvent({
+                type: "intent.identified",
+                ...a,
+                customerType: authenticated ? "authenticated" : "guest",
+                language: body.locale,
+                outcome: intent.intent,
+                attributes: { intent: intent.intent, confidence: intent.confidence },
+              }).catch(() => {});
+              return intent;
+            })
+            .catch(() => undefined); // best-effort: a classification failure never blocks
         }
 
         let finalState = session.state;
@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
           authenticated,
           userRef,
           adapters,
-          intent,
+          intentPromise,
           businessOpen,
           extraTools,
           runExtraTool,

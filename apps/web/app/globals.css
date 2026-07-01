@@ -568,6 +568,37 @@ body {
 .dlg-typing span:nth-child(3) {
   animation-delay: 0.3s;
 }
+/* "Looking that up…" status shown while a tool round runs. As a standalone line
+   on an empty bubble, or a trailing line under an in-progress reply. */
+.dlg-tool-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--c-text-muted);
+}
+.dlg-tool-status.trailing {
+  display: flex;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--c-border) 60%, transparent);
+  font-size: 12.5px;
+}
+.dlg-tool-spinner {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--c-primary) 22%, transparent);
+  border-top-color: var(--c-primary);
+  animation: dlg-spin 0.7s linear infinite;
+}
+@keyframes dlg-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dlg-tool-spinner { animation-duration: 1.6s; }
+}
 
 /* ---- Auth banner ---- */
 .dlg-auth-banner {

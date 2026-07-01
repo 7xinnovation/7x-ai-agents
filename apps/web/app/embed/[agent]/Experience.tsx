@@ -97,6 +97,23 @@ function postToParent(action: "expand" | "collapse" | "close") {
   }
 }
 
+/**
+ * Maps a streamed tool/lookup event to a short, human status line shown while the
+ * assistant works through a (silent, multi-second) tool round. Matches on generic
+ * keywords so it never leaks a raw internal tool name; falls back to a neutral line.
+ */
+function toolStatusLabel(ev: { type: string; tool?: string; kind?: string }, ar: boolean): string {
+  const t = (ev.tool || "").toLowerCase();
+  const L = (en: string, arb: string) => (ar ? arb : en);
+  if (ev.type === "lookup") return L("Tracking your shipment…", "جارٍ تتبّع شحنتك…");
+  if (/details/.test(t)) return L("Looking up your box…", "جارٍ جلب بيانات صندوقك…");
+  if (/pricing|charges/.test(t)) return L("Checking pricing…", "جارٍ حساب السعر…");
+  if (/boxlocations|branch/.test(t)) return L("Finding branches…", "جارٍ إيجاد الفروع…");
+  if (/bundle/.test(t)) return L("Fetching packages…", "جارٍ جلب الباقات…");
+  if (/options|entities|expiry/.test(t)) return L("Getting the details…", "جارٍ جلب التفاصيل…");
+  return L("Working on it…", "جارٍ العمل على طلبك…");
+}
+
 export function Experience({
   agent,
   initialLocale,
@@ -116,6 +133,8 @@ export function Experience({
   const [streaming, setStreaming] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [authReason, setAuthReason] = useState<string | null>(null);
+  // Friendly "what the assistant is doing" line shown during silent tool rounds.
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
   // Resume completion + a one-shot flag to fire the account pulse after sign-in.
   const [resumed, setResumed] = useState(false);
   const [signedInPulse, setSignedInPulse] = useState(false);
@@ -316,6 +335,7 @@ export function Experience({
       { role: "assistant" as const, content: "", citations: [] },
     ]);
     setStreaming(true);
+    setToolStatus(null);
 
     try {
       const res = await fetch("/api/chat", {
@@ -346,12 +366,15 @@ export function Experience({
             /* ignore */
           }
         } else if (ev.type === "text") {
+          if (ev.delta) setToolStatus(null); // real text is arriving — drop the status
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
             if (last) last.content += ev.delta;
             return next;
           });
+        } else if (ev.type === "integration" || ev.type === "lookup") {
+          setToolStatus(toolStatusLabel(ev, locale === "ar"));
         } else if (ev.type === "case") {
           setCaseState(ev.state);
         } else if (ev.type === "citation") {
@@ -398,6 +421,7 @@ export function Experience({
       });
     } finally {
       setStreaming(false);
+      setToolStatus(null);
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
 
@@ -523,15 +547,23 @@ export function Experience({
                   <span className="dlg-orb" aria-hidden="true" />
                 ) : null}
                 <div className="dlg-bubble">
-                  {m.content ? (
-                    m.role === "assistant" ? <Markdown text={m.content} /> : m.content
-                  ) : streaming && i === messages.length - 1 ? (
-                    <span className="dlg-typing">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  ) : null}
+                  {m.content ? (m.role === "assistant" ? <Markdown text={m.content} /> : m.content) : null}
+                  {streaming && i === messages.length - 1
+                    ? toolStatus ? (
+                        // Shows during a silent tool round — as a standalone line on an
+                        // empty bubble, or a trailing line under an in-progress reply.
+                        <span className={`dlg-tool-status${m.content ? " trailing" : ""}`}>
+                          <span className="dlg-tool-spinner" />
+                          {toolStatus}
+                        </span>
+                      ) : !m.content ? (
+                        <span className="dlg-typing">
+                          <span />
+                          <span />
+                          <span />
+                        </span>
+                      ) : null
+                    : null}
                   {m.citations?.length ? (
                     <div className="dlg-sources">
                       {m.citations.map((s, k) => (
