@@ -10,7 +10,6 @@ import {
   ArrowsInSimple,
   X,
   ChatsCircle,
-  Sparkle,
   TextAlignLeft,
   FileText,
   ListChecks,
@@ -576,9 +575,6 @@ export function Experience({
               </button>
             </div>
             <div className="dlg-input-hint">
-              <span className="dlg-powered">
-                <Sparkle size={11} weight="fill" /> {t.poweredBy}
-              </span>
               <span className="dlg-kbd-hint">{t.enterToSend}</span>
             </div>
           </div>
