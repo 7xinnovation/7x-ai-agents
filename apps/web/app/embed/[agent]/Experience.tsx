@@ -574,9 +574,6 @@ export function Experience({
                 <PaperPlaneRight size={18} weight="fill" />
               </button>
             </div>
-            <div className="dlg-input-hint">
-              <span className="dlg-kbd-hint">{t.enterToSend}</span>
-            </div>
           </div>
         </section>
 
