@@ -486,7 +486,7 @@ export function Experience({
           <button className="dlg-chip icon-only" onClick={toggleFull} aria-label={full ? t.collapse : t.expand}>
             {full ? <ArrowsInSimple size={16} weight={iconWeight} /> : <ArrowsOutSimple size={16} weight={iconWeight} />}
           </button>
-          <button className="dlg-chip icon-only" onClick={() => postToParent("close")} aria-label="Close">
+          <button className="dlg-chip icon-only danger" onClick={() => postToParent("close")} aria-label="Close">
             <X size={16} weight={iconWeight} />
           </button>
         </div>

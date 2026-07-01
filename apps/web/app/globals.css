@@ -171,10 +171,27 @@ body {
   border-radius: var(--r-pill);
   background: var(--c-success);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-success) 18%, transparent);
+  position: relative;
+}
+/* A slow live-status pulse ring (communicates "online", not decoration). */
+.dlg-dot::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-success) 45%, transparent);
+  animation: dlg-dot-pulse 2.6s var(--ease-out) infinite;
+}
+@keyframes dlg-dot-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-success) 40%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 7px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dlg-dot::after { animation: none; }
 }
 .dlg-actions {
   display: flex;
-  gap: 6px;
+  gap: 2px;
   align-items: center;
 }
 .dlg-chip {
@@ -192,34 +209,60 @@ body {
   font-family: inherit;
   cursor: pointer;
   transition: background 0.2s var(--ease), border-color 0.2s var(--ease),
-    transform 0.12s var(--ease);
+    color 0.2s var(--ease), box-shadow 0.2s var(--ease), transform 0.12s var(--ease-spring);
 }
+/* Icon buttons read as a light toolbar: ghost until hover, then a soft rounded
+   surface. Declutters the header vs. five bordered pills competing for weight. */
 .dlg-chip.icon-only {
-  width: 34px;
+  width: 33px;
   padding: 0;
   justify-content: center;
+  border-radius: 10px;
+  border-color: transparent;
+  background: transparent;
+  color: color-mix(in srgb, var(--c-text) 62%, var(--c-text-muted));
 }
-.dlg-chip:hover {
+.dlg-chip.icon-only:hover {
+  background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
+  color: var(--c-text);
+}
+/* Bordered (text) chips like the language toggle keep their outline. */
+.dlg-chip:not(.icon-only):hover {
   background: var(--c-surface-muted);
   border-color: color-mix(in srgb, var(--c-text) 18%, var(--c-border));
 }
 .dlg-chip:active {
-  transform: scale(0.96);
+  transform: scale(0.9);
+}
+.dlg-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--c-surface),
+    0 0 0 4px color-mix(in srgb, var(--c-primary) 50%, transparent);
 }
 .dlg-chip:disabled {
-  opacity: 0.4;
+  opacity: 0.34;
   cursor: default;
   pointer-events: none;
 }
-.dlg-chip.is-on {
-  background: color-mix(in srgb, var(--c-success) 12%, var(--c-surface));
-  border-color: color-mix(in srgb, var(--c-success) 45%, var(--c-border));
-  color: color-mix(in srgb, var(--c-success) 80%, var(--c-text));
+/* Signed-in / verified — brand-success tinted fill. */
+.dlg-chip.icon-only.is-on {
+  background: color-mix(in srgb, var(--c-success) 15%, var(--c-surface));
+  color: color-mix(in srgb, var(--c-success) 82%, var(--c-text));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-success) 40%, transparent);
+}
+.dlg-chip.icon-only.is-on:hover {
+  background: color-mix(in srgb, var(--c-success) 22%, var(--c-surface));
+  color: color-mix(in srgb, var(--c-success) 82%, var(--c-text));
+}
+/* Close — neutral, hints dismissal on hover only. */
+.dlg-chip.icon-only.danger:hover {
+  background: color-mix(in srgb, var(--c-danger) 11%, var(--c-surface));
+  color: color-mix(in srgb, var(--c-danger) 82%, var(--c-text));
 }
 /* Compact language chip: icon + short tag, stays small at any width. */
 .dlg-chip.lang {
-  padding: 0 10px;
-  gap: 4px;
+  padding: 0 11px;
+  gap: 5px;
 }
 .dlg-chip-tag {
   font-size: 12px;
@@ -466,6 +509,12 @@ body {
 .dlg-md-table tbody tr:nth-child(even) td {
   background: color-mix(in srgb, var(--c-text) 2.5%, var(--c-surface));
 }
+.dlg-md-table tbody tr {
+  transition: background 0.15s var(--ease);
+}
+.dlg-md-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--c-primary) 5%, var(--c-surface));
+}
 /* First column reads like a label. */
 .dlg-md-table td:first-child {
   font-weight: 600;
@@ -681,6 +730,12 @@ body {
 .dlg-starter:active {
   transform: scale(0.98);
 }
+.dlg-starter:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--c-primary) 45%, var(--c-border));
+  box-shadow: var(--shadow-sm), 0 0 0 2px var(--c-surface),
+    0 0 0 4px color-mix(in srgb, var(--c-primary) 45%, transparent);
+}
 .dlg-starter:disabled {
   opacity: 0.5;
   pointer-events: none;
@@ -751,7 +806,8 @@ body {
 .dlg-progress-track {
   height: 7px;
   border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--c-text) 8%, var(--c-surface));
+  background: color-mix(in srgb, var(--c-text) 9%, var(--c-surface));
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--c-text) 8%, transparent);
   overflow: hidden;
 }
 .dlg-progress-fill {
@@ -759,10 +815,12 @@ body {
   border-radius: var(--r-pill);
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--c-primary) 80%, white),
+    color-mix(in srgb, var(--c-primary) 78%, white),
     var(--c-primary)
   );
-  transition: width 0.5s var(--ease);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 38%, transparent),
+    0 0 8px -2px color-mix(in srgb, var(--c-primary) 55%, transparent);
+  transition: width 0.55s var(--ease-spring);
 }
 .dlg-progress-fill.done {
   background: linear-gradient(90deg, color-mix(in srgb, var(--c-success) 80%, white), var(--c-success));
@@ -770,21 +828,25 @@ body {
 
 .dlg-card {
   background: var(--c-surface);
-  border: 1px solid var(--c-border);
+  border: 1px solid color-mix(in srgb, var(--c-border) 85%, transparent);
   border-radius: var(--r-card);
-  box-shadow: var(--shadow-sm);
-  padding: 14px 16px;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in srgb, #fff 55%, transparent);
+  padding: 13px 16px 5px;
 }
 .dlg-card h3 {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--c-text-muted);
-  margin: 0 0 10px;
+  letter-spacing: 0.07em;
+  color: color-mix(in srgb, var(--c-primary) 45%, var(--c-text-muted));
+  margin: 0 0 4px;
+}
+.dlg-card h3 svg {
+  color: var(--c-primary);
+  opacity: 0.9;
 }
 .dlg-field,
 .dlg-doc {
@@ -801,10 +863,13 @@ body {
 }
 .dlg-field-label {
   color: var(--c-text-muted);
+  font-size: 13px;
+  flex-shrink: 0;
 }
 .dlg-field-value {
   font-weight: 600;
   text-align: end;
+  color: color-mix(in srgb, var(--c-text) 92%, var(--c-primary));
 }
 .dlg-doc-left {
   display: flex;
@@ -948,9 +1013,15 @@ body {
   gap: 10px;
   padding: 13px 15px;
   border-radius: var(--r-card);
-  background: color-mix(in srgb, var(--c-success) 10%, var(--c-surface));
-  border: 1px solid color-mix(in srgb, var(--c-success) 40%, var(--c-border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--c-success) 15%, var(--c-surface)),
+    color-mix(in srgb, var(--c-success) 7%, var(--c-surface))
+  );
+  border: 1px solid color-mix(in srgb, var(--c-success) 42%, var(--c-border));
+  box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent);
   font-size: 13px;
+  animation: dlg-rise 0.5s var(--ease-spring) both;
 }
 .dlg-reference .ref-label {
   color: var(--c-text-muted);
@@ -978,8 +1049,14 @@ body {
   display: grid;
   place-items: center;
   color: var(--c-primary);
-  background: color-mix(in srgb, var(--c-primary) 10%, var(--c-surface));
-  box-shadow: var(--shadow-sm);
+  background: linear-gradient(
+    150deg,
+    color-mix(in srgb, var(--c-primary) 13%, var(--c-surface)),
+    color-mix(in srgb, var(--c-primary) 6%, var(--c-surface))
+  );
+  box-shadow: var(--shadow-sm),
+    0 0 0 6px color-mix(in srgb, var(--c-primary) 5%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent);
 }
 .dlg-empty h4 {
   margin: 0;
