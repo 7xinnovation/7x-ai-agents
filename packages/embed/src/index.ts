@@ -44,14 +44,14 @@ function injectStyles(cfg: BootConfig) {
   if (document.getElementById(STYLE_ID)) return;
   const side = cfg.position === "bottom-left" ? "left: 24px;" : "right: 24px;";
   const css = `
-  :root{--dlg-accent:#1330F0;--dlg-accent-2:#3a52ff;--dlg-accent-fg:#fff}
-  .dlg-launcher{position:fixed;bottom:24px;${side}z-index:2147483000;width:58px;height:58px;border-radius:9999px;border:none;cursor:pointer;padding:0;
-    background:linear-gradient(140deg,var(--dlg-accent-2),var(--dlg-accent));color:var(--dlg-accent-fg);
+  :root{--dlg-accent:#2626a1;--dlg-accent-2:#1f1f86;--dlg-accent-fg:#fff}
+  .dlg-launcher{position:fixed;bottom:24px;${side}z-index:2147483000;width:54px;height:54px;border-radius:9999px;border:none;cursor:pointer;padding:0;
+    background:var(--dlg-accent);color:var(--dlg-accent-fg);
     display:flex;align-items:center;justify-content:center;
-    box-shadow:0 10px 30px rgba(16,24,40,.28),0 2px 8px rgba(16,24,40,.16),inset 0 1px 0 rgba(255,255,255,.28);
-    transition:transform .22s cubic-bezier(.16,1,.3,1),box-shadow .22s ease;will-change:transform;animation:dlg-pop .4s cubic-bezier(.16,1,.3,1) both}
-  .dlg-launcher:hover{transform:translateY(-2px) scale(1.05);box-shadow:0 16px 40px rgba(16,24,40,.34),0 4px 12px rgba(16,24,40,.2)}
-  .dlg-launcher:active{transform:scale(.95)}
+    box-shadow:0 8px 22px -6px rgba(16,24,40,.24),0 2px 6px rgba(16,24,40,.12),inset 0 1px 0 rgba(255,255,255,.14);
+    transition:transform .24s cubic-bezier(.16,1,.3,1),box-shadow .24s ease;will-change:transform;animation:dlg-pop .4s cubic-bezier(.16,1,.3,1) both}
+  .dlg-launcher:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 14px 30px -8px rgba(16,24,40,.28),0 4px 10px rgba(16,24,40,.15),inset 0 1px 0 rgba(255,255,255,.14)}
+  .dlg-launcher:active{transform:scale(.94)}
   .dlg-launcher svg{position:absolute;transition:opacity .2s ease,transform .28s cubic-bezier(.16,1,.3,1)}
   .dlg-launcher .ic-x{opacity:0;transform:rotate(-90deg) scale(.6)}
   .dlg-launcher.open .ic-chat{opacity:0;transform:rotate(90deg) scale(.6)}
@@ -83,7 +83,8 @@ async function applyTheme(cfg: BootConfig) {
     const fg: string | undefined = data?.theme?.colors?.primaryForeground;
     if (primary) {
       document.documentElement.style.setProperty("--dlg-accent", primary);
-      document.documentElement.style.setProperty("--dlg-accent-2", `color-mix(in srgb, ${primary} 78%, white)`);
+      // Slightly darker same-hue shade for depth (no light-to-bright gradient).
+      document.documentElement.style.setProperty("--dlg-accent-2", `color-mix(in srgb, ${primary} 86%, black)`);
     }
     if (fg) document.documentElement.style.setProperty("--dlg-accent-fg", fg);
   } catch {
@@ -92,7 +93,7 @@ async function applyTheme(cfg: BootConfig) {
 }
 
 const CHAT_ICON =
-  '<svg class="ic-chat" width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/></svg>';
+  '<svg class="ic-chat" width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.4c0 3.8-3.6 6.9-8 6.9-1.05 0-2.05-.16-2.96-.45L4 19.5l1.16-3.32A6.5 6.5 0 0 1 4 11.4C4 7.6 7.6 4.5 12 4.5s8 3.1 8 6.9Z"/></svg>';
 const X_ICON =
   '<svg class="ic-x" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 

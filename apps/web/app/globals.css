@@ -138,9 +138,9 @@ body {
 }
 /* Brand wordmark/emblem shown in the header in place of the avatar tile. */
 .dlg-header-logo {
-  height: 26px;
+  height: 19px;
   width: auto;
-  max-width: 132px;
+  max-width: 104px;
   object-fit: contain;
   flex-shrink: 0;
   display: block;
