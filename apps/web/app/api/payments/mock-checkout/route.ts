@@ -33,7 +33,9 @@ async function finish(outcome){
   await fetch('/api/payments/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reference:${JSON.stringify(ref)},outcome})});
   document.querySelectorAll('button').forEach(b=>b.style.display='none');
   var d=document.getElementById('done');d.style.display='block';
-  d.textContent = outcome==='paid' ? '✓ Payment successful. Return to the chat to continue.' : 'Payment cancelled. Return to the chat.';
+  d.textContent = outcome==='paid' ? '✓ Payment successful. Returning you to the chat\\u2026' : 'Payment cancelled. Returning you to the chat\\u2026';
+  // Opened as a popup from the chat — hand control back automatically.
+  setTimeout(function(){ window.close(); }, 1400);
 }
 </script></body></html>`;
   return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });

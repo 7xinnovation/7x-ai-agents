@@ -135,6 +135,40 @@ export function Markdown({ text }: { text: string }) {
       );
       continue;
     }
+    // Horizontal rule: --- / *** on its own line (not a table separator — those
+    // are consumed by the table branch above).
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+      nodes.push(<hr key={k++} className="dlg-md-hr" />);
+      i++;
+      continue;
+    }
+    // Headings: #..#### — rendered as compact section titles inside the bubble.
+    const h = line.match(/^\s*(#{1,4})\s+(.*)$/);
+    if (h) {
+      nodes.push(
+        <div key={k++} className={`dlg-md-h dlg-md-h${h[1]!.length}`}>
+          {renderInline(h[2]!)}
+        </div>
+      );
+      i++;
+      continue;
+    }
+    // Blockquote: consecutive "> " lines grouped into one quote block.
+    if (/^\s*>\s?/.test(line)) {
+      const quote: string[] = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i]!)) {
+        quote.push(lines[i]!.replace(/^\s*>\s?/, ""));
+        i++;
+      }
+      nodes.push(
+        <blockquote key={k++} className="dlg-md-quote">
+          {quote.map((q, j) => (
+            <React.Fragment key={j}>{j > 0 ? <br /> : null}{renderInline(q)}</React.Fragment>
+          ))}
+        </blockquote>
+      );
+      continue;
+    }
     if (/^\s*[-*]\s+/.test(line)) {
       const items: string[] = [];
       while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]!)) {
@@ -150,7 +184,9 @@ export function Markdown({ text }: { text: string }) {
       i++;
     } else {
       const para: string[] = [];
-      while (i < lines.length && lines[i]!.trim() !== "" && !/^\s*[-*]\s+/.test(lines[i]!)) {
+      const isBlock = (l: string) =>
+        /^\s*[-*]\s+/.test(l) || /^\s*(-{3,}|\*{3,})\s*$/.test(l) || /^\s*#{1,4}\s+/.test(l) || /^\s*>\s?/.test(l);
+      while (i < lines.length && lines[i]!.trim() !== "" && !isBlock(lines[i]!)) {
         para.push(lines[i]!);
         i++;
       }

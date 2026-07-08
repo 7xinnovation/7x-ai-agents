@@ -19,15 +19,25 @@ import {
   ArrowRight,
   UploadSimple,
   ArrowClockwise,
+  LockSimple,
+  ArrowSquareOut,
 } from "@phosphor-icons/react";
 import { tr, type CaseState, type Locale } from "@dialog/config";
 import { Markdown, TypewriterMarkdown } from "./Markdown";
 import type { PublicAgent } from "./types";
 
+interface PaymentInfo {
+  reference: string;
+  link?: string;
+  amount: number;
+  currency: string;
+}
+
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   citations?: string[];
+  payment?: PaymentInfo;
 }
 
 const STR = {
@@ -58,6 +68,14 @@ const STR = {
     askAnything: "Ask anything, or start with",
     enterToSend: "Enter to send",
     poweredBy: "AI assistant",
+    securePayment: "Secure payment",
+    payNow: "Pay now",
+    payWaiting: "Complete the payment in the secure window…",
+    payPaid: "Payment received",
+    payFailed: "Payment unsuccessful",
+    payRetry: "Try again",
+    payNote: "Processed by the payment gateway — card details never touch this chat.",
+    payWindowClosed: "The payment window was closed.",
   },
   ar: {
     placeholder: "اكتب رسالتك…",
@@ -86,6 +104,14 @@ const STR = {
     askAnything: "اسأل أي شيء، أو ابدأ بـ",
     enterToSend: "اضغط Enter للإرسال",
     poweredBy: "مساعد ذكي",
+    securePayment: "دفع آمن",
+    payNow: "ادفع الآن",
+    payWaiting: "أكمل الدفع في النافذة الآمنة…",
+    payPaid: "تم استلام الدفعة",
+    payFailed: "لم تكتمل عملية الدفع",
+    payRetry: "حاول مرة أخرى",
+    payNote: "تتم المعالجة عبر بوابة الدفع — بيانات البطاقة لا تمر عبر هذه المحادثة.",
+    payWindowClosed: "تم إغلاق نافذة الدفع.",
   },
 } as const;
 
@@ -114,6 +140,147 @@ function toolStatusLabel(ev: { type: string; tool?: string; kind?: string }, ar:
   return L("Working on it…", "جارٍ العمل على طلبك…");
 }
 
+/**
+ * In-chat secure payment card. The hosted gateway page opens in a centered
+ * popup (card data never touches the chat — PCI stays with the gateway); while
+ * it's open we poll the payment status, and the moment the webhook settles it
+ * the card flips to paid/failed and `onPaid` lets the conversation continue.
+ */
+function PaymentCard({
+  payment,
+  conversationId,
+  strings,
+  locale,
+  onPaid,
+}: {
+  payment: PaymentInfo;
+  conversationId: string | null;
+  strings: (typeof STR)[Locale];
+  locale: Locale;
+  onPaid: () => void;
+}) {
+  const [phase, setPhase] = useState<"ready" | "waiting" | "paid" | "failed">("ready");
+  const [note, setNote] = useState<string | null>(null);
+  const popupRef = useRef<Window | null>(null);
+  const paidRef = useRef(false);
+
+  const amountFmt = useMemo(() => {
+    try {
+      return new Intl.NumberFormat(locale === "ar" ? "ar-AE" : "en-AE", {
+        style: "currency",
+        currency: payment.currency,
+      }).format(payment.amount);
+    } catch {
+      return `${payment.amount} ${payment.currency}`;
+    }
+  }, [payment.amount, payment.currency, locale]);
+
+  const openPopup = useCallback(() => {
+    if (!payment.link) return;
+    const w = 480;
+    const h = 720;
+    const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
+    const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
+    const win = window.open(payment.link, "dlg-pay", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+    // Popup blocked → new tab; polling picks the result up either way.
+    popupRef.current = win ?? window.open(payment.link, "_blank");
+    setNote(null);
+    setPhase("waiting");
+  }, [payment.link]);
+
+  useEffect(() => {
+    if (phase !== "waiting" || !conversationId) return;
+    let cancelled = false;
+    let closedPolls = 0;
+    let polls = 0;
+    const tick = async () => {
+      polls++;
+      try {
+        const res = await fetch(
+          `/api/payments/status?reference=${encodeURIComponent(payment.reference)}&conversationId=${encodeURIComponent(conversationId)}`
+        );
+        if (!res.ok || cancelled) return;
+        const { status } = (await res.json()) as { status?: string };
+        if (cancelled) return;
+        if (status === "paid") {
+          setPhase("paid");
+          if (!paidRef.current) {
+            paidRef.current = true;
+            onPaid();
+          }
+          return;
+        }
+        if (status === "failed") {
+          setPhase("failed");
+          return;
+        }
+      } catch {
+        /* transient — keep polling */
+      }
+      // Customer dismissed the payment window without paying → offer the button again.
+      if (popupRef.current?.closed) {
+        closedPolls++;
+        if (closedPolls >= 2) {
+          setPhase("ready");
+          setNote(strings.payWindowClosed);
+        }
+      }
+      if (polls > 240) setPhase("ready"); // ~10 min safety stop
+    };
+    const id = setInterval(() => void tick(), 2500);
+    void tick();
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [phase, conversationId, payment.reference, onPaid, strings]);
+
+  return (
+    <div className={`dlg-paycard ${phase}`}>
+      <div className="dlg-paycard-head">
+        <span className="dlg-paycard-icon">
+          <LockSimple size={14} weight="fill" />
+        </span>
+        <span className="dlg-paycard-title">{strings.securePayment}</span>
+        <span className="dlg-paycard-amount">{amountFmt}</span>
+      </div>
+      {phase === "ready" ? (
+        <>
+          <button className="dlg-paybtn" onClick={openPopup} disabled={!payment.link}>
+            {strings.payNow}
+            <ArrowSquareOut size={15} weight="bold" />
+          </button>
+          {note ? <div className="dlg-paycard-note warn">{note}</div> : null}
+          <div className="dlg-paycard-note">{strings.payNote}</div>
+        </>
+      ) : null}
+      {phase === "waiting" ? (
+        <div className="dlg-paycard-status">
+          <span className="dlg-tool-spinner" />
+          {strings.payWaiting}
+        </div>
+      ) : null}
+      {phase === "paid" ? (
+        <div className="dlg-paycard-status paid">
+          <CheckCircle size={16} weight="fill" />
+          {strings.payPaid}
+        </div>
+      ) : null}
+      {phase === "failed" ? (
+        <>
+          <div className="dlg-paycard-status failed">
+            <Warning size={16} weight="fill" />
+            {strings.payFailed}
+          </div>
+          <button className="dlg-paybtn ghost" onClick={openPopup} disabled={!payment.link}>
+            {strings.payRetry}
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function Experience({
   agent,
   initialLocale,
@@ -138,6 +305,9 @@ export function Experience({
   // Resume completion + a one-shot flag to fire the account pulse after sign-in.
   const [resumed, setResumed] = useState(false);
   const [signedInPulse, setSignedInPulse] = useState(false);
+  // One-shot flag: the in-chat payment card saw the webhook settle → have the
+  // assistant confirm + continue as soon as no turn is streaming.
+  const [paymentPulse, setPaymentPulse] = useState(false);
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -299,19 +469,53 @@ export function Experience({
     setAuthenticated(false);
   }, [streaming, storageKey]);
 
-  // Sign-in: real UAE PASS OIDC redirect when configured, else the dev mock toggle.
+  // Sign-in: real UAE PASS OIDC when configured, else the dev mock toggle.
+  // UAE PASS forbids being framed, so from the embedded widget it opens in a
+  // centered popup; the callback posts the result back and the chat continues in
+  // place. Falls back to a full redirect if the popup is blocked.
   const signIn = useCallback(() => {
     if (agent.uaePassEnabled && typeof window !== "undefined") {
-      const returnTo = window.location.href.split("?")[0] ?? window.location.href;
-      window.location.href =
+      const base =
         `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
-        `&cid=${encodeURIComponent(convId.current ?? "")}` +
-        `&returnTo=${encodeURIComponent(returnTo)}`;
+        `&cid=${encodeURIComponent(convId.current ?? "")}`;
+      const w = 480;
+      const h = 720;
+      const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
+      const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
+      const win = window.open(`${base}&popup=1`, "dlg-uaepass", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+      if (!win) {
+        const returnTo = window.location.href.split("?")[0] ?? window.location.href;
+        window.location.href = `${base}&returnTo=${encodeURIComponent(returnTo)}`;
+      }
     } else {
       setAuthenticated(true);
       setAuthReason(null);
     }
   }, [agent.uaePassEnabled, agent.slug]);
+
+  // Result of the popup sign-in, posted by the callback page.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      const m = e.data as { source?: string; status?: string; cid?: string | null };
+      if (m?.source !== "dialog-uaepass") return;
+      if (m.status === "ok") {
+        setAuthenticated(true);
+        setAuthReason(null);
+        if (m.cid) {
+          convId.current = m.cid;
+          try { window.localStorage.setItem(storageKey, m.cid); } catch { /* ignore */ }
+        }
+        setSignedInPulse(true);
+      } else if (m.status === "cancelled") {
+        setAuthReason(locale === "ar" ? "تم إلغاء تسجيل الدخول." : "Sign-in was cancelled.");
+      } else {
+        setAuthReason(locale === "ar" ? "تعذّر إكمال تسجيل الدخول. حاول مرة أخرى." : "Sign-in could not be completed. Please try again.");
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [storageKey, locale]);
 
   const toggleFull = useCallback(() => {
     setFull((prev) => {
@@ -320,18 +524,20 @@ export function Experience({
     });
   }, []);
 
-  const send = useCallback(async (override?: string, opts?: { proactive?: boolean }) => {
+  const send = useCallback(async (override?: string, opts?: { proactive?: boolean; paymentSettled?: boolean }) => {
     const proactive = opts?.proactive ?? false;
-    const text = proactive ? "" : (override ?? input).trim();
+    const paymentSettled = opts?.paymentSettled ?? false;
+    const silent = proactive || paymentSettled;
+    const text = silent ? "" : (override ?? input).trim();
     if (streaming) return;
-    if (!proactive && !text) return;
-    if (!proactive) setInput("");
+    if (!silent && !text) return;
+    if (!silent) setInput("");
     setAuthReason(null);
-    // Proactive turns (e.g. the post-sign-in account pulse) add no user bubble —
-    // only the assistant's response is shown.
+    // Silent turns (post-sign-in account pulse, payment settled) add no user
+    // bubble — only the assistant's response is shown.
     setMessages((prev) => [
       ...prev,
-      ...(proactive ? [] : [{ role: "user" as const, content: text }]),
+      ...(silent ? [] : [{ role: "user" as const, content: text }]),
       { role: "assistant" as const, content: "", citations: [] },
     ]);
     setStreaming(true);
@@ -343,8 +549,9 @@ export function Experience({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug: agent.slug,
-          userMessage: proactive ? "account_pulse" : text,
+          userMessage: proactive ? "account_pulse" : paymentSettled ? "payment_settled" : text,
           pulse: proactive || undefined,
+          paymentSettled: paymentSettled || undefined,
           conversationId: convId.current ?? undefined,
           locale,
           authenticated,
@@ -367,30 +574,47 @@ export function Experience({
           }
         } else if (ev.type === "text") {
           if (ev.delta) setToolStatus(null); // real text is arriving — drop the status
+          // Pure updater: never mutate the previous message object — StrictMode
+          // double-invokes updaters, and a mutation would append the delta twice.
           setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last) last.content += ev.delta;
+            const last = prev[prev.length - 1];
+            if (!last) return prev;
+            const next = prev.slice();
+            next[next.length - 1] = { ...last, content: last.content + ev.delta };
             return next;
           });
         } else if (ev.type === "integration" || ev.type === "lookup") {
           setToolStatus(toolStatusLabel(ev, locale === "ar"));
+        } else if (ev.type === "payment_initiated") {
+          // Attach the secure payment card to the assistant message being streamed.
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (!last) return prev;
+            const next = prev.slice();
+            next[next.length - 1] = {
+              ...last,
+              payment: { reference: ev.reference, link: ev.link, amount: ev.amount, currency: ev.currency },
+            };
+            return next;
+          });
         } else if (ev.type === "case") {
           setCaseState(ev.state);
         } else if (ev.type === "citation") {
           setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last && !last.citations?.includes(ev.source)) last.citations = [...(last.citations ?? []), ev.source];
+            const last = prev[prev.length - 1];
+            if (!last || last.citations?.includes(ev.source)) return prev;
+            const next = prev.slice();
+            next[next.length - 1] = { ...last, citations: [...(last.citations ?? []), ev.source] };
             return next;
           });
         } else if (ev.type === "auth_required") {
           setAuthReason(ev.reason);
         } else if (ev.type === "error") {
           setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last) last.content += `\n\n⚠ ${ev.message}`;
+            const last = prev[prev.length - 1];
+            if (!last) return prev;
+            const next = prev.slice();
+            next[next.length - 1] = { ...last, content: `${last.content}\n\n⚠ ${ev.message}` };
             return next;
           });
         }
@@ -414,9 +638,10 @@ export function Experience({
       }
     } catch (err) {
       setMessages((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        if (last) last.content += `\n\n⚠ ${err instanceof Error ? err.message : "error"}`;
+        const last = prev[prev.length - 1];
+        if (!last) return prev;
+        const next = prev.slice();
+        next[next.length - 1] = { ...last, content: `${last.content}\n\n⚠ ${err instanceof Error ? err.message : "error"}` };
         return next;
       });
     } finally {
@@ -433,6 +658,18 @@ export function Experience({
       void send(undefined, { proactive: true });
     }
   }, [signedInPulse, resumed, authenticated, streaming, send]);
+
+  // The payment card saw the gateway settle the payment → as soon as no turn is
+  // streaming, have the assistant confirm and finish the journey (no user bubble).
+  useEffect(() => {
+    if (paymentPulse && !streaming) {
+      setPaymentPulse(false);
+      void send(undefined, { paymentSettled: true });
+    }
+  }, [paymentPulse, streaming, send]);
+
+  // Stable callback for PaymentCard so its polling effect isn't reset each render.
+  const onPaymentPaid = useCallback(() => setPaymentPulse(true), []);
 
   const fallbackFont = "'SF Pro Display', -apple-system, 'Segoe UI', system-ui, sans-serif";
   const rootStyle = {
@@ -570,6 +807,15 @@ export function Experience({
                         </span>
                       ) : null
                     : null}
+                  {m.payment ? (
+                    <PaymentCard
+                      payment={m.payment}
+                      conversationId={convId.current}
+                      strings={t}
+                      locale={locale}
+                      onPaid={onPaymentPaid}
+                    />
+                  ) : null}
                   {m.citations?.length ? (
                     <div className="dlg-sources">
                       {m.citations.map((s, k) => (
@@ -611,6 +857,11 @@ export function Experience({
               <button className="dlg-send" onClick={() => void send()} disabled={streaming || !input.trim()} aria-label="Send">
                 <PaperPlaneRight size={18} weight="fill" />
               </button>
+            </div>
+            <div className="dlg-input-hint" aria-hidden="true">
+              <span>{t.poweredBy}</span>
+              <span className="sep" />
+              <span>{t.enterToSend}</span>
             </div>
           </div>
         </section>

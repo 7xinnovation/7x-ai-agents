@@ -52,22 +52,28 @@ function injectStyles(cfg: BootConfig) {
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 10px 26px -8px color-mix(in srgb,var(--dlg-accent) 55%,transparent),0 3px 8px rgba(16,24,40,.14),inset 0 0 0 1px rgba(255,255,255,.10),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -2px 3px color-mix(in srgb,var(--dlg-accent-2) 60%,transparent);
     transition:transform .24s cubic-bezier(.16,1,.3,1),box-shadow .24s ease;will-change:transform;animation:dlg-pop .4s cubic-bezier(.16,1,.3,1) both}
+  .dlg-launcher::before{content:"";position:absolute;inset:-7px;border-radius:inherit;z-index:-1;pointer-events:none;
+    background:radial-gradient(closest-side,color-mix(in srgb,var(--dlg-accent) 32%,transparent),transparent);
+    filter:blur(9px);animation:dlg-breathe 4.5s ease-in-out infinite}
+  .dlg-launcher:hover::before{animation-play-state:paused;opacity:.85}
+  .dlg-launcher.open::before{display:none}
   .dlg-launcher:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 16px 34px -8px color-mix(in srgb,var(--dlg-accent) 62%,transparent),0 5px 12px rgba(16,24,40,.16),inset 0 0 0 1px rgba(255,255,255,.12),inset 0 1px 0 rgba(255,255,255,.22)}
   .dlg-launcher:active{transform:scale(.94)}
   .dlg-launcher svg{position:absolute;transition:opacity .2s ease,transform .28s cubic-bezier(.16,1,.3,1)}
   .dlg-launcher .ic-x{opacity:0;transform:rotate(-90deg) scale(.6)}
   .dlg-launcher.open .ic-chat{opacity:0;transform:rotate(90deg) scale(.6)}
   .dlg-launcher.open .ic-x{opacity:1;transform:none}
-  .dlg-frame{position:fixed;border:none;z-index:2147483001;background:transparent;border-radius:20px;
-    box-shadow:0 30px 80px rgba(16,24,40,.30),0 8px 24px rgba(16,24,40,.18);
+  .dlg-frame{position:fixed;border:none;z-index:2147483001;background:transparent;border-radius:22px;
+    box-shadow:0 0 0 1px rgba(16,24,40,.07),0 30px 80px rgba(16,24,40,.28),0 8px 24px rgba(16,24,40,.16);
     opacity:0;visibility:hidden;transform:translateY(14px) scale(.98);transform-origin:bottom ${cfg.position === "bottom-left" ? "left" : "right"};
     transition:opacity .3s cubic-bezier(.16,1,.3,1),transform .3s cubic-bezier(.16,1,.3,1),visibility .3s,width .3s ease,height .3s ease,border-radius .3s ease}
   .dlg-frame.widget{bottom:96px;${side}width:404px;height:640px;max-height:calc(100vh - 120px)}
   .dlg-frame.full{inset:0;width:100vw;height:100vh;border-radius:0;transform-origin:center}
   .dlg-frame.open{opacity:1;visibility:visible;transform:none}
   @media (max-width:640px){.dlg-frame.widget{inset:0;width:100vw;height:100vh;border-radius:0}}
-  @media (prefers-reduced-motion:reduce){.dlg-launcher{animation:none}.dlg-launcher,.dlg-launcher svg,.dlg-frame{transition:opacity .15s linear}}
+  @media (prefers-reduced-motion:reduce){.dlg-launcher{animation:none}.dlg-launcher::before{animation:none}.dlg-launcher,.dlg-launcher svg,.dlg-frame{transition:opacity .15s linear}}
   @keyframes dlg-pop{from{opacity:0;transform:translateY(10px) scale(.8)}to{opacity:1;transform:none}}
+  @keyframes dlg-breathe{0%,100%{transform:scale(1);opacity:.45}50%{transform:scale(1.14);opacity:.75}}
   `;
   const style = document.createElement("style");
   style.id = STYLE_ID;
