@@ -69,7 +69,13 @@ async function run() {
 
   // Confirm payment via webhook (authoritative).
   if (paymentRef) {
-    const wh = await fetch(`${BASE}/api/payments/webhook`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reference: paymentRef, outcome: "paid" }) });
+    const whBody = JSON.stringify({ reference: paymentRef, outcome: "paid" });
+    const whHeaders = { "Content-Type": "application/json" };
+    if (process.env.PAYMENT_WEBHOOK_SECRET) {
+      const { createHmac } = await import("node:crypto");
+      whHeaders["x-dialog-signature"] = "sha256=" + createHmac("sha256", process.env.PAYMENT_WEBHOOK_SECRET).update(whBody).digest("hex");
+    }
+    const wh = await fetch(`${BASE}/api/payments/webhook`, { method: "POST", headers: whHeaders, body: whBody });
     const wj = await wh.json().catch(() => ({}));
     check("Webhook confirms payment (200 ok)", wh.status === 200 && (wj.ok || wj.idempotent), `status=${wh.status} ${JSON.stringify(wj)}`);
   }

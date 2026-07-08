@@ -1,6 +1,15 @@
 import { NextRequest } from "next/server";
+import { createHmac } from "node:crypto";
 
 export const runtime = "nodejs";
+
+/** Sign a webhook body exactly like a real gateway would, so the mock keeps
+ * working when PAYMENT_WEBHOOK_SECRET (HMAC verification) is enabled. */
+function sign(body: string): string {
+  const secret = process.env.PAYMENT_WEBHOOK_SECRET;
+  if (!secret) return "";
+  return "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
+}
 
 /**
  * Mock payment gateway checkout page. Stands in for the Network International
@@ -9,6 +18,11 @@ export const runtime = "nodejs";
  */
 export async function GET(req: NextRequest) {
   const ref = req.nextUrl.searchParams.get("ref") ?? "";
+  // Pre-compute the signed payloads server-side (the secret never reaches the page).
+  const bodyPaid = JSON.stringify({ reference: ref, outcome: "paid" });
+  const bodyFailed = JSON.stringify({ reference: ref, outcome: "failed" });
+  const sigs = JSON.stringify({ paid: sign(bodyPaid), failed: sign(bodyFailed) });
+  const bodies = JSON.stringify({ paid: bodyPaid, failed: bodyFailed });
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Secure Payment</title>
 <style>
@@ -29,8 +43,11 @@ export async function GET(req: NextRequest) {
   <div class="done" id="done"></div>
 </div>
 <script>
+var SIGS=${sigs}, BODIES=${bodies};
 async function finish(outcome){
-  await fetch('/api/payments/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reference:${JSON.stringify(ref)},outcome})});
+  var headers={'Content-Type':'application/json'};
+  if(SIGS[outcome]) headers['x-dialog-signature']=SIGS[outcome];
+  await fetch('/api/payments/webhook',{method:'POST',headers:headers,body:BODIES[outcome]});
   document.querySelectorAll('button').forEach(b=>b.style.display='none');
   var d=document.getElementById('done');d.style.display='block';
   d.textContent = outcome==='paid' ? '✓ Payment successful. Returning you to the chat\\u2026' : 'Payment cancelled. Returning you to the chat\\u2026';

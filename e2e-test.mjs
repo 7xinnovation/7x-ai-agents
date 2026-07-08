@@ -78,14 +78,22 @@ async function run() {
   check("KB answer cites sources OR stays grounded", r.citations.length > 0 || /licen|document|trade/i.test(r.text),
     `citations=${r.citations.length}`);
 
-  section("EPGL · Auth gating for transactional action");
+  section("EPGL · Guest journey policy (guest-allowed while client testing)");
+  // EPGL journeys are temporarily guest-allowed (NXN pattern; see BLOCKERS.md).
+  // Flip this assertion back to "prompts authentication" when requiresAuth returns.
   r = await chat({ agentSlug: "epgl-dialog", userMessage: "I want to apply for a new courier license right now. Let's start." });
-  const epglAuth = r.types.includes("auth_required") || /sign in|log ?in|authenticat|uae ?pass/i.test(r.text);
-  check("Guest apply → prompts authentication", epglAuth, `types=${r.types}`);
+  const epglGuest = r.state?.journeyKey === "new_license" || /company|licen[cs]e|trade|name/i.test(r.text);
+  check("Guest apply starts the journey", epglGuest, `journey=${r.state?.journeyKey} types=${r.types}`);
 
   section("EPGL · Escalation / callback");
   r = await chat({ agentSlug: "epgl-dialog", userMessage: "This is too complicated, I want a human to call me back please." });
-  const epglEsc = r.tools.some((t) => /escal|callback/i.test(t)) || /callback|call you|agent|human|reference/i.test(r.text);
+  const escConv = r.conversationId;
+  let epglEsc = r.tools.some((t) => /escal|callback/i.test(t)) || /callback|call you|agent|human|reference/i.test(r.text);
+  if (!epglEsc) {
+    // Collecting contact details before filing is valid — supply them and expect the escalation.
+    r = await chat({ agentSlug: "epgl-dialog", conversationId: escConv, userMessage: "Omar Haddad, +971501234567, it's about a courier license question. Please arrange the callback." });
+    epglEsc = r.tools.some((t) => /escal|callback/i.test(t)) || /callback|reference|call you|arranged/i.test(r.text);
+  }
   check("Callback request handled", epglEsc, `tools=${r.tools} text~=${lc(r.text).slice(0,60)}`);
 
   section("EPGL · Multilingual (Arabic)");
@@ -138,14 +146,20 @@ async function run() {
 
   section("Payments · Reconciliation sweep");
   {
-    const rc = await fetch(`${BASE}/api/payments/reconcile`, { method: "POST" });
+    const rc = await fetch(`${BASE}/api/payments/reconcile`, { method: "POST", headers: process.env.CRON_SECRET ? { "x-cron-secret": process.env.CRON_SECRET } : {} });
     check("POST /api/payments/reconcile → 200", rc.status === 200, `status=${rc.status}`);
     if (rc.status === 200) { const j = await rc.json(); check("reconcile returns sweep counts", j.ok === true && "paymentsChecked" in j, JSON.stringify(j).slice(0, 100)); }
   }
 
   section("Payments · Webhook rejects bad input");
   {
-    const wh = await fetch(`${BASE}/api/payments/webhook`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reference: "DOES-NOT-EXIST", outcome: "paid" }) });
+    const whBody = JSON.stringify({ reference: "DOES-NOT-EXIST", outcome: "paid" });
+    const whHeaders = { "Content-Type": "application/json" };
+    if (process.env.PAYMENT_WEBHOOK_SECRET) {
+      const { createHmac } = await import("node:crypto");
+      whHeaders["x-dialog-signature"] = "sha256=" + createHmac("sha256", process.env.PAYMENT_WEBHOOK_SECRET).update(whBody).digest("hex");
+    }
+    const wh = await fetch(`${BASE}/api/payments/webhook`, { method: "POST", headers: whHeaders, body: whBody });
     check("Webhook unknown ref → 404 (not silent success)", wh.status === 404, `status=${wh.status}`);
   }
 
