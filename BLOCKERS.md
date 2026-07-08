@@ -48,13 +48,14 @@ Each is built and selectable per agent; supplying credentials switches it from m
 ### Collections Agent (separate initiative — NOT the EPGL license agent)
 **Built 2026-07-07** as agent `collections-dialog` (internal Finance/AR tool, same tenant): integration "Collections Salesforce" on `epg--epuat.sandbox.my.salesforce.com` (OAuth2 client-credentials, token URL per spec) with both UAT ops — `retrieveAccountByNumber` (SOQL account + outstanding-balance lookup) and `submitCallResult` (atomic composite: Task upsert by Correlation ID + transcript ContentVersion + link). Journey `collection_call` collects outcome/commitment/notes/transcript and the apiFlow renders the exact composite recipe. Verified: agent serves, tools load, and credential-less calls fail gracefully with a callback offer. **Blocked on:** `COLLECTIONS_SF_CLIENT_ID`/`COLLECTIONS_SF_CLIENT_SECRET` — the emailed Postman environment arrived with EMPTY values (verified against the original Outlook attachment; Postman strips "current values" on export — sender asked to re-share). Also TBD by Finance per the solution summary: Call Outcome picklist values (assumed Commitment / No Commitment / Unreachable), email templates + communication rules, sender address, and the nightly balance-refresh integration. Re-run `apps/web/scripts/import-collections-salesforce.ts` once creds land.
 
-### Production secrets (set before go-live)
-| Secret | Why |
-|--------|-----|
-| `PAYMENT_WEBHOOK_SECRET` | Enables HMAC signature verification on the payment webhook (currently skipped in dev). |
-| `SECRETS_KEY` | Dedicated 32-byte key for encrypting integration secrets at rest (currently derived from `ADMIN_SESSION_SECRET`). |
-| Rotated `ADMIN_SESSION_SECRET` + strong `ADMIN_PASSWORD` | Replace the dev bootstrap values. |
-| `AZURE_AD_TENANT_ID/CLIENT_ID/CLIENT_SECRET` _(optional)_ | Enables Microsoft Entra SSO; otherwise password + RBAC is used. |
+### Production secrets (status as of 2026-07-09 e2e audit)
+| Secret | Status |
+|--------|--------|
+| `PAYMENT_WEBHOOK_SECRET` | ✅ **Set (local + Railway)** — webhook now rejects unsigned calls (401); mock gateway signs its posts server-side; e2e suites sign when the env var is present. |
+| `CRON_SECRET` | ✅ **Set (local + Railway)** — `/api/payments/reconcile` now requires `x-cron-secret`. Remaining: schedule the sweep (Railway cron service or external scheduler hitting the endpoint every ~15 min). |
+| `ADMIN_PASSWORD` | ⚠️ **8 characters — weak.** Rotate to a long passphrase before real users; it's the only credential for password login. |
+| `SECRETS_KEY` | Still derived from `ADMIN_SESSION_SECRET` (50 chars, strong). Acceptable; note that setting a dedicated `SECRETS_KEY` later requires RE-ENCRYPTING all stored integration secrets, and rotating `ADMIN_SESSION_SECRET` has the same effect. |
+| `AZURE_AD_TENANT_ID/CLIENT_ID/CLIENT_SECRET` _(optional)_ | Not set — login page auto-shows "Continue with Microsoft" once configured. |
 
 ### Product / content confirmations (from EPGL / NXN PRDs)
 - Exact **document matrix** per license/service type (mandatory vs conditional).
