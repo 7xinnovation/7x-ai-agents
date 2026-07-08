@@ -28,10 +28,59 @@ export async function markAuthenticated(conversationId: string, userRef: string)
 }
 
 /**
+ * PO Boxes this customer has used in previous conversations (matched by their
+ * UAE PASS identity). The EP account-level APIs that would list boxes by
+ * identity are disabled upstream (see BLOCKERS §1 #4), so this is how the
+ * account pulse avoids re-asking a returning customer for their box number —
+ * the first sign-in asks once, every later one starts from what we know.
+ */
+export async function knownCustomerBoxes(
+  agentId: string,
+  userRef: string,
+  limit = 5
+): Promise<{ box: string; emirate?: string }[]> {
+  const rows = await getDb()
+    .select({ state: cases.state })
+    .from(cases)
+    .innerJoin(conversations, eq(cases.conversationId, conversations.id))
+    .where(and(eq(conversations.agentId, agentId), eq(conversations.userRef, userRef)))
+    .orderBy(desc(cases.updatedAt))
+    .limit(25);
+  const seen = new Map<string, { box: string; emirate?: string }>();
+  for (const r of rows) {
+    const data = ((r.state as CaseState | null)?.data ?? {}) as Record<string, unknown>;
+    let box: string | undefined;
+    let emirate: string | undefined;
+    for (const [k, v] of Object.entries(data)) {
+      const nk = k.replace(/[_\s-]/g, "").toLowerCase();
+      if (/^(po)?box(number|no)?$/.test(nk) && (typeof v === "string" || typeof v === "number")) box = String(v);
+      else if (nk === "emirate" && typeof v === "string") emirate = v;
+    }
+    if (box && !seen.has(box)) seen.set(box, { box, emirate });
+    if (seen.size >= limit) break;
+  }
+  return [...seen.values()];
+}
+
+/**
  * Server-authoritative conversation state. The client only holds a
  * conversationId; history + case live in the DB so sessions survive reloads and
  * can be resumed (PRD: partial-application retention / resume) and audited.
  */
+/**
+ * A client's "I am authenticated" claim is honored only while no real UAE PASS
+ * integration is live (mock/dev, e2e scripts) — with real UAE PASS in
+ * production, the ONLY way a conversation becomes authenticated is the UAE PASS
+ * callback (markAuthenticated), which also records the verified identity.
+ * Otherwise anyone could claim authenticated:true and e.g. bypass guest PII
+ * redaction on integration lookups.
+ */
+function clientAuthClaimTrusted(): boolean {
+  if (process.env.NODE_ENV !== "production") return true;
+  if (process.env.UAEPASS_MOCK === "1") return true;
+  return !(process.env.UAEPASS_CLIENT_ID && process.env.UAEPASS_CLIENT_SECRET);
+}
+
 export async function getOrCreateSession(input: {
   agentId: string;
   conversationId?: string;
@@ -40,6 +89,7 @@ export async function getOrCreateSession(input: {
   userRef?: string;
 }): Promise<Session> {
   const db = getDb();
+  const claimedAuth = input.authenticated && clientAuthClaimTrusted();
 
   if (input.conversationId) {
     const conv = await db.query.conversations.findFirst({
@@ -50,7 +100,7 @@ export async function getOrCreateSession(input: {
       // (UAE PASS callback sets authenticated + a session token), a later client
       // request claiming "guest" must NOT downgrade it — otherwise the next
       // message after sign-in would re-gate the journey. Client can only upgrade.
-      const effectiveAuth = conv.authenticated || input.authenticated || Boolean(conv.sessionToken);
+      const effectiveAuth = conv.authenticated || claimedAuth || Boolean(conv.sessionToken);
       if (effectiveAuth !== conv.authenticated || (input.userRef && conv.userRef !== input.userRef)) {
         await db
           .update(conversations)
@@ -83,7 +133,7 @@ export async function getOrCreateSession(input: {
     .values({
       agentId: input.agentId,
       locale: input.locale,
-      authenticated: input.authenticated,
+      authenticated: claimedAuth,
       userRef: input.userRef,
     })
     .returning();
@@ -91,7 +141,7 @@ export async function getOrCreateSession(input: {
     .insert(cases)
     .values({ conversationId: conv!.id, agentId: input.agentId, state: emptyCase() })
     .returning();
-  return { conversationId: conv!.id, caseId: caseRow!.id, state: caseRow!.state, history: [], authenticated: input.authenticated, userRef: input.userRef };
+  return { conversationId: conv!.id, caseId: caseRow!.id, state: caseRow!.state, history: [], authenticated: claimedAuth, userRef: input.userRef };
 }
 
 export async function appendMessage(

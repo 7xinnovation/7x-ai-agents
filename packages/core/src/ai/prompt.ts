@@ -74,7 +74,10 @@ export function buildSystemPrompt(
   locale: Locale,
   authenticated: boolean,
   businessOpen?: boolean,
-  intent?: { intent: string; confidence: number }
+  intent?: { intent: string; confidence: number },
+  // Server-verified facts about the signed-in customer (e.g. PO Boxes on file
+  // from previous authenticated sessions) — so the agent never re-asks for them.
+  customerContext?: string
 ): SystemPrompt {
   const journey = findJourney(agent, state.journeyKey);
   const g = agent.guardrails;
@@ -117,6 +120,7 @@ ${journey.steps
   values you read from a tool), not batched at the end — the customer's side
   panel updates live from these calls. Do not claim something is saved unless you
   called the tool.
+- Formatting: simple markdown only — **bold** for key values, short "###" headings when a reply has sections, tables for comparisons, "-" bullets. NEVER use emojis or decorative symbols; keep a clean, professional, government-service tone. Express status in words ("Active", "Off"), not icons.
 - Reply in ${locale === "ar" ? "Arabic (with correct, natural phrasing)" : "English"} unless the user switches language; preserve all collected context across a language switch.
 - Never re-ask for information already present in the case or already provided this session.
 - When you have what you need, act (call the tool) instead of asking permission to act.
@@ -165,8 +169,11 @@ ${businessOpen === false
 ${journey?.submission?.apiFlow
       ? renderApiFlow(journey.submission.apiFlow)
       : journey?.submission?.requiresPayment
-        ? `- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment, share the secure link, and WAIT for confirmation. Only call submit_case once payment status is "paid".`
-        : "- The active journey (if any) has no payment step."}
+        ? `- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment — a secure payment card appears in the chat automatically, so never paste a link; WAIT for confirmation. Only call submit_case once payment status is "paid".`
+        : "- The active journey (if any) has no payment step."}${customerContext ? `
+
+# Known customer record (server-verified, from previous signed-in sessions)
+${customerContext}` : ""}
 
 # Current case state
 ${journeyBlock}

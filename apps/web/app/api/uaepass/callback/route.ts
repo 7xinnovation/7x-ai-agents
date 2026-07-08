@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri } from "@/lib/uaepass";
-import { saveSessionToken, markAuthenticated } from "@/lib/conversation";
+import { saveSessionToken, markAuthenticated, getOrCreateSession } from "@/lib/conversation";
+import { getAgentBySlug } from "@/lib/agents";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -16,13 +17,27 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const err = req.nextUrl.searchParams.get("error");
-  let flow: { state?: string; cid?: string; agent?: string; returnTo?: string } = {};
+  let flow: { state?: string; cid?: string; agent?: string; returnTo?: string; popup?: boolean } = {};
   try { flow = JSON.parse(req.cookies.get("uaepass_flow")?.value ?? "{}"); } catch { /* ignore */ }
 
-  const back = (params: Record<string, string>) => {
+  const back = (params: Record<string, string>, cid: string | undefined = flow.cid) => {
+    // Popup flow: hand the result back to the chat via postMessage and close —
+    // the embed stays exactly where it was (no page navigation at all).
+    if (flow.popup) {
+      const payload = JSON.stringify({ source: "dialog-uaepass", status: params.uaepass ?? "ok", cid: cid ?? null });
+      const origin = JSON.stringify(req.nextUrl.origin);
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in complete</title></head>
+<body style="font-family:-apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#5b6478">
+<p>Returning you to the chat…</p>
+<script>try{if(window.opener)window.opener.postMessage(${payload},${origin});}catch(e){}window.close();</script>
+</body></html>`;
+      const res = new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      res.cookies.delete("uaepass_flow");
+      return res;
+    }
     const url = new URL(flow.returnTo || `${req.nextUrl.origin}/embed/${flow.agent ?? ""}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-    if (flow.cid) url.searchParams.set("cid", flow.cid);
+    if (cid) url.searchParams.set("cid", cid);
     const res = NextResponse.redirect(url.toString());
     res.cookies.delete("uaepass_flow");
     return res;
@@ -37,11 +52,22 @@ export async function GET(req: NextRequest) {
     const id = uaePassMock()
       ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: "uaepass-mock-001", name: "Test Persona" }
       : await exchangeCode(code, resolveRedirectUri(req.nextUrl.origin));
-    if (flow.cid) {
-      await saveSessionToken(flow.cid, id.accessToken); // becomes the bearer for protected calls
-      await markAuthenticated(flow.cid, id.sub);
+    // Signed in before the first message → no conversation exists yet. Create it
+    // here so the verified identity has somewhere to live; the redirect's ?cid=
+    // pins it in the embed, and the post-sign-in pulse lands in it.
+    let cid = flow.cid;
+    if (!cid && flow.agent) {
+      const agent = await getAgentBySlug(flow.agent);
+      if (agent) {
+        const s = await getOrCreateSession({ agentId: agent.id, locale: "en", authenticated: false });
+        cid = s.conversationId;
+      }
     }
-    return back({ uaepass: "ok" });
+    if (cid) {
+      await saveSessionToken(cid, id.accessToken); // becomes the bearer for protected calls
+      await markAuthenticated(cid, id.sub);
+    }
+    return back({ uaepass: "ok" }, cid);
   } catch (e) {
     log.error("uaepass_callback_failed", e, { cid: flow.cid });
     return back({ uaepass: "error" });

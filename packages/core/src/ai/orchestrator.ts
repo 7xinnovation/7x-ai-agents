@@ -29,6 +29,9 @@ export interface RunTurnInput {
   intentPromise?: Promise<{ intent: string; confidence: number } | undefined>;
   // Whether the request is within configured business hours (drives escalation).
   businessOpen?: boolean;
+  // Server-verified facts about the signed-in customer (e.g. PO Boxes on file),
+  // surfaced in the system prompt so the agent never re-asks for them.
+  customerContext?: string;
   // Dynamic tools from the agent's API integrations (imported from OpenAPI).
   extraTools?: Anthropic.Tool[];
   runExtraTool?: (name: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
@@ -99,7 +102,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const sys = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen, intent);
+      const sys = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen, intent, input.customerContext);
       // Split system: cacheable stable prefix + small volatile tail (case state).
       // cache_control is accepted by the GA messages endpoint at runtime; the
       // SDK 0.32 GA types don't surface it yet, hence the cast.

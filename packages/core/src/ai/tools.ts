@@ -56,7 +56,7 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
   {
     name: "request_payment",
     description:
-      "Initiate payment for a chargeable journey through the payment gateway. Call after the customer confirms the summary and before submit_case. Returns a secure payment link; await confirmation before submitting. Pass amount to charge the authoritative price you obtained from a backend pricing tool (otherwise the journey's configured amount is used).",
+      "Initiate payment for a chargeable journey through the payment gateway. Call after the customer confirms the summary and before submit_case. A secure in-chat payment card is shown to the customer automatically — never paste payment links; await confirmation before submitting. Pass amount to charge the authoritative price you obtained from a backend pricing tool (otherwise the journey's configured amount is used).",
     input_schema: {
       type: "object",
       properties: {
@@ -341,7 +341,7 @@ export async function dispatchTool(
       events.push({ type: "payment_initiated", reference: res.reference, link: res.link, amount, currency });
       events.push({ type: "case", state });
       return {
-        result: `Payment ${res.reference} initiated for ${amount} ${currency}. Share this secure link with the customer: ${res.link}. Wait for payment confirmation before calling submit_case.`,
+        result: `Payment ${res.reference} initiated for ${amount} ${currency}. A secure "Pay now" card is now displayed to the customer inside the chat — do NOT paste any payment link or URL. Briefly tell them to complete the payment using the secure payment card shown below your message, then wait for payment confirmation before calling submit_case.`,
         state,
         events,
       };

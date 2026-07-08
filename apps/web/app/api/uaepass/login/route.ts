@@ -16,6 +16,10 @@ export async function GET(req: NextRequest) {
   const cid = req.nextUrl.searchParams.get("cid") ?? "";
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
   const returnTo = req.nextUrl.searchParams.get("returnTo") || `${req.nextUrl.origin}/embed/${agent}`;
+  // Popup mode: the embed opened this flow in a popup window (it can't redirect
+  // its own iframe to UAE PASS — frame-ancestors forbids it). The callback then
+  // notifies the opener via postMessage and closes instead of redirecting.
+  const popup = req.nextUrl.searchParams.get("popup") === "1";
   const state = crypto.randomUUID();
   // Mock mode: skip UAE PASS, go straight to our callback with a fake code so the
   // full flow can be tested locally before the callback is registered with UAE PASS.
@@ -24,7 +28,7 @@ export async function GET(req: NextRequest) {
     : buildAuthorizeUrl(resolveRedirectUri(req.nextUrl.origin), state);
 
   const res = NextResponse.redirect(target);
-  res.cookies.set("uaepass_flow", JSON.stringify({ state, cid, agent, returnTo }), {
+  res.cookies.set("uaepass_flow", JSON.stringify({ state, cid, agent, returnTo, popup }), {
     httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 600,
   });
   return res;

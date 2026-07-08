@@ -3,19 +3,26 @@ import { getDb, agentIntegrations } from "@dialog/db";
 import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
+import { redactGuestPII } from "./pii";
 
 export type EnvKey = "staging" | "production";
 
-export type AuthType = "none" | "bearer" | "apiKey" | "uaepass_test" | "uaepass_live";
+export type AuthType = "none" | "bearer" | "apiKey" | "uaepass_test" | "uaepass_live" | "oauth2_cc";
 
 export interface EnvSpec {
   specUrl: string;
   baseUrl: string;
   // uaepass_test: use the stored token (authValue) as the session bearer.
   // uaepass_live: use the UAE PASS session token forwarded by the embedding site.
+  // oauth2_cc: OAuth2 client-credentials (e.g. Salesforce External Client App) —
+  //   authValue holds the client SECRET (encrypted); oauthClientId/oauthTokenUrl
+  //   below complete the grant. Tokens are fetched + cached server-side.
   authType: AuthType;
   authValue: string | null;
   authHeader: string | null;
+  // OAuth2 client-credentials fields (authType "oauth2_cc" only).
+  oauthClientId?: string | null;
+  oauthTokenUrl?: string | null;
   // Gateway/app API key sent on EVERY request (e.g. NXN guest APIs require an
   // X-API-KEY header). Independent of the per-user session above; both can apply.
   apiKey?: string | null;
@@ -142,7 +149,7 @@ export function extractSessionToken(body: string): string | null {
 export async function buildApiTools(
   agentId: string,
   activeEnv: EnvKey,
-  opts: { uaePassToken?: string; sessionToken?: string } = {}
+  opts: { uaePassToken?: string; sessionToken?: string; authenticated?: boolean } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
@@ -185,7 +192,12 @@ export async function buildApiTools(
       authValue: isEncrypted(entry.spec.authValue) ? decryptSecret(entry.spec.authValue) : entry.spec.authValue,
       apiKey: isEncrypted(entry.spec.apiKey) ? decryptSecret(entry.spec.apiKey) : entry.spec.apiKey,
     };
-    const res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken());
+    // Guest privacy: with no verified identity (no UAE PASS / OTP session and the
+    // conversation isn't authenticated), backend responses are PII-redacted before
+    // the model sees them — a guest proving knowledge of a box number must not
+    // learn the holder's name, email, phone, or ID.
+    const identified = Boolean(opts.authenticated) || Boolean(runtimeToken());
+    const res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), { redactPII: !identified });
     // Capture a freshly-minted session token from a login/token op for reuse.
     if (!res.isError && isAuthOperation(entry.op)) {
       const body = res.result.slice(res.result.indexOf("\n") + 1);
@@ -198,11 +210,50 @@ export async function buildApiTools(
   return { tools, exec, getCapturedToken: () => captured };
 }
 
+/**
+ * OAuth2 client-credentials token cache (e.g. Salesforce External Client App).
+ * Salesforce's token endpoint takes x-www-form-urlencoded grant_type=client_credentials
+ * and REJECTS a "scope" parameter (scope policy lives on the app). Tokens are
+ * cached per (tokenUrl, clientId) and invalidated on a 401 so the next call
+ * re-mints; Salesforce doesn't reliably return expires_in for this grant, so we
+ * cap cache age conservatively.
+ */
+const OAUTH_CACHE_TTL_MS = 20 * 60_000;
+const oauthTokens = new Map<string, { token: string; fetchedAt: number }>();
+
+async function getClientCredentialsToken(spec: EnvSpec, forceRefresh = false): Promise<string> {
+  const tokenUrl = spec.oauthTokenUrl || "";
+  const clientId = spec.oauthClientId || "";
+  const clientSecret = spec.authValue || "";
+  if (!tokenUrl || !clientId || !clientSecret) {
+    throw new Error("OAuth2 client-credentials integration is not fully configured (token URL / client id / secret).");
+  }
+  const key = `${tokenUrl}|${clientId}`;
+  const hit = oauthTokens.get(key);
+  if (!forceRefresh && hit && Date.now() - hit.fetchedAt < OAUTH_CACHE_TTL_MS) return hit.token;
+
+  const body = new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret });
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: body.toString(),
+  });
+  if (!res.ok) {
+    const text = (await res.text()).slice(0, 300);
+    throw new Error(`OAuth2 token request failed (HTTP ${res.status}): ${text}`);
+  }
+  const json = (await res.json()) as { access_token?: string };
+  if (!json.access_token) throw new Error("OAuth2 token response had no access_token.");
+  oauthTokens.set(key, { token: json.access_token, fetchedAt: Date.now() });
+  return json.access_token;
+}
+
 export async function executeOperation(
   spec: EnvSpec,
   op: ApiOperation,
   input: Record<string, unknown>,
-  runtimeToken?: string
+  runtimeToken?: string,
+  opts: { redactPII?: boolean } = {}
 ): Promise<{ result: string; isError?: boolean }> {
   try {
     const tokenAuth = spec.authType === "bearer" || spec.authType === "uaepass_test" || spec.authType === "uaepass_live";
@@ -238,7 +289,19 @@ export async function executeOperation(
       else if (p.in === "header") headers[p.name] = String(v);
     }
 
-    if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
+    // System-level OAuth2 client-credentials (e.g. Salesforce): mint/reuse a
+    // cached app token. This is machine auth — never the customer's session.
+    const oauthCC = spec.authType === "oauth2_cc";
+    if (oauthCC) {
+      try {
+        headers["Authorization"] = `Bearer ${await getClientCredentialsToken(spec)}`;
+      } catch (e) {
+        return {
+          result: `The backend integration could not authenticate: ${e instanceof Error ? e.message : "error"}. Tell the customer this service is temporarily unavailable and offer a callback — the operations team must verify the integration credentials.`,
+          isError: true,
+        };
+      }
+    } else if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
     if (spec.authType === "apiKey" && spec.authValue) headers[spec.authHeader || "X-API-Key"] = spec.authValue;
     // Gateway/app API key sent on EVERY request when configured (e.g. NXN guest APIs).
     if (spec.apiKey) headers[spec.apiKeyHeader || "X-API-KEY"] = spec.apiKey;
@@ -252,10 +315,25 @@ export async function executeOperation(
     const qs = query.toString();
     const url = `${spec.baseUrl}${path}${qs ? `?${qs}` : ""}`;
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
-    const res = await fetch(url, { method: op.method, headers, body, signal: ctrl.signal });
-    clearTimeout(timer);
+    const doFetch = async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      try {
+        return await fetch(url, { method: op.method, headers, body, signal: ctrl.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    let res = await doFetch();
+    // Cached app token may have been revoked/expired server-side — re-mint once.
+    if (oauthCC && res.status === 401) {
+      try {
+        headers["Authorization"] = `Bearer ${await getClientCredentialsToken(spec, true)}`;
+        res = await doFetch();
+      } catch {
+        /* fall through to the generic 401 handling below */
+      }
+    }
 
     // Backend says auth is required/insufficient — translate to guidance instead
     // of a raw 401/403 (the backend is the source of truth for what needs a session).
@@ -268,7 +346,9 @@ export async function executeOperation(
       };
     }
 
-    const text = await res.text();
+    let text = await res.text();
+    // Redact BEFORE truncation so a long payload can't smuggle PII past the cut.
+    if (opts.redactPII) text = redactGuestPII(text);
     const trimmed = text.length > 4000 ? text.slice(0, 4000) + "…(truncated)" : text;
     return { result: `HTTP ${res.status} ${res.statusText}\n${trimmed}`, isError: !res.ok };
   } catch (e) {

@@ -1,3 +1,5 @@
+import { load as yamlLoad } from "js-yaml";
+
 /**
  * Minimal OpenAPI 3 / Swagger 2 parser. Fetches a spec and converts each
  * operation into a callable "tool" the agent can invoke: a JSON-schema input
@@ -47,8 +49,12 @@ function sanitize(s: string): string {
 
 function deriveBaseUrl(spec: any, specUrl: string): string {
   // OpenAPI 3
-  const server = spec.servers?.[0]?.url;
+  let server = spec.servers?.[0]?.url as string | undefined;
   if (server) {
+    // Substitute server variables with their declared defaults
+    // (e.g. https://{myDomain}--{sandboxName}.sandbox.my.salesforce.com).
+    const vars = spec.servers?.[0]?.variables ?? {};
+    server = server.replace(/\{([^}]+)\}/g, (m: string, name: string) => vars[name]?.default ?? m);
     if (/^https?:\/\//.test(server)) return server.replace(/\/$/, "");
     try {
       return new URL(server, specUrl).toString().replace(/\/$/, "");
@@ -74,6 +80,14 @@ function tryJson(text: string): any | null {
   try {
     const j = JSON.parse(text);
     return j && typeof j === "object" ? j : null;
+  } catch {
+    /* fall through to YAML */
+  }
+  // Many teams ship OpenAPI as YAML (e.g. Salesforce contracts). Only accept a
+  // parse that actually looks like a spec/object — YAML happily parses HTML too.
+  try {
+    const y = yamlLoad(text);
+    return y && typeof y === "object" ? y : null;
   } catch {
     return null;
   }

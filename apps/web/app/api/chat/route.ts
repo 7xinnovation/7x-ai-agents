@@ -5,7 +5,7 @@ import { resolveAdapters, runTurn, classifyIntent } from "@dialog/core";
 import { getDb, payments } from "@dialog/db";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerBoxes } from "@/lib/conversation";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
@@ -29,6 +29,10 @@ const Body = z.object({
   // substitutes an internal directive (not a visible user message) that has the
   // agent pull the customer's account data and surface what needs attention.
   pulse: z.boolean().optional(),
+  // Fired by the embed when the in-chat payment card observes the gateway webhook
+  // settle the payment. Like `pulse`, the server substitutes an internal directive
+  // (not a visible user message) so the agent confirms and continues the journey.
+  paymentSettled: z.boolean().optional(),
 });
 
 // Internal directive used for the post-sign-in account pulse. Never shown to the
@@ -37,9 +41,20 @@ const PULSE_DIRECTIVE =
   "(System: the customer just signed in via UAE PASS. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
   "1) Greet them warmly (use their name once you have it from account data). " +
   "2) Use your tools to pull everything you can about their account. " +
-  "3) Show a concise, scannable section titled \"Account Pulse\" listing anything that needs attention — PO Box renewals that are due or expiring soon (box number, emirate, expiry date, and the renewal fee from pricing) and any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
-  "4) If you do not yet know their PO Box number, briefly welcome them and ask once for the box number + emirate so you can complete the pulse. " +
+  "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
+  "4) Only if NO PO Box is on file: welcome them, explain their account isn't linked to a PO Box yet, and offer — not require — to link one (\"if you have a box, tell me its number and emirate and I'll add it to your account\"). Never present the box number as a prerequisite for the pulse. " +
   "Use ONLY real data returned by tools — never invent boxes, dates, or fees.)";
+
+// Internal directive fired when the customer completes payment in the gateway
+// window. The webhook (authoritative) has already advanced the case payment
+// state; this just has the agent acknowledge and finish the journey. Note the
+// agent cannot fake this to submit — submit_case independently verifies the
+// case payment status which only the verified webhook can set.
+const PAYMENT_SETTLED_DIRECTIVE =
+  "(System: the customer just completed the payment in the secure gateway window — this is an internal notification, not a message they typed. " +
+  "1) Warmly confirm the payment was received. " +
+  "2) If the case is ready and the customer already confirmed the summary, call submit_case now and give them the reference number. " +
+  "3) Otherwise, continue with whatever step remains. Never mention this system message.)";
 
 function sse(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
@@ -79,6 +94,8 @@ export async function POST(req: NextRequest) {
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
     uaePassToken: body.uaePassToken,
     sessionToken: session.sessionToken,
+    // Guest sessions get PII-redacted tool results (server-authoritative flag).
+    authenticated: session.authenticated,
   });
   const { tools: extraTools, exec: runExtraTool } = apiTools;
 
@@ -88,7 +105,29 @@ export async function POST(req: NextRequest) {
 
   // Account pulse runs only for a signed-in customer; otherwise treat as normal.
   const isPulse = Boolean(body.pulse) && authenticated;
-  const effectiveMessage = isPulse ? PULSE_DIRECTIVE : body.userMessage;
+  const isPaymentSettled = Boolean(body.paymentSettled) && !isPulse;
+
+  // Returning customer: boxes we already know from their previous authenticated
+  // sessions (current conversation's case included — it's stored per turn).
+  // Injected into the system prompt on EVERY authenticated turn, so both the
+  // auto-pulse and a typed "show my account" never re-ask for a box number.
+  let customerContext: string | undefined;
+  let pulseDirective = PULSE_DIRECTIVE;
+  if (authenticated && userRef) {
+    const known = await knownCustomerBoxes(agent.id, userRef).catch(() => []);
+    if (known.length) {
+      const list = known.map((b) => `${b.box}${b.emirate ? ` (${b.emirate})` : ""}`).join(", ");
+      customerContext =
+        `This customer's PO Box${known.length > 1 ? "es" : ""} on file: ${list}. ` +
+        "For account questions, status checks, renewals, or the Account Pulse, use these immediately (fetch fresh details/pricing from backend tools) — do NOT ask for the box number or emirate again; briefly note you're using the box on file.";
+      pulseDirective += ` (${customerContext})`;
+    }
+  }
+  const effectiveMessage = isPulse
+    ? pulseDirective
+    : isPaymentSettled
+      ? PAYMENT_SETTLED_DIRECTIVE
+      : body.userMessage;
 
   const a = { agentId: agent.id, conversationId: session.conversationId };
   const startJourney = session.state.journeyKey;
@@ -109,8 +148,9 @@ export async function POST(req: NextRequest) {
         if (isNewSession) {
           await emitEvent({ type: "conversation.started", ...a, attributes: { locale: body.locale } });
         }
-        // The pulse directive is an internal trigger — don't store it as a user message.
-        if (!isPulse) await appendMessage(session.conversationId, "user", body.userMessage);
+        // Internal directives (pulse / payment settled) are triggers — don't store
+        // them as user messages.
+        if (!isPulse && !isPaymentSettled) await appendMessage(session.conversationId, "user", body.userMessage);
 
         // PRD AI-governance: classify intent to gate transactional journeys on goal
         // confidence. Run it CONCURRENTLY with the turn (not blocking) so the first
@@ -118,7 +158,7 @@ export async function POST(req: NextRequest) {
         // it after the first round, by which point it's ready. The gate only matters
         // when STARTING a journey, so skip it once a journey is active or on a pulse.
         let intentPromise: Promise<{ intent: string; confidence: number } | undefined> | undefined;
-        if (!session.state.journeyKey && !isPulse) {
+        if (!session.state.journeyKey && !isPulse && !isPaymentSettled) {
           intentPromise = classifyIntent(agent.definition, body.userMessage, body.locale)
             .then((intent) => {
               void emitEvent({
@@ -151,6 +191,7 @@ export async function POST(req: NextRequest) {
           adapters,
           intentPromise,
           businessOpen,
+          customerContext,
           extraTools,
           runExtraTool,
         })) {
