@@ -1,0 +1,1033 @@
+openapi: 3.0.3
+info:
+  title: "EPGL Agent - License Issuance & Renewal API"
+  description: >
+    Salesforce API contract for the EPGL Agent, covering License Issuance and License
+    Renewal, derived from the Solution Design & Integration Alignment document.
+
+    Salesforce is the system of record. The Agent is an external consumer and does not
+    receive broad CRM access. Customer-facing / Agent-side authentication (e.g. UAE PASS)
+    is owned by the Agent team and is out of scope.
+
+    APIs in this contract:
+      * API 1 – Create License Issuance Request   (POST /LicenseRequest, example "issuance")
+      * API 2 – Create License Renewal Request     (POST /LicenseRequest, example "renewal")
+      * API 1/2 – Update an existing Request        (POST /LicenseRequest, example "update")
+      * API 3 – Retrieve Request Status            (GET  /LicenseRequest/status)
+      * API 4 – Duplicate Submission Check         (POST /LicenseRequest/duplicate-check) – optional
+      * API 5 – Upload / Attach Document           (POST /Document)
+
+    Submission model (API 1 & 2): a single atomic call (allOrNone) sends the company
+    (Account) and everything attached to it – owners, contacts, portal user, members,
+    documents and the license request – in one composite-shaped payload. The Account is
+    processed first; children reference it via @{NewAccount.id}. Each record is UPSERTED
+    (matched & updated if it already exists, otherwise created), so duplicate handling
+    lives in Salesforce. The portal User's login fields (username, alias, profile, locale)
+    are generated server-side. The document step is processed internally.
+
+    Agent-sourced requests (isAgentSource=true): every call through this API runs under
+    the Agent integration user, so Salesforce evaluates isAgentSource = true server-side.
+    In this mode, Update requests are matched by explicit identifiers instead of the
+    default upsert keys – see the "update" example and the "Required on Update" notes on
+    Account.Id, EPG_License_Request__c.Name, EPG_Partner__c.EPG_Emirates_ID__c,
+    Contact.Email and Members__c.Name (each scoped by the matched Account) and
+    User.EPG_Emirates_Id__c.
+
+    NOTE: The exact Apex REST resource paths below are placeholders to be confirmed by the
+    Salesforce team; substitute the deployed paths before integration.
+  version: 1.0.0
+  contact:
+    name: Salesforce Team
+
+servers:
+  - url: https://{myDomain}--{sandboxName}.sandbox.my.salesforce.com
+    description: >
+      Salesforce sandbox org. Sandboxes use a two-part My Domain host:
+      "<prodMyDomain>--<sandboxName>.sandbox.my.salesforce.com".
+    variables:
+      myDomain:
+        default: epro
+        description: My Domain name of the production org the sandbox was cloned from.
+      sandboxName:
+        default: preprod2
+        description: Sandbox name, the part after "--" in the sandbox My Domain host.
+  - url: https://{instance}.my.salesforce.com
+    description: Salesforce production / Developer Edition org (My Domain, no sandbox suffix).
+    variables:
+      instance:
+        default: yourInstance
+        description: My Domain / instance host (e.g. epgl--uat)
+
+security:
+  - oauth2ClientCredentials: []
+
+paths:
+  /services/apexrest/EPGL/LicenseRequest:
+    post:
+      operationId: submitLicenseRequest
+      tags: [License Request]
+      summary: Create or Update a License Issuance or Renewal request (atomic, upsert)
+      description: >
+        API 1 (issuance) & API 2 (renewal). Submits the company and all related records
+        in one atomic call. Use the "issuance" example for a new license, "renewal" for an
+        existing company (most Company Information is read-only / pre-filled; renewal adds
+        Branch Details and quarterly Trial Balance), or "update" to modify existing records
+        (Account.Id, EPG_License_Request__c.Name and the equivalent identifiers on each
+        child record are required in that case). With allOrNone=true the whole transaction
+        rolls back on any failure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompositeRequest' }
+            examples:
+              issuance:
+                summary: New License Issuance (source of truth for fields & documents)
+                value:
+                  allOrNone: true
+                  isAgentSource: true
+                  compositeRequest:
+                    - method: POST
+                      referenceId: NewAccount
+                      url: /services/data/v66.0/sobjects/Account
+                      body:
+                        Name: QProslIJ4j2UAT03 For Letters & Post Items Delivery
+                        EPG_Company_Name_Arabic__c: قبروسليج٤جؤات٠٣ لنقل بعائث بريد الرسائل
+                        EPG_Company_Status__c: Active
+                        EPG_Trade_license_no__c: '2137129'
+                        EPG_Trade_Name_in_English__c: QProslIJ4j2UAT03 For Letters & Post Items Delivery
+                        EPG_Trade_Name_in_Arabic__c: قبروسليج٤جؤات٠٣ لنقل بعائث بريد الرسائل
+                        EPG_Regulator__c: Dubai - Department of Economy and Tourism
+                        BillingStreet: 610,مثسن
+                        BillingCity: Dubai
+                        BillingState: Dubai
+                        BillingCountry: United Arab Emirates
+                        EPG_Emirates__c: Dubai
+                        EPG_Region__c: Mirdif
+                        EPG_PO_Box__c: '6666'
+                        RecordTypeId: 0125f000001xIheAAE
+                        License_Expiry_Date__c: '2027-05-20'
+                    - method: POST
+                      referenceId: NewPartner
+                      url: /services/data/v66.0/sobjects/EPG_Partner__c
+                      body:
+                        - Name: SALMA MOHAMED SAEED ALMANSOORI
+                          EPG_Company__c: '@{NewAccount.id}'
+                          EPG_Share_holder_type__c: Est. Owner
+                          EPG_Contact_No__c: +971-55555555
+                          EPG_Emirates_ID__c: '784194147908318'
+                          EPG_Status__c: Active
+                          EPG_Nationality__c: United Arab Emirates
+                          EPG_Passport_No__c: '2609303'
+                          EPG_Passport_Expiry_Date__c: '2050-10-08'
+                    - method: POST
+                      referenceId: NewContact
+                      url: /services/data/v66.0/sobjects/Contact
+                      body:
+                        - FirstName: testuat
+                          LastName: testuat
+                          Email: test@test.com
+                          Phone: '551499876'
+                          Title: Manager
+                          EPG_Designation__c: Manager
+                          AccountId: '@{NewAccount.id}'
+                          EPG_Country_Code__c: UAE(+971)
+                          Secondary_Contact: 'True'
+                    - method: POST
+                      referenceId: NewUser
+                      url: /services/data/v66.0/sobjects/User
+                      body:
+                        AccountId: '@{NewAccount.id}'
+                        FirstName: SALMA MOHAMED SAEED
+                        LastName: ALMANSOORI
+                        Email: omnia01@mailinator.com
+                        Phone: +971-55555555
+                        EPG_Emirates_Id__c: '784194147908318'
+                    - method: POST
+                      referenceId: NewMember
+                      url: /services/data/v66.0/sobjects/Members__c
+                      body:
+                        - AccountId__c: '@{NewAccount.id}'
+                          Name: Test
+                    - method: POST
+                      referenceId: NewDocument
+                      url: /services/data/v66.0/sobjects/EPG_Document__c
+                      body:
+                        - EPG_Company__c: '@{NewAccount.id}'
+                          EPG_File_Name__c: NewRenewCommitmentForm.pdf
+                          docType__c: pdf
+                          fileType__c: pdf
+                          EPG_File_Id__c: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
+                          fileSize__c: 299756
+                    - method: POST
+                      referenceId: NewLicenseRequest
+                      url: /services/data/v66.0/sobjects/EPG_License_Request__c
+                      body:
+                        RecordTypeId: 0125f000001xIhuAAE
+                        EPG_Service__c: a1H5f0000033Q7pEAE
+                        EPG_Account__c: '@{NewAccount.id}'
+                        serviceId__c: S-EPG-000002
+                        serviceNameEN__c: Issue Postal Activity License
+                        serviceNameAR__c: احصل على رخصة نشاط المستودعات والطرود
+                        submissionCount__c: 1
+                        Activity_Codes__c: '5320002'
+              update:
+                summary: Update an existing License Request (Agent-sourced, Id/Name matched)
+                description: >
+                  Same shape as "issuance", but this call updates existing records instead of
+                  creating them. Requests through this API run under the Agent integration
+                  user (isAgentSource=true), so each object is matched by an explicit
+                  identifier rather than the default upsert key: Account.Id and
+                  EPG_License_Request__c.Name are required to locate the Account and License
+                  Request being updated; EPG_Partner__c.EPG_Emirates_ID__c, Contact.Email and
+                  Members__c.Name (each scoped under the matched Account) and
+                  User.EPG_Emirates_Id__c are required to locate each existing child record.
+                value:
+                  allOrNone: true
+                  isAgentSource: true
+                  compositeRequest:
+                    - method: POST
+                      referenceId: NewAccount
+                      url: /services/data/v66.0/sobjects/Account
+                      body:
+                        Id: 0015f00000XXXXXAAA
+                        Name: QProslIJ4j2UAT03 For Letters & Post Items Delivery
+                        EPG_Company_Name_Arabic__c: قبروسليج٤جؤات٠٣ لنقل بعائث بريد الرسائل
+                        EPG_Company_Status__c: Active
+                        EPG_Trade_license_no__c: '2137129'
+                        EPG_Trade_Name_in_English__c: QProslIJ4j2UAT03 For Letters & Post Items Delivery
+                        EPG_Trade_Name_in_Arabic__c: قبروسليج٤جؤات٠٣ لنقل بعائث بريد الرسائل
+                        EPG_Regulator__c: Dubai - Department of Economy and Tourism
+                        BillingStreet: 610,مثسن
+                        BillingCity: Dubai
+                        BillingState: Dubai
+                        BillingCountry: United Arab Emirates
+                        EPG_Emirates__c: Dubai
+                        EPG_Region__c: Mirdif
+                        EPG_PO_Box__c: '6666'
+                        RecordTypeId: 0125f000001xIheAAE
+                        License_Expiry_Date__c: '2027-05-20'
+                    - method: POST
+                      referenceId: NewPartner
+                      url: /services/data/v66.0/sobjects/EPG_Partner__c
+                      body:
+                        - Name: SALMA MOHAMED SAEED ALMANSOORI
+                          EPG_Company__c: '@{NewAccount.id}'
+                          EPG_Share_holder_type__c: Est. Owner
+                          EPG_Contact_No__c: +971-55555555
+                          EPG_Emirates_ID__c: '784194147908318'
+                          EPG_Status__c: Active
+                          EPG_Nationality__c: United Arab Emirates
+                          EPG_Passport_No__c: '2609303'
+                          EPG_Passport_Expiry_Date__c: '2050-10-08'
+                    - method: POST
+                      referenceId: NewContact
+                      url: /services/data/v66.0/sobjects/Contact
+                      body:
+                        - FirstName: testuat
+                          LastName: testuat
+                          Email: test@test.com
+                          Phone: '551499876'
+                          Title: Manager
+                          EPG_Designation__c: Manager
+                          AccountId: '@{NewAccount.id}'
+                          EPG_Country_Code__c: UAE(+971)
+                          Secondary_Contact: 'True'
+                    - method: POST
+                      referenceId: NewUser
+                      url: /services/data/v66.0/sobjects/User
+                      body:
+                        AccountId: '@{NewAccount.id}'
+                        FirstName: SALMA MOHAMED SAEED
+                        LastName: ALMANSOORI
+                        Email: omnia01@mailinator.com
+                        Phone: +971-55555555
+                        EPG_Emirates_Id__c: '784194147908318'
+                    - method: POST
+                      referenceId: NewMember
+                      url: /services/data/v66.0/sobjects/Members__c
+                      body:
+                        - AccountId__c: '@{NewAccount.id}'
+                          Name: Test
+                    - method: POST
+                      referenceId: NewDocument
+                      url: /services/data/v66.0/sobjects/EPG_Document__c
+                      body:
+                        - EPG_Company__c: '@{NewAccount.id}'
+                          EPG_File_Name__c: NewRenewCommitmentForm.pdf
+                          docType__c: pdf
+                          fileType__c: pdf
+                          EPG_File_Id__c: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
+                          fileSize__c: 299756
+                    - method: POST
+                      referenceId: NewLicenseRequest
+                      url: /services/data/v66.0/sobjects/EPG_License_Request__c
+                      body:
+                        Name: LR234
+                        RecordTypeId: 0125f000001xIhuAAE
+                        EPG_Service__c: a1H5f0000033Q7pEAE
+                        EPG_Account__c: '@{NewAccount.id}'
+                        serviceId__c: S-EPG-000002
+                        serviceNameEN__c: Issue Postal Activity License
+                        serviceNameAR__c: احصل على رخصة نشاط المستودعات والطرود
+                        submissionCount__c: 1
+                        Activity_Codes__c: '5320002'
+              renewal:
+                summary: License Renewal (existing company - read-only company info + Quarterly Trial Balance)
+                description: >
+                  On renewal the Account is matched and updated by trade license no.
+                  Only EPG_Trade_license_no__c, EPG_Trade_license_Expiry_date__c, EPG_Trade_Name_in_English__c,
+                  EPG_Trade_Name_in_Arabic__c are editable on the portal; other Account fields are read-only.
+                  Quarterly trial balance records are submitted as separate EPG_Finance_Summary__c items
+                  (one per quarter). EPG_Trial_Balance__c does NOT exist in this org - use EPG_Finance_Summary__c.
+                  BLOCKERS TO AVOID:
+                  (1) EPG_Terms_and_Conditions__c, Approved_Commitment_Form__c and Mandatory_integration_with_IDEP__c
+                  must all be true (portal validates these before submit).
+                  (2) EPG_Is_Financial_Statement_Submitted__c must be true; if false the trigger sets the request
+                  to 'Partially Closed' when it reaches 'Closed' status.
+                  (3) At least one Contact with EPG_Designation__c containing 'Accountant' is required.
+                  (4) EPG_Finance_Summary__c has no upsert key in CompositeHandler so records are always INSERTed;
+                  do not call this endpoint twice for the same license request or duplicates will be created.
+                  CompositeHandler automatically sets EPG_Request_Status__c = 'Under document review' for renewal
+                  (because the account already exists) - this is expected behavior.
+                value:
+                  allOrNone: true
+                  isAgentSource: true
+                  compositeRequest:
+                    - method: POST
+                      referenceId: NewAccount
+                      url: /services/data/v66.0/sobjects/Account
+                      body:
+                        Id: 001FW00712htl3sYAA
+                        EPG_Trade_license_no__c: '2137129'
+                        Name: Test Renewal By Agent
+                        EPG_Trade_license_Expiry_date__c: '2028-05-20'
+                        EPG_Trade_Name_in_English__c: QProslIJ4j2UAT03 For Letters & Post Items Delivery
+                        EPG_Trade_Name_in_Arabic__c: قبروسليج٤جؤات٠٣ لنقل بعائث بريد الرسائل
+                        RecordTypeId: 0125f000001xIheAAE
+                    - method: POST
+                      referenceId: NewContact
+                      url: /services/data/v66.0/sobjects/Contact
+                      body:
+                        - AccountId: '@{NewAccount.id}'
+                          FirstName: Jane
+                          LastName: Smith
+                          Email: accountant@example.com
+                          Phone: '971501234567'
+                          EPG_Designation__c: Accountant
+                          EPG_Country_Code__c: UAE(+971)
+                          Secondary_Contact: 'True'
+                    - method: POST
+                      referenceId: NewLicenseRequest
+                      url: /services/data/v66.0/sobjects/EPG_License_Request__c
+                      body:
+                        RecordTypeId: 0125f000001xIhwAAE
+                        EPG_Account__c: '@{NewAccount.id}'
+                        EPG_Service__c: a1H5f0000033Q7lEAE
+                        serviceNameEN__c: Renew Postal Activity License
+                        EPG_Terms_and_Conditions__c: true
+                        Approved_Commitment_Form__c: true
+                        Mandatory_integration_with_IDEP__c: true
+                        EPG_Is_Financial_Statement_Submitted__c: true
+                    - method: POST
+                      referenceId: NewDocument
+                      url: /services/data/v66.0/sobjects/EPG_Document__c
+                      body:
+                        - EPG_Company__c: '@{NewAccount.id}'
+                          EPG_File_Name__c: NewRenewCommitmentForm.pdf
+                          docType__c: pdf
+                          fileType__c: pdf
+                          EPG_File_Id__c: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
+                          fileSize__c: 299756
+                    - method: POST
+                      referenceId: NewTrialBalance
+                      url: /services/data/v66.0/sobjects/EPG_Finance_Summary__c
+                      body:
+                        - EPG_License_Request__c: '@{NewLicenseRequest.id}'
+                          Quarter__c: Q1
+                          EPG_Year__c: '2024'
+                          Name: Q1 2024
+                          EPG_Leviable_Income__c: 100000
+                          EPG_Non_Leviable_Income__c: 0
+                        - EPG_License_Request__c: '@{NewLicenseRequest.id}'
+                          Quarter__c: Q2
+                          EPG_Year__c: '2024'
+                          Name: Q2 2024
+                          EPG_Leviable_Income__c: 120000
+                          EPG_Non_Leviable_Income__c: 0
+                        - EPG_License_Request__c: '@{NewLicenseRequest.id}'
+                          Quarter__c: Q3
+                          EPG_Year__c: '2024'
+                          Name: Q3 2024
+                          EPG_Leviable_Income__c: 110000
+                          EPG_Non_Leviable_Income__c: 0
+                        - EPG_License_Request__c: '@{NewLicenseRequest.id}'
+                          Quarter__c: Q4
+                          EPG_Year__c: '2024'
+                          Name: Q4 2024
+                          EPG_Leviable_Income__c: 130000
+                          EPG_Non_Leviable_Income__c: 0
+      responses:
+        '200':
+          description: >
+            Returned for both SUCCESS and BUSINESS FAILURE - always inspect each item's
+            body.success, never the HTTP status. CompositeHandler deliberately returns
+            HTTP 200 even when allOrNone rolls the whole transaction back, and even on an
+            unhandled top-level exception. Response semantics:
+              * body.success=true  -> item persisted; body.id holds the record Id and
+                httpHeaders.Location points at it (item httpStatusCode 200).
+              * body.success=false -> item failed (item httpStatusCode 400). With
+                allOrNone=true EVERY item (including ones that had succeeded) is rewritten
+                with the same concatenated message
+                "Rolled back due to allOrNone=true: <err1> | <err2> | ..." and id=null.
+              * Items whose request body was an ARRAY fan out to one response entry per
+                element, with "_<index>" appended to the referenceId
+                (NewContact -> NewContact_0, NewTrialBalance -> NewTrialBalance_0..3).
+              * EPG_Document__c items sent as an array are processed internally and
+                OMITTED from the response.
+              * A malformed JSON body or other top-level error also returns HTTP 200,
+                with a single item (referenceId=null) - see the "topLevelError" example.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompositeResponse' }
+              examples:
+                issuanceSuccess:
+                  summary: Issuance succeeded (matches the "issuance" request example)
+                  description: >
+                    One entry per created record. Array-body items carry the _0 suffix;
+                    the NewDocument item is processed internally and omitted.
+                  value:
+                    compositeResponse:
+                      - referenceId: NewAccount
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Account/0015f00000XXXXXAAA }
+                        body: { id: 0015f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewPartner_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_Partner__c/a0z5f00000XXXXXAAA }
+                        body: { id: a0z5f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewContact_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Contact/0035f00000XXXXXAAA }
+                        body: { id: 0035f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewUser
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/User/0055f00000XXXXXAAA }
+                        body: { id: 0055f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewMember_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Members__c/a0x5f00000XXXXXAAA }
+                        body: { id: a0x5f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewLicenseRequest
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_License_Request__c/a115f00000XXXXXAAA }
+                        body: { id: a115f00000XXXXXAAA, success: true, errors: [] }
+                issuanceRolledBack:
+                  summary: Issuance failed - allOrNone rollback (missing required field)
+                  description: >
+                    The Account insert failed, so after rollback every item echoes the
+                    same concatenated failure message with id=null and httpStatusCode 400.
+                    HTTP status is still 200.
+                  value:
+                    compositeResponse:
+                      - referenceId: NewAccount
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A required field value is missing: "Trade License No".']
+                      - referenceId: NewPartner_0
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A required field value is missing: "Trade License No".']
+                      - referenceId: NewContact_0
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A required field value is missing: "Trade License No".']
+                      - referenceId: NewUser
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A required field value is missing: "Trade License No".']
+                      - referenceId: NewMember_0
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A required field value is missing: "Trade License No".']
+                      - referenceId: NewLicenseRequest
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A required field value is missing: "Trade License No".']
+                updateSuccess:
+                  summary: Update succeeded (matches the "update" request example)
+                  description: >
+                    Same shape as issuanceSuccess; ids are the matched existing records
+                    (Account matched by Id, License Request by Name, children by their
+                    Agent-sourced identifiers).
+                  value:
+                    compositeResponse:
+                      - referenceId: NewAccount
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Account/0015f00000XXXXXAAA }
+                        body: { id: 0015f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewPartner_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_Partner__c/a0z5f00000XXXXXAAA }
+                        body: { id: a0z5f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewContact_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Contact/0035f00000XXXXXAAA }
+                        body: { id: 0035f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewUser
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/User/0055f00000XXXXXAAA }
+                        body: { id: 0055f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewMember_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Members__c/a0x5f00000XXXXXAAA }
+                        body: { id: a0x5f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewLicenseRequest
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_License_Request__c/a115f00000XXXXXAAA }
+                        body: { id: a115f00000XXXXXAAA, success: true, errors: [] }
+                updateRolledBackDuplicate:
+                  summary: Update failed - duplicate rule blocked the Account update
+                  description: >
+                    A duplicate rule (e.g. another Account already has the submitted Name)
+                    blocks the Account update. Because the Account failed, later items that
+                    depend on @{NewAccount.id} resolve it to null and add their own
+                    secondary errors; all messages are concatenated into every item after
+                    rollback. Fix the root cause (first message) - the rest are cascade.
+                  value:
+                    compositeResponse:
+                      - referenceId: NewAccount
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A record already exists with the same unique value for "one of the unique fields".']
+                      - referenceId: NewLicenseRequest
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: A record already exists with the same unique value for "one of the unique fields".']
+                renewalSuccess:
+                  summary: Renewal succeeded (matches the "renewal" request example)
+                  description: >
+                    Account is updated in place; four EPG_Finance_Summary__c rows come back
+                    as NewTrialBalance_0..3. NewDocument is omitted (processed internally).
+                  value:
+                    compositeResponse:
+                      - referenceId: NewAccount
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Account/001FW00712htl3sYAA }
+                        body: { id: 001FW00712htl3sYAA, success: true, errors: [] }
+                      - referenceId: NewContact_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/Contact/0035f00000XXXXXAAA }
+                        body: { id: 0035f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewLicenseRequest
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_License_Request__c/a115f00000XXXXXAAA }
+                        body: { id: a115f00000XXXXXAAA, success: true, errors: [] }
+                      - referenceId: NewTrialBalance_0
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_Finance_Summary__c/a1Q5f00000XXXX1AAA }
+                        body: { id: a1Q5f00000XXXX1AAA, success: true, errors: [] }
+                      - referenceId: NewTrialBalance_1
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_Finance_Summary__c/a1Q5f00000XXXX2AAA }
+                        body: { id: a1Q5f00000XXXX2AAA, success: true, errors: [] }
+                      - referenceId: NewTrialBalance_2
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_Finance_Summary__c/a1Q5f00000XXXX3AAA }
+                        body: { id: a1Q5f00000XXXX3AAA, success: true, errors: [] }
+                      - referenceId: NewTrialBalance_3
+                        httpStatusCode: 200
+                        httpHeaders: { Location: /services/data/v60.0/sobjects/EPG_Finance_Summary__c/a1Q5f00000XXXX4AAA }
+                        body: { id: a1Q5f00000XXXX4AAA, success: true, errors: [] }
+                renewalRolledBackNoLicense:
+                  summary: Renewal failed - Account has no related License (EPG_License__c)
+                  description: >
+                    EPG_Finance_Summary__c requires a License lookup. CompositeHandler
+                    derives it from the matched Account's EPG_License__c; when that field is
+                    empty every quarter row fails with an explicit validation message (one
+                    per row, concatenated after rollback - the real payload repeats the full
+                    message on every item; "| ..." below is an abbreviation). Populate
+                    EPG_License__c on the Account before renewal, or send EPG_License_No__c
+                    on each row.
+                  value:
+                    compositeResponse:
+                      - referenceId: NewAccount
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c).']
+                      - referenceId: NewContact_0
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c).']
+                      - referenceId: NewLicenseRequest
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | ...']
+                      - referenceId: NewTrialBalance_0
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | ...']
+                      - referenceId: NewTrialBalance_1
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | ...']
+                      - referenceId: NewTrialBalance_2
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | ...']
+                      - referenceId: NewTrialBalance_3
+                        httpStatusCode: 400
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Rolled back due to allOrNone=true: No License found for this Account. A Finance Summary cannot be created because the Account has no related License (EPG_License__c). | ...']
+                topLevelError:
+                  summary: Malformed JSON / unexpected server error (still HTTP 200)
+                  description: >
+                    When the request body cannot be parsed or an unexpected exception
+                    escapes item processing, a single synthetic item is returned with
+                    referenceId=null. HTTP status remains 200.
+                  value:
+                    compositeResponse:
+                      - referenceId: null
+                        httpStatusCode: 200
+                        httpHeaders: {}
+                        body:
+                          id: null
+                          success: false
+                          errors: ['Error processing composite request: Unexpected character (''}'') ... | Class.CompositeHandler.processCompositeRequest: line 68, column 1']
+        '400':
+          description: >
+            Returned ONLY when the payload has no "compositeRequest" array. All other
+            failures come back as HTTP 200 with body.success=false per item.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompositeResponse' }
+              example:
+                compositeResponse:
+                  - referenceId: null
+                    httpStatusCode: 400
+                    httpHeaders: {}
+                    body:
+                      id: null
+                      success: false
+                      errors: ['Missing compositeRequest array.']
+        '401':
+          description: Missing or invalid access token.
+
+  /services/apexrest/EPGL/LicenseRequest/status:
+    get:
+      operationId: getRequestStatus
+      tags: [License Request]
+      summary: Retrieve request status (API 3)
+      description: >
+        Returns the current status of a license request, located by the Agent-supplied the Salesforce record id.
+      parameters:
+        - { name: id, in: query, required: false, schema: { type: string }, description: Salesforce EPG_License_Request__c record id }
+      responses:
+        '200':
+          description: Current request status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestStatus' }
+              example:
+                salesforceRecordId: a1A5f00000XXXXXAAA
+                licenseNumber: null
+                requestStatus: Under document review
+                lastUpdated: '2026-06-18T10:15:00.000+0000'
+        '401': { description: Missing or invalid access token. }
+        '404': { description: Request not found. }
+
+  /services/apexrest/EPGL/LicenseRequest/duplicate-check:
+    post:
+      operationId: duplicateCheck
+      tags: [License Request]
+      summary: Duplicate submission check (API 4 – optional)
+      description: >
+        Optional pre-submit check. Duplicate handling is already built into the submit
+        endpoint (upsert), so this is not required. Matching criteria are to be confirmed
+        by Business.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DuplicateCheckRequest' }
+            example:
+              tradeLicenseNumber: '2137129'
+              emiratesId: '784194147908318'
+              email: omnia01@mailinator.com
+              mobileNumber: +971-55555555
+      responses:
+        '200':
+          description: Match result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DuplicateCheckResponse' }
+              example:
+                matchFound: true
+                matchedRecordIds: ['0015f00000XXXXXAAA']
+                matchedRequests:
+                  - matchedRequestStatus: Under document review
+                    matchedRequestNumber: LR234
+                    recommendedAction: Update existing application
+        '401': { description: Missing or invalid access token. }
+
+  /services/apexrest/EPGL/Document:
+    post:
+      operationId: uploadDocument
+      tags: [Documents]
+      summary: Upload / attach a document to the License Request (API 5)
+      description: >
+        Uploads a file (base64) into Salesforce as a File (ContentVersion) and links it to
+        the License Request via ContentDocumentLink. Files are stored inside Salesforce;
+        no external document service is used.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentUploadRequest' }
+            example:
+              licenseRequestId: a1A5f00000XXXXXAAA
+              fileName: NewRenewCommitmentForm.pdf
+              fileType: pdf
+              versionData: JVBERi0xLjQKJ... (base64)
+      responses:
+        '201':
+          description: Document stored and linked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentUploadResponse' }
+              example:
+                contentDocumentId: 069XXXXXXXXXXXXAAA
+                contentVersionId: 068XXXXXXXXXXXXAAA
+                linkedTo: a1A5f00000XXXXXAAA
+                success: true
+        '400': { description: Invalid file or missing link target. }
+        '401': { description: Missing or invalid access token. }
+
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      description: >
+        OAuth 2.0 Client Credentials flow via a dedicated External Client App
+        ("Agent_AI") + a least-privilege integration user. The tokenUrl below targets
+        the sandbox shown in Postman (epro--preprod2). When promoting to UAT/production,
+        swap it for that environment's My Domain token endpoint (or
+        https://login.salesforce.com/services/oauth2/token).
+        client_id and client_secret must come from a secret store / Postman environment
+        variables (or a vault) – never commit or hardcode them in this spec.
+      flows:
+        clientCredentials:
+          tokenUrl: https://epro--preprod2.sandbox.my.salesforce.com/services/oauth2/token
+          scopes: {}
+          # Intentionally empty: Salesforce's client-credentials token endpoint rejects a
+          # "scope" request parameter outright (400 invalid_request, "scope parameter not
+          # supported"). Scope is enforced server-side via the External Client App's OAuth
+          # Scopes policy ("api" is selected there), not negotiated at token-request time.
+          # Listing a scope here makes Swagger UI / codegen send scope=..., which Salesforce
+          # rejects – so leave this map empty.
+      x-tokenRequest:
+        description: >
+          The "clientCredentials" flow implies grant_type=client_credentials, but OpenAPI
+          has no field to spell that out – documented here for implementers building the
+          actual token call (matches the Postman request body, x-www-form-urlencoded).
+          Do not send a "scope" parameter; Salesforce rejects it for this grant type.
+        contentType: application/x-www-form-urlencoded
+        parameters:
+          grant_type:
+            value: client_credentials
+            required: true
+          client_id:
+            description: External Client App ("Agent_AI") consumer key. Store in a secret / env var.
+            required: true
+          client_secret:
+            description: External Client App consumer secret. Store in a secret / env var.
+            required: true
+
+  schemas:
+    # ---- Composite wrappers (submit) ----
+    CompositeRequest:
+      type: object
+      required: [compositeRequest]
+      properties:
+        allOrNone:
+          type: boolean
+          default: true
+          description: When true, all subrequests succeed or the whole call rolls back.
+        isAgentSource:
+          type: boolean
+          default: false
+          description: >
+            Overrides the server-derived Agent-source flag for this call. When true,
+            CompositeHandler matches/updates existing records by explicit identifier
+            (Account.Id, EPG_License_Request__c.Name, EPG_Partner__c.EPG_Emirates_ID__c,
+            Contact.Email, Members__c.Name, User.EPG_Emirates_Id__c) instead of the default
+            upsert keys. Required (true) on Update requests; omit or set false for a plain
+            Create.
+        compositeRequest:
+          type: array
+          items: { $ref: '#/components/schemas/CompositeSubrequest' }
+    CompositeSubrequest:
+      type: object
+      required: [referenceId, method, url]
+      properties:
+        referenceId:
+          type: string
+          example: NewAccount
+          description: 'Unique id; referenced by later subrequests as @{referenceId.id}'
+        method:
+          type: string
+          enum: [GET, POST, PATCH, PUT, DELETE]
+          description: 'Informational; the endpoint upserts regardless'
+        url:
+          type: string
+          example: /services/data/v66.0/sobjects/Account
+          description: 'Only the last path segment is read, to derive the target object'
+        body:
+          description: >
+            A single object {} or an array of objects [{}].
+            IMPORTANT: CompositeHandler expects Map<String,Object> per item — use a plain
+            object {} for EPG_Trial_Balance__c entries (NewBranch, NewTrialBalance), not an
+            array. Sending an array body for the last composite item causes a runtime
+            cast error (List<ANY> to Map<String,ANY>).
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items: { type: object, additionalProperties: true }
+          nullable: true
+    CompositeResponse:
+      type: object
+      properties:
+        compositeResponse:
+          type: array
+          items: { $ref: '#/components/schemas/CompositeSubresponse' }
+    CompositeSubresponse:
+      type: object
+      properties:
+        referenceId: { type: string }
+        httpStatusCode: { type: integer }
+        httpHeaders: { type: object, additionalProperties: { type: string } }
+        body:
+          type: object
+          properties:
+            id: { type: string, nullable: true }
+            success: { type: boolean }
+            errors: { type: array, items: { type: string } }
+
+    # ---- API 3 / 4 / 5 ----
+    RequestStatus:
+      type: object
+      description: API 3 – request status read-back.
+      properties:
+        salesforceRecordId: { type: string, description: Parent record Id }
+        licenseNumber: { type: string, nullable: true, description: Null until issued }
+        requestStatus: { type: string, description: 'e.g. Under document review, Rejected – full set [TO BE CONFIRMED]' }
+        lastUpdated: { type: string, format: date-time, description: ISO 8601 }
+    DuplicateCheckRequest:
+      type: object
+      description: 'API 4 – candidate matching criteria (final rules [TO BE CONFIRMED]).'
+      properties:
+        emiratesId: { type: string }
+        tradeLicenseNumber: { type: string }
+        accountNumber: { type: string }
+        email: { type: string, format: email }
+        mobileNumber: { type: string }
+    DuplicateCheckResponse:
+      type: object
+      properties:
+        matchFound: { type: boolean }
+        matchedRecordIds: { type: array, items: { type: string } }
+        matchedRequests: { type: array, items: { $ref: '#/components/schemas/MatchedRequest' } }
+    MatchedRequest:
+      type: object
+      description: One entry per existing EPG_License_Request__c found under a matched account.
+      properties:
+        matchedRequestStatus: { type: string, nullable: true }
+        matchedRequestNumber: { type: string, nullable: true }
+        recommendedAction: { type: string, nullable: true }
+    DocumentUploadRequest:
+      type: object
+      description: API 5 – file stored as ContentVersion and linked to the License Request.
+      required: [licenseRequestId, fileName, versionData]
+      properties:
+        licenseRequestId: { type: string, description: EPG_License_Request__c Id to attach the file to }
+        fileName: { type: string, example: NewRenewCommitmentForm.pdf }
+        fileType: { type: string, example: pdf, description: 'Supported types [CONFIRM]' }
+        versionData: { type: string, format: byte, description: Base64-encoded file content }
+    DocumentUploadResponse:
+      type: object
+      properties:
+        contentDocumentId: { type: string }
+        contentVersionId: { type: string }
+        linkedTo: { type: string, description: License Request Id }
+        success: { type: boolean }
+
+    # ---- Target sObjects (from Appendix A) ----
+    Account:
+      type: object
+      description: Legal entity / trade license. Upsert key – EPG_Trade_license_no__c.
+      required: [Name, EPG_Trade_license_no__c, RecordTypeId]
+      properties:
+        Id: { type: string, description: 'Required on Update (Agent-sourced) – Salesforce Account Id used to match the existing record.' }
+        Name: { type: string }
+        EPG_Company_Name_Arabic__c: { type: string }
+        EPG_Company_Status__c: { type: string, example: Active }
+        EPG_Trade_license_no__c: { type: string, example: '2137129' }
+        EPG_Trade_Name_in_English__c: { type: string }
+        EPG_Trade_Name_in_Arabic__c: { type: string }
+        EPG_Regulator__c: { type: string }
+        BillingStreet: { type: string }
+        BillingCity: { type: string }
+        BillingState: { type: string }
+        BillingPostalCode: { type: string, nullable: true }
+        BillingCountry: { type: string }
+        EPG_Emirates__c: { type: string }
+        EPG_Region__c: { type: string }
+        EPG_TRN_No__c: { type: string, nullable: true }
+        EPG_PO_Box__c: { type: string }
+        RecordTypeId: { type: string, example: 0125f000001xIheAAE }
+        Local_Governmental_Entity__c: { type: string, nullable: true }
+        License_Expiry_Date__c: { type: string, format: date }
+    EPGPartner:
+      type: object
+      description: EPG_Partner__c – owners / shareholders. Upsert key – EPG_Company__c + EPG_Emirates_ID__c.
+      required: [Name, EPG_Company__c]
+      properties:
+        Name: { type: string }
+        EPG_Company__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
+        EPG_Share_holder_type__c: { type: string, example: Est. Owner }
+        EPG_Contact_No__c: { type: string }
+        EPG_Emirates_ID__c: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing Partner under the Account.' }
+        EPG_Status__c: { type: string, example: Active }
+        EPG_Nationality__c: { type: string }
+        EPG_Passport_No__c: { type: string }
+        EPG_Passport_Expiry_Date__c: { type: string, format: date }
+    Contact:
+      type: object
+      description: Secondary contacts.
+      required: [LastName, AccountId]
+      properties:
+        FirstName: { type: string }
+        LastName: { type: string }
+        Email: { type: string, format: email, description: 'Required on Update (Agent-sourced) – matches the existing Contact under the Account.' }
+        Phone: { type: string }
+        Title: { type: string }
+        EPG_Designation__c: { type: string }
+        AccountId: { type: string, description: 'Account Id or @{NewAccount.id}' }
+        EPG_Country_Code__c: { type: string, example: UAE(+971) }
+        Secondary_Contact: { type: string, enum: ['True', 'False'] }
+    User:
+      type: object
+      description: Portal applicant. Login fields (Username/Alias/Profile/locale) generated server-side.
+      required: [FirstName, LastName, Email]
+      properties:
+        AccountId: { type: string, description: 'Account Id or @NewAccount.id' }
+        FirstName: { type: string }
+        LastName: { type: string }
+        Email: { type: string, format: email }
+        Phone: { type: string }
+        EPG_Emirates_Id__c: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing User.' }
+    Members:
+      type: object
+      description: Members__c – board members / managers. Upsert key – AccountId__c + Name (NameEn).
+      required: [AccountId__c]
+      properties:
+        AccountId__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
+        Name: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing Member under the Account.' }
+    EPGDocument:
+      type: object
+      description: EPG_Document__c – document metadata (processed internally). Upsert key – EPG_File_Id__c.
+      required: [EPG_Company__c, EPG_File_Id__c]
+      properties:
+        EPG_Company__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
+        EPG_File_Name__c: { type: string, example: NewRenewCommitmentForm.pdf }
+        docType__c: { type: string, example: pdf }
+        fileType__c: { type: string, example: pdf }
+        EPG_File_Id__c: { type: string }
+        fileSize__c: { type: integer }
+        location__c: { type: string, nullable: true }
+    EPGLicenseRequest:
+      type: object
+      description: EPG_License_Request__c – the license request record.
+      required: [RecordTypeId, EPG_Account__c]
+      properties:
+        Name: { type: string, description: 'Required on Update (Agent-sourced) – License Request Name used to match the existing record.' }
+        RecordTypeId: { type: string, example: 0125f000001xIhuAAE }
+        EPG_Service__c: { type: string, example: a1H5f0000033Q7pEAE }
+        EPG_Account__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
+        serviceId__c: { type: string, example: S-EPG-000002 }
+        serviceNameEN__c: { type: string, example: Issue Postal Activity License }
+        serviceNameAR__c: { type: string }
+        providerCode__c: { type: string, nullable: true, description: Defaults to EPG }
+        submissionCount__c: { type: integer, example: 1 }
+        Activity_Codes__c: { type: string, example: '5320002' }
+        Terms_Conditions_Accepted__c: { type: boolean, description: Required for renewal. }
+
+    # ---- Renewal-specific (Appendix B) ----
+    Branch:
+      type: object
+      description: >
+        Renewal Branch Details (EPG_Trial_Balance__c). Linked to the License Request via
+        EPG_License_Request__c. Send as a plain object {}, not an array.
+      required: [EPG_License_Request__c]
+      properties:
+        EPG_License_Request__c: { type: string, description: 'License Request Id or @{NewLicenseRequest.id}' }
+      additionalProperties: true
+    TrialBalance:
+      type: object
+      description: >
+        Renewal quarterly Trial Balance Total Income (AED) — EPG_Trial_Balance__c.
+        Linked to the License Request via EPG_License_Request__c.
+        Send as a plain object {}, not an array.
+      required: [EPG_License_Request__c]
+      properties:
+        EPG_License_Request__c: { type: string, description: 'License Request Id or @{NewLicenseRequest.id}' }
+        TrialBalance_Q1__c: { type: string, description: Quarter 1 total income (AED) }
+        TrialBalance_Q2__c: { type: string, description: Quarter 2 total income (AED) }
+        TrialBalance_Q3__c: { type: string, description: Quarter 3 total income (AED) }
+        TrialBalance_Q4__c: { type: string, description: Quarter 4 total income (AED) }

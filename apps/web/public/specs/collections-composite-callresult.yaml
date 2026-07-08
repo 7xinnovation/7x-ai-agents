@@ -1,0 +1,287 @@
+openapi: 3.0.3
+info:
+  title: Collections Agent - Submit Call Result API (Composite)
+  description: >
+    Single Salesforce Composite request used by the Collections Agent to submit a
+    complete collection call result in one atomic transaction (allOrNone): upsert a
+    completed Task (idempotent by Correlation ID), upload the transcript as a
+    Salesforce File (ContentVersion), resolve its ContentDocumentId, and link the
+    file to the Task (ContentDocumentLink).
+  version: 1.0.0
+  contact:
+    name: Salesforce Team
+
+servers:
+  - url: https://{instance}.sandbox.my.salesforce.com
+    description: Salesforce UAT Sandbox instance
+    variables:
+      instance:
+        default: epg--epuat
+        description: Salesforce UAT Domain
+
+security:
+  - oauth2ClientCredentials: []
+
+paths:
+  /services/data/v66.0/composite:
+    post:
+      operationId: submitCallResult
+      summary: Submit collection call result (Task + transcript + link) atomically
+      description: >
+        Executes 4 ordered subrequests sharing results by referenceId:
+          1. taskUpsert  - PATCH upsert Task by Correlation_ID__c (idempotent)
+          2. transcript  - POST ContentVersion (base64 transcript file)
+          3. cvLookup    - GET ContentVersion.ContentDocumentId via @{transcript.id}
+          4. linkFile    - POST ContentDocumentLink (file -> Task)
+        With allOrNone=true the whole transaction rolls back on any failure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompositeRequest'
+            example:
+              allOrNone: true
+              compositeRequest:
+                - referenceId: taskUpsert
+                  method: PATCH
+                  url: /services/data/v66.0/sobjects/Task/Correlation_ID__c/CORR-2026-0001
+                  body:
+                    WhatId: 001XXXXXXXXXXXXAAA
+                    Subject: Collection Call
+                    RecordTypeId: 012FV000OtzpV8eYIE
+                    Status: Completed
+                    Call_Notes__c: Customer agreed to pay by month end.
+                    Call_Outcome__c: Commitment
+                    Commitment_Amount__c: 1500.00
+                    Commitment_Date__c: '2026-07-01'
+                    Detected_Language__c: en
+                    Communication_Status__c: Pending
+                - referenceId: transcript
+                  method: POST
+                  url: /services/data/v66.0/sobjects/ContentVersion
+                  body:
+                    Title: Collection Call Transcript
+                    PathOnClient: transcript.txt
+                    VersionData: PGJhc2U2NC1lbmNvZGVkLXRyYW5zY3JpcHQ+
+                - referenceId: cvLookup
+                  method: GET
+                  url: /services/data/v66.0/sobjects/ContentVersion/@{transcript.id}?fields=ContentDocumentId
+                - referenceId: linkFile
+                  method: POST
+                  url: /services/data/v66.0/sobjects/ContentDocumentLink
+                  body:
+                    ContentDocumentId: '@{cvLookup.ContentDocumentId}'
+                    LinkedEntityId: '@{taskUpsert.id}'
+                    ShareType: V
+                    Visibility: AllUsers
+      responses:
+        '200':
+          description: >
+            Composite processed. Inspect each subrequest's httpStatusCode. With
+            allOrNone=true, a non-2xx in any subrequest rolls back all of them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompositeResponse'
+              example:
+                compositeResponse:
+                  - referenceId: taskUpsert
+                    httpStatusCode: 200
+                    body:
+                      id: 00TXXXXXXXXXXXXAAA
+                      success: true
+                      created: true
+                  - referenceId: transcript
+                    httpStatusCode: 201
+                    body:
+                      id: 068XXXXXXXXXXXXAAA
+                      success: true
+                  - referenceId: cvLookup
+                    httpStatusCode: 200
+                    body:
+                      ContentDocumentId: 069XXXXXXXXXXXXAAA
+                  - referenceId: linkFile
+                    httpStatusCode: 201
+                    body:
+                      id: 06AXXXXXXXXXXXXAAA
+                      success: true
+        '400':
+          description: Invalid composite payload or a subrequest failed (rolled back).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompositeResponse'
+        '401':
+          description: Missing or invalid access token.
+
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      description: OAuth 2.0 Client Credentials flow via a dedicated Connected App.
+      flows:
+        clientCredentials:
+          tokenUrl: https://epg--epuat.sandbox.my.salesforce.com/services/oauth2/token
+          scopes:
+            api: Access and manage data (api)
+
+  schemas:
+    CompositeRequest:
+      type: object
+      required: [compositeRequest]
+      properties:
+        allOrNone:
+          type: boolean
+          default: true
+          description: When true, all subrequests succeed or the whole call rolls back.
+        compositeRequest:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositeSubrequest'
+
+    CompositeSubrequest:
+      type: object
+      required: [referenceId, method, url]
+      properties:
+        referenceId:
+          type: string
+          description: Unique id; referenced by later subrequests as @{referenceId.field}.
+          example: taskUpsert
+        method:
+          type: string
+          enum: [GET, POST, PATCH, PUT, DELETE]
+        url:
+          type: string
+          example: /services/data/v66.0/sobjects/Task/Correlation_ID__c/CORR-2026-0001
+        body:
+          oneOf:
+            - $ref: '#/components/schemas/TaskUpsertPayload'
+            - $ref: '#/components/schemas/ContentVersionPayload'
+            - $ref: '#/components/schemas/ContentDocumentLinkPayload'
+          nullable: true
+
+    TaskUpsertPayload:
+      type: object
+      description: Payload body format specifically for the taskUpsert subrequest.
+      required:
+        [
+          WhatId,
+          Subject,
+          RecordTypeId,
+          Status,
+          Call_Outcome__c,
+          Detected_Language__c,
+          Communication_Status__c,
+        ]
+      properties:
+        WhatId:
+          type: string
+          description: Salesforce Account Id related to the Task.
+          example: 001XXXXXXXXXXXXAAA
+        Subject:
+          type: string
+          description: Task subject, use Collection Call
+          example: Collection Call
+        RecordTypeId:
+          type: string
+          description: Task Record Type Id. Collections_Agent_Call UAT RecordType ID is 012FV000OtzpV8eYIE (diff ID for production env)
+          example: 012FV000OtzpV8eYIE
+        Status:
+          type: string
+          description: Task status.
+          enum:
+            - Completed
+        Call_Notes__c:
+          type: string
+          description: Notes regarding from the collection call.(32,768 chars)
+        Call_Outcome__c:
+          type: string
+          description: Outcome of the collection call.
+          enum:
+            - Commitment
+            - No Commitment
+            - Wrong Number
+            - Dispute
+            - Callback Requested
+            - No Answer
+        Commitment_Amount__c:
+          type: number
+          format: double
+          description: Amount the customer committed to pay.
+          example: 1500.00
+        Commitment_Date__c:
+          type: string
+          format: date
+          description: Date the customer committed to pay.
+          example: '2026-07-01'
+        Detected_Language__c:
+          type: string
+          description: Language detected during the call.
+          enum:
+            - en
+            - ar
+        Communication_Status__c:
+          type: string
+          description: Communication status initially Pending , then updated in SF once email to customer is sent.
+          example: Pending
+
+    ContentVersionPayload:
+      type: object
+      required: [Title, PathOnClient, VersionData]
+      properties:
+        Title:
+          type: string
+          example: Collection Call Transcript
+        PathOnClient:
+          type: string
+          example: transcript.txt
+        VersionData:
+          type: string
+          format: byte
+          description: Base64 encoded plaintext string content of the audio call log transcription.
+
+    ContentDocumentLinkPayload:
+      type: object
+      required: [ContentDocumentId, LinkedEntityId, ShareType, Visibility]
+      properties:
+        ContentDocumentId:
+          type: string
+          description: Reference variable dynamically evaluates
+          example: '@{cvLookup.ContentDocumentId}'
+        LinkedEntityId:
+          type: string
+          description: Reference variable dynamically evaluates
+          example: '@{taskUpsert.id}'
+        ShareType:
+          type: string
+          default: V
+          example: V
+        Visibility:
+          type: string
+          default: AllUsers
+          example: AllUsers
+
+    CompositeResponse:
+      type: object
+      properties:
+        compositeResponse:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompositeSubresponse'
+
+    CompositeSubresponse:
+      type: object
+      properties:
+        referenceId:
+          type: string
+        httpStatusCode:
+          type: integer
+        body:
+          type: object
+          additionalProperties: true
+          nullable: true
+        httpHeaders:
+          type: object
+          additionalProperties:
+            type: string

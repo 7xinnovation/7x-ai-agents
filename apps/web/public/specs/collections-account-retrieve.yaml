@@ -1,0 +1,210 @@
+openapi: 3.0.3
+info:
+  title: Collections Agent - Retrieve Account Information API
+  description: >
+    Standard Salesforce REST Query API used by the Collections Agent to retrieve
+    customer and outstanding balance information for a given Tech_accountNumber__c along
+    with details about its primary billing contact before
+    placing a collection call. Read-only. Outstanding balance is existing data in
+    Salesforce (sourcing is out of scope for this project).
+  version: 1.0.0
+  contact:
+    name: Salesforce Team
+
+servers:
+  - url: https://{instance}.sandbox.my.salesforce.com
+    description: Salesforce UAT Sandbox instance
+    variables:
+      instance:
+        default: epg--epuat
+        description: Salesforce UAT Domain
+
+security:
+  - oauth2ClientCredentials: []
+
+paths:
+  /services/data/v66.0/query:
+    get:
+      operationId: retrieveAccountByNumber
+      summary: Retrieve Account info by Tech_accountNumber__c (SOQL)
+      description: >
+        Executes a SOQL query to return the Account matching the supplied Account
+        Number along with primary billing contact's id , email and mobile The caller URL-encodes the SOQL string in the `q` parameter.
+        Example SOQL:
+          SELECT Id, Name, Tech_accountNumber__c, Phone,BillingCountry, PreferredLanguage__pc,PrimaryBillingContact__r.Email, PrimaryBillingContact__r.MobilePhone
+          FROM Account
+          WHERE Tech_accountNumber__c = '123456'
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: URL-encoded SOQL statement filtering Account by Tech_accountNumber__c.
+          schema:
+            type: string
+          example: >-
+            SELECT Id, Name, Tech_accountNumber__c, Phone,BillingCountry, PreferredLanguage__pc, PrimaryBillingContact__r.Id, PrimaryBillingContact__r.Email, PrimaryBillingContact__r.MobilePhone
+            FROM Account
+            WHERE Tech_accountNumber__c = '123456'
+      responses:
+        '200':
+          description: Query executed. Returns 0..n matching Account records with the details about the Primary Billing Contact.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountQueryResult'
+              examples:
+                found:
+                  summary: Account found
+                  value:
+                    totalSize: 1
+                    done: true
+                    records:
+                      - attributes:
+                          type: Account
+                          url: /services/data/v66.0/sobjects/Account/001XXXXXXXXXXXXAAA
+                        Id: 001XXXXXXXXXXXXAAA
+                        Name: Acme Trading LLC
+                        Tech_accountNumber__c: '123456'
+                        Phone: '+97141234567'
+                        BillingCountry: United Arab Emirates
+                        Outstanding_Balance__c: 4250.75
+                        PreferredLanguage__pc: English
+                        PrimaryBillingContact__r:
+                          attributes:
+                            type: Contact
+                            url: /services/data/v66.0/sobjects/Contact/001XXXXXXXXXXXXCCC
+                          Id: 001XXXXXXXXXXXXCCC
+                          Email: john.doe@acmetraining.ae
+                          MobilePhone: 00973503887021
+
+                notFound:
+                  summary: No match
+                  value:
+                    totalSize: 0
+                    done: true
+                    records: []
+        '400':
+          description: Malformed SOQL / invalid query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceErrorArray'
+        '401':
+          description: Missing or invalid access token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceErrorArray'
+
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      description: >
+        OAuth 2.0 Client Credentials flow via a dedicated External Client App / Connected
+        App + a least-privilege integration user. client_id and client_secret must come
+        from a secret store / Postman environment variables (or a vault) — never commit
+        or hardcode them in this spec.
+      flows:
+        clientCredentials:
+          tokenUrl: https://epg--epuat.sandbox.my.salesforce.com/services/oauth2/token
+          scopes: {}
+      x-tokenRequest:
+        description: >
+          The "clientCredentials" flow implies grant_type=client_credentials, but OpenAPI
+          has no field to spell that out — documented here for implementers building the
+          actual token call (matches a typical Postman request body, x-www-form-urlencoded).
+          Do not send a "scope" parameter; Salesforce rejects it for this grant type.
+        contentType: application/x-www-form-urlencoded
+        parameters:
+          grant_type:
+            value: client_credentials
+            required: true
+          client_id:
+            description: External Client App consumer key.
+            required: true
+          client_secret:
+            description: External Client App consumer secret.
+            required: true
+
+  schemas:
+    AccountQueryResult:
+      type: object
+      properties:
+        totalSize:
+          type: integer
+          example: 1
+        done:
+          type: boolean
+          example: true
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+
+    Account:
+      type: object
+      properties:
+        attributes:
+          type: object
+          properties:
+            type:
+              type: string
+              example: Account
+            url:
+              type: string
+        Id:
+          type: string
+          example: 001XXXXXXXXXXXXAAA
+        Name:
+          type: string
+          example: Acme Trading LLC
+        Tech_accountNumber__c:
+          type: string
+        Phone:
+          type: string
+          nullable: true
+        BillingCountry:
+          type: string
+          nullable: true
+        Outstanding_Balance__c:
+          type: number
+          format: double
+          nullable: true
+          description: Existing outstanding balance field in Salesforce
+        PreferredLanguage__pc:
+          type: string
+          nullable: true
+          description: Picklist allowed values are Arabic and English.
+        PrimaryBillingContact__r:
+          type: object
+          properties:
+            attributes:
+              type: object
+              properties:
+                type:
+                  type: string
+                url:
+                  type: string
+            Id:
+              type: string
+              nullable: true
+            Email:
+              type: string
+              nullable: true
+            MobilePhone:
+              type: string
+              nullable: true
+
+    SalesforceErrorArray:
+      type: array
+      items:
+        type: object
+        properties:
+          message:
+            type: string
+          errorCode:
+            type: string
+      example:
+        - message: 'INVALID_FIELD: ...'
+          errorCode: INVALID_FIELD
