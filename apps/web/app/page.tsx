@@ -1,33 +1,17 @@
-export default function Home() {
-  return (
-    <main className="page">
-      <h1>Dialog Platform</h1>
-      <p>
-        Multi-tenant conversational AI. Each agent is defined as data (branding, languages, journeys,
-        guardrails, integrations) and ships as a floating widget that expands into a full-page split
-        screen: chat on the left, a realtime case builder on the right.
-      </p>
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { verifySession } from "@/lib/session";
 
-      <h3>Try it</h3>
-      <p>
-        <a href="/admin">Admin console — generate & configure agents →</a>
-        <br />
-        <a href="/embed/epgl-dialog?embedded=0">Open the EPGL full-page experience →</a>
-        <br />
-        <a href="/demo">Open a host page with the floating widget →</a>
-      </p>
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-      <h3>Embed snippet</h3>
-      <pre>{`<script src="HOST/dialog.js"
-        data-agent="epgl-dialog"
-        data-host="HOST"
-        data-locale="en"></script>`}</pre>
-
-      <h3>Add another company</h3>
-      <p>
-        Insert one row in <code>agents</code> with a new <code>AgentDefinition</code> — no code changes.
-        See <code>packages/db/src/seed.ts</code> for the EPGL example.
-      </p>
-    </main>
-  );
+/**
+ * Root route: straight to the product. A valid admin session lands on the
+ * dashboard; everyone else goes to the login page. (The old marketing page is
+ * gone — agents are reached via their /embed/<slug> URLs or the widget.)
+ */
+export default async function Home() {
+  const token = (await cookies()).get("dlg_admin")?.value;
+  const claims = await verifySession(token);
+  redirect(claims ? "/admin" : "/admin/login");
 }
