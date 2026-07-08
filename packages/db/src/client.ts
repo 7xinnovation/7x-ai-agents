@@ -1,5 +1,7 @@
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
+import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
+import { Pool as PgPool } from "pg";
 import * as schema from "./schema";
 
 // In Node (scripts, server runtime) the WS transport needs a polyfill; in edge
@@ -10,28 +12,43 @@ if (typeof WebSocket === "undefined") {
   neonConfig.webSocketConstructor = require("ws");
 }
 
-let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
+// Both drivers expose the same drizzle query API; type as node-postgres and let
+// the Neon instance structurally conform.
+export type Db = NodePgDatabase<typeof schema>;
 
-export function getDb(connectionString = process.env.DATABASE_URL) {
+let _db: Db | null = null;
+
+/**
+ * Driver-agnostic Postgres client:
+ *  - *.neon.tech URLs → Neon serverless driver (their WebSocket proxy protocol).
+ *  - anything else (Railway, RDS, local Postgres…) → node-postgres.
+ * Pool settings mirror each other: prune idle sockets quickly and fail fast on
+ * connect so a connection that died idle can't poison later queries; idle-client
+ * errors are logged and the pool discards the client so the next query reconnects.
+ */
+export function getDb(connectionString = process.env.DATABASE_URL): Db {
   if (!connectionString) throw new Error("DATABASE_URL is not set");
   if (_db) return _db;
-  const pool = new Pool({
+
+  const poolOpts = {
     connectionString,
-    // Prune idle sockets quickly and fail fast on connect: a WebSocket that died
-    // while idle (network blip, Neon idle timeout) must not poison later queries.
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
-    maxUses: 500,
-  });
-  // Errors on IDLE pooled clients surface here (not on any query). Without a
-  // handler they become unhandled ErrorEvents that crash the request/process;
-  // logging + letting the pool discard the client lets the next query reconnect.
-  pool.on("error", (err) => {
-    console.warn("[db] idle pool client error (client discarded):", err?.message ?? err);
-  });
-  _db = drizzle(pool, { schema });
+  };
+  const onIdleError = (err: unknown) => {
+    console.warn("[db] idle pool client error (client discarded):", err instanceof Error ? err.message : err);
+  };
+
+  if (/\.neon\.tech[/:]?/.test(connectionString)) {
+    const pool = new NeonPool({ ...poolOpts, maxUses: 500 });
+    pool.on("error", onIdleError);
+    _db = drizzleNeon(pool, { schema }) as unknown as Db;
+  } else {
+    const pool = new PgPool(poolOpts);
+    pool.on("error", onIdleError);
+    _db = drizzlePg(pool, { schema });
+  }
   return _db;
 }
 
 export { schema };
-export type Db = ReturnType<typeof getDb>;
