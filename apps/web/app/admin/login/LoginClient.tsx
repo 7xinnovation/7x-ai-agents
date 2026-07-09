@@ -58,15 +58,29 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
         </div>
 
         <div className="relative max-w-md">
-          <h2 className="text-balance text-4xl font-bold leading-[1.08] tracking-tight text-white">
+          <h2 className="text-balance text-[40px] font-bold leading-[1.06] tracking-[-0.02em] text-white">
             One console for every conversational agent.
           </h2>
-          <p className="mt-4 max-w-[42ch] text-[15px] leading-relaxed text-white/60">
+          <p className="mt-4 max-w-[42ch] text-[15px] leading-relaxed text-white/55">
             Configure journeys, watch conversations as they happen, and act on what customers need.
           </p>
+
+          {/* Concrete capability lines — quiet structure for the panel, no decoration. */}
+          <dl className="mt-10 max-w-sm">
+            {[
+              ["Live conversations", "Every session, as it happens"],
+              ["Journey builder", "Agents defined as data, not code"],
+              ["Governance", "RBAC, audit trail, analytics"],
+            ].map(([term, desc]) => (
+              <div key={term} className="border-t border-white/10 py-3.5 first:border-t-0">
+                <dt className="text-[13.5px] font-semibold text-white/90">{term}</dt>
+                <dd className="mt-0.5 text-[12.5px] text-white/45">{desc}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
-        <p className="relative text-[13px] text-white/40">Agents, conversations, analytics and governance in one place.</p>
+        <p className="relative text-[12.5px] text-white/35">7X Dialog · Secure operations console</p>
       </aside>
 
       {/* Form panel */}
@@ -91,6 +105,7 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
                 autoFocus
                 autoComplete="username"
                 placeholder="you@7x.ae"
+                className="h-11"
                 aria-invalid={Boolean(error)}
               />
             </div>
@@ -105,7 +120,7 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
                   onKeyUp={(e) => setCapsLock(e.getModifierState?.("CapsLock") ?? false)}
                   autoComplete="current-password"
                   placeholder="Enter your password"
-                  className="pr-11"
+                  className="h-11 pr-11"
                   aria-invalid={Boolean(error)}
                 />
                 <button

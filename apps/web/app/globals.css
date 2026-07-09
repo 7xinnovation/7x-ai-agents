@@ -350,6 +350,12 @@ body {
   gap: 13px;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
+  /* Comfortable reading measure: on the wide full-page split the conversation
+     centers into a column instead of stretching edge to edge. In the narrow
+     widget (~404px) the cap is inert, so this only shapes the full-page. */
+  width: 100%;
+  max-width: 792px;
+  margin-inline: auto;
 }
 .dlg-msg {
   display: flex;
@@ -407,28 +413,28 @@ body {
 .dlg-msg.assistant .dlg-bubble {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, #fff 55%, var(--c-surface)),
-    color-mix(in srgb, var(--c-text) 2%, var(--c-surface))
+    color-mix(in srgb, #fff 60%, var(--c-surface)),
+    color-mix(in srgb, var(--c-text) 1.5%, var(--c-surface))
   );
-  border: 1px solid color-mix(in srgb, var(--c-text) 11%, var(--c-border));
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, var(--c-border));
   box-shadow:
-    0 1px 2px rgba(16, 24, 40, 0.05),
-    0 8px 20px -10px rgba(16, 24, 40, 0.12),
-    inset 0 1px 0 color-mix(in srgb, #fff 65%, transparent);
-  border-start-start-radius: 8px;
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 10px 22px -14px rgba(16, 24, 40, 0.14),
+    inset 0 1px 0 color-mix(in srgb, #fff 70%, transparent);
+  border-start-start-radius: 7px;
 }
 .dlg-msg.user .dlg-bubble {
   color: var(--c-primary-fg);
   background: linear-gradient(
     142deg,
-    color-mix(in srgb, var(--c-primary) 86%, white),
+    color-mix(in srgb, var(--c-primary) 88%, white),
     var(--c-primary)
   );
   box-shadow:
     0 1px 2px rgba(16, 24, 40, 0.06),
-    0 8px 20px -10px color-mix(in srgb, var(--c-primary) 45%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
-  border-start-end-radius: 8px;
+    0 10px 22px -12px color-mix(in srgb, var(--c-primary) 50%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  border-start-end-radius: 7px;
 }
 /* Rendered markdown inside bubbles */
 .dlg-bubble :where(p, ul) {
@@ -867,7 +873,9 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 18px 10px;
+  width: calc(100% - 36px);
+  max-width: 792px;
+  margin: 0 auto 10px;
   padding: 11px 13px;
   font-size: 13px;
   color: color-mix(in srgb, var(--c-warning) 75%, var(--c-text));
@@ -897,6 +905,10 @@ body {
 }
 .dlg-input-wrap > * {
   pointer-events: auto;
+  /* Align the composer to the same centered reading measure as the messages. */
+  width: 100%;
+  max-width: 792px;
+  margin-inline: auto;
 }
 .dlg-input {
   display: flex;
