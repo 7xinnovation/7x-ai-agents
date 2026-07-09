@@ -49,6 +49,50 @@ const isTableSep = (line: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+
 const isTableRow = (line: string) => /\|/.test(line) && line.trim().length > 0;
 
 /**
+ * Parse a ```cards fenced block into selectable option cards (PRD/feedback
+ * FB-1169: show products or options to choose from as visual cards, not tables).
+ * Each card is a `- ` item followed by `key: value` lines; recognised keys —
+ * title, price, desc/subtitle, badge, meta — get dedicated styling, anything
+ * else renders as a labeled attribute row.
+ */
+interface OptionCard {
+  title: string;
+  price?: string;
+  desc?: string;
+  badge?: string;
+  attrs: { label: string; value: string }[];
+}
+function parseCards(body: string[]): OptionCard[] {
+  const cards: OptionCard[] = [];
+  let cur: OptionCard | null = null;
+  for (const raw of body) {
+    const item = raw.match(/^\s*-\s+(.*)$/);
+    const kv = raw.match(/^\s*([A-Za-z][\w ]*?):\s*(.*)$/);
+    if (item) {
+      if (cur) cards.push(cur);
+      cur = { title: "", attrs: [] };
+      const inline = item[1]!.match(/^([A-Za-z][\w ]*?):\s*(.*)$/);
+      if (inline) applyCardKey(cur, inline[1]!, inline[2]!);
+      else cur.title = item[1]!.trim();
+    } else if (kv && cur) {
+      applyCardKey(cur, kv[1]!, kv[2]!);
+    }
+  }
+  if (cur) cards.push(cur);
+  return cards.filter((c) => c.title || c.desc || c.attrs.length);
+}
+function applyCardKey(card: OptionCard, key: string, value: string) {
+  const k = key.trim().toLowerCase();
+  const v = value.trim();
+  if (k === "title" || k === "name") card.title = v;
+  else if (k === "price" || k === "cost" || k === "fee") card.price = v;
+  else if (k === "desc" || k === "description" || k === "subtitle") card.desc = v;
+  else if (k === "badge" || k === "tag") card.badge = v;
+  else if (!card.title) card.title = v;
+  else card.attrs.push({ label: key.trim(), value: v });
+}
+
+/**
  * Reveals assistant text with a smooth typewriter effect, decoupled from the
  * network: SSE deltas grow `text`, and this animates the visible slice up to it
  * at a steady pace, accelerating to catch up after a burst (e.g. text resuming
@@ -108,6 +152,48 @@ export function Markdown({ text }: { text: string }) {
   let k = 0;
   while (i < lines.length) {
     const line = lines[i]!;
+    // Option cards: a ```cards fenced block → visual, scannable choice cards.
+    const fence = line.match(/^\s*```\s*(cards)?\s*$/);
+    if (fence) {
+      const isCards = fence[1] === "cards";
+      i++;
+      const body: string[] = [];
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
+      i++; // closing fence
+      if (isCards) {
+        const cards = parseCards(body);
+        if (cards.length) {
+          nodes.push(
+            <div className="dlg-cards" key={k++}>
+              {cards.map((c, ci) => (
+                <div className="dlg-card-opt" key={ci}>
+                  <div className="dlg-card-opt-head">
+                    <span className="dlg-card-opt-title">{renderInline(c.title)}</span>
+                    {c.badge ? <span className="dlg-card-opt-badge">{c.badge}</span> : null}
+                  </div>
+                  {c.desc ? <p className="dlg-card-opt-desc">{renderInline(c.desc)}</p> : null}
+                  {c.attrs.length ? (
+                    <div className="dlg-card-opt-attrs">
+                      {c.attrs.map((a, ai) => (
+                        <span className="dlg-card-opt-attr" key={ai}>
+                          <span className="k">{a.label}</span>
+                          <span className={`v${a.value.length > 32 ? " long" : ""}`}>{renderInline(a.value)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {c.price ? <div className="dlg-card-opt-price">{c.price}</div> : null}
+                </div>
+              ))}
+            </div>
+          );
+        }
+      } else {
+        // Plain fenced code block.
+        nodes.push(<pre className="dlg-md-pre" key={k++}><code>{body.join("\n")}</code></pre>);
+      }
+      continue;
+    }
     // Table: a header row followed by a |---|---| separator, then body rows.
     if (isTableRow(line) && i + 1 < lines.length && isTableSep(lines[i + 1]!)) {
       const header = splitRow(line);

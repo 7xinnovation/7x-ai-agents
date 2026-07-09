@@ -30,6 +30,11 @@ export const Journey = z.object({
   title: LocalizedString,
   summary: LocalizedString.optional(),
   requiresAuth: z.boolean().default(true),
+  // Free-text playbook for how the agent should run this journey conversationally
+  // (stage order, optional gates, consent capture, presentation rules). Rendered
+  // into the system prompt when this journey is active — independent of the
+  // payment mode, so fixed-price (internal-spine) journeys get guidance too.
+  guidance: z.string().optional(),
   steps: z.array(JourneyStep).default([]),
   // Submission readiness: all mandatory fields/documents present before submit
   // is enabled (PRD: submission blocked until requirements met).

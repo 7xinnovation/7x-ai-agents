@@ -43,26 +43,28 @@ async function run() {
   const details =
     "I'd like to rent a new personal PO Box. Here are all my details: " +
     "full name Mariam Al Suwaidi, emirate Dubai, preferred branch Deira Main Post Office, " +
-    "the standard/basic package, duration 1 year, no optional add-ons, " +
+    "box number 50123, the MyBox package, duration 1 year, no authorized agent, collect the key from the branch, " +
     "contact phone +971501234567, email mariam@example.ae. Please record everything.";
   r = await chat({ agentSlug: "nxn-dialog", userMessage: details, authenticated: true, userRef });
   const conv = r.conversationId;
   check("Rental journey started", r.state?.journeyKey === "personal_po_box_rental", `journey=${r.state?.journeyKey}`);
 
-  // Drive remaining required fields until readiness complete (max 5 nudges).
-  for (let i = 0; i < 5 && r.state && !r.state.readiness?.complete; i++) {
+  // Drive remaining required fields until readiness complete (max 6 nudges).
+  // Accept whatever branch the agent resolves from the location API.
+  for (let i = 0; i < 6 && r.state && !r.state.readiness?.complete; i++) {
     const missing = (r.state.readiness?.missing ?? []).map((m) => m.key).join(", ");
     r = await chat({
       agentSlug: "nxn-dialog", conversationId: conv, authenticated: true, userRef,
-      userMessage: `Please use these for any missing fields (${missing}): full name Mariam Al Suwaidi, emirate Dubai, branch Deira Main Post Office, package basic, duration 1 year, phone +971501234567, email mariam@example.ae.`,
+      userMessage: `Please fill any missing fields (${missing}). Use the nearest branch you can find in Dubai and just record it — do not keep asking me to confirm the branch. Values: full name Mariam Al Suwaidi, emirate Dubai, box number 50123, package MyBox, duration 1 year, no authorized agent, collect key from branch, phone +971501234567, email mariam@example.ae.`,
     });
   }
   check("Case reaches submission readiness", !!r.state?.readiness?.complete, `missing=${JSON.stringify(r.state?.readiness?.missing)}`);
 
-  // Ask to pay → expect payment_initiated with a reference.
+  // Ask to pay → expect payment_initiated with a reference. Accept whatever
+  // branch/duration the agent proposes so the richer journey reaches payment.
   let paymentRef = null;
-  for (let i = 0; i < 3 && !paymentRef; i++) {
-    r = await chat({ agentSlug: "nxn-dialog", conversationId: conv, authenticated: true, userRef, userMessage: i === 0 ? "Yes, everything is correct. Please proceed to payment and give me the secure link." : "Please initiate the payment now." });
+  for (let i = 0; i < 4 && !paymentRef; i++) {
+    r = await chat({ agentSlug: "nxn-dialog", conversationId: conv, authenticated: true, userRef, userMessage: i === 0 ? "Yes — use whichever branch you suggested and 1 year duration. Everything is correct, no auto-renew, no saved card. Please proceed to payment and give me the secure link." : "Yes, that's all correct. Please initiate the payment now." });
     const pe = evOf(r, "payment_initiated"); if (pe) paymentRef = pe.reference;
   }
   check("Payment initiated (reference issued)", !!paymentRef, `state.payment=${JSON.stringify(r.state?.payment)}`);
