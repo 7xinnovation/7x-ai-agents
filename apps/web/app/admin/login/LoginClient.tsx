@@ -7,6 +7,7 @@ import { Input, Label } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 
 export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [reveal, setReveal] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
@@ -21,10 +22,10 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
       const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
       if (!res.ok) {
-        setError(res.status === 429 ? "Too many attempts. Wait a moment and try again." : "Incorrect password.");
+        setError(res.status === 429 ? "Too many attempts. Wait a moment and try again." : "Incorrect email or password.");
         return;
       }
       const params = new URLSearchParams(window.location.search);
@@ -81,6 +82,19 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
 
           <form onSubmit={submit} className="mt-7 flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
+              <Label htmlFor="admin-email">Email</Label>
+              <Input
+                id="admin-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+                autoComplete="username"
+                placeholder="you@7x.ae"
+                aria-invalid={Boolean(error)}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="admin-password">Password</Label>
               <div className="relative">
                 <Input
@@ -89,7 +103,6 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyUp={(e) => setCapsLock(e.getModifierState?.("CapsLock") ?? false)}
-                  autoFocus
                   autoComplete="current-password"
                   placeholder="Enter your password"
                   className="pr-11"
@@ -113,7 +126,7 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
               </div>
             ) : null}
 
-            <Button type="submit" disabled={busy || !password} className="h-11 w-full text-sm">
+            <Button type="submit" disabled={busy || !email || !password} className="h-11 w-full text-sm">
               {busy ? (
                 <>
                   <span
