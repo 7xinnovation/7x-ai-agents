@@ -11,3 +11,4 @@ export * from "./ai/intent";
 export * from "./ai/embeddings";
 export * from "./ai/tools";
 export * from "./ai/orchestrator";
+export * from "./ai/extract";

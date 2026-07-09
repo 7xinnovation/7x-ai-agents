@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setDocument, resolveAdapters, adapterContext } from "@dialog/core";
+import { setDocument, setField, resolveAdapters, adapterContext, extractFieldsFromDocument } from "@dialog/core";
 import { getDb, documents as documentsTable } from "@dialog/db";
 import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
@@ -66,11 +66,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ case: state, rejected: true, reason });
   }
 
-  // Store the bytes via the configured storage adapter.
+  // Read the bytes once — used for both storage and field extraction.
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  // Store via the configured storage adapter.
   let storageKey = `inline://${caseRow.caseId}/${key}/${file.name}`;
   if (adapters.storage) {
     const sctx = adapterContext(agent.definition, agent.definition.integrations.storage);
-    const bytes = new Uint8Array(await file.arrayBuffer());
     const res = await adapters.storage.put(sctx, {
       caseId: caseRow.caseId,
       key,
@@ -81,11 +83,36 @@ export async function POST(req: NextRequest) {
     storageKey = res.storageKey;
   }
 
-  const state = setDocument(agent.definition, caseRow.state, {
+  let state = setDocument(agent.definition, caseRow.state, {
     key,
     status: "uploaded",
     fileName: file.name,
   });
+
+  // Documents-first auto-fill: read the document with a vision model and
+  // pre-fill whatever journey fields it contains, so the customer isn't asked
+  // for details the document already carries. Best-effort — never blocks upload.
+  const extractedKeys: string[] = [];
+  try {
+    const locale = (agent.definition.locales?.[0] ?? "en") as "en" | "ar";
+    const { values } = await extractFieldsFromDocument({
+      agent: agent.definition,
+      state,
+      locale,
+      fileName: file.name,
+      contentType: file.type || "application/octet-stream",
+      bytes,
+    });
+    for (const [fieldKey, value] of Object.entries(values)) {
+      // Do not overwrite a value the customer already provided.
+      if (state.data[fieldKey] !== undefined && state.data[fieldKey] !== null && state.data[fieldKey] !== "") continue;
+      const r = setField(agent.definition, state, fieldKey, value);
+      if (!r.error) { state = r.state; extractedKeys.push(fieldKey); }
+    }
+  } catch {
+    /* extraction is best-effort; the upload still succeeds */
+  }
+
   await saveCase(caseRow.caseId, state);
   await getDb()
     .insert(documentsTable)
@@ -95,8 +122,8 @@ export async function POST(req: NextRequest) {
     conversationId,
     actor: "user",
     action: "document_uploaded",
-    payload: { key, fileName: file.name },
+    payload: { key, fileName: file.name, extracted: extractedKeys },
   });
 
-  return NextResponse.json({ case: state, rejected: false });
+  return NextResponse.json({ case: state, rejected: false, extracted: extractedKeys });
 }
