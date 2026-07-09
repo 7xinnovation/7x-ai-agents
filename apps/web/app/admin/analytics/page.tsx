@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { loadDashboards } from "@/lib/metrics";
+import { loadDashboards, listAgentsForFilter } from "@/lib/metrics";
+import { AgentFilter } from "../AgentFilter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,29 +45,38 @@ function Panel({ title, desc, children }: { title: string; desc: string; childre
   );
 }
 
-export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
-  const { days } = await searchParams;
+export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ days?: string; agent?: string }> }) {
+  const { days, agent } = await searchParams;
   const windowDays = RANGES.includes(Number(days)) ? Number(days) : 30;
-  const d = await loadDashboards(windowDays);
+  const agentList = await listAgentsForFilter();
+  const selected = agent ? agentList.find((a) => a.slug === agent) : undefined;
+  const d = await loadDashboards(windowDays, selected?.id);
   const k = d.kpis;
+  // Preserve the agent scope on the range links.
+  const rangeHref = (r: number) => `/admin/analytics?days=${r}${selected ? `&agent=${selected.slug}` : ""}`;
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[26px] font-bold tracking-tight">Analytics &amp; Monitoring</h1>
-          <p className="mt-1 text-[14px] text-muted">KPIs, conversation, journey, escalation, SLA and operational dashboards · last {windowDays} days.</p>
+          <p className="mt-1 text-[14px] text-muted">
+            KPIs, conversation, journey, escalation, SLA and operational dashboards · {selected ? selected.name : "all agents"} · last {windowDays} days.
+          </p>
         </div>
-        <div className="flex gap-1 rounded-lg border border-[var(--color-line)] bg-surface p-0.5">
-          {RANGES.map((r) => (
-            <Link key={r} href={`/admin/analytics?days=${r}`} className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${r === windowDays ? "bg-[var(--color-line-soft)] text-ink" : "text-muted hover:text-ink"}`}>{r}d</Link>
-          ))}
+        <div className="flex items-center gap-2">
+          <AgentFilter agents={agentList} />
+          <div className="flex gap-1 rounded-lg border border-[var(--color-line)] bg-surface p-0.5">
+            {RANGES.map((r) => (
+              <Link key={r} href={rangeHref(r)} className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${r === windowDays ? "bg-[var(--color-line-soft)] text-ink" : "text-muted hover:text-ink"}`}>{r}d</Link>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* 1 — KPI Dashboard */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Conversations" value={String(k.conversations)} sub={`${d.counts["intent.identified"] ?? 0} intents classified`} />
+        <Stat label="Conversations" value={String(k.conversations)} sub={`${k.intentsClassified} intents classified`} />
         <Stat label="Journey completion" value={`${k.journeyCompletionRate}%`} sub={`${k.journeysCompleted}/${k.journeysStarted} completed`} tone={k.journeyCompletionRate >= 60 ? "pos" : undefined} />
         <Stat label="Payment success" value={`${k.paymentSuccessRate}%`} sub={`${d.payments.completed}/${d.payments.initiated} paid`} tone={k.paymentSuccessRate >= 95 ? "pos" : undefined} />
         <Stat label="Self-service rate" value={`${k.selfServiceRate}%`} sub={`${d.escalations.total} callbacks`} tone={k.selfServiceRate >= 70 ? "pos" : undefined} />

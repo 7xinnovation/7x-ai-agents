@@ -65,6 +65,11 @@ Each is built and selectable per agent; supplying credentials switches it from m
 
 ---
 
+## 2.5 Analytics accuracy (2026-07-09)
+- **Agent filter** added to Analytics + Activity (`?agent=<slug>`) — previously every number blended all three agents into one aggregate (e.g. "unknown 148" was nxn 74 + epgl 84). Both dashboards now scope cleanly.
+- **Conversations KPI** now counts real `conversations` rows (source of truth) instead of `conversation.started` events, which undercounted by ~5% (a conversation created at sign-in before the first message never emitted the event).
+- **apiFlow completions** now tracked: a successful Salesforce `submitLicenseRequest` (or any journey `saveTool`) emits `journey.completed` just like the internal `submit_case`, so EPGL journey completion no longer reads 0% when licenses are actually being submitted. Detector judges the composite body (success marker present, no rollback), not HTTP status.
+
 ## 3. Engineering to-dos (not blocked, just not done)
 
 - [ ] **Production deployment**: hosting, managed Postgres env, domain, CDN for `dialog.js` embed loader, env-var wiring.

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { getDb, conversations, agents, auditLog } from "@dialog/db";
+import { listAgentsForFilter } from "@/lib/metrics";
+import { AgentFilter } from "../AgentFilter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,8 +16,11 @@ function timeAgo(d: Date | string) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-export default async function Activity() {
+export default async function Activity({ searchParams }: { searchParams: Promise<{ agent?: string }> }) {
   const db = getDb();
+  const { agent } = await searchParams;
+  const agentList = await listAgentsForFilter();
+  const selected = agent ? agentList.find((a) => a.slug === agent) : undefined;
 
   const convs = await db
     .select({
@@ -27,6 +32,7 @@ export default async function Activity() {
     })
     .from(conversations)
     .leftJoin(agents, eq(conversations.agentId, agents.id))
+    .where(selected ? eq(conversations.agentId, selected.id) : undefined)
     .orderBy(desc(conversations.createdAt))
     .limit(12);
 
@@ -40,6 +46,7 @@ export default async function Activity() {
     })
     .from(auditLog)
     .leftJoin(agents, eq(auditLog.agentId, agents.id))
+    .where(selected ? eq(auditLog.agentId, selected.id) : undefined)
     .orderBy(desc(auditLog.createdAt))
     .limit(15);
 
@@ -48,8 +55,9 @@ export default async function Activity() {
       <header className="sa-top">
         <div>
           <h1>Activity</h1>
-          <p>Conversations and audited actions across all agents.</p>
+          <p>Conversations and audited actions{selected ? ` · ${selected.name}` : " across all agents"}.</p>
         </div>
+        <AgentFilter agents={agentList} />
       </header>
 
       <div className="sa-cols">

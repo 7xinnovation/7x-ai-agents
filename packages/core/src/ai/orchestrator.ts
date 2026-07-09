@@ -4,6 +4,20 @@ import type { AdapterBundle } from "../adapters/types";
 import { getAnthropic, resolveModel } from "./anthropic";
 import { buildSystemPrompt } from "./prompt";
 import { TOOL_DEFS, dispatchTool } from "./tools";
+import { findJourney } from "../case/engine";
+
+/**
+ * Detect a successful apiFlow submission from a Salesforce-style composite (or
+ * plain success) tool result. The gateway always returns HTTP 200, so we judge
+ * by the body: at least one success marker and no rollback / failure marker.
+ * Returns a reference id (first Salesforce-style record id) when successful.
+ */
+function submissionReference(result: string): string | null {
+  if (!/"success"\s*:\s*true/i.test(result)) return null;
+  if (/"success"\s*:\s*false/i.test(result) || /rolled back/i.test(result)) return null;
+  const id = result.match(/"id"\s*:\s*"([a-zA-Z0-9]{15,18})"/)?.[1];
+  return id ?? "submitted";
+}
 
 export interface TurnMessage {
   role: "user" | "assistant";
@@ -99,6 +113,8 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
   // "…right away!To look up…"). Insert a paragraph separator before the next
   // round's first text so the segments read as distinct messages.
   let pendingSeparator = false;
+  // Emit at most one apiFlow submission per turn (a successful saveTool call).
+  let submittedThisTurn = false;
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -181,6 +197,17 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           yield { type: "integration", tool: tu.name };
           const r = await input.runExtraTool(tu.name, tu.input as Record<string, unknown>);
           toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: r.result, is_error: r.isError });
+          // apiFlow journeys complete through a backend saveTool (e.g. Salesforce
+          // submitLicenseRequest), not the internal submit_case. When the active
+          // journey's saveTool succeeds, surface it as a submission so completion
+          // is tracked in analytics exactly like the internal spine.
+          if (!r.isError && !submittedThisTurn) {
+            const saveTool = findJourney(agent, state.journeyKey)?.submission?.apiFlow?.saveTool;
+            if (saveTool && tu.name === saveTool) {
+              const ref = submissionReference(r.result);
+              if (ref) { submittedThisTurn = true; yield { type: "submitted", reference: ref }; }
+            }
+          }
           continue;
         }
         const res = await dispatchTool(tu.name, tu.input as Record<string, unknown>, {
