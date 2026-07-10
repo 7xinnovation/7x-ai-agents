@@ -691,7 +691,12 @@ export function Experience({
 
   const missing = caseState?.readiness.missing ?? [];
   const dataEntries = Object.entries(caseState?.data ?? {});
-  const hasCase = caseState && (dataEntries.length > 0 || caseState.documents.length > 0);
+  // Show the assembled panel as soon as a journey is active and has document
+  // slots (so the upload buttons appear immediately when the agent asks for
+  // documents), or once any data / document exists. Only a journey with no
+  // documents and no data yet falls back to the empty state.
+  const hasCase =
+    caseState && (dataEntries.length > 0 || caseState.documents.length > 0 || docSlots.length > 0);
   const iconWeight = "regular" as const;
 
   return (
