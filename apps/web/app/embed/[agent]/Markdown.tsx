@@ -165,11 +165,26 @@ export function Markdown({ text }: { text: string }) {
         if (cards.length) {
           nodes.push(
             <div className="dlg-cards" key={k++}>
-              {cards.map((c, ci) => (
-                <div className="dlg-card-opt" key={ci}>
+              {cards.map((c, ci) => {
+                const selected = !!c.badge && /^\s*selected\s*$/i.test(c.badge);
+                return (
+                <div className={`dlg-card-opt${selected ? " is-selected" : ""}`} key={ci}>
                   <div className="dlg-card-opt-head">
                     <span className="dlg-card-opt-title">{renderInline(c.title)}</span>
-                    {c.badge ? <span className="dlg-card-opt-badge">{c.badge}</span> : null}
+                    {c.badge ? (
+                      <span className={`dlg-card-opt-badge${selected ? " is-selected" : ""}`}>
+                        {selected ? (
+                          <>
+                            <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                              <path d="M2.4 6.3l2.2 2.2 5-5.1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Selected
+                          </>
+                        ) : (
+                          c.badge
+                        )}
+                      </span>
+                    ) : null}
                   </div>
                   {c.desc ? <p className="dlg-card-opt-desc">{renderInline(c.desc)}</p> : null}
                   {c.attrs.length ? (
@@ -184,7 +199,8 @@ export function Markdown({ text }: { text: string }) {
                   ) : null}
                   {c.price ? <div className="dlg-card-opt-price">{c.price}</div> : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
           );
         }
