@@ -14,6 +14,13 @@
  * collected fields and adds a per-journey `guidance` playbook. Auto-renew and
  * save-card consent are captured as fields so they land in the case + payload.
  *
+ * Round 2 (gap closure against the same docs):
+ *   - Renewals require UAE PASS sign-in (docs: UAE PASS is the ONLY renewal auth;
+ *     FB-1168 "ask to login") — journey + intent requiresAuth flipped to true.
+ *   - Rent journeys: agent EID front/back upload slots (mandatory once the
+ *     customer opts to add an agent) with vision extraction as the primary path
+ *     for the agent's name / ID number / expiry; manual entry is the fallback.
+ *
  * Run: npx tsx scripts/reshape-nxn-journeys.ts   (from apps/web)
  */
 import { config } from "dotenv";
@@ -58,6 +65,12 @@ const consentFields = [
   field("save_card_consent", "Consent to save card for future payments (yes/no)", "الموافقة على حفظ البطاقة (نعم/لا)", { type: "boolean", required: false }),
   field("auto_renew_consent", "Consent to enable auto-renewal (yes/no)", "الموافقة على التجديد التلقائي (نعم/لا)", { type: "boolean", required: false }),
 ];
+// Agent EID uploads (docs Stage "Add Agent": front + back required once the
+// customer opts in; extraction is the primary path, manual entry the fallback).
+const agentEidDocs = [
+  { key: "agent_eid_front", label: t("Agent Emirates ID (front)", "الهوية الإماراتية للوكيل (الوجه الأمامي)"), requirement: "mandatory", condition: "add_agent == 'yes'", acceptedFormats: ["png", "jpg", "jpeg", "pdf"], maxSizeMb: 10 },
+  { key: "agent_eid_back", label: t("Agent Emirates ID (back)", "الهوية الإماراتية للوكيل (الوجه الخلفي)"), requirement: "mandatory", condition: "add_agent == 'yes'", acceptedFormats: ["png", "jpg", "jpeg", "pdf"], maxSizeMb: 10 },
+];
 
 const CARDS_RULE =
   "Whenever you present bundles, branches, available box numbers, durations or add-ons for the customer to choose from, show them as CARDS (a ```cards fenced block), never as a table.";
@@ -69,7 +82,7 @@ const RENT_PERSONAL_GUIDANCE = [
   "Follow the Rent Personal PO Box journey.",
   "Entry: the customer signs in with UAE PASS (name, Emirates ID, EID expiry come from the profile — do not ask for an identity upload). For a returning customer, pre-fill bundle, branch and duration from their prior choices where known and shortcut the steps.",
   "Stage 1 Selection: 1) present bundle types, 2) ask Emirate, 3) show branches for that Emirate, 4) show 10 available numbers with a Refresh option (next 10), 5) ask rental duration in years. " + CARDS_RULE,
-  "Stage 2 Add Agent (OPTIONAL): ask 'Add an agent to this PO Box?'. If yes, request the agent EID (front+back), validate it, read/confirm the agent's details (manual entry if extraction fails), and ask agent email + phone. If the EID is expired or invalid, tell the customer the agent can be added later from the management page and proceed with NO agent — never block the customer.",
+  "Stage 2 Add Agent (OPTIONAL): ask 'Add an agent to this PO Box?' and record add_agent. If yes, ask the customer to upload the agent's Emirates ID front AND back in the two upload slots that appear (agent_eid_front, agent_eid_back — both sides required). The uploads are read automatically and the agent's full name, ID number and EID expiry are extracted to pre-fill the fields — present the extracted details for confirmation (this is the PRIMARY path); only if extraction fails, collect them manually. Then ask agent email + phone. If the EID is expired or invalid/unreadable (after one retry), tell the customer the agent can be added later from the PO Box management page, set add_agent to 'no', and proceed with NO agent — never block the customer.",
   "Stage 3 Key Delivery (OPTIONAL): ask 'Deliver the key to an address?' (show its price). If no, default to branch collection. If yes and a registered address is on file, offer it; otherwise take the delivery address.",
   "Stage 4 Review & Confirm: summarise bundle, Emirate, branch, number, duration, price, agent (if added) and delivery (if chosen); let the customer edit any block, then confirm.",
   "Stage 5 Payment: " + PAYMENT_CONSENT,
@@ -82,7 +95,7 @@ const RENT_CORPORATE_GUIDANCE = [
   "Stage 2 Trade License verification (three tiers): Tier 1 — ask the issuing entity, then GSB-check whether the customer's EID matches an owner ID under that entity; one company → use it, multiple → let the customer pick. Tier 2 — if none found, ask for the trade license number and re-check the EID against the owner ID on that license. Tier 3 — if still no match or not found, ask the customer to upload the trade license copy and route into the existing form-based manual validation (Salesforce case, flagged pending validation). The GSB EID-to-owner match IS the ownership check on Tiers 1 and 2.",
   "Stage 2A: after a Tier 1/Tier 2 match, show the company's existing corporate PO Boxes before creating a new one, to avoid duplicates.",
   "Stage 3 Company Address: capture the company address.",
-  "Stage 4 Add Agent (OPTIONAL): same as the personal journey (EID front+back, validate, confirm details, email+phone; expired/invalid → proceed with no agent).",
+  "Stage 4 Add Agent (OPTIONAL): same as the personal journey — record add_agent; if yes, the agent's Emirates ID front AND back are uploaded (agent_eid_front, agent_eid_back) and auto-extracted to pre-fill name / ID number / expiry (confirm with the customer; manual entry only if extraction fails), then email + phone. Expired or invalid EID → set add_agent to 'no' and proceed with no agent.",
   "Stage 5 Key Delivery (OPTIONAL): offer the company address, or take a different delivery address.",
   "Stage 6 Review & Confirm: summarise everything and let the customer edit before payment.",
   "Stage 7 Payment (taken on both the auto-verified and manual paths): " + PAYMENT_CONSENT,
@@ -93,9 +106,12 @@ const RENEW_AUTO_RENEW = [
   "Auto-renewal (feedback FB-1168): after identifying the box, read its current auto-renewal status and whether a card is saved. If auto-renew is already ENABLED and a card is on file, tell the customer their box is set to renew automatically and offer to process the renewal now on the saved card — a simple confirm, no re-entry. If auto-renew is OFF or no card is saved, run the renewal journey and, at payment, ask for consent to save the card and to enable auto-renewal; if consented, mark auto-renew ACTIVE in the system. Never enable auto-renew without explicit consent.",
 ].join("\n");
 
+const RENEW_AUTH =
+  "Entry: UAE PASS sign-in is REQUIRED — it is the ONLY authentication method for renewal (guest OTP was rejected as a weaker parallel path). If the customer is not signed in, briefly explain why and call request_authentication before collecting anything. After sign-in, use the known customer record to pre-select their box where available instead of asking from scratch.";
+
 const RENEW_PERSONAL_GUIDANCE = [
   "Follow the Renew Personal PO Box journey. Renewal extends the existing box on the SAME bundle (changing bundle/branch/agent/delivery is out of scope here).",
-  "Entry: prefer UAE PASS sign-in so you can retrieve the customer's PO Box portfolio and auto-renewal status. " + RENEW_AUTO_RENEW,
+  RENEW_AUTH + " " + RENEW_AUTO_RENEW,
   "Stage 1 Retrieve & Confirm: show the box number, branch, current bundle and expiry, plus auto-renew and agent status; confirm which box to renew. " + CARDS_RULE,
   "Stage 2 Renewal Terms: confirm same-bundle renewal and ask the renewal duration in years (default to prior duration where known).",
   "Stage 3 Summary & Confirm: summarise box, branch, bundle, duration, new expiry date, price and any fees; the customer confirms.",
@@ -105,7 +121,7 @@ const RENEW_PERSONAL_GUIDANCE = [
 
 const RENEW_CORPORATE_GUIDANCE = [
   "Follow the Renew Corporate PO Box journey. Same-bundle renewal only; the customer must be the owner. The corporate addition is a trade-license validity check.",
-  "Entry: prefer UAE PASS sign-in to retrieve the company's corporate PO Box portfolio and statuses. " + RENEW_AUTO_RENEW,
+  RENEW_AUTH + " " + RENEW_AUTO_RENEW,
   "Stage 1 Retrieve & Confirm: show the company's corporate boxes with bundle, expiry, auto-renew and agent status; the customer picks which box to renew. " + CARDS_RULE,
   "Stage 2 Trade License validity: if the license on file is valid, proceed. If it is expired or near expiry, re-route to the existing form-based validation (Salesforce case, pending-validation completion) — mirroring the corporate rental Tier 3 handoff. Renewal payment is still taken; the box is renewed only once documents are validated.",
   "Stage 3 Renewal Terms: confirm same-bundle renewal and ask the renewal duration in years.",
@@ -133,10 +149,11 @@ async function main() {
       field("box_number", "Selected box number", "رقم الصندوق المختار"),
       field("duration", "Rental duration", "مدة الإيجار", { type: "enum", options: durationOpts }),
     ] },
-    { key: "agent", title: t("Authorized agent (optional)", "الوكيل المفوّض (اختياري)"), requiresAuth: false, documents: [], fields: [
+    { key: "agent", title: t("Authorized agent (optional)", "الوكيل المفوّض (اختياري)"), requiresAuth: false, documents: agentEidDocs, fields: [
       field("add_agent", "Add an authorized agent?", "إضافة وكيل مفوّض؟", { type: "enum", required: false, options: yesNo }),
       field("agent_full_name", "Agent full name", "اسم الوكيل", { required: false }),
-      field("agent_emirates_id", "Agent Emirates ID", "الهوية الإماراتية للوكيل", { required: false }),
+      field("agent_emirates_id", "Agent Emirates ID number", "رقم الهوية الإماراتية للوكيل", { required: false }),
+      field("agent_eid_expiry", "Agent Emirates ID expiry", "تاريخ انتهاء هوية الوكيل", { type: "date", required: false }),
       field("agent_email", "Agent email", "بريد الوكيل", { type: "email", required: false }),
       field("agent_phone", "Agent phone", "هاتف الوكيل", { type: "phone", required: false }),
     ] },
@@ -176,10 +193,11 @@ async function main() {
     { key: "company", title: t("Company address", "عنوان الشركة"), requiresAuth: false, documents: [], fields: [
       field("company_address", "Company address", "عنوان الشركة", { type: "longtext" }),
     ] },
-    { key: "agent", title: t("Authorized agent (optional)", "الوكيل المفوّض (اختياري)"), requiresAuth: false, documents: [], fields: [
+    { key: "agent", title: t("Authorized agent (optional)", "الوكيل المفوّض (اختياري)"), requiresAuth: false, documents: agentEidDocs, fields: [
       field("add_agent", "Add an authorized agent?", "إضافة وكيل مفوّض؟", { type: "enum", required: false, options: yesNo }),
       field("agent_full_name", "Agent full name", "اسم الوكيل", { required: false }),
-      field("agent_emirates_id", "Agent Emirates ID", "الهوية الإماراتية للوكيل", { required: false }),
+      field("agent_emirates_id", "Agent Emirates ID number", "رقم الهوية الإماراتية للوكيل", { required: false }),
+      field("agent_eid_expiry", "Agent Emirates ID expiry", "تاريخ انتهاء هوية الوكيل", { type: "date", required: false }),
       field("agent_email", "Agent email", "بريد الوكيل", { type: "email", required: false }),
       field("agent_phone", "Agent phone", "هاتف الوكيل", { type: "phone", required: false }),
     ] },
@@ -196,8 +214,9 @@ async function main() {
   // ── Renew Personal ── (keep apiFlow details/pricing; add consent + guidance)
   const rnp = J("personal_po_box_renewal");
   rnp.guidance = RENEW_PERSONAL_GUIDANCE;
+  rnp.requiresAuth = true; // docs: UAE PASS is the ONLY renewal auth (FB-1168)
   rnp.steps = [
-    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: false, documents: [], fields: [
+    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: true, documents: [], fields: [
       field("po_box_number", "PO Box number", "رقم صندوق البريد"),
       field("renewal_period", "Renewal duration", "مدة التجديد", { type: "enum", options: durationOpts }),
       field("updated_phone", "Contact phone", "رقم الهاتف", { type: "phone", required: false }),
@@ -208,8 +227,9 @@ async function main() {
   // ── Renew Corporate ── (keep apiFlow; add TL check + consent + guidance)
   const rnc = J("corporate_po_box_renewal");
   rnc.guidance = RENEW_CORPORATE_GUIDANCE;
+  rnc.requiresAuth = true; // docs: UAE PASS is the ONLY renewal auth (FB-1168)
   rnc.steps = [
-    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: false, documents: [], fields: [
+    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: true, documents: [], fields: [
       field("po_box_number", "PO Box number", "رقم صندوق البريد"),
       field("trade_license_number", "Trade license number", "رقم الرخصة التجارية"),
       field("renewal_period", "Renewal duration", "مدة التجديد", { type: "enum", options: durationOpts }),
@@ -217,6 +237,13 @@ async function main() {
       ...consentFields,
     ] },
   ];
+
+  // Renewal intents must ask for sign-in too (rendered "(requires sign-in)" in
+  // the prompt; set_journey enforces it server-side).
+  for (const key of ["renew_personal_pobox", "renew_corporate_pobox"]) {
+    const intent = def.intents.find((i: any) => i.key === key);
+    if (intent) intent.requiresAuth = true;
+  }
 
   await db.update(agents).set({ definition: def as typeof agent.definition }).where(eq(agents.id, agent.id));
   console.log("NXN journeys reshaped to the attached docs:");

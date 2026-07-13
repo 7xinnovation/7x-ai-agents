@@ -10,3 +10,4 @@ out
 .DS_Store
 coverage
 packages/eval/report.json
+.dev-server.log

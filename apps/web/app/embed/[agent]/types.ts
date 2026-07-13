@@ -9,6 +9,9 @@ export interface PublicDocument {
   key: string;
   label: LocalizedString;
   requirement: "mandatory" | "conditional" | "optional";
+  // Only requested when this expression holds against the collected case data
+  // (same tiny grammar as the engine's evalCondition).
+  condition?: string;
   acceptedFormats: string[];
   maxSizeMb: number;
 }

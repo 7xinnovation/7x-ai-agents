@@ -70,7 +70,7 @@ export async function extractFieldsFromDocument(input: {
     .join("\n");
 
   const instruction =
-    "You are extracting structured data from an official UAE business document (a trade/postal license, a Memorandum of Association, or a similar record) to pre-fill a licensing application.\n" +
+    "You are extracting structured data from an official UAE document (an Emirates ID card, a trade/postal license, a Memorandum of Association, or a similar record) to pre-fill a service application.\n" +
     "Read the attached document and return ONLY the fields you can read with confidence. Extract these fields (key: description):\n" +
     fieldList +
     "\n\nRules:\n" +
@@ -79,6 +79,7 @@ export async function extractFieldsFromDocument(input: {
     "- For enum fields, return exactly one of the allowed values.\n" +
     "- Prefer the English value when a field has both English and Arabic.\n" +
     "- For owner/partner or shareholder details, use the FIRST/primary partner (highest share).\n" +
+    "- If the document is an identity card (e.g. Emirates ID) and the fields describe an agent/representative, map the card's name, ID number and expiry to those agent fields only.\n" +
     "- Respond with the JSON object only, no prose, no markdown fences.";
 
   try {

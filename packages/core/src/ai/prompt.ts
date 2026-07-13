@@ -141,8 +141,8 @@ ${journey.steps
 The user is currently ${authenticated ? "AUTHENTICATED" : "a GUEST"}.
 Only intents/journeys explicitly marked "(requires sign-in)" below need an
 authenticated user. For those, if a guest attempts one, briefly explain why and
-call request_authentication. Everything else — including guest-allowed actions
-like renewals, shipment tracking, callbacks, and general questions — does NOT
+call request_authentication. Everything else — guest-allowed actions like
+shipment tracking, callbacks, and general questions — does NOT
 require an account: proceed and collect details (ownership/identity is validated
 through the journey's own fields and the backend, not by forcing sign-in). Never
 call request_authentication for an action that is not marked as requiring sign-in.

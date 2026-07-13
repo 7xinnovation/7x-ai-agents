@@ -336,6 +336,23 @@ export function Experience({
     [agent, locale]
   );
 
+  // Mirror of the engine's document `condition` evaluator (key == 'v', key != 'v',
+  // bare-key truthy) so conditional slots only surface once their gate field says so.
+  const docApplies = useCallback(
+    (condition: string | undefined) => {
+      if (!condition) return true;
+      const data = (caseState?.data ?? {}) as Record<string, unknown>;
+      const eq = condition.match(/^\s*([\w.]+)\s*(==|!=)\s*'([^']*)'\s*$/);
+      if (eq) {
+        const [, key, op, val] = eq;
+        const actual = String(data[key!] ?? "");
+        return op === "==" ? actual === val : actual !== val;
+      }
+      return Boolean(data[condition.trim()]);
+    },
+    [caseState]
+  );
+
   // Submission progress for the active journey (legitimate form feedback).
   const progress = useMemo(() => {
     if (!caseState?.journeyKey) return null;
@@ -344,27 +361,29 @@ export function Experience({
     let total = 0;
     for (const s of j.steps) {
       total += s.fields.filter((f) => f.required).length;
-      total += s.documents.filter((d) => d.requirement === "mandatory").length;
+      total += s.documents.filter((d) => d.requirement === "mandatory" && docApplies(d.condition)).length;
     }
     if (total === 0) return null;
     const done = Math.max(0, total - caseState.readiness.missing.length);
     return { done, total, pct: Math.round((done / total) * 100) };
-  }, [caseState, agent]);
+  }, [caseState, agent, docApplies]);
 
   // Document slots for the active journey, merged with current upload status, so
-  // the user can upload proactively (PRD: document collection step).
+  // the user can upload proactively (PRD: document collection step). Conditional
+  // documents stay hidden until their condition holds (e.g. agent EID only after
+  // the customer chooses to add an agent) — unless already uploaded.
   const docSlots = useMemo(() => {
     if (!caseState?.journeyKey) return [];
     const j = agent.journeys.find((x) => x.key === caseState.journeyKey);
     if (!j) return [];
     const byKey = new Map(caseState.documents.map((d) => [d.key, d]));
-    return j.steps.flatMap((s) => s.documents).map((d) => ({
+    return j.steps.flatMap((s) => s.documents).filter((d) => docApplies(d.condition) || byKey.has(d.key)).map((d) => ({
       ...d,
       status: byKey.get(d.key)?.status ?? "pending",
       fileName: byKey.get(d.key)?.fileName,
       rejectionReason: byKey.get(d.key)?.rejectionReason,
     }));
-  }, [caseState, agent]);
+  }, [caseState, agent, docApplies]);
 
   const uploadDoc = useCallback(
     async (key: string, file: File) => {

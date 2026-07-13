@@ -37,6 +37,7 @@ export default async function EmbedPage({
           key: doc.key,
           label: doc.label,
           requirement: doc.requirement,
+          condition: doc.condition,
           acceptedFormats: doc.acceptedFormats,
           maxSizeMb: doc.maxSizeMb,
         })),
