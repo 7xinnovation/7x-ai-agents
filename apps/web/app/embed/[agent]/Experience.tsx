@@ -21,7 +21,12 @@ import {
   ArrowClockwise,
   LockSimple,
   ArrowSquareOut,
+  Camera,
+  DeviceMobile,
+  Info,
+  CaretLeft,
 } from "@phosphor-icons/react";
+import QRCode from "qrcode";
 import { tr, type CaseState, type Locale } from "@dialog/config";
 import { Markdown, TypewriterMarkdown } from "./Markdown";
 import type { PublicAgent } from "./types";
@@ -76,6 +81,13 @@ const STR = {
     payRetry: "Try again",
     payNote: "Processed by the payment gateway — card details never touch this chat.",
     payWindowClosed: "The payment window was closed.",
+    takePhoto: "Take photo",
+    fromPhone: "From phone",
+    scanTitle: "Upload from your phone",
+    scanHint: "Scan this code with your phone camera to open the upload page for this application. Files you add there appear here automatically.",
+    done: "Done",
+    caseTab: "Your case",
+    backToChat: "Back to chat",
   },
   ar: {
     placeholder: "اكتب رسالتك…",
@@ -112,6 +124,13 @@ const STR = {
     payRetry: "حاول مرة أخرى",
     payNote: "تتم المعالجة عبر بوابة الدفع — بيانات البطاقة لا تمر عبر هذه المحادثة.",
     payWindowClosed: "تم إغلاق نافذة الدفع.",
+    takePhoto: "التقاط صورة",
+    fromPhone: "من الهاتف",
+    scanTitle: "الرفع من هاتفك",
+    scanHint: "امسح هذا الرمز بكاميرا هاتفك لفتح صفحة رفع المستندات لهذا الطلب. الملفات التي تضيفها هناك تظهر هنا تلقائياً.",
+    done: "تم",
+    caseTab: "طلبك",
+    backToChat: "العودة للمحادثة",
   },
 } as const;
 
@@ -121,6 +140,53 @@ function postToParent(action: "expand" | "collapse" | "close") {
   } catch {
     /* not embedded */
   }
+}
+
+/**
+ * QR hand-off (feedback FB-6, web): on a computer the customer scans this to open
+ * the per-conversation mobile upload page on their phone; whatever they upload
+ * there flows into the same case (the desktop polls the conversation and the
+ * panel updates live). The QR is rendered locally (no external image service).
+ */
+function QrModal({
+  url,
+  strings,
+  onClose,
+}: {
+  url: string;
+  strings: { scanTitle: string; scanHint: string; done: string };
+  onClose: () => void;
+}) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: "M" })
+      .then((d) => alive && setDataUrl(d))
+      .catch(() => alive && setDataUrl(null));
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  return (
+    <div className="dlg-qr-overlay" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="dlg-qr-card" onClick={(e) => e.stopPropagation()}>
+        <h4>{strings.scanTitle}</h4>
+        <p>{strings.scanHint}</p>
+        {dataUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className="dlg-qr-img" src={dataUrl} alt="QR code" />
+        ) : (
+          <div className="dlg-qr-img" />
+        )}
+        <a className="dlg-qr-link" href={url} target="_blank" rel="noreferrer">
+          {url}
+        </a>
+        <button className="dlg-qr-close" onClick={onClose}>
+          {strings.done}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -310,6 +376,10 @@ export function Experience({
   const [paymentPulse, setPaymentPulse] = useState(false);
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [full, setFull] = useState(false);
+  // Mobile (feedback FB-5): the case panel is a full-screen overlay toggled here.
+  const [mobileCaseOpen, setMobileCaseOpen] = useState(false);
+  // QR hand-off modal (feedback FB-6): the mobile upload URL currently shown.
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const convId = useRef<string | null>(null);
   const storageKey = `dlg-conv-${agent.slug}`;
@@ -385,6 +455,13 @@ export function Experience({
     }));
   }, [caseState, agent, docApplies]);
 
+  // Documents still awaiting an upload — drives the mobile toggle badge and the
+  // live-sync poll (so a phone/QR upload doesn't need to keep polling forever).
+  const pendingDocCount = useMemo(
+    () => docSlots.filter((d) => d.status !== "uploaded" && d.status !== "accepted").length,
+    [docSlots]
+  );
+
   const uploadDoc = useCallback(
     async (key: string, file: File) => {
       if (!convId.current) return;
@@ -406,6 +483,36 @@ export function Experience({
     },
     [agent.slug]
   );
+
+  // Open the QR hand-off for the current conversation (feedback FB-6, web →
+  // phone). The mobile page keys off agent slug + conversation id.
+  const openQrHandoff = useCallback(() => {
+    if (!convId.current || typeof window === "undefined") return;
+    setQrUrl(`${window.location.origin}/m/${agent.slug}/${convId.current}`);
+  }, [agent.slug]);
+
+  // Live-sync: while documents are still pending (and nothing local is in
+  // flight), poll the conversation so uploads made on a phone via the QR
+  // hand-off appear in this panel without a manual refresh.
+  useEffect(() => {
+    if (!convId.current || pendingDocCount === 0 || streaming || uploadingKey) return;
+    let alive = true;
+    const id = window.setInterval(async () => {
+      if (!convId.current) return;
+      try {
+        const res = await fetch(`/api/conversations/${convId.current}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive && data.case) setCaseState(data.case);
+      } catch {
+        /* transient */
+      }
+    }, 4000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [pendingDocCount, streaming, uploadingKey]);
 
   // Host site can push/refresh the UAE PASS session token at any time.
   useEffect(() => {
@@ -719,7 +826,7 @@ export function Experience({
   const iconWeight = "regular" as const;
 
   return (
-    <div className={`dlg-root ${full ? "is-full" : ""}`} dir={dir} style={rootStyle}>
+    <div className={`dlg-root ${full ? "is-full" : ""} ${mobileCaseOpen ? "is-mobile-case" : ""}`} dir={dir} style={rootStyle}>
       <header className="dlg-header">
         <div className="dlg-brand">
           {agent.theme.logoUrl ? (
@@ -767,7 +874,18 @@ export function Experience({
           >
             <ArrowClockwise size={16} weight={iconWeight} />
           </button>
-          <button className="dlg-chip icon-only" onClick={toggleFull} aria-label={full ? t.collapse : t.expand}>
+          {hasCase ? (
+            <button
+              className="dlg-chip dlg-mobile-toggle"
+              onClick={() => setMobileCaseOpen((v) => !v)}
+              aria-label={t.caseTab}
+              title={t.caseTab}
+            >
+              <ListChecks size={16} weight={iconWeight} />
+              {pendingDocCount > 0 ? <span className="count">{pendingDocCount}</span> : null}
+            </button>
+          ) : null}
+          <button className="dlg-chip icon-only expand-toggle" onClick={toggleFull} aria-label={full ? t.collapse : t.expand}>
             {full ? <ArrowsInSimple size={16} weight={iconWeight} /> : <ArrowsOutSimple size={16} weight={iconWeight} />}
           </button>
           <button className="dlg-chip icon-only danger" onClick={() => postToParent("close")} aria-label="Close">
@@ -894,6 +1012,9 @@ export function Experience({
         <aside className="dlg-case">
           <div className="dlg-case-inner">
             <div className="dlg-case-head">
+              <button className="dlg-back-chat" onClick={() => setMobileCaseOpen(false)} aria-label={t.backToChat}>
+                <CaretLeft size={14} weight="bold" /> {t.backToChat}
+              </button>
               <h2>{t.case}</h2>
               {caseState && hasCase ? <span className={`dlg-status ${caseState.status}`}>{caseState.status}</span> : null}
             </div>
@@ -952,6 +1073,12 @@ export function Experience({
                     <h3>
                       <FileText size={15} weight="bold" /> {t.documents}
                     </h3>
+                    {agent.documentsDisclaimer ? (
+                      <div className="dlg-doc-disclaimer">
+                        <Info size={15} weight="fill" />
+                        <span>{tr(agent.documentsDisclaimer, locale)}</span>
+                      </div>
+                    ) : null}
                     {docSlots.map((d) => {
                       const uploaded = d.status === "uploaded" || d.status === "accepted";
                       const busy = uploadingKey === d.key;
@@ -985,24 +1112,47 @@ export function Experience({
                               <span className="hint">
                                 {d.acceptedFormats.join(", ").toUpperCase()} · {t.upTo} {d.maxSizeMb}MB
                               </span>
-                              <label className={`dlg-upload ${busy ? "busy" : ""}`}>
-                                {busy ? (
-                                  <>
-                                    <ArrowClockwise size={14} weight="bold" className="spin" /> {t.uploading}
-                                  </>
-                                ) : (
-                                  <>
-                                    <UploadSimple size={14} weight="bold" /> {t.upload}
-                                  </>
-                                )}
-                                <input
-                                  type="file"
-                                  hidden
-                                  disabled={busy}
-                                  accept={d.acceptedFormats.map((f) => "." + f).join(",")}
-                                  onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
-                                />
-                              </label>
+                              <div className="dlg-upload-group">
+                                {/* Camera capture — only visible on touch devices (FB-6, mobile). */}
+                                <label className="dlg-upload cam" title={t.takePhoto} aria-label={t.takePhoto}>
+                                  <Camera size={14} weight="bold" />
+                                  <input
+                                    type="file"
+                                    hidden
+                                    disabled={busy}
+                                    accept="image/*"
+                                    capture="environment"
+                                    onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
+                                  />
+                                </label>
+                                {/* Upload from phone via QR — only on desktop (FB-6, web). */}
+                                <button
+                                  type="button"
+                                  className="dlg-upload-phone"
+                                  onClick={openQrHandoff}
+                                  title={t.fromPhone}
+                                >
+                                  <DeviceMobile size={14} weight="bold" /> {t.fromPhone}
+                                </button>
+                                <label className={`dlg-upload ${busy ? "busy" : ""}`}>
+                                  {busy ? (
+                                    <>
+                                      <ArrowClockwise size={14} weight="bold" className="spin" /> {t.uploading}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <UploadSimple size={14} weight="bold" /> {t.upload}
+                                    </>
+                                  )}
+                                  <input
+                                    type="file"
+                                    hidden
+                                    disabled={busy}
+                                    accept={d.acceptedFormats.map((f) => "." + f).join(",")}
+                                    onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
+                                  />
+                                </label>
+                              </div>
                             </div>
                           )}
                           {d.status === "rejected" && d.rejectionReason ? (
@@ -1045,6 +1195,7 @@ export function Experience({
           </div>
         </aside>
       </div>
+      {qrUrl ? <QrModal url={qrUrl} strings={t} onClose={() => setQrUrl(null)} /> : null}
     </div>
   );
 }

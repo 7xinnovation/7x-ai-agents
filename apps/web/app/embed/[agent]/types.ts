@@ -32,6 +32,8 @@ export interface PublicAgent {
   locales: Locale[];
   greeting: LocalizedString;
   theme: Theme;
+  // Disclaimer shown above the document upload slots (team-verified notice).
+  documentsDisclaimer?: LocalizedString;
   journeys: PublicJourney[];
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;

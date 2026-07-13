@@ -62,6 +62,10 @@ export const AgentDefinition = z.object({
   allowedOrigins: z.array(z.string()).default([]),
   greeting: LocalizedString,
   theme: Theme,
+  // Shown above the document upload slots in the case panel and on the mobile
+  // upload page (feedback: state up-front that documents are team-verified and
+  // the customer should ensure accurate data for the fastest processing).
+  documentsDisclaimer: LocalizedString.optional(),
   intents: z.array(Intent).default([]),
   journeys: z.array(Journey).default([]),
   guardrails: Guardrails.default({}),

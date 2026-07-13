@@ -62,6 +62,52 @@ export async function knownCustomerBoxes(
   return [...seen.values()];
 }
 
+// Fields we treat as a returning customer's stable company profile. These are
+// prefilled for a signed-in EPGL user (feedback FB-2/FB-3: account/company
+// details + EID come from the customer's profile; quarterly figures come from
+// IDEP/company data — the customer confirms, does not re-enter). In the absence
+// of a live IDEP/Salesforce company-profile read endpoint, the profile is
+// reconstructed from the customer's most recent applications (a demo stand-in
+// for that feed — swap in the SF/IDEP read once the contract exposes it).
+const EPGL_PROFILE_KEYS = [
+  "company_name", "company_name_ar", "trade_license_number", "license_expiry_date",
+  "regulator", "emirate", "region", "address_street", "po_box", "activity_codes",
+  "owner_name", "owner_emirates_id", "owner_nationality", "owner_passport_no", "owner_contact_no",
+  "contact_name", "contact_email", "contact_phone", "contact_designation",
+  "trade_name_en", "trade_name_ar",
+  "financial_year", "leviable_income_q1", "leviable_income_q2", "leviable_income_q3", "leviable_income_q4",
+  "accountant_name", "accountant_email", "accountant_phone",
+];
+
+/**
+ * Reconstruct a returning EPGL customer's company profile from their most recent
+ * applications: merge the profile-relevant fields across their cases (most
+ * recent value wins). Returns an empty object when nothing is on file so the
+ * agent cleanly falls back to the documents-first flow for a brand-new customer.
+ */
+export async function knownEpglProfile(
+  agentId: string,
+  userRef: string
+): Promise<Record<string, string>> {
+  const rows = await getDb()
+    .select({ state: cases.state })
+    .from(cases)
+    .innerJoin(conversations, eq(cases.conversationId, conversations.id))
+    .where(and(eq(conversations.agentId, agentId), eq(conversations.userRef, userRef)))
+    .orderBy(desc(cases.updatedAt))
+    .limit(25);
+  const profile: Record<string, string> = {};
+  for (const r of rows) {
+    const data = ((r.state as CaseState | null)?.data ?? {}) as Record<string, unknown>;
+    for (const k of EPGL_PROFILE_KEYS) {
+      if (profile[k] !== undefined) continue; // most-recent-first: first non-empty wins
+      const v = data[k];
+      if (v !== undefined && v !== null && v !== "") profile[k] = String(v);
+    }
+  }
+  return profile;
+}
+
 /**
  * Server-authoritative conversation state. The client only holds a
  * conversationId; history + case live in the DB so sessions survive reloads and

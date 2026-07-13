@@ -5,7 +5,7 @@ import { resolveAdapters, runTurn, classifyIntent } from "@dialog/core";
 import { getDb, payments } from "@dialog/db";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerBoxes } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerBoxes, knownEpglProfile } from "@/lib/conversation";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
@@ -58,6 +58,36 @@ const PAYMENT_SETTLED_DIRECTIVE =
 
 function sse(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
+}
+
+// Render a signed-in EPGL customer's on-file company profile into a system-prompt
+// note (feedback FB-2/FB-3): account/company details + EID come from the Salesforce
+// customer profile; quarterly leviable-income figures come from IDEP/company data.
+// The agent must prefill and ask the customer only to confirm — never to re-type.
+function formatEpglProfileContext(p: Record<string, string>): string | undefined {
+  if (!p || Object.keys(p).length === 0) return undefined;
+  const parts: string[] = [];
+  const company = p.company_name || p.company_name_ar;
+  if (company) parts.push(`Company: ${company}${p.company_name_ar && p.company_name_ar !== company ? ` / ${p.company_name_ar}` : ""}`);
+  if (p.trade_license_number) parts.push(`Trade license no: ${p.trade_license_number}${p.license_expiry_date ? ` (expires ${p.license_expiry_date})` : ""}`);
+  if (p.trade_name_en || p.trade_name_ar) parts.push(`Trade name: ${p.trade_name_en || p.trade_name_ar}`);
+  if (p.emirate) parts.push(`Emirate: ${p.emirate}`);
+  if (p.address_street) parts.push(`Address: ${p.address_street}`);
+  if (p.owner_name) parts.push(`Owner: ${p.owner_name}`);
+  if (p.owner_emirates_id) parts.push(`Owner Emirates ID: ${p.owner_emirates_id}`);
+  if (p.owner_nationality) parts.push(`Owner nationality: ${p.owner_nationality}`);
+  if (p.contact_name || p.contact_email) parts.push(`Contact: ${[p.contact_name, p.contact_email, p.contact_phone].filter(Boolean).join(", ")}`);
+  const quarters = ["leviable_income_q1", "leviable_income_q2", "leviable_income_q3", "leviable_income_q4"]
+    .map((k, i) => (p[k] ? `Q${i + 1} ${p[k]}` : null))
+    .filter(Boolean);
+  if (quarters.length) parts.push(`Quarterly leviable income${p.financial_year ? ` for FY ${p.financial_year}` : ""} (from IDEP/company data): ${quarters.join(", ")}`);
+  if (p.accountant_name || p.accountant_email) parts.push(`Accountant: ${[p.accountant_name, p.accountant_email, p.accountant_phone].filter(Boolean).join(", ")}`);
+  if (parts.length === 0) return undefined;
+  return (
+    "This signed-in customer's company profile on file (from their Salesforce customer profile and IDEP company data): " +
+    parts.join("; ") +
+    ". Use these to PREFILL the application via collect_field — the account/company details and Emirates ID come from the customer's profile, and the quarterly leviable-income figures come from IDEP/company data, so do NOT ask the customer to type any of them. Present what you have as a card and ask only for a quick confirmation, plus anything genuinely missing. Before submitting, sanity-check the Emirates ID looks valid (format 784-YYYY-NNNNNNN-N) and flag it if not."
+  );
 }
 
 /**
@@ -114,14 +144,21 @@ export async function POST(req: NextRequest) {
   let customerContext: string | undefined;
   let pulseDirective = PULSE_DIRECTIVE;
   if (authenticated && userRef) {
-    const known = await knownCustomerBoxes(agent.id, userRef).catch(() => []);
-    if (known.length) {
-      const list = known.map((b) => `${b.box}${b.emirate ? ` (${b.emirate})` : ""}`).join(", ");
-      customerContext =
-        `This customer's PO Box${known.length > 1 ? "es" : ""} on file: ${list}. ` +
-        "For account questions, status checks, renewals, or the Account Pulse, use these immediately (fetch fresh details/pricing from backend tools) — do NOT ask for the box number or emirate again; briefly note you're using the box on file.";
-      pulseDirective += ` (${customerContext})`;
+    // EPGL: prefill the signed-in customer's company profile + EID + quarterly
+    // figures from their Salesforce/IDEP company data (feedback FB-2/FB-3).
+    if (agent.definition.slug === "epgl-dialog") {
+      const profile = await knownEpglProfile(agent.id, userRef).catch(() => ({}));
+      customerContext = formatEpglProfileContext(profile);
+    } else {
+      const known = await knownCustomerBoxes(agent.id, userRef).catch(() => []);
+      if (known.length) {
+        const list = known.map((b) => `${b.box}${b.emirate ? ` (${b.emirate})` : ""}`).join(", ");
+        customerContext =
+          `This customer's PO Box${known.length > 1 ? "es" : ""} on file: ${list}. ` +
+          "For account questions, status checks, renewals, or the Account Pulse, use these immediately (fetch fresh details/pricing from backend tools) — do NOT ask for the box number or emirate again; briefly note you're using the box on file.";
+      }
     }
+    if (customerContext) pulseDirective += ` (${customerContext})`;
   }
   const effectiveMessage = isPulse
     ? pulseDirective

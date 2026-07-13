@@ -26,6 +26,7 @@ export default async function EmbedPage({
     locales: d.locales,
     greeting: d.greeting,
     theme: d.theme,
+    documentsDisclaimer: d.documentsDisclaimer,
     journeys: d.journeys.map((j) => ({
       key: j.key,
       title: j.title,

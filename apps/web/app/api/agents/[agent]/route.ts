@@ -21,6 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ age
     allowedOrigins: d.allowedOrigins,
     greeting: d.greeting,
     theme: d.theme,
+    documentsDisclaimer: d.documentsDisclaimer,
     intents: d.intents.map((i) => ({ key: i.key, description: i.description })),
     journeys: d.journeys.map((j) => ({
       key: j.key,
@@ -30,7 +31,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ age
         key: s.key,
         title: s.title,
         fields: s.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, required: f.validation.required })),
-        documents: s.documents.map((doc) => ({ key: doc.key, label: doc.label, requirement: doc.requirement })),
+        documents: s.documents.map((doc) => ({
+          key: doc.key,
+          label: doc.label,
+          requirement: doc.requirement,
+          condition: doc.condition,
+          acceptedFormats: doc.acceptedFormats,
+          maxSizeMb: doc.maxSizeMb,
+        })),
       })),
     })),
   });
