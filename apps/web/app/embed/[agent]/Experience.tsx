@@ -776,6 +776,16 @@ export function Experience({
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
 
+  // Tap-to-select: clicking an option card sends its title as the customer's
+  // choice, so they can pick without typing. Ignored while a turn is streaming.
+  const handleCardSelect = useCallback(
+    (choice: string) => {
+      if (streaming) return;
+      void send(choice);
+    },
+    [streaming, send]
+  );
+
   // After sign-in, once the session has resumed, proactively run the account
   // pulse exactly once (no user bubble — just the assistant's summary).
   useEffect(() => {
@@ -928,7 +938,7 @@ export function Experience({
                 <div className="dlg-bubble">
                   {m.content ? (
                     m.role === "assistant" ? (
-                      <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} />
+                      <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} />
                     ) : (
                       m.content
                     )

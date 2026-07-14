@@ -99,7 +99,7 @@ function applyCardKey(card: OptionCard, key: string, value: string) {
  * after a tool round) so it never lags far behind. When `animate` is false
  * (completed / resumed messages) it renders in full immediately.
  */
-export function TypewriterMarkdown({ text, animate }: { text: string; animate: boolean }) {
+export function TypewriterMarkdown({ text, animate, onSelect }: { text: string; animate: boolean; onSelect?: (text: string) => void }) {
   const [shown, setShown] = React.useState(animate ? 0 : text.length);
   const shownRef = React.useRef(shown);
   const textRef = React.useRef(text);
@@ -142,10 +142,11 @@ export function TypewriterMarkdown({ text, animate }: { text: string; animate: b
     if (!animate) setShown(text.length);
   }, [animate, text]);
 
-  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} />;
+  // Cards are tappable only once the reply has fully rendered — never mid-stream.
+  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} onSelect={animate ? undefined : onSelect} />;
 }
 
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, onSelect }: { text: string; onSelect?: (text: string) => void }) {
   const lines = text.split("\n");
   const nodes: React.ReactNode[] = [];
   let i = 0;
@@ -167,38 +168,52 @@ export function Markdown({ text }: { text: string }) {
             <div className="dlg-cards" key={k++}>
               {cards.map((c, ci) => {
                 const selected = !!c.badge && /^\s*selected\s*$/i.test(c.badge);
-                return (
-                <div className={`dlg-card-opt${selected ? " is-selected" : ""}`} key={ci}>
-                  <div className="dlg-card-opt-head">
-                    <span className="dlg-card-opt-title">{renderInline(c.title)}</span>
-                    {c.badge ? (
-                      <span className={`dlg-card-opt-badge${selected ? " is-selected" : ""}`}>
-                        {selected ? (
-                          <>
-                            <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                              <path d="M2.4 6.3l2.2 2.2 5-5.1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            Selected
-                          </>
-                        ) : (
-                          c.badge
-                        )}
-                      </span>
-                    ) : null}
-                  </div>
-                  {c.desc ? <p className="dlg-card-opt-desc">{renderInline(c.desc)}</p> : null}
-                  {c.attrs.length ? (
-                    <div className="dlg-card-opt-attrs">
-                      {c.attrs.map((a, ai) => (
-                        <span className="dlg-card-opt-attr" key={ai}>
-                          <span className="k">{a.label}</span>
-                          <span className={`v${a.value.length > 32 ? " long" : ""}`}>{renderInline(a.value)}</span>
+                // A tappable card sends its title as the customer's choice, so the
+                // user can pick by tapping instead of typing. The already-selected
+                // card and any card rendered without a handler stay inert.
+                const tappable = !!onSelect && !selected;
+                const cls = `dlg-card-opt${selected ? " is-selected" : ""}${tappable ? " is-tappable" : ""}`;
+                const inner = (
+                  <>
+                    <div className="dlg-card-opt-head">
+                      <span className="dlg-card-opt-title">{renderInline(c.title)}</span>
+                      {c.badge ? (
+                        <span className={`dlg-card-opt-badge${selected ? " is-selected" : ""}`}>
+                          {selected ? (
+                            <>
+                              <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M2.4 6.3l2.2 2.2 5-5.1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              Selected
+                            </>
+                          ) : (
+                            c.badge
+                          )}
                         </span>
-                      ))}
+                      ) : null}
                     </div>
-                  ) : null}
-                  {c.price ? <div className="dlg-card-opt-price">{c.price}</div> : null}
-                </div>
+                    {c.desc ? <p className="dlg-card-opt-desc">{renderInline(c.desc)}</p> : null}
+                    {c.attrs.length ? (
+                      <div className="dlg-card-opt-attrs">
+                        {c.attrs.map((a, ai) => (
+                          <span className="dlg-card-opt-attr" key={ai}>
+                            <span className="k">{a.label}</span>
+                            <span className={`v${a.value.length > 32 ? " long" : ""}`}>{renderInline(a.value)}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {c.price ? <div className="dlg-card-opt-price">{c.price}</div> : null}
+                  </>
+                );
+                return tappable ? (
+                  <button type="button" className={cls} key={ci} onClick={() => onSelect!(c.title)} aria-label={`Choose ${c.title}`}>
+                    {inner}
+                  </button>
+                ) : (
+                  <div className={cls} key={ci}>
+                    {inner}
+                  </div>
                 );
               })}
             </div>
