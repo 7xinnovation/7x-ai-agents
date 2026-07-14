@@ -79,7 +79,7 @@ const STR = {
     payPaid: "Payment received",
     payFailed: "Payment unsuccessful",
     payRetry: "Try again",
-    payNote: "Processed by the payment gateway — card details never touch this chat.",
+    payNote: "Processed by the payment gateway. Card details never touch this chat.",
     payWindowClosed: "The payment window was closed.",
     takePhoto: "Take photo",
     fromPhone: "From phone",
@@ -122,7 +122,7 @@ const STR = {
     payPaid: "تم استلام الدفعة",
     payFailed: "لم تكتمل عملية الدفع",
     payRetry: "حاول مرة أخرى",
-    payNote: "تتم المعالجة عبر بوابة الدفع — بيانات البطاقة لا تمر عبر هذه المحادثة.",
+    payNote: "تتم المعالجة عبر بوابة الدفع. بيانات البطاقة لا تمر عبر هذه المحادثة.",
     payWindowClosed: "تم إغلاق نافذة الدفع.",
     takePhoto: "التقاط صورة",
     fromPhone: "من الهاتف",
@@ -916,10 +916,11 @@ export function Experience({
               <div className="dlg-starters">
                 <span className="dlg-starters-label">{t.askAnything}</span>
                 <div className="dlg-starters-grid">
-                  {starters.map((s) => (
+                  {starters.map((s, si) => (
                     <button
                       key={s.key}
                       className="dlg-starter"
+                      style={{ ["--i" as string]: si }}
                       onClick={() => void send(s.label)}
                       disabled={streaming}
                     >

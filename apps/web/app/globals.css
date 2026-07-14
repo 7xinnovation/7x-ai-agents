@@ -1070,8 +1070,8 @@ body {
   flex-direction: column;
   gap: 10px;
   margin: 4px 0 0 36px;
-  animation: dlg-in 0.5s var(--ease) both;
-  animation-delay: 0.1s;
+  animation: dlg-fade-in 0.4s var(--ease) both;
+  animation-delay: 0.08s;
 }
 .dlg-root[dir="rtl"] .dlg-starters {
   margin: 4px 36px 0 0;
@@ -1107,6 +1107,10 @@ body {
   box-shadow: var(--shadow-sm);
   transition: border-color 0.2s var(--ease), transform 0.14s var(--ease),
     box-shadow 0.2s var(--ease), background 0.2s var(--ease);
+  /* Onboarding cascade: each option rises in sequence. `backwards` fill hides
+     them during the delay but returns to base after, so hover transforms work. */
+  animation: dlg-in 0.5s var(--ease) backwards;
+  animation-delay: calc(0.14s + var(--i, 0) * 0.06s);
 }
 .dlg-starter svg {
   color: var(--c-text-muted);
@@ -1258,6 +1262,16 @@ body {
   gap: 12px;
   padding: 9px 0;
   font-size: 13.5px;
+}
+/* Each captured detail slides in as the case takes shape. React keys rows by
+   field, so only a genuinely new row animates — existing rows stay put on the
+   live poll. `backwards` returns to base so nothing lingers mid-transform. */
+.dlg-field {
+  animation: dlg-field-in 0.42s var(--ease) backwards;
+}
+@keyframes dlg-field-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
 }
 .dlg-field + .dlg-field,
 .dlg-doc + .dlg-doc {
@@ -1867,6 +1881,8 @@ body {
   .dlg-case,
   .dlg-root.is-full .dlg-case,
   .dlg-starters,
+  .dlg-starter,
+  .dlg-field,
   .dlg-cards .dlg-card-opt {
     animation: none !important;
   }
