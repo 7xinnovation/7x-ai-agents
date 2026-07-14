@@ -330,7 +330,9 @@ body {
   display: block;
   animation: dlg-panel-in 0.55s var(--ease) both;
 }
-@media (min-width: 1000px) {
+/* Dock the case as a right-side panel for tablets/laptops and up. Below this it
+   becomes a full-screen overlay toggled from the header (see the phone block). */
+@media (min-width: 600px) {
   .dlg-case {
     width: 40%;
     max-width: 540px;
@@ -1293,7 +1295,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px 10px;
   margin-top: 8px;
 }
 .dlg-docslot-meta .hint {
@@ -1497,11 +1500,12 @@ body {
 }
 
 /* =========================================================================
-   Embedded chat — mobile / small viewport (feedback FB-5)
-   The side "case" panel becomes a full-screen overlay toggled from the header,
-   so the whole experience works on a phone instead of hiding the panel.
+   Embedded chat — phone / very narrow viewport (feedback FB-5)
+   Below the side-panel breakpoint the "case" panel becomes a full-screen overlay
+   toggled from the header, so the whole experience works on a phone. Kept below
+   the 600px dock breakpoint so tablets/laptops keep the docked right-side panel.
    ========================================================================= */
-@media (max-width: 760px) {
+@media (max-width: 599px) {
   .dlg-split {
     position: relative;
   }
