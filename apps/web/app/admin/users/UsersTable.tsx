@@ -74,8 +74,8 @@ export function UsersTable({ initial }: { initial: UserRow[] }) {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]">
-        <table className="w-full text-left text-[13.5px]">
+      <div className="overflow-x-auto rounded-xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]">
+        <table className="w-full min-w-[560px] text-left text-[13.5px]">
           <thead className="border-b border-[var(--color-line)] text-[12px] uppercase tracking-wide text-muted">
             <tr>
               <th className="px-5 py-3 font-semibold">User</th>

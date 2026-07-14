@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Paperclip, SendHorizontal, Sparkles, ExternalLink, Lock } from "lucide-react";
+import { Search, Paperclip, SendHorizontal, Sparkles, ExternalLink, Lock, ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 
@@ -51,9 +51,10 @@ export function Inbox({ initial }: { initial: Item[] }) {
   const customer = detail?.authenticated ? detail?.userRef || "Authenticated customer" : "Guest";
 
   return (
-    <div className="-mx-10 -my-8 flex h-dvh overflow-hidden bg-surface text-ink">
-      {/* List */}
-      <div className="flex w-[310px] shrink-0 flex-col border-r border-[var(--color-line)]">
+    <div className="-mx-4 -my-6 flex h-[calc(100dvh-3.5rem)] overflow-hidden bg-surface text-ink sm:-mx-6 lg:-mx-10 lg:-my-8 lg:h-dvh">
+      {/* List — full width on mobile, fixed column on tablet+. On mobile it yields
+          to the thread once a conversation is picked (master-detail). */}
+      <div className={cn("w-full shrink-0 flex-col border-r border-[var(--color-line)] md:flex md:w-[310px]", selected ? "hidden md:flex" : "flex")}>
         <div className="flex items-center justify-between px-4 pt-5 pb-3">
           <h1 className="text-[20px] font-bold tracking-tight">Inbox</h1>
           <Badge tone="brand">{items.length}</Badge>
@@ -88,14 +89,21 @@ export function Inbox({ initial }: { initial: Item[] }) {
         </div>
       </div>
 
-      {/* Thread */}
-      <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-canvas)]">
+      {/* Thread — hidden on mobile until a conversation is selected. */}
+      <div className={cn("min-w-0 flex-1 flex-col bg-[var(--color-canvas)]", selected ? "flex" : "hidden md:flex")}>
         {!detail ? (
           <div className="grid flex-1 place-items-center text-sm text-muted">{loading ? "Loading…" : "Select a conversation"}</div>
         ) : (
           <>
             <div className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] bg-surface px-5 py-3">
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  onClick={() => setSelected(null)}
+                  aria-label="Back to conversations"
+                  className="-ml-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:bg-[var(--color-canvas)] hover:text-ink md:hidden"
+                >
+                  <ArrowLeft className="h-[18px] w-[18px]" />
+                </button>
                 <span className="grid h-9 w-9 place-items-center rounded-full text-[13px] font-bold text-white" style={{ background: a?.primary ?? "#0020F5" }}>{(a?.name ?? "?").charAt(0)}</span>
                 <div>
                   <div className="text-[15px] font-semibold leading-tight">{a?.name ?? "Agent"}</div>

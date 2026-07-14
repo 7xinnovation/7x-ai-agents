@@ -55,9 +55,9 @@ export default async function Overview() {
         <span className="grid h-5 w-5 place-items-center rounded bg-[#0020f5]"><img src="/7xlogo.svg" alt="" className="h-2 w-auto" /></span>
         7X <ChevronRight className="h-3.5 w-3.5 text-[#c4c8d0]" /> <span className="text-ink">Overview</span>
       </div>
-      <header className="mb-8 flex items-end justify-between gap-4">
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-[30px] font-bold leading-[1.1] text-ink">Overview</h1>
+          <h1 className="text-[26px] font-bold leading-[1.1] text-ink sm:text-[30px]">Overview</h1>
           <p className="mt-1.5 text-[14px] text-muted">Your conversational agents, knowledge and operations at a glance.</p>
         </div>
         <div className="flex items-center gap-2.5">

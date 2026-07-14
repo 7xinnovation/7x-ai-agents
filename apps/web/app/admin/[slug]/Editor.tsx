@@ -80,9 +80,9 @@ export function Editor({ slug }: { slug: string }) {
 
   return (
     <>
-      <header className="sticky top-0 z-10 -mx-10 -mt-8 mb-6 flex items-center justify-between gap-4 border-b border-[var(--color-line)] bg-surface/85 px-10 py-4 backdrop-blur-xl">
-        <div>
-          <h1 className="text-[20px] font-extrabold tracking-tight">{isNew ? "New agent" : def.name || slug}</h1>
+      <header className="sticky top-0 z-10 -mx-4 -mt-6 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] bg-surface/85 px-4 py-4 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-10 lg:-mt-8 lg:px-10">
+        <div className="min-w-0">
+          <h1 className="truncate text-[20px] font-extrabold tracking-tight">{isNew ? "New agent" : def.name || slug}</h1>
           <p className="mt-0.5 flex items-center gap-1 text-[13px] text-muted"><Link href="/admin/agents" className="font-semibold text-[var(--color-brand)]">Agents</Link><ChevronRight className="h-3.5 w-3.5" />{isNew ? "new" : def.slug}</p>
         </div>
         <div className="flex items-center gap-2.5">
