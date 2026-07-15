@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMockAllowed, exchangeCode, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
 import { saveSessionToken, markAuthenticated, getOrCreateSession } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
 import { MOCK_PERSONA_SUB, MOCK_PERSONA_NAME } from "@/lib/mockPersona";
@@ -18,8 +18,11 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const err = req.nextUrl.searchParams.get("error");
-  let flow: { state?: string; cid?: string; agent?: string; returnTo?: string; popup?: boolean } = {};
+  let flow: { state?: string; cid?: string; agent?: string; returnTo?: string; popup?: boolean; mock?: boolean } = {};
   try { flow = JSON.parse(req.cookies.get("uaepass_flow")?.value ?? "{}"); } catch { /* ignore */ }
+  // Honour the mock decision made at login, but only if this deployment still
+  // permits it (guards against a stale cookie after the flag is turned off).
+  const isMock = uaePassMockAllowed() && Boolean(flow.mock);
 
   const back = (params: Record<string, string>, cid: string | undefined = flow.cid) => {
     // Popup flow: hand the result back to the chat via postMessage and close —
@@ -54,7 +57,7 @@ export async function GET(req: NextRequest) {
   try {
     // Mock mode: synthesize a verified identity instead of calling UAE PASS, so the
     // sign-in → session → authenticated flow is testable without registration.
-    const id = uaePassMock()
+    const id = isMock
       ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: MOCK_PERSONA_SUB, name: MOCK_PERSONA_NAME }
       : await exchangeCode(code, resolveRedirectUri(requestOrigin(req)));
     // Signed in before the first message → no conversation exists yet. Create it
@@ -75,7 +78,7 @@ export async function GET(req: NextRequest) {
       // token and force a 401. So skip it: the mock persona stays authenticated for
       // journey gating, and protected API calls fall back to the integration's own
       // stored credentials.
-      if (!uaePassMock()) await saveSessionToken(cid, id.accessToken);
+      if (!isMock) await saveSessionToken(cid, id.accessToken);
       await markAuthenticated(cid, id.sub);
     }
     return back({ uaepass: "ok" }, cid);

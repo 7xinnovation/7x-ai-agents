@@ -631,10 +631,14 @@ export function Experience({
       // Pass the embed's own URL so the server returns the user (and targets the
       // popup postMessage) at this exact origin — never the server's internal one.
       const returnTo = window.location.href.split("?")[0] ?? window.location.href;
+      // Tester opt-in: opening the embed with ?mock=1 makes the UAE PASS button
+      // simulate a login (only honoured where the server permits it). Real users on
+      // the plain URL always get genuine UAE PASS.
+      const mock = new URLSearchParams(window.location.search).get("mock") === "1" ? "&mock=1" : "";
       const base =
         `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
-        `&returnTo=${encodeURIComponent(returnTo)}`;
+        `&returnTo=${encodeURIComponent(returnTo)}${mock}`;
       const w = 480;
       const h = 720;
       const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));

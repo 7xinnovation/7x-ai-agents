@@ -19,6 +19,19 @@ export function uaePassConfigured(): boolean {
 }
 
 /**
+ * Opt-in mock sign-in: permitted when the whole deployment is mocked
+ * (UAEPASS_MOCK, dev/local), OR when a real deployment explicitly allows testers
+ * to simulate a login via `?mock=1` WITHOUT disabling real UAE PASS for everyone
+ * (UAEPASS_MOCK_ALLOWED). This is what lets QA test all flows on a live URL while
+ * real customers still get the genuine UAE PASS flow. Turn it off by removing the
+ * env var. A single request is mocked only when this is true AND the caller opted
+ * in (the `mock` flag carried through the login → callback flow).
+ */
+export function uaePassMockAllowed(): boolean {
+  return uaePassMock() || process.env.UAEPASS_MOCK_ALLOWED === "1";
+}
+
+/**
  * The PUBLIC origin (scheme + host) the customer actually reached — the custom
  * domain, the Railway URL, or localhost in dev. Behind a proxy (Railway)
  * `req.nextUrl.origin` is the internal localhost origin, so derive it from the
