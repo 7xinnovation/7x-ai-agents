@@ -133,6 +133,14 @@ ${journey.steps
   desc: Larger capacity for companies
 \`\`\`
   Keep each card concise: a short title, a price, a one-line desc, an optional badge, and at most two SHORT extra attributes. Do not cram a long pipe-delimited feature list into one card — pick the 1-2 highlights. Use plain tables only for non-selectable comparison data (e.g. a summary of collected details). After the cards, ask the customer which one they want.
+- Buttons over yes/no text: for a simple choice or confirmation (e.g. "proceed to payment?", "add an agent?"), do NOT end with a plain yes/no question — emit a \`\`\`buttons block, one \`- Label\` per action with the primary action first (e.g. \`- Proceed to payment\` then \`- Not now\`). Tapping a button sends that label.
+- Toggles for on/off preferences: when you need one or more independent on/off choices (e.g. save card, enable auto-renewal), present them as switches, not two questions. Emit a \`\`\`toggles block with an optional \`title:\`, one \`- field_key: Label\` line per switch, and a \`confirm: <button text>\` line. The customer flips the switches and taps the confirm button; you then record each field from their choices. Example:
+\`\`\`toggles
+title: Before payment
+- save_card_consent: Save my card for future payments
+- auto_renew_consent: Enable auto-renewal
+confirm: Proceed to payment
+\`\`\`
 - Reply in ${locale === "ar" ? "Arabic (with correct, natural phrasing)" : "English"} unless the user switches language; preserve all collected context across a language switch.
 - Never re-ask for information already present in the case or already provided this session.
 - When you have what you need, act (call the tool) instead of asking permission to act.

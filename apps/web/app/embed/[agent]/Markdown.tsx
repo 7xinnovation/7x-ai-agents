@@ -93,6 +93,61 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
   );
 }
 
+/** Inline action buttons (a ```buttons block). Tapping sends the label as the reply. */
+function ChatButtons({ labels, onSelect }: { labels: string[]; onSelect: (text: string) => void }) {
+  if (!labels.length) return null;
+  return (
+    <div className="dlg-chat-buttons">
+      {labels.map((l, i) => (
+        <button key={i} type="button" className={`dlg-chat-btn${i === 0 ? " primary" : ""}`} onClick={() => onSelect(l)}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Inline toggle switches (a ```toggles block) plus a confirm button — for
+ * capturing on/off choices (e.g. save card, auto-renewal) without a text Q&A.
+ * On confirm it sends a readable summary of the switches so the agent records
+ * each choice and continues.
+ */
+function ChatToggles({
+  items, title, confirmLabel, onSelect,
+}: {
+  items: { key: string; label: string }[];
+  title?: string;
+  confirmLabel: string;
+  onSelect: (text: string) => void;
+}) {
+  const [on, setOn] = React.useState<Record<string, boolean>>({});
+  if (!items.length) return null;
+  const submit = () => {
+    const summary = items.map((it) => `${it.label}: ${on[it.key] ? "Yes" : "No"}`).join(". ");
+    onSelect(`${summary}. ${confirmLabel}.`);
+  };
+  return (
+    <div className="dlg-toggles">
+      {title ? <div className="dlg-toggles-title">{title}</div> : null}
+      {items.map((it) => (
+        <button
+          key={it.key}
+          type="button"
+          role="switch"
+          aria-checked={!!on[it.key]}
+          className={`dlg-toggle${on[it.key] ? " is-on" : ""}`}
+          onClick={() => setOn((s) => ({ ...s, [it.key]: !s[it.key] }))}
+        >
+          <span className="dlg-toggle-label">{it.label}</span>
+          <span className="dlg-toggle-track" aria-hidden="true"><span className="dlg-toggle-thumb" /></span>
+        </button>
+      ))}
+      <button type="button" className="dlg-toggles-confirm" onClick={submit}>{confirmLabel}</button>
+    </div>
+  );
+}
+
 /**
  * Minimal, dependency-free Markdown renderer for assistant messages: paragraphs,
  * bullet lists, **bold**, *italic* / _italic_, `code`, and [links](url). Builds
@@ -247,10 +302,12 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
-    const fence = line.match(/^\s*```\s*(cards|upload)?\s*$/);
+    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles)?\s*$/);
     if (fence) {
       const isCards = fence[1] === "cards";
       const isUpload = fence[1] === "upload";
+      const isButtons = fence[1] === "buttons";
+      const isToggles = fence[1] === "toggles";
       i++;
       const body: string[] = [];
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
@@ -263,6 +320,26 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
           nodes.push(<ChatUpload key={k++} dkey={dkey} ctx={uploadCtx} />);
         }
         // No ctx (still streaming) or unknown key → render nothing for the block.
+        continue;
+      }
+      if (isButtons) {
+        // Each `- Label` line is an action button; tapping sends that label.
+        const labels = body.map((l) => l.match(/^\s*-\s+(.*\S)\s*$/)).filter(Boolean).map((m) => m![1]!.trim());
+        if (onSelect && labels.length) nodes.push(<ChatButtons key={k++} labels={labels} onSelect={onSelect} />);
+        continue;
+      }
+      if (isToggles) {
+        // `title:` / `confirm:` lines, and `- key: label` lines for each switch.
+        let tTitle: string | undefined;
+        let tConfirm = "Confirm";
+        const tItems: { key: string; label: string }[] = [];
+        for (const l of body) {
+          const item = l.match(/^\s*-\s+([\w.-]+)\s*:\s*(.+?)\s*$/);
+          const meta = l.match(/^\s*(title|confirm)\s*:\s*(.+?)\s*$/i);
+          if (item) tItems.push({ key: item[1]!.trim(), label: item[2]!.trim() });
+          else if (meta) { if (/^title$/i.test(meta[1]!)) tTitle = meta[2]!.trim(); else tConfirm = meta[2]!.trim(); }
+        }
+        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} onSelect={onSelect} />);
         continue;
       }
       if (isCards) {
