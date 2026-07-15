@@ -1466,6 +1466,77 @@ body {
   }
 }
 
+/* In-chat upload widget — an assistant message asks for one document at a time
+   and renders this inline control (feedback: keep the upload in the conversation). */
+.dlg-chat-upload {
+  margin-top: 10px;
+  padding: 12px 13px;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 9%, var(--c-border));
+  background: color-mix(in srgb, var(--c-primary) 3%, var(--c-surface));
+  animation: dlg-in 0.35s var(--ease) both;
+}
+.dlg-chat-upload.is-done {
+  background: color-mix(in srgb, var(--c-success) 6%, var(--c-surface));
+  border-color: color-mix(in srgb, var(--c-success) 24%, var(--c-border));
+}
+.dlg-chat-upload-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dlg-chat-upload-head > svg {
+  flex-shrink: 0;
+  color: var(--c-text-muted);
+}
+.dlg-chat-upload-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.dlg-chat-upload-name em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--c-text-muted);
+}
+.dlg-chat-upload-status {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: color-mix(in srgb, var(--c-success) 82%, var(--c-text));
+}
+.dlg-chat-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+}
+.dlg-chat-upload-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+}
+.dlg-chat-upload-file .fname {
+  font-size: 12.5px;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-chat-upload-hint {
+  margin-top: 9px;
+  font-size: 11.5px;
+  color: var(--c-text-muted);
+}
+
 /* QR hand-off modal — scan to upload from a phone (feedback FB-6, web). */
 .dlg-qr-overlay {
   position: fixed;
@@ -1883,6 +1954,7 @@ body {
   .dlg-starters,
   .dlg-starter,
   .dlg-field,
+  .dlg-chat-upload,
   .dlg-cards .dlg-card-opt {
     animation: none !important;
   }

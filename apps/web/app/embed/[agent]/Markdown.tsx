@@ -1,4 +1,97 @@
 import React from "react";
+import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning } from "@phosphor-icons/react";
+import { tr, type LocalizedString, type Locale } from "@dialog/config";
+
+/**
+ * Context the chat needs to render an inline upload widget (feedback: keep the
+ * upload in the conversation, one document at a time). Built in Experience and
+ * threaded into assistant-message markdown; a ```upload block names the doc key.
+ */
+export interface UploadDocMeta {
+  label: LocalizedString;
+  requirement: "mandatory" | "conditional" | "optional";
+  acceptedFormats: string[];
+  maxSizeMb: number;
+}
+export interface UploadCtx {
+  locale: Locale;
+  docs: Record<string, UploadDocMeta>;
+  statuses: Record<string, { status: string; fileName?: string; rejectionReason?: string }>;
+  uploadingKey: string | null;
+  onUpload: (key: string, file: File) => void;
+  onQr: () => void;
+  strings: {
+    upload: string; uploading: string; replace: string; optional: string;
+    upTo: string; takePhoto: string; fromPhone: string; uploaded: string;
+  };
+}
+
+/** Inline, in-conversation upload control for a single document (by key). */
+function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
+  const doc = ctx.docs[dkey];
+  if (!doc) return null;
+  const st = ctx.statuses[dkey];
+  const uploaded = st?.status === "uploaded" || st?.status === "accepted";
+  const busy = ctx.uploadingKey === dkey;
+  const accept = doc.acceptedFormats.map((f) => "." + f).join(",");
+  const t = ctx.strings;
+  return (
+    <div className={`dlg-chat-upload${uploaded ? " is-done" : ""}`}>
+      <div className="dlg-chat-upload-head">
+        <FileText size={15} weight="regular" />
+        <span className="dlg-chat-upload-name">
+          {tr(doc.label, ctx.locale)}
+          {doc.requirement === "optional" ? <em> ({t.optional})</em> : null}
+        </span>
+        {uploaded ? (
+          <span className="dlg-chat-upload-status">
+            <CheckCircle size={13} weight="fill" /> {t.uploaded}
+          </span>
+        ) : null}
+      </div>
+      {uploaded ? (
+        <div className="dlg-chat-upload-file">
+          <span className="fname">{st?.fileName}</span>
+          <label className="dlg-upload ghost">
+            {t.replace}
+            <input type="file" hidden accept={accept} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
+          </label>
+        </div>
+      ) : (
+        <div className="dlg-chat-upload-actions">
+          <label className="dlg-upload cam" title={t.takePhoto} aria-label={t.takePhoto}>
+            <Camera size={14} weight="bold" />
+            <input type="file" hidden disabled={busy} accept="image/*" capture="environment" onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
+          </label>
+          <button type="button" className="dlg-upload-phone" onClick={ctx.onQr} title={t.fromPhone}>
+            <DeviceMobile size={14} weight="bold" /> {t.fromPhone}
+          </button>
+          <label className={`dlg-upload ${busy ? "busy" : ""}`}>
+            {busy ? (
+              <>
+                <ArrowClockwise size={14} weight="bold" className="spin" /> {t.uploading}
+              </>
+            ) : (
+              <>
+                <UploadSimple size={14} weight="bold" /> {t.upload}
+              </>
+            )}
+            <input type="file" hidden disabled={busy} accept={accept} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
+          </label>
+        </div>
+      )}
+      {st?.status === "rejected" && st?.rejectionReason ? (
+        <div className="dlg-docslot-error">
+          <Warning size={13} weight="fill" /> {st.rejectionReason}
+        </div>
+      ) : (
+        <div className="dlg-chat-upload-hint">
+          {doc.acceptedFormats.join(", ").toUpperCase()} · {t.upTo} {doc.maxSizeMb}MB
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * Minimal, dependency-free Markdown renderer for assistant messages: paragraphs,
@@ -99,7 +192,7 @@ function applyCardKey(card: OptionCard, key: string, value: string) {
  * after a tool round) so it never lags far behind. When `animate` is false
  * (completed / resumed messages) it renders in full immediately.
  */
-export function TypewriterMarkdown({ text, animate, onSelect }: { text: string; animate: boolean; onSelect?: (text: string) => void }) {
+export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx }: { text: string; animate: boolean; onSelect?: (text: string) => void; uploadCtx?: UploadCtx }) {
   const [shown, setShown] = React.useState(animate ? 0 : text.length);
   const shownRef = React.useRef(shown);
   const textRef = React.useRef(text);
@@ -142,25 +235,36 @@ export function TypewriterMarkdown({ text, animate, onSelect }: { text: string; 
     if (!animate) setShown(text.length);
   }, [animate, text]);
 
-  // Cards are tappable only once the reply has fully rendered — never mid-stream.
-  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} onSelect={animate ? undefined : onSelect} />;
+  // Cards/uploads are interactive only once the reply has fully rendered.
+  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} onSelect={animate ? undefined : onSelect} uploadCtx={animate ? undefined : uploadCtx} />;
 }
 
-export function Markdown({ text, onSelect }: { text: string; onSelect?: (text: string) => void }) {
+export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect?: (text: string) => void; uploadCtx?: UploadCtx }) {
   const lines = text.split("\n");
   const nodes: React.ReactNode[] = [];
   let i = 0;
   let k = 0;
   while (i < lines.length) {
     const line = lines[i]!;
-    // Option cards: a ```cards fenced block → visual, scannable choice cards.
-    const fence = line.match(/^\s*```\s*(cards)?\s*$/);
+    // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
+    const fence = line.match(/^\s*```\s*(cards|upload)?\s*$/);
     if (fence) {
       const isCards = fence[1] === "cards";
+      const isUpload = fence[1] === "upload";
       i++;
       const body: string[] = [];
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
       i++; // closing fence
+      if (isUpload) {
+        // Body carries a `key: <docKey>` line naming which document to upload.
+        const keyLine = body.map((l) => l.match(/^\s*key\s*:\s*(.+?)\s*$/i)).find(Boolean);
+        const dkey = keyLine ? keyLine[1]!.trim() : "";
+        if (uploadCtx && dkey && uploadCtx.docs[dkey]) {
+          nodes.push(<ChatUpload key={k++} dkey={dkey} ctx={uploadCtx} />);
+        }
+        // No ctx (still streaming) or unknown key → render nothing for the block.
+        continue;
+      }
       if (isCards) {
         const cards = parseCards(body);
         if (cards.length) {

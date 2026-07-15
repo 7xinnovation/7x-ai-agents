@@ -22,6 +22,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ age
     greeting: d.greeting,
     theme: d.theme,
     documentsDisclaimer: d.documentsDisclaimer,
+    documentsInChat: d.documentsInChat,
     intents: d.intents.map((i) => ({ key: i.key, description: i.description })),
     journeys: d.journeys.map((j) => ({
       key: j.key,

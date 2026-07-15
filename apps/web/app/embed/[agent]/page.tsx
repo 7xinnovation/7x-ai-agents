@@ -27,6 +27,7 @@ export default async function EmbedPage({
     greeting: d.greeting,
     theme: d.theme,
     documentsDisclaimer: d.documentsDisclaimer,
+    documentsInChat: d.documentsInChat,
     journeys: d.journeys.map((j) => ({
       key: j.key,
       title: j.title,

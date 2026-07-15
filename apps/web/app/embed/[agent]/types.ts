@@ -34,6 +34,8 @@ export interface PublicAgent {
   theme: Theme;
   // Disclaimer shown above the document upload slots (team-verified notice).
   documentsDisclaimer?: LocalizedString;
+  // Uploads happen inline in the chat (panel Documents section suppressed).
+  documentsInChat?: boolean;
   journeys: PublicJourney[];
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;

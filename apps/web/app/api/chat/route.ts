@@ -33,6 +33,10 @@ const Body = z.object({
   // settle the payment. Like `pulse`, the server substitutes an internal directive
   // (not a visible user message) so the agent confirms and continues the journey.
   paymentSettled: z.boolean().optional(),
+  // Fired by the embed after a document is uploaded inline (documents-in-chat
+  // flow). The server substitutes a directive so the agent confirms what was
+  // captured and requests the NEXT document, one at a time.
+  documentUploaded: z.boolean().optional(),
 });
 
 // Internal directive used for the post-sign-in account pulse. Never shown to the
@@ -55,6 +59,15 @@ const PAYMENT_SETTLED_DIRECTIVE =
   "1) Warmly confirm the payment was received. " +
   "2) If the case is ready and the customer already confirmed the summary, call submit_case now and give them the reference number. " +
   "3) Otherwise, continue with whatever step remains. Never mention this system message.)";
+
+// Fired after an inline document upload (documents-in-chat flow). Not a message
+// the customer typed. Keeps the one-at-a-time upload loop moving.
+const DOCUMENT_UPLOADED_DIRECTIVE =
+  "(System: the customer just uploaded a document inline and the case has been updated with any fields read from it — this is an internal notification, not a message they typed. " +
+  "1) In one short sentence, confirm the document was received and note anything useful that was captured from it (do not dump every field). " +
+  "2) If more documents are still needed for this journey, request the NEXT one by emitting its ```upload block (one document only). " +
+  "3) If all required documents are in, move on: show a brief cards summary of the captured details for confirmation, or continue the journey. " +
+  "Never re-list all the documents, never ask the customer to use a side panel, and never mention this system message.)";
 
 function sse(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
@@ -136,6 +149,7 @@ export async function POST(req: NextRequest) {
   // Account pulse runs only for a signed-in customer; otherwise treat as normal.
   const isPulse = Boolean(body.pulse) && authenticated;
   const isPaymentSettled = Boolean(body.paymentSettled) && !isPulse;
+  const isDocumentUploaded = Boolean(body.documentUploaded) && !isPulse && !isPaymentSettled;
 
   // Returning customer: boxes we already know from their previous authenticated
   // sessions (current conversation's case included — it's stored per turn).
@@ -164,7 +178,9 @@ export async function POST(req: NextRequest) {
     ? pulseDirective
     : isPaymentSettled
       ? PAYMENT_SETTLED_DIRECTIVE
-      : body.userMessage;
+      : isDocumentUploaded
+        ? DOCUMENT_UPLOADED_DIRECTIVE
+        : body.userMessage;
 
   const a = { agentId: agent.id, conversationId: session.conversationId };
   const startJourney = session.state.journeyKey;
@@ -185,9 +201,9 @@ export async function POST(req: NextRequest) {
         if (isNewSession) {
           await emitEvent({ type: "conversation.started", ...a, attributes: { locale: body.locale } });
         }
-        // Internal directives (pulse / payment settled) are triggers — don't store
-        // them as user messages.
-        if (!isPulse && !isPaymentSettled) await appendMessage(session.conversationId, "user", body.userMessage);
+        // Internal directives (pulse / payment settled / document uploaded) are
+        // triggers — don't store them as user messages.
+        if (!isPulse && !isPaymentSettled && !isDocumentUploaded) await appendMessage(session.conversationId, "user", body.userMessage);
 
         // PRD AI-governance: classify intent to gate transactional journeys on goal
         // confidence. Run it CONCURRENTLY with the turn (not blocking) so the first
@@ -195,7 +211,7 @@ export async function POST(req: NextRequest) {
         // it after the first round, by which point it's ready. The gate only matters
         // when STARTING a journey, so skip it once a journey is active or on a pulse.
         let intentPromise: Promise<{ intent: string; confidence: number } | undefined> | undefined;
-        if (!session.state.journeyKey && !isPulse && !isPaymentSettled) {
+        if (!session.state.journeyKey && !isPulse && !isPaymentSettled && !isDocumentUploaded) {
           intentPromise = classifyIntent(agent.definition, body.userMessage, body.locale)
             .then((intent) => {
               void emitEvent({

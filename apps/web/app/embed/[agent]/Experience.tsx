@@ -28,7 +28,7 @@ import {
 } from "@phosphor-icons/react";
 import QRCode from "qrcode";
 import { tr, type CaseState, type Locale } from "@dialog/config";
-import { Markdown, TypewriterMarkdown } from "./Markdown";
+import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import type { PublicAgent } from "./types";
 
 interface PaymentInfo {
@@ -66,6 +66,7 @@ const STR = {
     online: "Online",
     upload: "Upload",
     uploading: "Uploading…",
+    uploaded: "Uploaded",
     replace: "Replace",
     optional: "optional",
     upTo: "up to",
@@ -109,6 +110,7 @@ const STR = {
     online: "متصل",
     upload: "رفع",
     uploading: "جارٍ الرفع…",
+    uploaded: "تم الرفع",
     replace: "استبدال",
     optional: "اختياري",
     upTo: "حتى",
@@ -491,6 +493,31 @@ export function Experience({
     setQrUrl(`${window.location.origin}/m/${agent.slug}/${convId.current}`);
   }, [agent.slug]);
 
+  // Context for in-chat upload widgets (feedback: keep the upload in the chat).
+  // A ```upload block in an assistant message renders a control for that doc key.
+  const uploadCtx = useMemo<UploadCtx>(() => {
+    const docs: UploadCtx["docs"] = {};
+    for (const j of agent.journeys)
+      for (const s of j.steps)
+        for (const d of s.documents)
+          docs[d.key] = { label: d.label, requirement: d.requirement, acceptedFormats: d.acceptedFormats, maxSizeMb: d.maxSizeMb };
+    const statuses: UploadCtx["statuses"] = {};
+    for (const d of caseState?.documents ?? [])
+      statuses[d.key] = { status: d.status, fileName: d.fileName, rejectionReason: d.rejectionReason };
+    return {
+      locale,
+      docs,
+      statuses,
+      uploadingKey,
+      onUpload: uploadDoc,
+      onQr: openQrHandoff,
+      strings: {
+        upload: t.upload, uploading: t.uploading, replace: t.replace, optional: t.optional,
+        upTo: t.upTo, takePhoto: t.takePhoto, fromPhone: t.fromPhone, uploaded: t.uploaded,
+      },
+    };
+  }, [agent, caseState, locale, uploadingKey, uploadDoc, openQrHandoff, t]);
+
   // Live-sync: while documents are still pending (and nothing local is in
   // flight), poll the conversation so uploads made on a phone via the QR
   // hand-off appear in this panel without a manual refresh.
@@ -650,10 +677,11 @@ export function Experience({
     });
   }, []);
 
-  const send = useCallback(async (override?: string, opts?: { proactive?: boolean; paymentSettled?: boolean }) => {
+  const send = useCallback(async (override?: string, opts?: { proactive?: boolean; paymentSettled?: boolean; documentUploaded?: boolean }) => {
     const proactive = opts?.proactive ?? false;
     const paymentSettled = opts?.paymentSettled ?? false;
-    const silent = proactive || paymentSettled;
+    const documentUploaded = opts?.documentUploaded ?? false;
+    const silent = proactive || paymentSettled || documentUploaded;
     const text = silent ? "" : (override ?? input).trim();
     if (streaming) return;
     if (!silent && !text) return;
@@ -675,9 +703,10 @@ export function Experience({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug: agent.slug,
-          userMessage: proactive ? "account_pulse" : paymentSettled ? "payment_settled" : text,
+          userMessage: proactive ? "account_pulse" : paymentSettled ? "payment_settled" : documentUploaded ? "document_uploaded" : text,
           pulse: proactive || undefined,
           paymentSettled: paymentSettled || undefined,
+          documentUploaded: documentUploaded || undefined,
           conversationId: convId.current ?? undefined,
           locale,
           authenticated,
@@ -785,6 +814,26 @@ export function Experience({
     },
     [streaming, send]
   );
+
+  // In-chat documents flow: when a new document lands (uploaded in the chat or via
+  // the phone QR hand-off), fire one proactive turn so the agent confirms what was
+  // captured and asks for the next document. A baseline is taken on first load so
+  // resuming a conversation with prior uploads never triggers it.
+  const uploadedBaseline = useRef<number | null>(null);
+  useEffect(() => {
+    if (!resumed || !agent.documentsInChat) return;
+    const uploaded = (caseState?.documents ?? []).filter((d) => d.status === "uploaded" || d.status === "accepted").length;
+    if (uploadedBaseline.current === null) {
+      uploadedBaseline.current = uploaded; // establish baseline, do not fire
+      return;
+    }
+    if (uploaded > uploadedBaseline.current) {
+      uploadedBaseline.current = uploaded;
+      if (!streaming) void send(undefined, { documentUploaded: true });
+    } else if (uploaded < uploadedBaseline.current) {
+      uploadedBaseline.current = uploaded;
+    }
+  }, [caseState, resumed, agent.documentsInChat, streaming, send]);
 
   // After sign-in, once the session has resumed, proactively run the account
   // pulse exactly once (no user bubble — just the assistant's summary).
@@ -939,7 +988,7 @@ export function Experience({
                 <div className="dlg-bubble">
                   {m.content ? (
                     m.role === "assistant" ? (
-                      <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} />
+                      <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={uploadCtx} />
                     ) : (
                       m.content
                     )
@@ -1079,7 +1128,7 @@ export function Experience({
                   </div>
                 ) : null}
 
-                {docSlots.length ? (
+                {docSlots.length && !agent.documentsInChat ? (
                   <div className="dlg-card">
                     <h3>
                       <FileText size={15} weight="bold" /> {t.documents}

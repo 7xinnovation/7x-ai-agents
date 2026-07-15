@@ -35,7 +35,11 @@ const DOCUMENTS_DISCLAIMER = {
 
 // Shared conversational rules appended to both EPGL journeys.
 const DISCLAIMER_RULE =
-  "Before asking for any uploads, briefly tell the customer that the documents they submit are reviewed and verified by the EPGL team, so they should make sure the details are accurate and legible for the fastest processing (the panel shows this disclaimer above the upload slots too).";
+  "Before asking for any uploads, briefly tell the customer that the documents they submit are reviewed and verified by the EPGL team, so they should make sure the details are accurate and legible for the fastest processing.";
+
+// Uploads happen INSIDE the chat, one document at a time (feedback).
+const UPLOAD_RULE =
+  "Collect documents ONE AT A TIME, inside the chat. To request a document, emit a fenced upload block: a line with three backticks followed by the word `upload`, then a line `key: <documentKey>`, then a closing line of three backticks. That renders an upload control right in the conversation (the customer can pick a file, take a photo on mobile, or scan a QR to upload from their phone). Ask for exactly ONE document per turn: introduce it in one short sentence, emit its single ```upload block, and STOP. Wait for the customer to upload it. Once it is uploaded the system reads it and pre-fills the case; briefly confirm what was captured, then request the NEXT document the same way. Never list several documents at once, never emit more than one upload block in a message, and never tell the customer to use a side panel.";
 
 const SIGNED_IN_PREFILL =
   "If the customer is SIGNED IN and a company profile is on file (see the known customer record note when present), use it: the account and company details and the owner's Emirates ID come from their Salesforce customer profile, and the quarterly leviable-income figures come from IDEP / company data. PREFILL these with collect_field and ask the customer only to confirm them (do NOT ask them to type values the profile already provides). Verify the Emirates ID looks valid (format 784-YYYY-NNNNNNN-N) and flag it if it does not. Only a signed-in customer gets this prefill; a guest continues documents-first.";
@@ -47,10 +51,11 @@ const ISSUANCE_GUIDANCE = [
   "DOCUMENTS-FIRST. Do not interrogate the customer field by field. Instead:",
   DISCLAIMER_RULE,
   SIGNED_IN_PREFILL,
-  "1) Ask the customer to upload their documents using the document slots in the panel: the Trade / Postal License, the Memorandum of Association (MOA), and the signed Declaration & Undertaking. The owner's Emirates ID is optional. On a phone they can use the camera; on a computer they can upload directly or scan the panel's QR code to upload from their phone.",
-  "2) The system reads each uploaded document automatically and pre-fills the application (company name EN/AR, trade license number + dates, emirate, address, email, and the primary owner's name, nationality and passport come from the license and the MOA). Watch the case panel fill in.",
-  "3) Once documents are in, show the customer what was captured as a card and ask them to confirm it is correct. Only ask the customer to type fields the documents did NOT provide (for example the activity codes, region, or a contact person if missing). NEVER ask for a value the case already shows.",
-  "4) The Declaration & Undertaking is a legal consent form — treat its upload as the customer's acknowledgment; do not try to read data from it.",
+  UPLOAD_RULE,
+  "1) Collect the documents one at a time, in this order, each with its own ```upload block (document keys in brackets): first the Trade / Postal License (key: trade_license), then the Memorandum of Association (key: moa), then the signed Declaration and Undertaking (key: commitment_form). The owner's Emirates ID (key: emirates_id) is OPTIONAL: offer it last, only if the customer wants to add it.",
+  "2) The system reads each uploaded document automatically and pre-fills the application (company name EN/AR, trade license number and dates, emirate, address, email, and the primary owner's name, nationality and passport come from the license and the MOA).",
+  "3) After each upload, briefly confirm what was captured, then request the next document. Once all documents are in, show a short ```cards summary of the captured details and ask the customer to confirm. Only ask the customer to type fields the documents did NOT provide (for example the activity codes, region, or a contact person if missing). NEVER ask for a value the case already shows.",
+  "4) The Declaration and Undertaking is a legal consent form: treat its upload as the customer's acknowledgment; do not try to read data from it.",
   CARDS_RULE,
   "Then continue to duplicate-check and submission as before.",
 ].join("\n");
@@ -59,10 +64,11 @@ const RENEWAL_GUIDANCE = [
   "DOCUMENTS-FIRST, and prefer the signed-in customer's own data. Do not ask field by field. Instead:",
   DISCLAIMER_RULE,
   SIGNED_IN_PREFILL,
-  "1) If signed in, confirm the company and license from their profile. Otherwise ask the customer to upload their current Trade / Postal License and the signed Declaration & Undertaking (and the quarterly financial statement if they have it). On a phone they can use the camera; on a computer they can upload directly or scan the panel's QR code to upload from their phone.",
-  "2) The system reads the license and pre-fills the trade license number, expiry date and trade names automatically — watch the case panel.",
-  "3) The quarterly leviable-income figures come from IDEP / company data for a signed-in customer — present them as a card for confirmation rather than asking the customer to enter them; only ask for figures that are genuinely missing, plus the accountant contact. Never re-ask for anything the license or profile already filled in.",
-  "4) The Declaration & Undertaking upload is the customer's legal consent; do not extract data from it.",
+  UPLOAD_RULE,
+  "1) If signed in, confirm the company and license from their profile first. Then collect the documents one at a time, each with its own ```upload block: the current Trade / Postal License (key: updated_trade_license), then the signed Declaration and Undertaking (key: commitment_form). The quarterly financial statement (key: financial_statement) is OPTIONAL: offer it if they have it.",
+  "2) The system reads the license and pre-fills the trade license number, expiry date and trade names automatically.",
+  "3) The quarterly leviable-income figures come from IDEP / company data for a signed-in customer: present them as a ```cards summary for confirmation rather than asking the customer to enter them; only ask for figures that are genuinely missing, plus the accountant contact. Never re-ask for anything the license or profile already filled in.",
+  "4) The Declaration and Undertaking upload is the customer's legal consent; do not extract data from it.",
   CARDS_RULE,
   "Then continue with the renewal submission (terms, finance summaries) as before.",
 ].join("\n");
@@ -74,6 +80,7 @@ async function main() {
   const def = agent.definition as Record<string, any>;
 
   def.documentsDisclaimer = DOCUMENTS_DISCLAIMER;
+  def.documentsInChat = true; // uploads happen inline in the chat, one at a time
   const J = (key: string) => def.journeys.find((j: any) => j.key === key);
   const issuance = J("new_license");
   const renewal = J("renewal");
@@ -84,6 +91,7 @@ async function main() {
   await db.update(agents).set({ definition: def as typeof agent.definition }).where(eq(agents.id, agent.id));
   console.log("EPGL Round-1 feedback applied:");
   console.log("  documentsDisclaimer set:", !!def.documentsDisclaimer);
+  console.log("  documentsInChat:", def.documentsInChat);
   console.log("  new_license guidance:", issuance.guidance.length, "chars");
   console.log("  renewal guidance:", renewal.guidance.length, "chars");
 }
