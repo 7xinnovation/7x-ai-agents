@@ -149,6 +149,42 @@ function ChatToggles({
 }
 
 /**
+ * A premium review card (a ```summary block) for confirming collected details —
+ * a PO Box's details, a pre-payment summary. Labeled rows with an optional
+ * emphasised total footer; cleaner and more considered than a raw markdown table.
+ */
+function ChatSummary({
+  title, rows, total,
+}: {
+  title?: string;
+  rows: { label: string; value: string }[];
+  total?: { label: string; value: string };
+}) {
+  if (!rows.length && !total) return null;
+  return (
+    <div className="dlg-summary">
+      {title ? <div className="dlg-summary-title">{title}</div> : null}
+      {rows.length ? (
+        <div className="dlg-summary-rows">
+          {rows.map((r, i) => (
+            <div className="dlg-summary-row" key={i}>
+              <span className="dlg-summary-k">{renderInline(r.label)}</span>
+              <span className="dlg-summary-v">{renderInline(r.value)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {total ? (
+        <div className="dlg-summary-total">
+          <span className="dlg-summary-k">{renderInline(total.label)}</span>
+          <span className="dlg-summary-v">{renderInline(total.value)}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Minimal, dependency-free Markdown renderer for assistant messages: paragraphs,
  * bullet lists, **bold**, *italic* / _italic_, `code`, and [links](url). Builds
  * React elements (no raw HTML) so it's XSS-safe. Tolerant of partial markdown
@@ -302,12 +338,13 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
-    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles)?\s*$/);
+    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary)?\s*$/);
     if (fence) {
       const isCards = fence[1] === "cards";
       const isUpload = fence[1] === "upload";
       const isButtons = fence[1] === "buttons";
       const isToggles = fence[1] === "toggles";
+      const isSummary = fence[1] === "summary";
       i++;
       const body: string[] = [];
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
@@ -340,6 +377,25 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
           else if (meta) { if (/^title$/i.test(meta[1]!)) tTitle = meta[2]!.trim(); else tConfirm = meta[2]!.trim(); }
         }
         if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} onSelect={onSelect} />);
+        continue;
+      }
+      if (isSummary) {
+        // A review card: `title:` line, `- Label: Value` rows, and an optional
+        // `total: <amount>` line rendered as the emphasised footer.
+        let sTitle: string | undefined;
+        let sTotal: { label: string; value: string } | undefined;
+        const sRows: { label: string; value: string }[] = [];
+        for (const l of body) {
+          const meta = l.match(/^\s*(title|total)\s*:\s*(.+?)\s*$/i);
+          const row = l.match(/^\s*-\s+(.+?)\s*:\s*(.+?)\s*$/);
+          if (meta && /^title$/i.test(meta[1]!)) sTitle = meta[2]!.trim();
+          else if (meta) {
+            const t = meta[2]!.trim();
+            const split = t.match(/^(.+?)\s*:\s*(.+)$/);
+            sTotal = split ? { label: split[1]!.trim(), value: split[2]!.trim() } : { label: "Total", value: t };
+          } else if (row) sRows.push({ label: row[1]!.trim(), value: row[2]!.trim() });
+        }
+        if (sRows.length || sTotal) nodes.push(<ChatSummary key={k++} title={sTitle} rows={sRows} total={sTotal} />);
         continue;
       }
       if (isCards) {
