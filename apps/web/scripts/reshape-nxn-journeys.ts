@@ -245,6 +245,15 @@ async function main() {
     if (intent) intent.requiresAuth = false;
   }
 
+  // Harden the renewal pricing flow (avoid the redundant re-fetch AND the system
+  // error the fragile Pricing call throws on a mis-formatted expiry / wrong bundle).
+  const PRICING_RULE =
+    " RENEWAL PRICING — read carefully. Every price you show on a duration card MUST come from the Pricing tool: NEVER estimate, calculate, or guess a renewal price. After the customer picks a duration, REUSE that card's Pricing result for the summary and payment — do NOT call Pricing again for a duration you already priced. When you DO call Pricing, format the inputs EXACTLY or it returns a SYSTEM ERROR: (a) expiryDate = (the YEAR of currentExpiryDate + the number of renewal years)-12-31T00:00:00 and it MUST be strictly in the future — e.g. currentExpiryDate 2028-08-19 with a 2-year renewal gives '2030-12-31T00:00:00'; (b) newBundleId = the EXACT current bundle id from payload.poBoxRenewalDetails copied verbatim (e.g. 'MYHOME3'), with isBundleChanged=false. If a Pricing call errors, re-check the expiryDate (future, YYYY-12-31 format) and the bundle id and retry ONCE; if it still fails, tell the customer the price could not be confirmed right now and offer a callback instead of retrying in a loop.";
+  for (const rn of [rnp, rnc]) {
+    const af = (rn.submission as any)?.apiFlow;
+    if (af && !((af.notes ?? "") as string).includes("RENEWAL PRICING")) af.notes = (af.notes ?? "") + PRICING_RULE;
+  }
+
   await db.update(agents).set({ definition: def as typeof agent.definition }).where(eq(agents.id, agent.id));
   console.log("NXN journeys reshaped to the attached docs:");
   for (const k of ["personal_po_box_rental", "corporate_po_box_rental", "personal_po_box_renewal", "corporate_po_box_renewal"]) {
