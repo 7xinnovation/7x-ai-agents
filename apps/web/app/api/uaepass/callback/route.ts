@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri, publicOrigin } from "@/lib/uaepass";
 import { saveSessionToken, markAuthenticated, getOrCreateSession } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
 import { log } from "@/lib/logger";
@@ -25,7 +25,11 @@ export async function GET(req: NextRequest) {
     // the embed stays exactly where it was (no page navigation at all).
     if (flow.popup) {
       const payload = JSON.stringify({ source: "dialog-uaepass", status: params.uaepass ?? "ok", cid: cid ?? null });
-      const origin = JSON.stringify(req.nextUrl.origin);
+      // postMessage must target the OPENER's origin (the embed), not this request's
+      // origin (which is localhost behind the proxy) or the message is dropped.
+      let targetOrigin = publicOrigin(req.nextUrl.origin);
+      try { if (flow.returnTo) targetOrigin = new URL(flow.returnTo).origin; } catch { /* keep default */ }
+      const origin = JSON.stringify(targetOrigin);
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in complete</title></head>
 <body style="font-family:-apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#5b6478">
 <p>Returning you to the chat…</p>
@@ -35,7 +39,7 @@ export async function GET(req: NextRequest) {
       res.cookies.delete("uaepass_flow");
       return res;
     }
-    const url = new URL(flow.returnTo || `${req.nextUrl.origin}/embed/${flow.agent ?? ""}`);
+    const url = new URL(flow.returnTo || `${publicOrigin(req.nextUrl.origin)}/embed/${flow.agent ?? ""}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     if (cid) url.searchParams.set("cid", cid);
     const res = NextResponse.redirect(url.toString());

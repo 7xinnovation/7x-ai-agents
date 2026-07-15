@@ -28,6 +28,22 @@ export function resolveRedirectUri(origin: string): string {
   return process.env.UAEPASS_REDIRECT_URI || `${origin}/api/uaepass/callback`;
 }
 
+/**
+ * The app's PUBLIC origin (scheme + host), used to build return URLs and the
+ * popup postMessage target. Behind a proxy (Railway) `req.nextUrl.origin` can be
+ * the internal localhost origin, which would send the user back to localhost after
+ * sign-in — so prefer the origin of the registered callback (UAEPASS_REDIRECT_URI)
+ * or an explicit PUBLIC_APP_URL, falling back to the request origin only in dev.
+ */
+export function publicOrigin(requestOrigin: string): string {
+  for (const v of [process.env.PUBLIC_APP_URL, process.env.UAEPASS_REDIRECT_URI]) {
+    if (v && /^https?:\/\//i.test(v)) {
+      try { return new URL(v).origin; } catch { /* ignore malformed */ }
+    }
+  }
+  return requestOrigin;
+}
+
 function cfg() {
   return {
     base: (process.env.UAEPASS_BASE || "https://stg-id.uaepass.ae").replace(/\/$/, ""),

@@ -107,7 +107,7 @@ const RENEW_AUTO_RENEW = [
 ].join("\n");
 
 const RENEW_AUTH =
-  "Entry: UAE PASS sign-in is REQUIRED — it is the ONLY authentication method for renewal (guest OTP was rejected as a weaker parallel path). If the customer is not signed in, briefly explain why and call request_authentication before collecting anything. After sign-in, use the known customer record to pre-select their box where available instead of asking from scratch.";
+  "Entry: renewal is available to GUESTS and signed-in customers alike. OFFER UAE PASS sign-in (feedback FB-1168: 'ask to login') because signing in lets you check and turn on auto-renewal and pre-fill the customer's box, but NEVER require it: if the customer wants to continue as a guest, proceed with the renewal and collect the PO Box number and details directly. Do not call request_authentication for a renewal. When the customer IS signed in, use the known customer record to pre-select their box instead of asking from scratch.";
 
 const RENEW_PERSONAL_GUIDANCE = [
   "Follow the Renew Personal PO Box journey. Renewal extends the existing box on the SAME bundle (changing bundle/branch/agent/delivery is out of scope here).",
@@ -214,9 +214,9 @@ async function main() {
   // ── Renew Personal ── (keep apiFlow details/pricing; add consent + guidance)
   const rnp = J("personal_po_box_renewal");
   rnp.guidance = RENEW_PERSONAL_GUIDANCE;
-  rnp.requiresAuth = true; // docs: UAE PASS is the ONLY renewal auth (FB-1168)
+  rnp.requiresAuth = false; // renewal is guest-allowed; sign-in is offered, not required (FB-1168)
   rnp.steps = [
-    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: true, documents: [], fields: [
+    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: false, documents: [], fields: [
       field("po_box_number", "PO Box number", "رقم صندوق البريد"),
       field("renewal_period", "Renewal duration", "مدة التجديد", { type: "enum", options: durationOpts }),
       field("updated_phone", "Contact phone", "رقم الهاتف", { type: "phone", required: false }),
@@ -227,9 +227,9 @@ async function main() {
   // ── Renew Corporate ── (keep apiFlow; add TL check + consent + guidance)
   const rnc = J("corporate_po_box_renewal");
   rnc.guidance = RENEW_CORPORATE_GUIDANCE;
-  rnc.requiresAuth = true; // docs: UAE PASS is the ONLY renewal auth (FB-1168)
+  rnc.requiresAuth = false; // renewal is guest-allowed; sign-in is offered, not required (FB-1168)
   rnc.steps = [
-    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: true, documents: [], fields: [
+    { key: "identify", title: t("Identify & terms", "التحديد والشروط"), requiresAuth: false, documents: [], fields: [
       field("po_box_number", "PO Box number", "رقم صندوق البريد"),
       field("trade_license_number", "Trade license number", "رقم الرخصة التجارية"),
       field("renewal_period", "Renewal duration", "مدة التجديد", { type: "enum", options: durationOpts }),
@@ -238,11 +238,11 @@ async function main() {
     ] },
   ];
 
-  // Renewal intents must ask for sign-in too (rendered "(requires sign-in)" in
-  // the prompt; set_journey enforces it server-side).
+  // Renewal is guest-allowed: the intents do NOT require sign-in (the guidance
+  // still offers UAE PASS for auto-renew, but guests can renew).
   for (const key of ["renew_personal_pobox", "renew_corporate_pobox"]) {
     const intent = def.intents.find((i: any) => i.key === key);
-    if (intent) intent.requiresAuth = true;
+    if (intent) intent.requiresAuth = false;
   }
 
   await db.update(agents).set({ definition: def as typeof agent.definition }).where(eq(agents.id, agent.id));

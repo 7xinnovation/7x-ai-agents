@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, uaePassMock, buildAuthorizeUrl, resolveRedirectUri } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMock, buildAuthorizeUrl, resolveRedirectUri, publicOrigin } from "@/lib/uaepass";
 
 export const runtime = "nodejs";
 
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   }
   const cid = req.nextUrl.searchParams.get("cid") ?? "";
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
-  const returnTo = req.nextUrl.searchParams.get("returnTo") || `${req.nextUrl.origin}/embed/${agent}`;
+  const returnTo = req.nextUrl.searchParams.get("returnTo") || `${publicOrigin(req.nextUrl.origin)}/embed/${agent}`;
   // Popup mode: the embed opened this flow in a popup window (it can't redirect
   // its own iframe to UAE PASS — frame-ancestors forbids it). The callback then
   // notifies the opener via postMessage and closes instead of redirecting.

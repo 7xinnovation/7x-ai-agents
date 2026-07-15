@@ -628,17 +628,20 @@ export function Experience({
   // place. Falls back to a full redirect if the popup is blocked.
   const signIn = useCallback(() => {
     if (agent.uaePassEnabled && typeof window !== "undefined") {
+      // Pass the embed's own URL so the server returns the user (and targets the
+      // popup postMessage) at this exact origin — never the server's internal one.
+      const returnTo = window.location.href.split("?")[0] ?? window.location.href;
       const base =
         `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
-        `&cid=${encodeURIComponent(convId.current ?? "")}`;
+        `&cid=${encodeURIComponent(convId.current ?? "")}` +
+        `&returnTo=${encodeURIComponent(returnTo)}`;
       const w = 480;
       const h = 720;
       const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
       const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
       const win = window.open(`${base}&popup=1`, "dlg-uaepass", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
       if (!win) {
-        const returnTo = window.location.href.split("?")[0] ?? window.location.href;
-        window.location.href = `${base}&returnTo=${encodeURIComponent(returnTo)}`;
+        window.location.href = base;
       }
     } else {
       setAuthenticated(true);
