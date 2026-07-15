@@ -95,6 +95,16 @@ async function main() {
   issuance.guidance = ISSUANCE_GUIDANCE;
   renewal.guidance = RENEWAL_GUIDANCE;
 
+  // Salesforce composite rule (fixes "Invalid or missing URL" on submit/update):
+  // every compositeRequest item must carry method + referenceId + a url pointing
+  // at the object's sobjects path. Appended to both journeys' apiFlow notes.
+  const COMPOSITE_URL_RULE =
+    " CRITICAL COMPOSITE RULE: EVERY item in compositeRequest MUST include (a) method:'POST', (b) a referenceId, and (c) a url set to the object's sobjects path. Use exactly these urls: Account -> /services/data/v66.0/sobjects/Account; EPG_Partner__c -> /services/data/v66.0/sobjects/EPG_Partner__c; Contact -> /services/data/v66.0/sobjects/Contact; User -> /services/data/v66.0/sobjects/User; Members__c -> /services/data/v66.0/sobjects/Members__c; EPG_Document__c -> /services/data/v66.0/sobjects/EPG_Document__c; EPG_License_Request__c -> /services/data/v66.0/sobjects/EPG_License_Request__c; EPG_Finance_Summary__c -> /services/data/v66.0/sobjects/EPG_Finance_Summary__c. A subrequest without a valid url fails the ENTIRE submit with 'Invalid or missing URL'. This applies identically to new submissions AND updates. For an UPDATE, first call epglsalesforce__duplicateCheck (or getRequestStatus) to obtain the existing Account Id and License Request Name, put them in the Account.Id / EPG_License_Request__c.Name fields, and still include every item's url as above.";
+  for (const j of [issuance, renewal]) {
+    const af = j.submission?.apiFlow;
+    if (af && !((af.notes ?? "").includes("CRITICAL COMPOSITE RULE"))) af.notes = (af.notes ?? "") + COMPOSITE_URL_RULE;
+  }
+
   // Owner contact number duplicates the contact phone — never require it or block
   // submission on it; the agent copies contact_phone into it (see NO_REDUNDANT_ASK).
   let tweaked = 0;

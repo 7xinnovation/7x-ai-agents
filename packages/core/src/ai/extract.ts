@@ -80,6 +80,7 @@ export async function extractFieldsFromDocument(input: {
     "- Prefer the English value when a field has both English and Arabic.\n" +
     "- For owner/partner or shareholder details, use the FIRST/primary partner (highest share).\n" +
     "- Trade or postal licenses state the licensed ACTIVITY or activity code(s) and the REGION / area (or zone) of the registered address: read those into the matching activity-code and region fields when present.\n" +
+    "- The registered address on a license usually contains the area / district NAME (e.g. Al Quoz, Deira, Bur Dubai, Business Bay, Mirdif). Extract that area name into the region field even when it is part of a longer address line, and put the full address in the address/street field.\n" +
     "- Memoranda of Association and partner lists usually give each partner's EMIRATES ID number, NATIONALITY and PASSPORT number: read the primary owner's into the matching owner fields.\n" +
     "- A single phone number on the document can fill BOTH an owner-contact and a general contact-phone field if the document shows only one number for that person.\n" +
     "- If the document is an identity card (e.g. Emirates ID) and the fields describe an agent/representative, map the card's name, ID number and expiry to those agent fields only.\n" +
