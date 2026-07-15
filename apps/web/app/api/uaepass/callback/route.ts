@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri, publicOrigin } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
 import { saveSessionToken, markAuthenticated, getOrCreateSession } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
 import { log } from "@/lib/logger";
@@ -26,8 +26,8 @@ export async function GET(req: NextRequest) {
     if (flow.popup) {
       const payload = JSON.stringify({ source: "dialog-uaepass", status: params.uaepass ?? "ok", cid: cid ?? null });
       // postMessage must target the OPENER's origin (the embed), not this request's
-      // origin (which is localhost behind the proxy) or the message is dropped.
-      let targetOrigin = publicOrigin(req.nextUrl.origin);
+      // internal origin (localhost behind the proxy) or the message is dropped.
+      let targetOrigin = requestOrigin(req);
       try { if (flow.returnTo) targetOrigin = new URL(flow.returnTo).origin; } catch { /* keep default */ }
       const origin = JSON.stringify(targetOrigin);
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in complete</title></head>
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       res.cookies.delete("uaepass_flow");
       return res;
     }
-    const url = new URL(flow.returnTo || `${publicOrigin(req.nextUrl.origin)}/embed/${flow.agent ?? ""}`);
+    const url = new URL(flow.returnTo || `${requestOrigin(req)}/embed/${flow.agent ?? ""}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     if (cid) url.searchParams.set("cid", cid);
     const res = NextResponse.redirect(url.toString());
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     // sign-in → session → authenticated flow is testable without registration.
     const id = uaePassMock()
       ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: "uaepass-mock-001", name: "Test Persona" }
-      : await exchangeCode(code, resolveRedirectUri(req.nextUrl.origin));
+      : await exchangeCode(code, resolveRedirectUri(requestOrigin(req)));
     // Signed in before the first message → no conversation exists yet. Create it
     // here so the verified identity has somewhere to live; the redirect's ?cid=
     // pins it in the embed, and the post-sign-in pulse lands in it.

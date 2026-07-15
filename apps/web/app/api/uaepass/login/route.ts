@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, uaePassMock, buildAuthorizeUrl, resolveRedirectUri, publicOrigin } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMock, buildAuthorizeUrl, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
 
 export const runtime = "nodejs";
 
@@ -13,9 +13,10 @@ export async function GET(req: NextRequest) {
   if (!uaePassConfigured()) {
     return NextResponse.json({ error: "uaepass_not_configured", hint: "Set UAEPASS_CLIENT_ID/SECRET/BASE." }, { status: 501 });
   }
+  const origin = requestOrigin(req);
   const cid = req.nextUrl.searchParams.get("cid") ?? "";
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
-  const returnTo = req.nextUrl.searchParams.get("returnTo") || `${publicOrigin(req.nextUrl.origin)}/embed/${agent}`;
+  const returnTo = req.nextUrl.searchParams.get("returnTo") || `${origin}/embed/${agent}`;
   // Popup mode: the embed opened this flow in a popup window (it can't redirect
   // its own iframe to UAE PASS — frame-ancestors forbids it). The callback then
   // notifies the opener via postMessage and closes instead of redirecting.
@@ -24,8 +25,8 @@ export async function GET(req: NextRequest) {
   // Mock mode: skip UAE PASS, go straight to our callback with a fake code so the
   // full flow can be tested locally before the callback is registered with UAE PASS.
   const target = uaePassMock()
-    ? `${req.nextUrl.origin}/api/uaepass/callback?code=MOCK_CODE&state=${state}`
-    : buildAuthorizeUrl(resolveRedirectUri(req.nextUrl.origin), state);
+    ? `${origin}/api/uaepass/callback?code=MOCK_CODE&state=${state}`
+    : buildAuthorizeUrl(resolveRedirectUri(origin), state);
 
   const res = NextResponse.redirect(target);
   res.cookies.set("uaepass_flow", JSON.stringify({ state, cid, agent, returnTo, popup }), {

@@ -19,29 +19,36 @@ export function uaePassConfigured(): boolean {
 }
 
 /**
- * The redirect/callback URL. MUST exactly match a URL registered with UAE PASS
- * for this client, or UAE PASS returns "callback.not.match". Set
- * UAEPASS_REDIRECT_URI to the registered value; otherwise defaults to this app's
- * own callback on the request origin.
+ * The PUBLIC origin (scheme + host) the customer actually reached — the custom
+ * domain, the Railway URL, or localhost in dev. Behind a proxy (Railway)
+ * `req.nextUrl.origin` is the internal localhost origin, so derive it from the
+ * proxy's forwarded host headers instead. This is what keeps the whole UAE PASS
+ * round-trip on ONE origin (so the flow cookie and the return both work).
  */
-export function resolveRedirectUri(origin: string): string {
-  return process.env.UAEPASS_REDIRECT_URI || `${origin}/api/uaepass/callback`;
+export function requestOrigin(req: {
+  headers: { get(name: string): string | null };
+  nextUrl: { origin: string; protocol: string };
+}): string {
+  // An explicit override wins (single fixed public domain deployments).
+  const pin = process.env.PUBLIC_APP_URL;
+  if (pin && /^https?:\/\//i.test(pin)) { try { return new URL(pin).origin; } catch { /* ignore */ } }
+  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || req.nextUrl.protocol.replace(/:$/, "");
+  const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || req.headers.get("host");
+  return host ? `${proto}://${host}` : req.nextUrl.origin;
 }
 
 /**
- * The app's PUBLIC origin (scheme + host), used to build return URLs and the
- * popup postMessage target. Behind a proxy (Railway) `req.nextUrl.origin` can be
- * the internal localhost origin, which would send the user back to localhost after
- * sign-in — so prefer the origin of the registered callback (UAEPASS_REDIRECT_URI)
- * or an explicit PUBLIC_APP_URL, falling back to the request origin only in dev.
+ * The redirect/callback URL sent to UAE PASS. It stays on the SAME origin the
+ * customer is on (from requestOrigin), so the flow cookie and the return both
+ * work; that exact URL MUST be registered with UAE PASS for this client, or it
+ * returns "callback.not.match". To pin one fixed public origin, set PUBLIC_APP_URL
+ * (honoured by requestOrigin). UAEPASS_REDIRECT_URI is only a last-resort fallback
+ * when no origin can be derived — do NOT set it to a single domain in a
+ * multi-domain deployment (custom domain + Railway) or the callback is forced off
+ * the domain the customer used and the flow cookie / return break.
  */
-export function publicOrigin(requestOrigin: string): string {
-  for (const v of [process.env.PUBLIC_APP_URL, process.env.UAEPASS_REDIRECT_URI]) {
-    if (v && /^https?:\/\//i.test(v)) {
-      try { return new URL(v).origin; } catch { /* ignore malformed */ }
-    }
-  }
-  return requestOrigin;
+export function resolveRedirectUri(origin: string): string {
+  return origin ? `${origin}/api/uaepass/callback` : (process.env.UAEPASS_REDIRECT_URI ?? "");
 }
 
 function cfg() {
