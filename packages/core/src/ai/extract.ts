@@ -79,6 +79,9 @@ export async function extractFieldsFromDocument(input: {
     "- For enum fields, return exactly one of the allowed values.\n" +
     "- Prefer the English value when a field has both English and Arabic.\n" +
     "- For owner/partner or shareholder details, use the FIRST/primary partner (highest share).\n" +
+    "- Trade or postal licenses state the licensed ACTIVITY or activity code(s) and the REGION / area (or zone) of the registered address: read those into the matching activity-code and region fields when present.\n" +
+    "- Memoranda of Association and partner lists usually give each partner's EMIRATES ID number, NATIONALITY and PASSPORT number: read the primary owner's into the matching owner fields.\n" +
+    "- A single phone number on the document can fill BOTH an owner-contact and a general contact-phone field if the document shows only one number for that person.\n" +
     "- If the document is an identity card (e.g. Emirates ID) and the fields describe an agent/representative, map the card's name, ID number and expiry to those agent fields only.\n" +
     "- Respond with the JSON object only, no prose, no markdown fences.";
 
