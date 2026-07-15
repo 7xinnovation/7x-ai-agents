@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { uaePassConfigured, uaePassMock, exchangeCode, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
 import { saveSessionToken, markAuthenticated, getOrCreateSession } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
+import { MOCK_PERSONA_SUB, MOCK_PERSONA_NAME } from "@/lib/mockPersona";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest) {
     // Mock mode: synthesize a verified identity instead of calling UAE PASS, so the
     // sign-in → session → authenticated flow is testable without registration.
     const id = uaePassMock()
-      ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: "uaepass-mock-001", name: "Test Persona" }
+      ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: MOCK_PERSONA_SUB, name: MOCK_PERSONA_NAME }
       : await exchangeCode(code, resolveRedirectUri(requestOrigin(req)));
     // Signed in before the first message → no conversation exists yet. Create it
     // here so the verified identity has somewhere to live; the redirect's ?cid=
@@ -68,7 +69,13 @@ export async function GET(req: NextRequest) {
       }
     }
     if (cid) {
-      await saveSessionToken(cid, id.accessToken); // becomes the bearer for protected calls
+      // The token becomes the bearer for protected backend calls. In mock mode the
+      // "token" is a synthetic placeholder that no real backend (e.g. Emirates Post)
+      // would accept — saving it would only clobber the integration's stored service
+      // token and force a 401. So skip it: the mock persona stays authenticated for
+      // journey gating, and protected API calls fall back to the integration's own
+      // stored credentials.
+      if (!uaePassMock()) await saveSessionToken(cid, id.accessToken);
       await markAuthenticated(cid, id.sub);
     }
     return back({ uaepass: "ok" }, cid);

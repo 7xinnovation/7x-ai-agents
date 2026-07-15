@@ -6,6 +6,7 @@ import { getDb, payments } from "@dialog/db";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerBoxes, knownEpglProfile } from "@/lib/conversation";
+import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
@@ -163,6 +164,10 @@ export async function POST(req: NextRequest) {
     if (agent.definition.slug === "epgl-dialog") {
       const profile = await knownEpglProfile(agent.id, userRef).catch(() => ({}));
       customerContext = formatEpglProfileContext(profile);
+    } else if (userRef === MOCK_PERSONA_SUB) {
+      // TEST-ONLY: the mock UAE PASS persona (UAEPASS_MOCK=1) is given a couple of
+      // existing PO Boxes so signed-in flows have account data to work with.
+      customerContext = mockPersonaContext();
     } else {
       const known = await knownCustomerBoxes(agent.id, userRef).catch(() => []);
       if (known.length) {
