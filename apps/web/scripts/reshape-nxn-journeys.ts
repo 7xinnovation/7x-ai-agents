@@ -113,7 +113,7 @@ const RENEW_PERSONAL_GUIDANCE = [
   "Follow the Renew Personal PO Box journey. Renewal extends the existing box on the SAME bundle (changing bundle/branch/agent/delivery is out of scope here).",
   RENEW_AUTH + " " + RENEW_AUTO_RENEW,
   "Stage 1 Retrieve & Confirm: show the box number, branch, current bundle and expiry, plus auto-renew and agent status; confirm which box to renew. " + CARDS_RULE,
-  "Stage 2 Renewal Terms: confirm same-bundle renewal and ask the renewal duration in years (default to prior duration where known).",
+  "Stage 2 Renewal Terms: confirm same-bundle renewal and ask the renewal duration in years (default to prior duration where known). If you show the durations as cards, each card's price is the real, authoritative price for that duration; once the customer picks a duration, REUSE that card's price for the summary and payment. Do NOT re-run pricing for a duration you already priced and displayed.",
   "Stage 3 Summary & Confirm: summarise box, branch, bundle, duration, new expiry date, price and any fees; the customer confirms.",
   "Stage 4 Payment: " + PAYMENT_CONSENT,
   "Stage 5 Completion: confirm the box is renewed and show the new expiry date, then offer receipt, tax invoice and related services.",
@@ -124,7 +124,7 @@ const RENEW_CORPORATE_GUIDANCE = [
   RENEW_AUTH + " " + RENEW_AUTO_RENEW,
   "Stage 1 Retrieve & Confirm: show the company's corporate boxes with bundle, expiry, auto-renew and agent status; the customer picks which box to renew. " + CARDS_RULE,
   "Stage 2 Trade License validity: if the license on file is valid, proceed. If it is expired or near expiry, re-route to the existing form-based validation (Salesforce case, pending-validation completion) — mirroring the corporate rental Tier 3 handoff. Renewal payment is still taken; the box is renewed only once documents are validated.",
-  "Stage 3 Renewal Terms: confirm same-bundle renewal and ask the renewal duration in years.",
+  "Stage 3 Renewal Terms: confirm same-bundle renewal and ask the renewal duration in years. If you show the durations as cards, each card's price is the real, authoritative price for that duration; once the customer picks a duration, REUSE that card's price for the summary and payment. Do NOT re-run pricing for a duration you already priced and displayed.",
   "Stage 4 Summary & Payment (taken on both the valid-TL and re-route paths): " + PAYMENT_CONSENT,
   "Stage 5 Completion: on the valid-TL path confirm renewed + show the new expiry. On the re-route path do NOT say 'renewed' — tell the customer documents are being validated and confirmation follows.",
 ].join("\n");

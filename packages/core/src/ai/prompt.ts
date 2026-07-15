@@ -38,7 +38,7 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
     if (f.detailsTool)
       lines.push(`  1. Call ${f.detailsTool} once to fetch the record and the values you need (current expiry, bundle, customer details). Reuse them — do not re-ask the customer for what the tool returned, and do not call it again on later turns.`);
     if (f.pricingTool)
-      lines.push(`  2. Call ${f.pricingTool} to get the AUTHORITATIVE amount, quote exactly that figure, and ask the customer to confirm.`);
+      lines.push(`  2. Get the AUTHORITATIVE amount for the chosen option from ${f.pricingTool}. If you have ALREADY fetched and shown that exact price (e.g. on the option/duration card the customer just picked), REUSE it — do NOT call ${f.pricingTool} again for the same option. Quote exactly that figure and ask the customer to confirm.`);
     lines.push(`  3. After the customer confirms, call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"} and share the secure link. WAIT for confirmation.`);
     lines.push(`  4. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
     lines.push(`  Keep the case panel live: as soon as you learn each of this journey's fields, call collect_field for it (e.g. the box number, the chosen period) — including values you read from a tool — so the customer's side panel fills in step by step, not all at the end.`);
@@ -53,7 +53,7 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
   if (f.detailsTool)
     lines.push(`  1. Call ${f.detailsTool} to fetch the record and the values the next steps need (current expiry date, bundle, customer details). Use these — do not ask the user for data the tool already returned.`);
   if (f.pricingTool)
-    lines.push(`  2. Call ${f.pricingTool} to get the AUTHORITATIVE amount. Quote exactly that figure, then ask the customer to confirm.`);
+    lines.push(`  2. Get the AUTHORITATIVE amount for the chosen option from ${f.pricingTool}. If you have ALREADY fetched and shown that exact price (e.g. on the option/duration card the customer just picked), REUSE it — do NOT call ${f.pricingTool} again for the same option. Quote exactly that figure, then ask the customer to confirm.`);
   lines.push(
     `  3. After the customer confirms, call ${f.saveTool} to create the order. It returns a gateway payment URL (e.g. paymentGateWayResponse.paymentUrl) and a reference number — share that EXACT URL as the payment link${f.paymentReturnUrl ? ` (use paymentReturnUrl "${f.paymentReturnUrl}")` : ""}. Keep the reference number.`
   );
