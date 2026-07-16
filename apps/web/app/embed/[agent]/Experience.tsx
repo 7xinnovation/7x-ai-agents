@@ -6,9 +6,6 @@ import {
   GlobeSimple,
   SignIn,
   UserCircleCheck,
-  ArrowsOutSimple,
-  ArrowsInSimple,
-  X,
   ChatsCircle,
   TextAlignLeft,
   FileText,
@@ -138,13 +135,6 @@ const STR = {
   },
 } as const;
 
-function postToParent(action: "expand" | "collapse" | "close") {
-  try {
-    window.parent?.postMessage({ source: "dialog", action }, "*");
-  } catch {
-    /* not embedded */
-  }
-}
 
 /**
  * QR hand-off (feedback FB-6, web): on a computer the customer scans this to open
@@ -379,7 +369,7 @@ export function Experience({
   // assistant confirm + continue as soon as no turn is streaming.
   const [paymentPulse, setPaymentPulse] = useState(false);
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
-  const [full, setFull] = useState(false);
+  const [full] = useState(false);
   // Mobile (feedback FB-5): the case panel is a full-screen overlay toggled here.
   const [mobileCaseOpen, setMobileCaseOpen] = useState(false);
   // QR hand-off modal (feedback FB-6): the mobile upload URL currently shown.
@@ -683,12 +673,6 @@ export function Experience({
     return () => window.removeEventListener("message", onMsg);
   }, [storageKey, locale]);
 
-  const toggleFull = useCallback(() => {
-    setFull((prev) => {
-      postToParent(prev ? "collapse" : "expand");
-      return !prev;
-    });
-  }, []);
 
   const send = useCallback(async (override?: string, opts?: { proactive?: boolean; paymentSettled?: boolean; documentUploaded?: boolean }) => {
     const proactive = opts?.proactive ?? false;
@@ -972,12 +956,6 @@ export function Experience({
               {pendingDocCount > 0 ? <span className="count">{pendingDocCount}</span> : null}
             </button>
           ) : null}
-          <button className="dlg-chip icon-only expand-toggle" onClick={toggleFull} aria-label={full ? t.collapse : t.expand}>
-            {full ? <ArrowsInSimple size={16} weight={iconWeight} /> : <ArrowsOutSimple size={16} weight={iconWeight} />}
-          </button>
-          <button className="dlg-chip icon-only danger" onClick={() => postToParent("close")} aria-label="Close">
-            <X size={16} weight={iconWeight} />
-          </button>
         </div>
       </header>
 
@@ -1095,11 +1073,6 @@ export function Experience({
               <button className="dlg-send" onClick={() => void send()} disabled={streaming || !input.trim()} aria-label="Send">
                 <PaperPlaneRight size={18} weight="fill" />
               </button>
-            </div>
-            <div className="dlg-input-hint" aria-hidden="true">
-              <span>{t.poweredBy}</span>
-              <span className="sep" />
-              <span>{t.enterToSend}</span>
             </div>
           </div>
         </section>
