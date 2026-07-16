@@ -46,3 +46,99 @@ export function mockPersonaContext(): string {
     "This does NOT apply to renting a NEW box: for a new PO Box rental you MUST use the live Emirates Post tools (Rental/Bundle, Rental/BoxLocations, Rental/FreeBoxes, Rental/ExpiryDates) to fetch the real bundles, branches, available box numbers and dates — never invent them."
   );
 }
+
+/**
+ * TEST-ONLY response simulation for the mock persona.
+ *
+ * Some real Emirates Post operations can't work for the mock persona because it
+ * has no live EP backend session and its boxes aren't real staging records:
+ *  - Rental/FreeBoxes needs an authenticated EP session → 401 (the agent then
+ *    dead-ends asking for a one-time passcode).
+ *  - Guest/Renewal/Details + Guest/Renewal/Pricing error on the fake box number,
+ *    so renewal can't show a price.
+ * When the mock persona is signed in we substitute realistic, self-consistent
+ * responses for exactly these ops so the whole demo (new box + renewal) flows.
+ * Everything else still hits the real API. Keyed to the mock persona only — a
+ * real customer never gets simulated data.
+ */
+const MOCK_BASE_YEAR = 2026; // the mock boxes' current expiry year (see MOCK_PERSONA_BOXES)
+
+function mockBoxByNumber(box: string): MockBox | undefined {
+  return MOCK_PERSONA_BOXES.find((b) => b.box === String(box ?? "").trim());
+}
+function bundleIdFor(b: MockBox): string {
+  return /intensive/i.test(b.bundle) ? "MYHOMEINT" : /mybox/i.test(b.bundle) ? "MYBOX1" : "MYHOME3";
+}
+function annualRateFor(b: MockBox): number {
+  const m = b.rate.match(/(\d[\d,]*)/);
+  return m ? parseInt(m[1]!.replace(/,/g, ""), 10) : 695;
+}
+function rateForBundleId(bundleId: string): number {
+  return /intensive/i.test(bundleId) ? 995 : /mybox/i.test(bundleId) ? 300 : 695;
+}
+// Deterministic 5-digit box numbers (stable across refreshes; no Math.random).
+function seededBoxNumbers(seed: string, n: number): string[] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const base = 10000 + (Math.abs(h) % 89000);
+  return Array.from({ length: n }, (_, i) => String(base + i * 13 + (i % 5)));
+}
+
+/** Simulate a mock EP response for the ops that can't hit the real API; null = not simulated. */
+export function simulateNxnMockOp(
+  toolName: string,
+  input: Record<string, unknown>
+): { result: string; isError?: boolean } | null {
+  const t = toolName.toLowerCase();
+  const inp = (input ?? {}) as Record<string, any>;
+  const ok = (body: unknown) => ({ result: `HTTP 200 OK\n${JSON.stringify(body)}`, isError: false });
+
+  if (t.includes("rental_freeboxes")) {
+    const bundleId = String(inp.BundleId ?? inp.bundleId ?? "");
+    const locationId = String(inp.LocationId ?? inp.locationId ?? "");
+    const boxes = seededBoxNumbers(`${bundleId}|${locationId}`, 12);
+    return ok({
+      success: true, simulated: true, count: boxes.length,
+      availableBoxNumbers: boxes,
+      freeBoxes: boxes.map((b) => ({ boxNumber: b, available: true })),
+    });
+  }
+
+  if (t.includes("guest_renewal_details")) {
+    const b = mockBoxByNumber(String(inp.BoxNumber ?? inp.boxNumber ?? "")) ?? MOCK_PERSONA_BOXES[0]!;
+    return ok({
+      success: true, simulated: true,
+      payload: {
+        poBoxRenewalDetails: {
+          boxNumber: b.box,
+          emirateCode: String(inp.EmirateCode ?? inp.emirateCode ?? ""),
+          bundleId: bundleIdFor(b),
+          bundleName: b.bundle,
+          currentExpiryDate: `${MOCK_BASE_YEAR}-08-19T00:00:00`,
+          isRenewable: true,
+          autoRenew: b.autoRenew,
+          annualPrice: annualRateFor(b),
+        },
+      },
+    });
+  }
+
+  if (t.includes("guest_renewal_pricing")) {
+    let body: any = inp.body ?? inp;
+    if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
+    body = body || {};
+    const bundleId = String(body.newBundleId ?? body.NewBundleId ?? body.bundleId ?? "");
+    const expiryDate = String(body.expiryDate ?? body.ExpiryDate ?? "");
+    const yr = parseInt((expiryDate.match(/(\d{4})/) ?? [])[1] ?? "0", 10);
+    const years = Math.min(Math.max(yr > MOCK_BASE_YEAR ? yr - MOCK_BASE_YEAR : 1, 1), 10);
+    const rate = rateForBundleId(bundleId);
+    const total = rate * years;
+    return ok({
+      success: true, simulated: true, currency: "AED",
+      numberOfYears: years, annualPrice: rate,
+      totalPrice: total, price: total, amount: total, expiryDate,
+    });
+  }
+
+  return null;
+}

@@ -140,6 +140,9 @@ export async function POST(req: NextRequest) {
     sessionToken: session.sessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
     authenticated: session.authenticated,
+    // TEST-ONLY: the mock persona has no live EP session, so simulate the EP ops
+    // that need one (FreeBoxes) or a real box (Guest/Renewal Details+Pricing).
+    mockSimulate: session.userRef === MOCK_PERSONA_SUB,
   });
   const { tools: extraTools, exec: runExtraTool } = apiTools;
 

@@ -4,6 +4,7 @@ import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
+import { simulateNxnMockOp } from "./mockPersona";
 
 export type EnvKey = "staging" | "production";
 
@@ -149,7 +150,7 @@ export function extractSessionToken(body: string): string | null {
 export async function buildApiTools(
   agentId: string,
   activeEnv: EnvKey,
-  opts: { uaePassToken?: string; sessionToken?: string; authenticated?: boolean } = {}
+  opts: { uaePassToken?: string; sessionToken?: string; authenticated?: boolean; mockSimulate?: boolean } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
@@ -193,6 +194,13 @@ export async function buildApiTools(
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
+    // TEST-ONLY: for the mock persona, substitute realistic responses for the EP
+    // ops that can't hit the real API (no live session / fake box) so the demo
+    // completes. Branch locations are real (auth=false), so not simulated here.
+    if (opts.mockSimulate) {
+      const sim = simulateNxnMockOp(toolName, input ?? {});
+      if (sim) return sim;
+    }
     // Capture branch-locations queries (BundleId + EmirateCode) for the map widget.
     if (/boxlocations/i.test(toolName)) {
       const inp = (input ?? {}) as Record<string, unknown>;
