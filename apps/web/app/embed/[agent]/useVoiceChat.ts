@@ -57,13 +57,16 @@ export function useVoiceChat(opts: {
   const recRef = useRef<any>(null); // SpeechRecognition
   const busyRef = useRef(false); // an utterance is being recognized/transcribed
   const spokenRef = useRef(-1);
+  const audioCtxRef = useRef<AudioContext | null>(null); // playback of gpt-realtime audio
+  const ttsAbortRef = useRef<AbortController | null>(null); // in-flight /speak stream
+  const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]); // scheduled audio nodes
 
   const supported =
     typeof window !== "undefined" &&
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) &&
     "MediaRecorder" in window &&
-    "speechSynthesis" in window &&
-    !!navigator.mediaDevices?.getUserMedia;
+    !!navigator.mediaDevices?.getUserMedia &&
+    ("AudioContext" in window || "webkitAudioContext" in window || "speechSynthesis" in window);
 
   const stopRecognition = useCallback(() => {
     const rec = recRef.current;
@@ -122,30 +125,124 @@ export function useVoiceChat(opts: {
     try { rec.start(); } catch { busyRef.current = false; recRef.current = null; setListening(false); }
   }, [locale, send]);
 
+  const stopRealtimeAudio = useCallback(() => {
+    try { ttsAbortRef.current?.abort(); } catch { /* ignore */ }
+    ttsAbortRef.current = null;
+    for (const s of ttsSourcesRef.current) { try { s.stop(); } catch { /* already stopped */ } }
+    ttsSourcesRef.current = [];
+  }, []);
+
+  // Speak with the natural gpt-realtime voice: stream PCM16 (24 kHz mono) from
+  // /api/nxn/voice/speak and play it via Web Audio, scheduling chunks back to
+  // back. Returns true if audio actually played; false to fall back to on-device
+  // SpeechSynthesis (e.g. the realtime deployment isn't configured).
+  const speakRealtime = useCallback(async (text: string): Promise<boolean> => {
+    const AC: typeof AudioContext | undefined =
+      (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!AC) return false;
+    let ctx = audioCtxRef.current;
+    if (!ctx) { ctx = new AC(); audioCtxRef.current = ctx; }
+    try { if (ctx.state === "suspended") await ctx.resume(); } catch { /* ignore */ }
+
+    const controller = new AbortController();
+    ttsAbortRef.current = controller;
+    let resp: Response;
+    try {
+      resp = await fetch("/api/nxn/voice/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: controller.signal,
+      });
+    } catch { return false; }
+    if (!resp.ok || !resp.body) return false;
+
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    const reader = resp.body.getReader();
+    let scheduled = ctx.currentTime + 0.12;
+    let carry: Uint8Array | null = null;
+    let played = false;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || !value.length) continue;
+        let bytes: Uint8Array = value;
+        if (carry) {
+          const merged = new Uint8Array(carry.length + value.length);
+          merged.set(carry); merged.set(value, carry.length);
+          bytes = merged; carry = null;
+        }
+        const usable = bytes.length - (bytes.length % 2);
+        if (usable < bytes.length) carry = bytes.slice(usable);
+        if (usable <= 0) continue;
+        const n = usable / 2;
+        const buf = ctx.createBuffer(1, n, 24000);
+        const ch = buf.getChannelData(0);
+        const dv = new DataView(bytes.buffer, bytes.byteOffset, usable);
+        for (let i = 0; i < n; i++) ch[i] = dv.getInt16(i * 2, true) / 32768;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(gain);
+        const startAt = Math.max(scheduled, ctx.currentTime);
+        try { src.start(startAt); } catch { /* ctx closed */ }
+        ttsSourcesRef.current.push(src);
+        scheduled = startAt + buf.duration;
+        played = true;
+      }
+    } catch { /* aborted or stream error */ }
+    if (!played) return false;
+    const remaining = Math.max(0, scheduled - ctx.currentTime);
+    await new Promise((r) => setTimeout(r, remaining * 1000 + 80));
+    return true;
+  }, []);
+
+  const speakBrowser = useCallback((text: string, done: () => void) => {
+    try {
+      if (!("speechSynthesis" in window)) { done(); return; }
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = locale === "ar" ? "ar-SA" : "en-US";
+      u.rate = 1.03;
+      u.onend = done;
+      u.onerror = done;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    } catch { done(); }
+  }, [locale]);
+
   const speak = useCallback((text: string) => {
     const clean = forSpeech(text);
     if (!clean) { listenOnce(); return; }
     stopRecognition();
     speakingRef.current = true;
     setSpeaking(true);
-    const u = new SpeechSynthesisUtterance(clean);
-    u.lang = locale === "ar" ? "ar-SA" : "en-US";
-    u.rate = 1.03;
-    const done = () => { speakingRef.current = false; setSpeaking(false); if (activeRef.current && !streamingRef.current) listenOnce(); };
-    u.onend = done;
-    u.onerror = done;
-    try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch { done(); }
-  }, [locale, listenOnce, stopRecognition]);
+    const done = () => {
+      speakingRef.current = false;
+      setSpeaking(false);
+      ttsAbortRef.current = null;
+      ttsSourcesRef.current = [];
+      if (activeRef.current && !streamingRef.current) listenOnce();
+    };
+    void speakRealtime(clean)
+      .then((ok) => {
+        if (ok) { done(); return; }
+        if (activeRef.current) speakBrowser(clean, done);
+        else done();
+      })
+      .catch(() => { if (activeRef.current) speakBrowser(clean, done); else done(); });
+  }, [listenOnce, stopRecognition, speakRealtime, speakBrowser]);
 
   const cleanup = useCallback(() => {
     stopRecognition();
+    stopRealtimeAudio();
     micRef.current?.getTracks().forEach((t) => t.stop());
     micRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     speakingRef.current = false;
     setSpeaking(false);
     setListening(false);
-  }, [stopRecognition]);
+  }, [stopRecognition, stopRealtimeAudio]);
 
   const toggle = useCallback(async () => {
     if (!supported) return;
@@ -154,6 +251,13 @@ export function useVoiceChat(opts: {
     setActive(true);
     setError("");
     spokenRef.current = messages.length - 1;
+    // Unlock audio output on this user gesture so streamed replies can play.
+    try {
+      const AC: typeof AudioContext | undefined =
+        (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AC && !audioCtxRef.current) audioCtxRef.current = new AC();
+      if (audioCtxRef.current?.state === "suspended") void audioCtxRef.current.resume();
+    } catch { /* ignore */ }
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
@@ -179,7 +283,12 @@ export function useVoiceChat(opts: {
     }
   }, [active, streaming, messages, speak, listenOnce, stopRecognition]);
 
-  useEffect(() => () => { activeRef.current = false; cleanup(); }, [cleanup]);
+  useEffect(() => () => {
+    activeRef.current = false;
+    cleanup();
+    try { audioCtxRef.current?.close(); } catch { /* ignore */ }
+    audioCtxRef.current = null;
+  }, [cleanup]);
 
   return { supported, active, connecting: false, listening, speaking, error, toggle };
 }
