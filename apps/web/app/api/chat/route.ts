@@ -302,6 +302,18 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // Deterministic "browse nearby branches" map: the model reliably shows the
+        // branch cards but often forgets the ```map block, so if it looked up branch
+        // locations this turn and rendered cards without a map, append the block
+        // ourselves (streamed + persisted). Uses the exact emirate + bundle the
+        // model queried, so the map fetches the same branches.
+        const branchQuery = apiTools.getLastBranchQuery();
+        if (branchQuery && /```\s*cards/i.test(finalText) && !/```\s*map/i.test(finalText)) {
+          const mapBlock = `\n\n\`\`\`map\nemirate: ${branchQuery.emirate}\nbundle: ${branchQuery.bundle}\n\`\`\`\n`;
+          send({ type: "text", delta: mapBlock });
+          finalText += mapBlock;
+        }
+
         const cust = (authenticated ? "authenticated" : "guest") as "authenticated" | "guest";
         // Journey start detection (journeyKey newly set this turn).
         if (!startJourney && finalState.journeyKey) {

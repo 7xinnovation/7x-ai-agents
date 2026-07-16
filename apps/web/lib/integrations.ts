@@ -154,6 +154,7 @@ export async function buildApiTools(
   tools: Anthropic.Tool[];
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
   getCapturedToken: () => string | null;
+  getLastBranchQuery: () => { emirate: string; bundle: string } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -183,9 +184,22 @@ export async function buildApiTools(
   let captured: string | null = null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? opts.uaePassToken ?? undefined;
 
+  // Remember the emirate + bundle of the most recent branch-locations lookup so
+  // the route can deterministically render the "browse nearby branches" map even
+  // when the model forgets to emit the ```map block (which it does often).
+  let lastBranchQuery: { emirate: string; bundle: string } | null = null;
+  const asStr = (v: unknown) => (v === undefined || v === null ? "" : String(v).trim());
+
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
+    // Capture branch-locations queries (BundleId + EmirateCode) for the map widget.
+    if (/boxlocations/i.test(toolName)) {
+      const inp = (input ?? {}) as Record<string, unknown>;
+      const bundle = asStr(inp.BundleId ?? inp.bundleId ?? inp.bundle_Id ?? inp.bundle);
+      const emirate = asStr(inp.EmirateCode ?? inp.emirateCode ?? inp.Emirate ?? inp.emirate).toUpperCase();
+      if (bundle && emirate) lastBranchQuery = { emirate, bundle };
+    }
     // Decrypt stored secrets only at the moment of the outbound call.
     const liveSpec: EnvSpec = {
       ...entry.spec,
@@ -207,7 +221,7 @@ export async function buildApiTools(
     return res;
   };
 
-  return { tools, exec, getCapturedToken: () => captured };
+  return { tools, exec, getCapturedToken: () => captured, getLastBranchQuery: () => lastBranchQuery };
 }
 
 /**
