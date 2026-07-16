@@ -805,7 +805,7 @@ export function Experience({
   // Voice mode: speak the assistant's replies and turn the customer's speech into
   // chat messages (see useVoiceChat). Layered on the normal chat, not a separate
   // agent — voice input goes through the same send().
-  const voice = useVoiceChat({ locale, messages, streaming, send: (t) => void send(t) });
+  const voice = useVoiceChat({ agentSlug: agent.slug, locale, messages, streaming, send: (t) => void send(t) });
 
   // Tap-to-select: clicking an option card sends its title as the customer's
   // choice, so they can pick without typing. Ignored while a turn is streaming.
@@ -1049,9 +1049,9 @@ export function Experience({
           ) : null}
 
           {voice.active ? (
-            <div className={`dlg-voice-bar${voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
+            <div className={`dlg-voice-bar${voice.error ? " is-error" : voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
               <span className="dlg-voice-bar-dot" />
-              <span>{voice.speaking ? "Speaking…" : voice.listening ? "Listening…" : "Voice on"}</span>
+              <span>{voice.error ? voice.error : voice.connecting ? "Connecting…" : voice.speaking ? "Speaking…" : voice.listening ? "Listening…" : "Voice on"}</span>
               <button type="button" className="dlg-voice-bar-stop" onClick={voice.toggle}>Turn off</button>
             </div>
           ) : null}

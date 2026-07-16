@@ -957,6 +957,12 @@ body {
 }
 .dlg-voice-bar.is-listening .dlg-voice-bar-dot { animation: dlg-pulse 1.2s var(--ease-out) infinite; }
 .dlg-voice-bar.is-speaking .dlg-voice-bar-dot { animation: dlg-voice-pulse 0.9s var(--ease-out) infinite; }
+.dlg-voice-bar.is-error {
+  background: color-mix(in srgb, #b4433a 8%, var(--c-surface));
+  border-color: color-mix(in srgb, #b4433a 30%, var(--c-border));
+  color: color-mix(in srgb, #b4433a 78%, var(--c-text));
+}
+.dlg-voice-bar.is-error .dlg-voice-bar-dot { background: #b4433a; }
 .dlg-voice-bar-stop {
   margin-inline-start: auto;
   cursor: pointer;
