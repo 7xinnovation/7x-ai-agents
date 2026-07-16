@@ -921,6 +921,111 @@ body {
   cursor: pointer;
 }
 
+/* ---- Voice mode (GPT Realtime) overlay ---- */
+.dlg-voice-launch svg { color: var(--c-primary); }
+.dlg-voice {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, #0b1020 55%, transparent);
+  backdrop-filter: blur(6px);
+  animation: dlg-voice-fade 0.25s var(--ease) both;
+}
+@keyframes dlg-voice-fade { from { opacity: 0; } to { opacity: 1; } }
+.dlg-voice-card {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 28px 24px 22px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, color-mix(in srgb, #fff 65%, var(--c-surface)), var(--c-surface));
+  border: 1px solid color-mix(in srgb, var(--c-text) 8%, var(--c-border));
+  box-shadow: 0 24px 60px -20px rgba(16, 24, 40, 0.5);
+  animation: dlg-rise 0.35s var(--ease) both;
+}
+.dlg-voice-orb {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: radial-gradient(120% 120% at 30% 25%, color-mix(in srgb, #fff 22%, var(--c-primary)), var(--c-primary) 60%, color-mix(in srgb, var(--c-primary) 82%, #000));
+  box-shadow: 0 10px 30px -8px color-mix(in srgb, var(--c-primary) 55%, transparent), inset 0 1px 2px color-mix(in srgb, #fff 25%, transparent);
+}
+.dlg-voice-orb::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--c-primary) 40%, transparent);
+  opacity: 0;
+}
+.dlg-voice-orb.is-listening::after { animation: dlg-voice-ring 2s var(--ease-out) infinite; }
+.dlg-voice-orb.is-speaking { animation: dlg-voice-pulse 1.1s var(--ease-out) infinite; }
+@keyframes dlg-voice-ring { 0% { opacity: 0.7; transform: scale(1); } 100% { opacity: 0; transform: scale(1.28); } }
+@keyframes dlg-voice-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+.dlg-voice-state { font-size: 15px; font-weight: 600; color: var(--c-text); }
+.dlg-voice-err { font-size: 13px; color: color-mix(in srgb, #b4433a 75%, var(--c-text)); text-align: center; line-height: 1.4; }
+.dlg-voice-hint { font-size: 12.5px; color: var(--c-text-muted); text-align: center; }
+.dlg-voice-transcript {
+  width: 100%;
+  max-height: 150px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px;
+}
+.dlg-voice-line {
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 7px 11px;
+  border-radius: 12px;
+  max-width: 92%;
+}
+.dlg-voice-line.assistant {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--c-primary) 8%, var(--c-surface));
+  color: var(--c-text);
+  border-bottom-left-radius: 5px;
+}
+.dlg-voice-line.user {
+  align-self: flex-end;
+  background: var(--c-primary);
+  color: var(--c-primary-fg);
+  border-bottom-right-radius: 5px;
+}
+.dlg-voice-controls { display: flex; gap: 14px; margin-top: 2px; }
+.dlg-voice-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--c-text) 12%, var(--c-border));
+  background: var(--c-surface);
+  color: var(--c-text);
+  transition: transform 0.14s var(--ease-out), background 0.16s var(--ease-out);
+}
+.dlg-voice-btn:hover { transform: translateY(-1px); }
+.dlg-voice-btn:active { transform: translateY(1px); }
+.dlg-voice-btn:disabled { opacity: 0.5; cursor: default; }
+.dlg-voice-btn.is-off {
+  background: color-mix(in srgb, #b4433a 12%, var(--c-surface));
+  border-color: color-mix(in srgb, #b4433a 35%, var(--c-border));
+  color: color-mix(in srgb, #b4433a 80%, var(--c-text));
+}
+.dlg-voice-btn.is-end { background: #d5493f; border-color: #cc3333; color: #fff; }
+.dlg-voice-btn.is-end:hover { background: #cc3333; }
+
 .dlg-sources {
   display: flex;
   flex-wrap: wrap;
@@ -2279,6 +2384,10 @@ body {
   .dlg-toggles,
   .dlg-summary,
   .dlg-map.is-ready,
+  .dlg-voice,
+  .dlg-voice-card,
+  .dlg-voice-orb.is-listening::after,
+  .dlg-voice-orb.is-speaking,
   .dlg-cards .dlg-card-opt {
     animation: none !important;
   }

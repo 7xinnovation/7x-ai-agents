@@ -39,4 +39,6 @@ export interface PublicAgent {
   journeys: PublicJourney[];
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;
+  // Whether GPT Realtime voice mode is configured (AZURE_REALTIME_* env present).
+  voiceEnabled?: boolean;
 }

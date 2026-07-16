@@ -28,7 +28,9 @@ import {
 } from "@phosphor-icons/react";
 import QRCode from "qrcode";
 import { tr, type CaseState, type Locale } from "@dialog/config";
+import { Microphone } from "@phosphor-icons/react";
 import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
+import { VoiceMode } from "./VoiceMode";
 import type { PublicAgent } from "./types";
 
 interface PaymentInfo {
@@ -382,6 +384,8 @@ export function Experience({
   const [mobileCaseOpen, setMobileCaseOpen] = useState(false);
   // QR hand-off modal (feedback FB-6): the mobile upload URL currently shown.
   const [qrUrl, setQrUrl] = useState<string | null>(null);
+  // Voice mode (GPT Realtime): whether the live voice overlay is open.
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const convId = useRef<string | null>(null);
   const storageKey = `dlg-conv-${agent.slug}`;
@@ -910,6 +914,16 @@ export function Experience({
           </span>
         </div>
         <div className="dlg-actions">
+          {agent.voiceEnabled ? (
+            <button
+              className="dlg-chip icon-only dlg-voice-launch"
+              onClick={() => setVoiceOpen(true)}
+              aria-label="Talk to the assistant"
+              title="Talk to the assistant"
+            >
+              <Microphone size={16} weight={iconWeight} />
+            </button>
+          ) : null}
           {agent.locales.length > 1 ? (
             <button
               className="dlg-chip lang"
@@ -1263,6 +1277,7 @@ export function Experience({
         </aside>
       </div>
       {qrUrl ? <QrModal url={qrUrl} strings={t} onClose={() => setQrUrl(null)} /> : null}
+      {voiceOpen ? <VoiceMode agentSlug={agent.slug} onClose={() => setVoiceOpen(false)} /> : null}
     </div>
   );
 }

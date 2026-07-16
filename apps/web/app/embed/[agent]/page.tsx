@@ -46,6 +46,7 @@ export default async function EmbedPage({
       })),
     })),
     uaePassEnabled: uaePassConfigured(),
+    voiceEnabled: Boolean(process.env.AZURE_REALTIME_KEY && process.env.AZURE_REALTIME_ENDPOINT),
   };
 
   const initialLocale = (locale === "ar" || locale === "en" ? locale : d.locales[0]) ?? "en";
