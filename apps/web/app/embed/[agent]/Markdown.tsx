@@ -1,6 +1,7 @@
 import React from "react";
 import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning } from "@phosphor-icons/react";
 import { tr, type LocalizedString, type Locale } from "@dialog/config";
+import { ChatMap } from "./ChatMap";
 
 /**
  * Context the chat needs to render an inline upload widget (feedback: keep the
@@ -342,13 +343,14 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
-    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary)?\s*$/);
+    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary|map)?\s*$/);
     if (fence) {
       const isCards = fence[1] === "cards";
       const isUpload = fence[1] === "upload";
       const isButtons = fence[1] === "buttons";
       const isToggles = fence[1] === "toggles";
       const isSummary = fence[1] === "summary";
+      const isMap = fence[1] === "map";
       i++;
       const body: string[] = [];
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
@@ -400,6 +402,18 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
           } else if (row) sRows.push({ label: row[1]!.trim(), value: row[2]!.trim() });
         }
         if (sRows.length || sTotal) nodes.push(<ChatSummary key={k++} title={sTitle} rows={sRows} total={sTotal} />);
+        continue;
+      }
+      if (isMap) {
+        // `emirate: <code>` + `bundle: <bundleId>` — the in-chat nearby-branches map.
+        let mEmirate = "";
+        let mBundle = "";
+        for (const l of body) {
+          const m = l.match(/^\s*(emirate|bundle)\s*:\s*(.+?)\s*$/i);
+          if (m && /^emirate$/i.test(m[1]!)) mEmirate = m[2]!.trim().toUpperCase();
+          else if (m) mBundle = m[2]!.trim();
+        }
+        if (onSelect && mEmirate && mBundle) nodes.push(<ChatMap key={k++} emirate={mEmirate} bundle={mBundle} onSelect={onSelect} />);
         continue;
       }
       if (isCards) {
