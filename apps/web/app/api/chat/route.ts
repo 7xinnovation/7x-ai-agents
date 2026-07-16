@@ -7,6 +7,7 @@ import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerBoxes, knownEpglProfile } from "@/lib/conversation";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
+import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
@@ -38,6 +39,10 @@ const Body = z.object({
   // flow). The server substitutes a directive so the agent confirms what was
   // captured and requests the NEXT document, one at a time.
   documentUploaded: z.boolean().optional(),
+  // TEST-ONLY: the embed was opened with ?mock=1. Honoured only when the server
+  // allows mock (uaePassMockAllowed) — lets QA complete flows whose EP ops need a
+  // live session / real box by substituting simulated responses.
+  mock: z.boolean().optional(),
 });
 
 // Internal directive used for the post-sign-in account pulse. Never shown to the
@@ -140,9 +145,11 @@ export async function POST(req: NextRequest) {
     sessionToken: session.sessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
     authenticated: session.authenticated,
-    // TEST-ONLY: the mock persona has no live EP session, so simulate the EP ops
-    // that need one (FreeBoxes) or a real box (Guest/Renewal Details+Pricing).
-    mockSimulate: session.userRef === MOCK_PERSONA_SUB,
+    // TEST-ONLY: in mock demo mode (server allows it + the embed was opened with
+    // ?mock=1, or the signed-in user is the mock persona), simulate the EP ops
+    // that can't run without a live session (FreeBoxes) or a real box
+    // (Guest/Renewal Details+Pricing), so guest AND signed-in demos complete.
+    mockSimulate: uaePassMockAllowed() && (session.userRef === MOCK_PERSONA_SUB || body.mock === true),
   });
   const { tools: extraTools, exec: runExtraTool } = apiTools;
 

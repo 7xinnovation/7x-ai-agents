@@ -105,12 +105,15 @@ export function simulateNxnMockOp(
   }
 
   if (t.includes("guest_renewal_details")) {
-    const b = mockBoxByNumber(String(inp.BoxNumber ?? inp.boxNumber ?? "")) ?? MOCK_PERSONA_BOXES[0]!;
+    // Echo the box number the customer actually entered (guests type an arbitrary
+    // box, e.g. 5200); fall back to a known mock box for the bundle/rate.
+    const reqBox = String(inp.BoxNumber ?? inp.boxNumber ?? "").trim();
+    const b = mockBoxByNumber(reqBox) ?? MOCK_PERSONA_BOXES[0]!;
     return ok({
       success: true, simulated: true,
       payload: {
         poBoxRenewalDetails: {
-          boxNumber: b.box,
+          boxNumber: reqBox || b.box,
           emirateCode: String(inp.EmirateCode ?? inp.emirateCode ?? ""),
           bundleId: bundleIdFor(b),
           bundleName: b.bundle,

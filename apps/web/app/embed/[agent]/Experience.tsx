@@ -708,6 +708,9 @@ export function Experience({
           locale,
           authenticated,
           uaePassToken: uaePass.current,
+          // Tester opt-in (?mock=1): let the server simulate the EP ops that can't
+          // run in the demo (honoured only when the server allows mock).
+          mock: typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mock") === "1",
         }),
       });
       if (!res.body) throw new Error("no stream");
