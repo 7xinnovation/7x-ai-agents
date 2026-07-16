@@ -4,16 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Locale } from "@dialog/config";
 
 /**
- * Voice mode as an I/O layer over the normal text chat (NOT a separate agent):
- *  - Speech-to-text: the mic is streamed over WebRTC to an Azure OpenAI Realtime
- *    session running purely as a transcriber (gpt-4o-transcribe + server VAD +
- *    a PO-Box domain prompt) — far more accurate than the browser's Web Speech
- *    API. Each finished utterance is sent as a normal chat message via send(),
- *    so the same agent (tools, journeys, case panel) handles it.
- *  - Text-to-speech: each new assistant reply is spoken with the browser's
- *    SpeechSynthesis. The mic is muted while the assistant streams/speaks (no
- *    echo/feedback) and re-enabled after.
- * No popup; the realtime connection is invisible plumbing.
+ * Voice mode as an I/O layer over the normal text chat (not a separate agent):
+ *  - STT: the browser's SpeechRecognition is used only to detect utterance
+ *    boundaries (and as a fallback transcript). Each utterance is also recorded
+ *    with MediaRecorder and sent to /api/nxn/voice/transcribe (gpt-4o-transcribe)
+ *    for an ACCURATE transcript; the text is then sent as a normal chat message,
+ *    so the same agent (tools, journeys, case panel) handles it. If the
+ *    transcribe endpoint isn't available yet, it gracefully uses the on-device
+ *    recognition text instead.
+ *  - TTS: each new assistant reply is spoken with SpeechSynthesis; the mic is
+ *    paused while it streams/speaks (no echo) and resumes after.
  */
 interface Msg { role: string; content: string }
 
@@ -27,6 +27,15 @@ function forSpeech(md: string): string {
     .trim();
 }
 
+function pickMime(): string {
+  const MR = typeof window !== "undefined" ? (window as any).MediaRecorder : undefined;
+  if (!MR?.isTypeSupported) return "";
+  for (const m of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"]) {
+    if (MR.isTypeSupported(m)) return m;
+  }
+  return "";
+}
+
 export function useVoiceChat(opts: {
   agentSlug: string;
   locale: Locale;
@@ -34,9 +43,8 @@ export function useVoiceChat(opts: {
   streaming: boolean;
   send: (text: string) => void;
 }) {
-  const { agentSlug, locale, messages, streaming, send } = opts;
+  const { locale, messages, streaming, send } = opts;
   const [active, setActive] = useState(false);
-  const [connecting, setConnecting] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState("");
@@ -45,167 +53,133 @@ export function useVoiceChat(opts: {
   const streamingRef = useRef(false);
   const speakingRef = useRef(false);
   streamingRef.current = streaming;
-  const pcRef = useRef<RTCPeerConnection | null>(null);
   const micRef = useRef<MediaStream | null>(null);
-  const dcRef = useRef<RTCDataChannel | null>(null);
+  const recRef = useRef<any>(null); // SpeechRecognition
+  const busyRef = useRef(false); // an utterance is being recognized/transcribed
   const spokenRef = useRef(-1);
-  const connectingRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const supported =
     typeof window !== "undefined" &&
+    ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) &&
+    "MediaRecorder" in window &&
     "speechSynthesis" in window &&
-    "RTCPeerConnection" in window &&
     !!navigator.mediaDevices?.getUserMedia;
 
-  const setMicEnabled = useCallback((on: boolean) => {
-    micRef.current?.getAudioTracks().forEach((t) => { t.enabled = on; });
-    setListening(on);
-  }, []);
-
-  const cleanup = useCallback(() => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    connectingRef.current = false;
-    try { dcRef.current?.close(); } catch { /* ignore */ }
-    try { pcRef.current?.close(); } catch { /* ignore */ }
-    micRef.current?.getTracks().forEach((t) => t.stop());
-    dcRef.current = null; pcRef.current = null; micRef.current = null;
+  const stopRecognition = useCallback(() => {
+    const rec = recRef.current;
+    recRef.current = null;
+    busyRef.current = false;
+    if (rec) { try { rec.onend = null; rec.onresult = null; rec.abort(); } catch { /* ignore */ } }
     setListening(false);
   }, []);
 
-  const onEvent = useCallback((ev: any) => {
-    if (ev?.type === "conversation.item.input_audio_transcription.completed") {
-      const t = (ev.transcript ?? "").trim();
-      // Ignore anything captured while the assistant streams/speaks (echo/overlap).
-      if (t && !speakingRef.current && !streamingRef.current) send(t);
-    }
-  }, [send]);
-
-  const connect = useCallback(async () => {
-    setConnecting(true);
-    connectingRef.current = true;
-    setError("");
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      if (connectingRef.current && activeRef.current) {
-        connectingRef.current = false;
-        setError("Couldn't connect. Check your microphone and try again.");
-        setConnecting(false);
-        cleanup(); // keep voice mode ON so the error bar (with Turn off) stays visible
-      }
-    }, 12000);
+  // One utterance: recognise (for endpointing + fallback) while recording, then
+  // transcribe the recording accurately and send the text.
+  const listenOnce = useCallback(() => {
+    if (!activeRef.current || speakingRef.current || streamingRef.current || busyRef.current || !micRef.current) return;
+    const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    busyRef.current = true;
+    let fallback = "";
+    let recorder: any = null;
+    const chunks: BlobPart[] = [];
+    const mime = pickMime();
     try {
-      let mic: MediaStream;
-      try {
-        mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      } catch {
-        throw new Error("Microphone access is needed. Allow it and try again.");
+      recorder = new (window as any).MediaRecorder(micRef.current, mime ? { mimeType: mime } : undefined);
+      recorder.ondataavailable = (e: any) => { if (e.data?.size) chunks.push(e.data); };
+      recorder.start();
+    } catch { recorder = null; }
+
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = locale === "ar" ? "ar-SA" : "en-US";
+    rec.interimResults = false;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e: any) => { fallback = (e?.results?.[0]?.[0]?.transcript ?? "").trim(); };
+    rec.onerror = () => { /* onend follows */ };
+    rec.onend = async () => {
+      recRef.current = null;
+      setListening(false);
+      let blob: Blob | null = null;
+      if (recorder && recorder.state !== "inactive") {
+        blob = await new Promise<Blob>((res) => { recorder.onstop = () => res(new Blob(chunks, { type: recorder.mimeType || mime || "audio/webm" })); try { recorder.stop(); } catch { res(new Blob(chunks)); } });
       }
-      if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
-      micRef.current = mic;
-
-      const pc = new RTCPeerConnection();
-      pcRef.current = pc;
-      pc.ontrack = () => { /* transcribe-only: the model sends no audio, ignore */ };
-      mic.getTracks().forEach((t) => pc.addTrack(t, mic));
-      const dc = pc.createDataChannel("oai-events");
-      dcRef.current = dc;
-      dc.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch { /* ignore */ } };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      // Wait for ICE gathering to finish so the offer includes candidates — Azure
-      // rejects a candidate-less offer with 401 during media negotiation.
-      await new Promise<void>((resolve) => {
-        if (pc.iceGatheringState === "complete") return resolve();
-        const t = setTimeout(resolve, 3000);
-        const handler = () => {
-          if (pc.iceGatheringState === "complete") { clearTimeout(t); pc.removeEventListener("icegatheringstatechange", handler); resolve(); }
-        };
-        pc.addEventListener("icegatheringstatechange", handler);
-      });
-      // The server proxies the SDP to Azure (keeps the key server-side + surfaces
-      // the exact error). Media then flows browser<->Azure directly.
-      const res = await fetch(`/api/nxn/voice/session?agentSlug=${encodeURIComponent(agentSlug)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/sdp" },
-        body: pc.localDescription?.sdp ?? offer.sdp ?? "",
-      });
-      if (!res.ok) {
-        let extra = "";
-        try { const j = await res.json(); if (j?.status) extra = ` (${j.status})`; } catch { /* ignore */ }
-        throw new Error(`Voice handshake failed${extra}.`);
+      let text = "";
+      if (blob && blob.size > 1400) {
+        try {
+          const r = await fetch("/api/nxn/voice/transcribe", { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
+          if (r.ok) text = ((await r.json())?.text ?? "").trim();
+        } catch { /* fall back below */ }
       }
-      await pc.setRemoteDescription({ type: "answer", sdp: await res.text() });
-
-      connectingRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
-      setConnecting(false);
-      setMicEnabled(!streamingRef.current && !speakingRef.current);
-    } catch (e) {
-      connectingRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
-      setConnecting(false);
-      setError(e instanceof Error ? e.message : "Voice unavailable.");
-      cleanup(); // keep voice mode ON so the error is shown; user taps Turn off
-    }
-  }, [agentSlug, onEvent, cleanup, setMicEnabled]);
+      if (!text) text = fallback; // graceful fallback to on-device recognition
+      busyRef.current = false;
+      if (text) send(text);
+      // If nothing was sent, keep listening; otherwise the effect resumes after the reply.
+      if (!text && activeRef.current && !speakingRef.current && !streamingRef.current) listenOnce();
+    };
+    setListening(true);
+    try { rec.start(); } catch { busyRef.current = false; recRef.current = null; setListening(false); }
+  }, [locale, send]);
 
   const speak = useCallback((text: string) => {
     const clean = forSpeech(text);
-    if (!clean) return;
+    if (!clean) { listenOnce(); return; }
+    stopRecognition();
     speakingRef.current = true;
     setSpeaking(true);
-    setMicEnabled(false);
     const u = new SpeechSynthesisUtterance(clean);
     u.lang = locale === "ar" ? "ar-SA" : "en-US";
     u.rate = 1.03;
-    const done = () => {
-      speakingRef.current = false;
-      setSpeaking(false);
-      if (activeRef.current && !streamingRef.current) setMicEnabled(true);
-    };
+    const done = () => { speakingRef.current = false; setSpeaking(false); if (activeRef.current && !streamingRef.current) listenOnce(); };
     u.onend = done;
     u.onerror = done;
     try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch { done(); }
-  }, [locale, setMicEnabled]);
+  }, [locale, listenOnce, stopRecognition]);
 
-  const toggle = useCallback(() => {
+  const cleanup = useCallback(() => {
+    stopRecognition();
+    micRef.current?.getTracks().forEach((t) => t.stop());
+    micRef.current = null;
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    speakingRef.current = false;
+    setSpeaking(false);
+    setListening(false);
+  }, [stopRecognition]);
+
+  const toggle = useCallback(async () => {
     if (!supported) return;
-    const next = !activeRef.current;
-    activeRef.current = next;
-    setActive(next);
-    if (next) {
-      spokenRef.current = messages.length - 1; // don't replay history
-      void connect();
-    } else {
-      try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
-      speakingRef.current = false;
-      setSpeaking(false);
-      setError("");
-      cleanup();
+    if (activeRef.current) { activeRef.current = false; setActive(false); setError(""); cleanup(); return; }
+    activeRef.current = true;
+    setActive(true);
+    setError("");
+    spokenRef.current = messages.length - 1;
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
+      micRef.current = mic;
+      listenOnce();
+    } catch {
+      setError("Microphone access is needed. Allow it and try again.");
+      // keep active so the error stays visible; user taps Turn off
     }
-  }, [supported, messages.length, connect, cleanup]);
+  }, [supported, messages.length, cleanup, listenOnce]);
 
-  // Mute the mic while the agent responds; speak each new reply.
+  // Pause the mic while the agent responds; speak each new reply.
   useEffect(() => {
     if (!active) return;
-    if (streaming) { setMicEnabled(false); return; }
+    if (streaming) { stopRecognition(); return; }
     const idx = messages.length - 1;
     const last = messages[idx];
     if (last && last.role === "assistant" && last.content.trim() && idx > spokenRef.current) {
       spokenRef.current = idx;
-      speak(last.content); // mutes mic, speaks, re-enables after
-    } else if (!speakingRef.current && micRef.current) {
-      setMicEnabled(true);
+      speak(last.content);
+    } else if (!speakingRef.current && !busyRef.current && micRef.current) {
+      listenOnce();
     }
-  }, [active, streaming, messages, speak, setMicEnabled]);
+  }, [active, streaming, messages, speak, listenOnce, stopRecognition]);
 
-  useEffect(() => () => {
-    activeRef.current = false;
-    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
-    cleanup();
-  }, [cleanup]);
+  useEffect(() => () => { activeRef.current = false; cleanup(); }, [cleanup]);
 
-  return { supported, active, connecting, listening, speaking, error, toggle };
+  return { supported, active, connecting: false, listening, speaking, error, toggle };
 }
