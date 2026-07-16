@@ -114,12 +114,22 @@ export function useVoiceChat(opts: {
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      // Wait for ICE gathering to finish so the offer includes candidates — Azure
+      // rejects a candidate-less offer with 401 during media negotiation.
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") return resolve();
+        const t = setTimeout(resolve, 3000);
+        const handler = () => {
+          if (pc.iceGatheringState === "complete") { clearTimeout(t); pc.removeEventListener("icegatheringstatechange", handler); resolve(); }
+        };
+        pc.addEventListener("icegatheringstatechange", handler);
+      });
       // The server proxies the SDP to Azure (keeps the key server-side + surfaces
       // the exact error). Media then flows browser<->Azure directly.
       const res = await fetch(`/api/nxn/voice/session?agentSlug=${encodeURIComponent(agentSlug)}`, {
         method: "POST",
         headers: { "Content-Type": "application/sdp" },
-        body: offer.sdp ?? "",
+        body: pc.localDescription?.sdp ?? offer.sdp ?? "",
       });
       if (!res.ok) {
         let extra = "";
