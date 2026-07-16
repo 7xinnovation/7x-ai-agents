@@ -15,7 +15,7 @@ export const runtime = "nodejs";
  * AZURE_TRANSCRIBE_DEPLOYMENT if it's named differently.
  */
 const DEPLOYMENT = process.env.AZURE_TRANSCRIBE_DEPLOYMENT || "gpt-4o-transcribe";
-const API_VERSION = process.env.AZURE_TRANSCRIBE_API_VERSION || "2025-03-01-preview";
+const API_VERSION = process.env.AZURE_TRANSCRIBE_API_VERSION || "2025-01-01-preview";
 const DOMAIN_PROMPT =
   "Emirates Post PO Box services in the UAE. Likely phrases: rent a new PO Box, renew my PO Box, " +
   "track a shipment, MyBox, MyHome, MyHome Instant, Basic, Premium, Emirate, Dubai, Abu Dhabi, Sharjah, " +
