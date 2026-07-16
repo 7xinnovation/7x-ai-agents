@@ -335,6 +335,10 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   const nodes: React.ReactNode[] = [];
   let i = 0;
   let k = 0;
+  // Collapse a paragraph that exactly repeats the one right before it — the model
+  // sometimes re-emits the same sentence across a tool round (they arrive as two
+  // identical paragraphs), which reads as a stutter.
+  let lastPara = "";
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
@@ -544,6 +548,10 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         para.push(lines[i]!);
         i++;
       }
+      const paraText = para.join("\n").trim();
+      // Skip a paragraph identical to the previous one (a cross-round re-emit).
+      if (paraText && paraText === lastPara) continue;
+      lastPara = paraText;
       nodes.push(
         <p key={k++} className="dlg-md-p">
           {para.map((pl, j) => (
