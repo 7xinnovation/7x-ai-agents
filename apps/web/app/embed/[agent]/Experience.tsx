@@ -30,7 +30,7 @@ import QRCode from "qrcode";
 import { tr, type CaseState, type Locale } from "@dialog/config";
 import { Microphone } from "@phosphor-icons/react";
 import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
-import { VoiceMode } from "./VoiceMode";
+import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 
 interface PaymentInfo {
@@ -384,8 +384,10 @@ export function Experience({
   const [mobileCaseOpen, setMobileCaseOpen] = useState(false);
   // QR hand-off modal (feedback FB-6): the mobile upload URL currently shown.
   const [qrUrl, setQrUrl] = useState<string | null>(null);
-  // Voice mode (GPT Realtime): whether the live voice overlay is open.
-  const [voiceOpen, setVoiceOpen] = useState(false);
+  // Voice mode is a client-only capability; gate the button after mount to avoid
+  // an SSR/client hydration mismatch.
+  const [voiceReady, setVoiceReady] = useState(false);
+  useEffect(() => setVoiceReady(true), []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const convId = useRef<string | null>(null);
   const storageKey = `dlg-conv-${agent.slug}`;
@@ -816,6 +818,11 @@ export function Experience({
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
 
+  // Voice mode: speak the assistant's replies and turn the customer's speech into
+  // chat messages (see useVoiceChat). Layered on the normal chat, not a separate
+  // agent — voice input goes through the same send().
+  const voice = useVoiceChat({ locale, messages, streaming, send: (t) => void send(t) });
+
   // Tap-to-select: clicking an option card sends its title as the customer's
   // choice, so they can pick without typing. Ignored while a turn is streaming.
   const handleCardSelect = useCallback(
@@ -914,14 +921,14 @@ export function Experience({
           </span>
         </div>
         <div className="dlg-actions">
-          {agent.voiceEnabled ? (
+          {voiceReady && voice.supported ? (
             <button
-              className="dlg-chip icon-only dlg-voice-launch"
-              onClick={() => setVoiceOpen(true)}
-              aria-label="Talk to the assistant"
-              title="Talk to the assistant"
+              className={`dlg-chip icon-only dlg-voice-launch${voice.active ? " is-on" : ""}${voice.listening ? " is-listening" : ""}${voice.speaking ? " is-speaking" : ""}`}
+              onClick={voice.toggle}
+              aria-label={voice.active ? "Turn off voice mode" : "Turn on voice mode"}
+              title={voice.active ? "Voice mode on" : "Talk to the assistant"}
             >
-              <Microphone size={16} weight={iconWeight} />
+              <Microphone size={16} weight={voice.active ? "fill" : iconWeight} />
             </button>
           ) : null}
           {agent.locales.length > 1 ? (
@@ -1060,6 +1067,14 @@ export function Experience({
               <button className="dlg-chip" onClick={signIn}>
                 {t.signIn}
               </button>
+            </div>
+          ) : null}
+
+          {voice.active ? (
+            <div className={`dlg-voice-bar${voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
+              <span className="dlg-voice-bar-dot" />
+              <span>{voice.speaking ? "Speaking…" : voice.listening ? "Listening…" : "Voice on"}</span>
+              <button type="button" className="dlg-voice-bar-stop" onClick={voice.toggle}>Turn off</button>
             </div>
           ) : null}
 
@@ -1277,7 +1292,6 @@ export function Experience({
         </aside>
       </div>
       {qrUrl ? <QrModal url={qrUrl} strings={t} onClose={() => setQrUrl(null)} /> : null}
-      {voiceOpen ? <VoiceMode agentSlug={agent.slug} onClose={() => setVoiceOpen(false)} /> : null}
     </div>
   );
 }
