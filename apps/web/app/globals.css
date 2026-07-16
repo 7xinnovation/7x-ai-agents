@@ -972,7 +972,29 @@ body {
 @keyframes dlg-voice-ring { 0% { opacity: 0.7; transform: scale(1); } 100% { opacity: 0; transform: scale(1.28); } }
 @keyframes dlg-voice-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 .dlg-voice-state { font-size: 15px; font-weight: 600; color: var(--c-text); }
-.dlg-voice-err { font-size: 13px; color: color-mix(in srgb, #b4433a 75%, var(--c-text)); text-align: center; line-height: 1.4; }
+.dlg-voice-err {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: color-mix(in srgb, #b4433a 75%, var(--c-text));
+  text-align: center;
+  line-height: 1.4;
+}
+.dlg-voice-retry {
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-primary);
+  padding: 7px 16px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c-primary) 8%, var(--c-surface));
+  border: 1px solid color-mix(in srgb, var(--c-primary) 28%, var(--c-border));
+  transition: background 0.16s var(--ease-out);
+}
+.dlg-voice-retry:hover { background: color-mix(in srgb, var(--c-primary) 14%, var(--c-surface)); }
 .dlg-voice-hint { font-size: 12.5px; color: var(--c-text-muted); text-align: center; }
 .dlg-voice-transcript {
   width: 100%;

@@ -21,6 +21,9 @@ export function VoiceMode({ agentSlug, onClose }: { agentSlug: string; onClose: 
   const [muted, setMuted] = React.useState(false);
   const [speaking, setSpeaking] = React.useState(false);
   const [lines, setLines] = React.useState<Line[]>([]);
+  const [attempt, setAttempt] = React.useState(0);
+  const phaseRef = React.useRef<Phase>("connecting");
+  phaseRef.current = phase;
 
   const pcRef = React.useRef<RTCPeerConnection | null>(null);
   const micRef = React.useRef<MediaStream | null>(null);
@@ -70,6 +73,16 @@ export function VoiceMode({ agentSlug, onClose }: { agentSlug: string; onClose: 
 
   React.useEffect(() => {
     let alive = true;
+    setPhase("connecting");
+    setError("");
+    asstBuf.current = "";
+    // If we never reach a live connection, surface an error instead of hanging.
+    const timeout = setTimeout(() => {
+      if (alive && phaseRef.current === "connecting") {
+        setError("Couldn't connect. Check your connection and microphone, then try again.");
+        setPhase("error");
+      }
+    }, 15000);
     (async () => {
       try {
         const r = await fetch(`/api/nxn/voice/session?agentSlug=${encodeURIComponent(agentSlug)}`, { method: "POST" });
@@ -112,14 +125,16 @@ export function VoiceMode({ agentSlug, onClose }: { agentSlug: string; onClose: 
         if (alive) { setError(e instanceof Error ? e.message : "Voice unavailable."); setPhase("error"); }
       }
     })();
-    return () => { alive = false; cleanup(); };
-  }, [agentSlug, cleanup, onEvent]);
+    return () => { alive = false; clearTimeout(timeout); cleanup(); };
+  }, [agentSlug, attempt, cleanup, onEvent]);
 
   const toggleMute = () => {
     const m = !muted;
     setMuted(m);
     micRef.current?.getAudioTracks().forEach((t) => { t.enabled = !m; });
   };
+
+  const retry = () => { cleanup(); setMuted(false); setAttempt((a) => a + 1); };
 
   return (
     <div className="dlg-voice" role="dialog" aria-label="Voice assistant">
@@ -133,7 +148,12 @@ export function VoiceMode({ agentSlug, onClose }: { agentSlug: string; onClose: 
           {phase === "live" && (speaking ? "NXN is speaking" : muted ? "Muted" : "Listening…")}
           {phase === "error" && "Voice unavailable"}
         </div>
-        {phase === "error" ? <div className="dlg-voice-err">{error}</div> : null}
+        {phase === "error" ? (
+          <div className="dlg-voice-err">
+            <span>{error}</span>
+            <button type="button" className="dlg-voice-retry" onClick={retry}>Try again</button>
+          </div>
+        ) : null}
         {lines.length > 0 ? (
           <div className="dlg-voice-transcript">
             {lines.slice(-4).map((m, i) => (
