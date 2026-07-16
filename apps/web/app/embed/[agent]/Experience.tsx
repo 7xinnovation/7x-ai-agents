@@ -1048,15 +1048,14 @@ export function Experience({
             </div>
           ) : null}
 
-          {voice.active ? (
-            <div className={`dlg-voice-bar${voice.error ? " is-error" : voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
-              <span className="dlg-voice-bar-dot" />
-              <span>{voice.error ? voice.error : voice.connecting ? "Connecting…" : voice.speaking ? "Speaking…" : voice.listening ? "Listening…" : "Voice on"}</span>
-              <button type="button" className="dlg-voice-bar-stop" onClick={voice.toggle}>Turn off</button>
-            </div>
-          ) : null}
-
           <div className="dlg-input-wrap">
+            {voice.active ? (
+              <div className={`dlg-voice-bar${voice.error ? " is-error" : voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
+                <span className="dlg-voice-bar-dot" />
+                <span>{voice.error ? voice.error : voice.connecting ? "Connecting…" : voice.speaking ? "Speaking…" : voice.listening ? "Listening…" : "Voice on"}</span>
+                <button type="button" className="dlg-voice-bar-stop" onClick={voice.toggle}>Turn off</button>
+              </div>
+            ) : null}
             <div className="dlg-input">
               <textarea
                 value={input}

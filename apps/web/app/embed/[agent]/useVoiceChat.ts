@@ -95,11 +95,6 @@ export function useVoiceChat(opts: {
       }
     }, 12000);
     try {
-      const r = await fetch(`/api/nxn/voice/session?agentSlug=${encodeURIComponent(agentSlug)}`, { method: "POST" });
-      const data = await r.json();
-      if (!data?.clientSecret || !data?.webrtcUrl) {
-        throw new Error(data?.error === "voice_not_configured" ? "Voice isn't configured." : "Could not start voice.");
-      }
       let mic: MediaStream;
       try {
         mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
@@ -111,6 +106,7 @@ export function useVoiceChat(opts: {
 
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
+      pc.ontrack = () => { /* transcribe-only: the model sends no audio, ignore */ };
       mic.getTracks().forEach((t) => pc.addTrack(t, mic));
       const dc = pc.createDataChannel("oai-events");
       dcRef.current = dc;
@@ -118,13 +114,19 @@ export function useVoiceChat(opts: {
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      const sdpRes = await fetch(data.webrtcUrl, {
+      // The server proxies the SDP to Azure (keeps the key server-side + surfaces
+      // the exact error). Media then flows browser<->Azure directly.
+      const res = await fetch(`/api/nxn/voice/session?agentSlug=${encodeURIComponent(agentSlug)}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${data.clientSecret}`, "Content-Type": "application/sdp" },
-        body: offer.sdp,
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp ?? "",
       });
-      if (!sdpRes.ok) throw new Error("Voice handshake failed.");
-      await pc.setRemoteDescription({ type: "answer", sdp: await sdpRes.text() });
+      if (!res.ok) {
+        let extra = "";
+        try { const j = await res.json(); if (j?.status) extra = ` (${j.status})`; } catch { /* ignore */ }
+        throw new Error(`Voice handshake failed${extra}.`);
+      }
+      await pc.setRemoteDescription({ type: "answer", sdp: await res.text() });
 
       connectingRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
