@@ -40,7 +40,7 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
     if (f.pricingTool)
       lines.push(`  2. Get the AUTHORITATIVE amount for the chosen option from ${f.pricingTool}. If you have ALREADY fetched and shown that exact price (e.g. on the option/duration card the customer just picked), REUSE it — do NOT call ${f.pricingTool} again for the same option. Quote exactly that figure and ask the customer to confirm.`);
     lines.push(`  3. After the customer confirms, call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"} and share the secure link. WAIT for confirmation.`);
-    lines.push(`  4. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
+    lines.push(`  4. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. submit_case IS the finalisation for this journey — NEVER tell the customer it is complete, confirmed, or that a receipt link is available until submit_case has returned a reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
     lines.push(`  Keep the case panel live: as soon as you learn each of this journey's fields, call collect_field for it (e.g. the box number, the chosen period) — including values you read from a tool — so the customer's side panel fills in step by step, not all at the end.`);
     if (f.notes) lines.push(`  Field-mapping notes: ${f.notes}`);
     return lines.join("\n");
@@ -229,7 +229,9 @@ Documents: ${JSON.stringify(state.documents)}
 Payment: ${JSON.stringify(state.payment)}
 Submission readiness: ${state.readiness.complete ? "READY" : `NOT READY — missing ${JSON.stringify(state.readiness.missing)}`}
 ${journey?.submission?.apiFlow
-      ? "This journey is completed through the integration tools described above — finish it there; do NOT call submit_case."
+      ? journey.submission.apiFlow.saveTool
+        ? "This journey is completed through the integration tools described above — finish it there; do NOT call submit_case."
+        : "This journey reads details and pricing from the integration tools, but it is FINALISED with submit_case: once payment status is \"paid\", call submit_case ONCE to complete it and give the customer the returned reference. It is NOT complete until submit_case succeeds."
       : "When the case is ready (and paid, if required) and the user confirms, call submit_case. Before submitting, run a final check and tell the user the reference number you receive."}`;
 
   return { stable, volatile };
