@@ -18,7 +18,10 @@ const esc = (s: string) =>
 export async function GET(req: NextRequest, { params }: { params: Promise<{ reference: string }> }) {
   const { reference } = await params;
   const conversationId = req.nextUrl.searchParams.get("c") ?? "";
-  if (!reference || !conversationId) return NextResponse.json({ error: "missing_params" }, { status: 400 });
+  // conversation_id is a uuid column — a malformed value would throw at the DB
+  // layer (500); reject it up front instead.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!reference || !UUID_RE.test(conversationId)) return NextResponse.json({ error: "receipt_not_found" }, { status: 404 });
 
   const db = getDb();
   const pay = await db.query.payments.findFirst({
