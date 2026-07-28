@@ -1,0 +1,32 @@
+# Push-to-deploy for Railway.
+#
+# The Railway GitHub App lost access when this repo moved to the 7xinnovation
+# org (installing it there is a web-only consent flow), so deployment runs
+# through the Railway CLI instead: every push to main uploads the tree and
+# builds on Railway, same as `railway up` locally. RAILWAY_TOKEN is a
+# project-scoped token (name: github-actions-deploy) stored as a repo secret.
+#
+# If the Railway GitHub App is later installed on the 7xinnovation org and the
+# service reconnected in the dashboard, this workflow becomes redundant —
+# remove it then to avoid double deploys.
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: railway-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy app service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: npx -y @railway/cli@4 up --service 845af260-6739-48a8-bed1-95e32af78adf --ci
