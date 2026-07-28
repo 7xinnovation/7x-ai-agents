@@ -10,6 +10,9 @@
  */
 export const MOCK_PERSONA_SUB = "uaepass-mock-001";
 export const MOCK_PERSONA_NAME = "Ahmed Al Mansoori";
+// Contact details on the customer profile (Round-2 feedback FB-1374/FB-1395:
+// with UAE PASS sign-in, mobile + email come from the profile — never re-asked).
+export const MOCK_PERSONA_CONTACT = { mobile: "+971 50 555 0142", email: "ahmed.almansoori@example.ae" };
 
 export interface MockBox {
   box: string;
@@ -18,16 +21,19 @@ export interface MockBox {
   bundle: string;
   rate: string; // standard published annual rate
   expiry: string;
+  expiryIso: string; // same date, ISO — drives the simulated renewal details
   autoRenew: boolean;
   savedCard?: string;
 }
 
-// Two boxes on purpose: one with auto-renewal OFF + no saved card (exercises the
-// full renewal + save-card/auto-renew consent path), and one with auto-renewal
-// ON + a saved card (exercises the "already set to auto-renew" shortcut, FB-1168).
+// Two boxes on purpose: one active with auto-renewal OFF + no saved card
+// (exercises the full renewal + save-card/auto-renew consent path), and one
+// EXPIRED (Feb) with auto-renewal ON + a saved card (exercises the "already set
+// to auto-renew" shortcut FB-1168 AND the grace-period expiry calculation
+// FB-1427 — an expired box must still get a full year of renewal).
 export const MOCK_PERSONA_BOXES: MockBox[] = [
-  { box: "50500", emirate: "Dubai", branch: "Al Barsha Post Office", bundle: "MyHome", rate: "AED 695 / year", expiry: "19 Aug 2026", autoRenew: false },
-  { box: "33417", emirate: "Abu Dhabi", branch: "Khalidiya Post Office", bundle: "MyBox", rate: "AED 300 / year", expiry: "03 Feb 2026", autoRenew: true, savedCard: "Visa ending 4242" },
+  { box: "50500", emirate: "Dubai", branch: "Al Barsha Post Office", bundle: "MyHome", rate: "AED 695 / year", expiry: "19 Aug 2026", expiryIso: "2026-08-19", autoRenew: false },
+  { box: "33417", emirate: "Abu Dhabi", branch: "Khalidiya Post Office", bundle: "MyBox", rate: "AED 300 / year", expiry: "03 Feb 2026", expiryIso: "2026-02-03", autoRenew: true, savedCard: "Visa ending 4242" },
 ];
 
 /**
@@ -41,7 +47,9 @@ export function mockPersonaContext(): string {
       `auto-renewal ${b.autoRenew ? "ON" : "OFF"}, ${b.savedCard ? `card on file (${b.savedCard})` : "no saved card"}.`
   ).join(" ");
   return (
-    `The signed-in customer is ${MOCK_PERSONA_NAME}. PO Boxes on file: ${lines} ` +
+    `The signed-in customer is ${MOCK_PERSONA_NAME}. Contact on the customer profile: mobile ${MOCK_PERSONA_CONTACT.mobile}, email ${MOCK_PERSONA_CONTACT.email} — when a journey needs a contact phone or email, record THESE with collect_field and ask the customer only to confirm them; NEVER ask them to type their mobile number or email. ` +
+    `Usual branch: ${MOCK_PERSONA_BOXES[0]!.branch} — when presenting branches you may highlight it with a badge (e.g. "Your usual branch"), but never pre-select it. ` +
+    `PO Boxes on file: ${lines} ` +
     "This is a TEST account. For questions about THESE existing boxes — account questions, status checks, renewals of a box on file, the Account Pulse, or managing a box — treat the details above as authoritative account data (no external lookup needed) and use each box's standard annual rate as its renewal price; use these boxes immediately without asking for the box number or emirate, and when more than one applies let the customer pick. " +
     "This does NOT apply to renting a NEW box: for a new PO Box rental you MUST use the live Emirates Post tools (Rental/Bundle, Rental/BoxLocations, Rental/FreeBoxes, Rental/ExpiryDates) to fetch the real bundles, branches, available box numbers and dates — never invent them."
   );
@@ -106,9 +114,13 @@ export function simulateNxnMockOp(
 
   if (t.includes("guest_renewal_details")) {
     // Echo the box number the customer actually entered (guests type an arbitrary
-    // box, e.g. 5200); fall back to a known mock box for the bundle/rate.
+    // box, e.g. 5200); fall back to a known mock box for the bundle/rate. A box
+    // on file returns its REAL expiry (box 33417 is expired — FB-1427: the
+    // grace-period rule must produce a correct, at-least-one-year new expiry).
     const reqBox = String(inp.BoxNumber ?? inp.boxNumber ?? "").trim();
-    const b = mockBoxByNumber(reqBox) ?? MOCK_PERSONA_BOXES[0]!;
+    const matched = mockBoxByNumber(reqBox);
+    const b = matched ?? MOCK_PERSONA_BOXES[0]!;
+    const currentExpiry = matched ? matched.expiryIso : `${MOCK_BASE_YEAR}-08-19`;
     return ok({
       success: true, simulated: true,
       payload: {
@@ -117,7 +129,7 @@ export function simulateNxnMockOp(
           emirateCode: String(inp.EmirateCode ?? inp.emirateCode ?? ""),
           bundleId: bundleIdFor(b),
           bundleName: b.bundle,
-          currentExpiryDate: `${MOCK_BASE_YEAR}-08-19T00:00:00`,
+          currentExpiryDate: `${currentExpiry}T00:00:00`,
           isRenewable: true,
           autoRenew: b.autoRenew,
           annualPrice: annualRateFor(b),

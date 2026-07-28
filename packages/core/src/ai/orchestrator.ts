@@ -12,9 +12,22 @@ import { findJourney } from "../case/engine";
  * by the body: at least one success marker and no rollback / failure marker.
  * Returns a reference id (first Salesforce-style record id) when successful.
  */
-function submissionReference(result: string): string | null {
+export function submissionReference(result: string): string | null {
   if (!/"success"\s*:\s*true/i.test(result)) return null;
   if (/"success"\s*:\s*false/i.test(result) || /rolled back/i.test(result)) return null;
+  // Prefer the LICENSE REQUEST record's id over incidental ids (Account,
+  // Contact…) — feedback FB-1444: the confirmation must reference the actual
+  // application, not another record. Composite items look like
+  // {"body":{"id":"…","success":true},…,"referenceId":"NewLicenseRequest"}, so
+  // find the LicenseRequest item and take the nearest preceding id.
+  const refMatches = [...result.matchAll(/"referenceId"\s*:\s*"([^"]*LicenseRequest[^"]*)"/gi)];
+  for (const m of refMatches) {
+    const windowStart = Math.max(0, (m.index ?? 0) - 600);
+    const before = result.slice(windowStart, m.index);
+    const ids = [...before.matchAll(/"id"\s*:\s*"([a-zA-Z0-9]{15,18})"/g)];
+    const nearest = ids[ids.length - 1]?.[1];
+    if (nearest) return nearest;
+  }
   const id = result.match(/"id"\s*:\s*"([a-zA-Z0-9]{15,18})"/)?.[1];
   return id ?? "submitted";
 }

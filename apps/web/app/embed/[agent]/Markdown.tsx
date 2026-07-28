@@ -2,6 +2,7 @@ import React from "react";
 import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning } from "@phosphor-icons/react";
 import { tr, type LocalizedString, type Locale } from "@dialog/config";
 import { ChatMap } from "./ChatMap";
+import { ChatLocate } from "./ChatLocate";
 
 /**
  * Context the chat needs to render an inline upload widget (feedback: keep the
@@ -19,12 +20,40 @@ export interface UploadCtx {
   docs: Record<string, UploadDocMeta>;
   statuses: Record<string, { status: string; fileName?: string; rejectionReason?: string }>;
   uploadingKey: string | null;
+  // Active journey's documents still awaiting an upload (condition satisfied) —
+  // the safety net when an ```upload block names no resolvable key: rather than
+  // rendering NOTHING (feedback FB-1425: "AI says upload slots appeared but no
+  // upload fields display"), the pending documents' widgets render instead.
+  pendingDocs?: string[];
   onUpload: (key: string, file: File) => void;
   onQr: () => void;
   strings: {
     upload: string; uploading: string; replace: string; optional: string;
     upTo: string; takePhoto: string; fromPhone: string; uploaded: string;
   };
+}
+
+/**
+ * Resolve the document keys an ```upload block refers to. Tolerant by design
+ * (FB-1425 — a mis-emitted block must not silently render nothing):
+ *  - accepts any number of `key: <docKey>` lines (front + back in one block);
+ *  - accepts `- <docKey>` bullets and bare `<docKey>` lines;
+ *  - strips backticks/quotes and fuzzy-matches unknown keys against the known
+ *    document keys (case/punctuation-insensitive);
+ *  - if nothing resolves, falls back to the journey's still-pending documents.
+ */
+export function resolveUploadKeys(body: string[], ctx: UploadCtx): string[] {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const known = new Map(Object.keys(ctx.docs).map((k) => [norm(k), k]));
+  const out: string[] = [];
+  for (const raw of body) {
+    const line = raw.replace(/^\s*(?:key\s*:|-)\s*/i, "").replace(/[`'"]/g, "").trim();
+    if (!line || /\s.{24,}/.test(line)) continue; // skip prose lines
+    const hit = known.get(norm(line));
+    if (hit && !out.includes(hit)) out.push(hit);
+  }
+  if (!out.length && ctx.pendingDocs?.length) out.push(...ctx.pendingDocs.slice(0, 2));
+  return out;
 }
 
 /** Inline, in-conversation upload control for a single document (by key). */
@@ -112,39 +141,67 @@ function ChatButtons({ labels, onSelect }: { labels: string[]; onSelect: (text: 
  * Inline toggle switches (a ```toggles block) plus a confirm button — for
  * capturing on/off choices (e.g. save card, auto-renewal) without a text Q&A.
  * On confirm it sends a readable summary of the switches so the agent records
- * each choice and continues.
+ * each choice and continues. With `style: checkbox` the switches render as
+ * acknowledgment checkboxes (e.g. EPGL Declaration & Undertaking) and the
+ * confirm button stays disabled until every box is ticked.
  */
 function ChatToggles({
-  items, title, confirmLabel, onSelect,
+  items, title, confirmLabel, variant, onSelect,
 }: {
   items: { key: string; label: string }[];
   title?: string;
   confirmLabel: string;
+  variant?: "switch" | "checkbox";
   onSelect: (text: string) => void;
 }) {
   const [on, setOn] = React.useState<Record<string, boolean>>({});
   if (!items.length) return null;
+  const checkbox = variant === "checkbox";
+  const allOn = items.every((it) => on[it.key]);
   const submit = () => {
-    const summary = items.map((it) => `${it.label}: ${on[it.key] ? "Yes" : "No"}`).join(". ");
+    // Strip markdown links from labels (e.g. the T&C link) so the sent reply
+    // reads clean.
+    const plain = (s: string) => s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+    const summary = items.map((it) => `${plain(it.label)}: ${on[it.key] ? "Yes" : "No"}`).join(". ");
     onSelect(`${summary}. ${confirmLabel}.`);
   };
   return (
-    <div className="dlg-toggles">
+    <div className={`dlg-toggles${checkbox ? " is-checkbox" : ""}`}>
       {title ? <div className="dlg-toggles-title">{title}</div> : null}
       {items.map((it) => (
         <button
           key={it.key}
           type="button"
-          role="switch"
+          role={checkbox ? "checkbox" : "switch"}
           aria-checked={!!on[it.key]}
           className={`dlg-toggle${on[it.key] ? " is-on" : ""}`}
           onClick={() => setOn((s) => ({ ...s, [it.key]: !s[it.key] }))}
         >
-          <span className="dlg-toggle-label">{it.label}</span>
-          <span className="dlg-toggle-track" aria-hidden="true"><span className="dlg-toggle-thumb" /></span>
+          {checkbox ? (
+            <span className="dlg-checkbox-box" aria-hidden="true">
+              {on[it.key] ? (
+                <svg viewBox="0 0 12 12" fill="none">
+                  <path d="M2.4 6.3l2.2 2.2 5-5.1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : null}
+            </span>
+          ) : null}
+          {/* A link inside the label (e.g. Terms & Conditions) must open without
+              flipping the switch the row-button controls. */}
+          <span
+            className="dlg-toggle-label"
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest("a")) e.stopPropagation();
+            }}
+          >
+            {renderInline(it.label)}
+          </span>
+          {checkbox ? null : (
+            <span className="dlg-toggle-track" aria-hidden="true"><span className="dlg-toggle-thumb" /></span>
+          )}
         </button>
       ))}
-      <button type="button" className="dlg-toggles-confirm" onClick={submit}>{confirmLabel}</button>
+      <button type="button" className="dlg-toggles-confirm" disabled={checkbox && !allOn} onClick={submit}>{confirmLabel}</button>
     </div>
   );
 }
@@ -343,7 +400,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
-    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary|map)?\s*$/);
+    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary|map|locate)?\s*$/);
     if (fence) {
       const isCards = fence[1] === "cards";
       const isUpload = fence[1] === "upload";
@@ -351,18 +408,27 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
       const isToggles = fence[1] === "toggles";
       const isSummary = fence[1] === "summary";
       const isMap = fence[1] === "map";
+      const isLocate = fence[1] === "locate";
       i++;
       const body: string[] = [];
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
       i++; // closing fence
       if (isUpload) {
-        // Body carries a `key: <docKey>` line naming which document to upload.
-        const keyLine = body.map((l) => l.match(/^\s*key\s*:\s*(.+?)\s*$/i)).find(Boolean);
-        const dkey = keyLine ? keyLine[1]!.trim() : "";
-        if (uploadCtx && dkey && uploadCtx.docs[dkey]) {
-          nodes.push(<ChatUpload key={k++} dkey={dkey} ctx={uploadCtx} />);
+        // Body names which document(s) to upload; parsing is tolerant and falls
+        // back to the journey's pending documents so the block never renders as
+        // nothing once the message is complete (FB-1425).
+        if (uploadCtx) {
+          for (const dkey of resolveUploadKeys(body, uploadCtx)) {
+            nodes.push(<ChatUpload key={k++} dkey={dkey} ctx={uploadCtx} />);
+          }
         }
-        // No ctx (still streaming) or unknown key → render nothing for the block.
+        // No ctx (still streaming) → render nothing for the block yet.
+        continue;
+      }
+      if (isLocate) {
+        // Optional `label: <cta text>` line; confirms send the pinned location.
+        const labelLine = body.map((l) => l.match(/^\s*label\s*:\s*(.+?)\s*$/i)).find(Boolean);
+        if (onSelect) nodes.push(<ChatLocate key={k++} label={labelLine ? labelLine[1] : undefined} onSelect={onSelect} />);
         continue;
       }
       if (isButtons) {
@@ -372,17 +438,23 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         continue;
       }
       if (isToggles) {
-        // `title:` / `confirm:` lines, and `- key: label` lines for each switch.
+        // `title:` / `confirm:` / `style:` lines, and `- key: label` lines for
+        // each switch. `style: checkbox` renders acknowledgment checkboxes.
         let tTitle: string | undefined;
         let tConfirm = "Confirm";
+        let tVariant: "switch" | "checkbox" = "switch";
         const tItems: { key: string; label: string }[] = [];
         for (const l of body) {
           const item = l.match(/^\s*-\s+([\w.-]+)\s*:\s*(.+?)\s*$/);
-          const meta = l.match(/^\s*(title|confirm)\s*:\s*(.+?)\s*$/i);
+          const meta = l.match(/^\s*(title|confirm|style)\s*:\s*(.+?)\s*$/i);
           if (item) tItems.push({ key: item[1]!.trim(), label: item[2]!.trim() });
-          else if (meta) { if (/^title$/i.test(meta[1]!)) tTitle = meta[2]!.trim(); else tConfirm = meta[2]!.trim(); }
+          else if (meta) {
+            if (/^title$/i.test(meta[1]!)) tTitle = meta[2]!.trim();
+            else if (/^style$/i.test(meta[1]!)) tVariant = /checkbox/i.test(meta[2]!) ? "checkbox" : "switch";
+            else tConfirm = meta[2]!.trim();
+          }
         }
-        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} onSelect={onSelect} />);
+        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} variant={tVariant} onSelect={onSelect} />);
         continue;
       }
       if (isSummary) {

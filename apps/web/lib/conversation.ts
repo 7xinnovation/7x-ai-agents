@@ -62,6 +62,66 @@ export async function knownCustomerBoxes(
   return [...seen.values()];
 }
 
+export interface CustomerFacts {
+  boxes: { box: string; emirate?: string }[];
+  // Most-recently used branch — offered (never pre-selected) on the next rental.
+  preferredBranch?: string;
+  // Contact details on file from previous journeys (Round-2 feedback FB-1374/
+  // FB-1395: a signed-in customer's mobile + email are prefilled, not re-asked).
+  contactPhone?: string;
+  contactEmail?: string;
+  // Completed requests, newest first (FB-1397: show account history on sign-in).
+  history: { reference: string; journey: string; date: string }[];
+}
+
+/**
+ * Everything we know about a returning signed-in customer from their previous
+ * conversations: boxes, preferred branch, contact details, and completed
+ * requests. One pass over their recent cases (superset of knownCustomerBoxes).
+ */
+export async function knownCustomerFacts(agentId: string, userRef: string): Promise<CustomerFacts> {
+  const rows = await getDb()
+    .select({ state: cases.state, updatedAt: cases.updatedAt })
+    .from(cases)
+    .innerJoin(conversations, eq(cases.conversationId, conversations.id))
+    .where(and(eq(conversations.agentId, agentId), eq(conversations.userRef, userRef)))
+    .orderBy(desc(cases.updatedAt))
+    .limit(25);
+  const facts: CustomerFacts = { boxes: [], history: [] };
+  const seenBoxes = new Set<string>();
+  for (const r of rows) {
+    const st = r.state as CaseState | null;
+    const data = (st?.data ?? {}) as Record<string, unknown>;
+    let box: string | undefined;
+    let emirate: string | undefined;
+    for (const [k, v] of Object.entries(data)) {
+      const nk = k.replace(/[_\s-]/g, "").toLowerCase();
+      if (/^(po)?box(number|no)?$/.test(nk) && (typeof v === "string" || typeof v === "number")) box = String(v);
+      else if (nk === "emirate" && typeof v === "string") emirate = v;
+    }
+    if (box && !seenBoxes.has(box) && seenBoxes.size < 5) {
+      seenBoxes.add(box);
+      facts.boxes.push({ box, emirate });
+    }
+    if (!facts.preferredBranch && typeof data.branch === "string" && data.branch.trim()) facts.preferredBranch = data.branch.trim();
+    if (!facts.contactPhone) {
+      const phone = data.contact_phone ?? data.updated_phone;
+      if (typeof phone === "string" && phone.trim()) facts.contactPhone = phone.trim();
+    }
+    if (!facts.contactEmail && typeof data.contact_email === "string" && data.contact_email.trim()) {
+      facts.contactEmail = data.contact_email.trim();
+    }
+    if (st?.status === "submitted" && st.reference && facts.history.length < 6) {
+      facts.history.push({
+        reference: st.reference,
+        journey: (st.journeyKey ?? "request").replace(/_/g, " "),
+        date: r.updatedAt ? new Date(r.updatedAt).toISOString().slice(0, 10) : "",
+      });
+    }
+  }
+  return facts;
+}
+
 // Fields we treat as a returning customer's stable company profile. These are
 // prefilled for a signed-in EPGL user (feedback FB-2/FB-3: account/company
 // details + EID come from the customer's profile; quarterly figures come from
@@ -70,7 +130,7 @@ export async function knownCustomerBoxes(
 // reconstructed from the customer's most recent applications (a demo stand-in
 // for that feed — swap in the SF/IDEP read once the contract exposes it).
 const EPGL_PROFILE_KEYS = [
-  "company_name", "company_name_ar", "trade_license_number", "license_expiry_date",
+  "company_name", "company_name_ar", "trade_license_number", "license_expiry_date", "postal_license_number",
   "regulator", "emirate", "region", "address_street", "po_box", "activity_codes",
   "owner_name", "owner_emirates_id", "owner_nationality", "owner_passport_no", "owner_contact_no",
   "contact_name", "contact_email", "contact_phone", "contact_designation",

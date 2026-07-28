@@ -9,12 +9,50 @@ import { findJourney } from "../case/engine";
  * return values for the active journey's fields. Best-effort: any failure returns
  * an empty map so the upload itself never fails on extraction.
  *
+ * Round-1-internal feedback hardening (FB-1440..FB-1455): the same vision call
+ * now also CLASSIFIES the document into a fixed taxonomy before extraction, so
+ * the upload route can reject a file that is not the requested document type
+ * (e.g. a Trade License uploaded into the MOA slot, or a business card), and
+ * extraction is bound to what is PRINTED on this document only — no values from
+ * memory/filenames, no English text in Arabic-name fields, no nationality for a
+ * corporate owner, and an Initial Approval's number never lands in the trade
+ * license number field.
+ *
  * Supports PDFs (Claude `document` blocks) and images (`image` blocks). Only
  * fields the document actually contains are returned — the model is told to omit
  * anything it cannot read with confidence, so we never fabricate application data.
  */
 
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+
+/** Fixed classification taxonomy for official-document uploads. */
+export const DOC_TYPES = [
+  "trade_license",
+  "initial_approval",
+  "postal_license",
+  "moa",
+  "emirates_id",
+  "passport",
+  "financial_statement",
+  "declaration",
+  "business_card",
+  "other",
+] as const;
+export type DocType = (typeof DOC_TYPES)[number];
+
+/** Human labels for the taxonomy, used in customer-facing rejection reasons. */
+export const DOC_TYPE_LABELS: Record<DocType, { en: string; ar: string }> = {
+  trade_license: { en: "Trade License", ar: "رخصة تجارية" },
+  initial_approval: { en: "Initial Approval", ar: "موافقة مبدئية" },
+  postal_license: { en: "Postal License", ar: "رخصة بريدية" },
+  moa: { en: "Memorandum of Association", ar: "عقد تأسيس" },
+  emirates_id: { en: "Emirates ID card", ar: "بطاقة هوية إماراتية" },
+  passport: { en: "Passport", ar: "جواز سفر" },
+  financial_statement: { en: "Financial statement", ar: "بيان مالي" },
+  declaration: { en: "Declaration / undertaking form", ar: "نموذج إقرار وتعهد" },
+  business_card: { en: "Business card", ar: "بطاقة أعمال" },
+  other: { en: "Unrecognised document", ar: "مستند غير معروف" },
+};
 
 function fieldsForExtraction(agent: AgentDefinition, state: CaseState, locale: Locale): { key: string; desc: string; type: string; options?: string[] }[] {
   const journey = findJourney(agent, state.journeyKey);
@@ -23,8 +61,9 @@ function fieldsForExtraction(agent: AgentDefinition, state: CaseState, locale: L
   const label = (f: FieldDef) => (typeof f.label === "string" ? f.label : f.label[locale] ?? f.label.en ?? f.key);
   for (const step of journey.steps) {
     for (const f of step.fields) {
-      // Consent/boolean fields are user decisions, not document facts — skip.
-      if (f.type === "boolean" || f.key.endsWith("_consent")) continue;
+      // Consent/boolean fields (and their server-stamped timestamps) are user
+      // decisions, not document facts — skip.
+      if (f.type === "boolean" || /(_consent|_accepted|_acknowledged)(_at)?$/.test(f.key)) continue;
       out.push({
         key: f.key,
         desc: label(f),
@@ -38,8 +77,24 @@ function fieldsForExtraction(agent: AgentDefinition, state: CaseState, locale: L
 
 export interface ExtractionResult {
   values: Record<string, string>;
+  /** The expiry date printed on the document itself (ISO YYYY-MM-DD), when one
+   *  exists — lets the caller reject expired identity documents (e.g. an
+   *  expired Emirates ID) before they enter the case. */
+  docExpiryDate?: string;
+  /** What the vision model classified this document as (fixed taxonomy) — lets
+   *  the caller reject a file uploaded into the wrong slot before any of its
+   *  data is applied. Absent when classification failed. */
+  docType?: DocType;
   note?: string;
 }
+
+/** Synthetic extraction keys (never journey fields). */
+const DOC_EXPIRY_KEY = "__document_expiry_date";
+const DOC_TYPE_KEY = "__document_type";
+const OWNER_ENTITY_KEY = "__owner_entity_type";
+
+const ARABIC_RE = /[؀-ۿ]/;
+const LATIN_RE = /[A-Za-z]/;
 
 export async function extractFieldsFromDocument(input: {
   agent: AgentDefinition;
@@ -48,6 +103,9 @@ export async function extractFieldsFromDocument(input: {
   fileName: string;
   contentType: string;
   bytes: Uint8Array;
+  /** The document slot being filled (key + customer-facing label), so the model
+   *  knows what was REQUESTED — used for classification, never to bias reading. */
+  expected?: { key: string; label: string };
 }): Promise<ExtractionResult> {
   const fields = fieldsForExtraction(input.agent, input.state, input.locale);
   if (fields.length === 0) return { values: {} };
@@ -67,23 +125,34 @@ export async function extractFieldsFromDocument(input: {
 
   const fieldList = fields
     .map((f) => `  "${f.key}": ${f.desc}${f.type === "enum" && f.options ? ` (one of: ${f.options.join(", ")})` : ` (${f.type})`}`)
-    .join("\n");
+    .join("\n") +
+    `\n  "${DOC_EXPIRY_KEY}": the expiry date printed on THIS document itself, if it has one (date)` +
+    `\n  "${DOC_TYPE_KEY}": what THIS document IS — exactly one of: ${DOC_TYPES.join(", ")}` +
+    `\n  "${OWNER_ENTITY_KEY}": only when the document names a primary owner/partner — "individual" if that owner is a person, "corporate" if it is a company/legal entity`;
 
   const instruction =
-    "You are extracting structured data from an official UAE document (an Emirates ID card, a trade/postal license, a Memorandum of Association, or a similar record) to pre-fill a service application.\n" +
-    "Read the attached document and return ONLY the fields you can read with confidence. Extract these fields (key: description):\n" +
+    "You are examining an uploaded document for a UAE government service application.\n" +
+    (input.expected ? `The customer was ASKED to upload: "${input.expected.label}". First classify what this file actually is — do NOT assume it is what was requested.\n` : "") +
+    "Step 1 — CLASSIFY: decide what this document IS from the fixed list in the field \"" + DOC_TYPE_KEY + "\" below. If it is none of those (a random photo, letter, invoice…), use \"other\". A business card is \"business_card\", never a license.\n" +
+    "Step 2 — EXTRACT: return ONLY the fields whose values are VISIBLY PRINTED on this document. Extract these fields (key: description):\n" +
     fieldList +
     "\n\nRules:\n" +
     "- Return a single JSON object mapping field key to the extracted value. Omit any key you cannot find or are unsure about — never guess or fabricate.\n" +
+    "- PRINTED DATA ONLY: extract only what is visibly written on THIS document. Never derive a value from the file name, a logo, prior knowledge, or another document. If a company name is not printed on the document (common on an Initial Approval), do NOT return a company name at all.\n" +
+    "- DOCUMENT-NUMBER MAPPING: a trade license number comes ONLY from a trade license; an INITIAL APPROVAL's approval/reference number goes ONLY into an initial-approval field (e.g. initial_approval_number) if one exists — NEVER into a trade license number field. A postal license number goes only into a postal-license field.\n" +
+    "- SCRIPT MATCHING: a field asking for an ARABIC name must be filled with the Arabic text printed on the document; a field asking for an English name with the Latin text. Never copy an English value into an Arabic-name field or vice versa, and never transliterate.\n" +
+    "- CORPORATE OWNERS: if the primary owner/partner named on the document is a COMPANY (corporate shareholder), set " + OWNER_ENTITY_KEY + " to \"corporate\", return its name in the owner-name field, and OMIT nationality, passport and Emirates ID fields for it — those apply to people only.\n" +
     "- For dates use ISO format YYYY-MM-DD.\n" +
     "- For enum fields, return exactly one of the allowed values.\n" +
-    "- Prefer the English value when a field has both English and Arabic.\n" +
+    "- Prefer the English value when a field has both English and Arabic (except Arabic-name fields, per the script rule).\n" +
     "- For owner/partner or shareholder details, use the FIRST/primary partner (highest share).\n" +
     "- Trade or postal licenses state the licensed ACTIVITY or activity code(s) and the REGION / area (or zone) of the registered address: read those into the matching activity-code and region fields when present.\n" +
     "- The registered address on a license usually contains the area / district NAME (e.g. Al Quoz, Deira, Bur Dubai, Business Bay, Mirdif). Extract that area name into the region field even when it is part of a longer address line, and put the full address in the address/street field.\n" +
     "- Memoranda of Association and partner lists usually give each partner's EMIRATES ID number, NATIONALITY and PASSPORT number: read the primary owner's into the matching owner fields.\n" +
     "- A single phone number on the document can fill BOTH an owner-contact and a general contact-phone field if the document shows only one number for that person.\n" +
     "- If the document is an identity card (e.g. Emirates ID) and the fields describe an agent/representative, map the card's name, ID number and expiry to those agent fields only.\n" +
+    "- If the document is an Emirates ID card and the fields include an owner/signatory Emirates ID field, map the card's ID number (format 784-YYYY-NNNNNNN-N) into it, and the holder's name/nationality into the matching owner fields when present.\n" +
+    "- If the document is NOT a type that carries application data (business_card, other), return ONLY the " + DOC_TYPE_KEY + " classification and nothing else.\n" +
     "- Respond with the JSON object only, no prose, no markdown fences.";
 
   try {
@@ -98,12 +167,52 @@ export async function extractFieldsFromDocument(input: {
     const parsed = JSON.parse(json) as Record<string, unknown>;
     const validKeys = new Set(fields.map((f) => f.key));
     const values: Record<string, string> = {};
+    let docExpiryDate: string | undefined;
+    let docType: DocType | undefined;
+    let ownerEntity: string | undefined;
     for (const [k, v] of Object.entries(parsed)) {
-      if (!validKeys.has(k)) continue;
       if (v === null || v === undefined || v === "") continue;
+      if (k === DOC_EXPIRY_KEY) {
+        const d = String(v).match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+        if (d) docExpiryDate = d;
+        continue;
+      }
+      if (k === DOC_TYPE_KEY) {
+        const t = String(v).toLowerCase().trim() as DocType;
+        if ((DOC_TYPES as readonly string[]).includes(t)) docType = t;
+        continue;
+      }
+      if (k === OWNER_ENTITY_KEY) {
+        ownerEntity = String(v).toLowerCase().trim();
+        continue;
+      }
+      if (!validKeys.has(k)) continue;
       values[k] = typeof v === "string" ? v : String(v);
     }
-    return { values };
+
+    // ── Deterministic post-filters (belt and braces over the prompt rules) ──
+    // Script matching (FB-1442): an Arabic-name field must contain Arabic
+    // script; an explicitly-English name field must contain Latin script.
+    for (const [k, v] of Object.entries(values)) {
+      if (/_ar$/.test(k) && !ARABIC_RE.test(v)) delete values[k];
+      else if ((/_en$/.test(k) || k === "company_name") && !LATIN_RE.test(v) && ARABIC_RE.test(v)) delete values[k];
+    }
+    // Corporate owner (FB-1422): person-only attributes never apply.
+    if (ownerEntity === "corporate") {
+      for (const k of Object.keys(values)) {
+        if (/owner_(nationality|passport|emirates_id)/.test(k)) delete values[k];
+      }
+    }
+    // Initial Approval number mis-mapping (FB-1441): its number is not a trade
+    // license number — move it to an initial-approval field when one exists.
+    if (docType === "initial_approval" && values.trade_license_number) {
+      if (validKeys.has("initial_approval_number") && !values.initial_approval_number) {
+        values.initial_approval_number = values.trade_license_number;
+      }
+      delete values.trade_license_number;
+    }
+
+    return { values, docExpiryDate, docType };
   } catch (e) {
     return { values: {}, note: e instanceof Error ? e.message : "extraction_failed" };
   }

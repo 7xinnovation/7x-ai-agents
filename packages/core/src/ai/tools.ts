@@ -235,11 +235,23 @@ export async function dispatchTool(
     }
 
     case "collect_field": {
-      const { state: next, error } = setField(agent, state, String(input.key), input.value);
+      const fieldKey = String(input.key);
+      const { state: next, error } = setField(agent, state, fieldKey, input.value);
       if (error) return { result: `Validation failed: ${error.message}`, state, events, isError: true };
       state = next;
+      // Consent/acknowledgment fields (e.g. the EPGL Declaration & Undertaking
+      // checkbox) are legal acceptances: stamp the server date+time alongside the
+      // value so the acceptance is recorded with when it happened, not just that
+      // it happened.
+      const truthy = input.value === true || /^(true|yes|نعم|1)$/i.test(String(input.value));
+      if (truthy && /(_accepted|_consent|_acknowledged)$/.test(fieldKey) && !fieldKey.endsWith("_at")) {
+        const stampedAt = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+        state = setField(agent, state, `${fieldKey}_at`, stampedAt).state;
+        events.push({ type: "case", state });
+        return { result: `Saved ${fieldKey} and recorded the acceptance timestamp ${fieldKey}_at = "${stampedAt}". Readiness: ${state.readiness.complete ? "complete" : `missing ${state.readiness.missing.map((m) => m.key).join(", ")}`}.`, state, events };
+      }
       events.push({ type: "case", state });
-      return { result: `Saved ${input.key}. Readiness: ${state.readiness.complete ? "complete" : `missing ${state.readiness.missing.map((m) => m.key).join(", ")}`}.`, state, events };
+      return { result: `Saved ${fieldKey}. Readiness: ${state.readiness.complete ? "complete" : `missing ${state.readiness.missing.map((m) => m.key).join(", ")}`}.`, state, events };
     }
 
     case "record_document": {
@@ -311,6 +323,21 @@ export async function dispatchTool(
       const journey = findJourney(agent, state.journeyKey);
       const sub = journey?.submission;
       if (!sub?.requiresPayment) return { result: "This journey does not require payment.", state, events };
+      // Compliance gate: a journey that declares a terms_accepted field requires
+      // an explicit Terms & Conditions acceptance BEFORE any payment. Enforced
+      // server-side so the model cannot skip the checkbox.
+      const declaresTerms = journey?.steps.some((s) => s.fields.some((f) => f.key === "terms_accepted"));
+      const termsVal = state.data["terms_accepted"];
+      const termsAccepted = termsVal === true || /^(true|yes|نعم|1)$/i.test(String(termsVal ?? ""));
+      if (declaresTerms && !termsAccepted) {
+        return {
+          result:
+            "PAYMENT BLOCKED: the customer has not accepted the Terms and Conditions yet. Before payment, present the mandatory acknowledgment as a ```toggles block with `style: checkbox`, a single item `- terms_accepted: <label linking to the Terms and Conditions>`, and a confirm button. When the customer confirms, record it with collect_field(terms_accepted, true) — the acceptance timestamp is stamped automatically — then call request_payment again.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       // Only auth-required journeys (e.g. new rentals) gate payment on sign-in.
       // Guest-allowed journeys (e.g. renewals) may pay after ownership validation.
       if (journey?.requiresAuth && !ctx.authenticated) {
@@ -381,9 +408,15 @@ export async function dispatchTool(
       if (dup) {
         return { result: `An active request already exists: ${dup.reference}. Surface it instead of creating a duplicate.`, state, events };
       }
+      // Uploaded documents travel WITH the submission (feedback FB-1401: customer
+      // documents, e.g. the trade license, are saved to the PO Box record like the
+      // website flow — not left behind in chat storage).
+      const attachedDocs = state.documents
+        .filter((d) => d.status === "uploaded" || d.status === "accepted")
+        .map((d) => ({ key: d.key, fileName: d.fileName ?? "", status: d.status }));
       const { reference } = await adapters.crm.createCase(actx, {
         journeyKey: state.journeyKey!,
-        data: state.data,
+        data: attachedDocs.length ? { ...state.data, _documents: attachedDocs } : state.data,
         userRef: ctx.userRef,
       });
       state = { ...state, status: "submitted", reference };

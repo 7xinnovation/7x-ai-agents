@@ -4,6 +4,7 @@ export interface PublicField {
   key: string;
   label: LocalizedString;
   required: boolean;
+  type?: string;
 }
 export interface PublicDocument {
   key: string;

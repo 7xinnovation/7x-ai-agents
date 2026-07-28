@@ -22,6 +22,9 @@ import {
   DeviceMobile,
   Info,
   CaretLeft,
+  PencilSimple,
+  Check,
+  X,
 } from "@phosphor-icons/react";
 import QRCode from "qrcode";
 import { tr, type CaseState, type Locale } from "@dialog/config";
@@ -48,7 +51,7 @@ const STR = {
   en: {
     placeholder: "Type your message…",
     sources: "Sources",
-    case: "Your case",
+    case: "Your application",
     emptyTitle: "Nothing to assemble yet",
     emptyBody: "As we talk, your application takes shape here: details, documents, and what's left.",
     missing: "Submission readiness",
@@ -86,8 +89,11 @@ const STR = {
     scanTitle: "Upload from your phone",
     scanHint: "Scan this code with your phone camera to open the upload page for this application. Files you add there appear here automatically.",
     done: "Done",
-    caseTab: "Your case",
+    caseTab: "Your application",
     backToChat: "Back to chat",
+    caseStatus: { draft: "Draft", ready: "Ready", submitted: "Submitted", escalated: "Escalated" } as Record<string, string>,
+    docStatus: { pending: "pending", uploaded: "uploaded", rejected: "rejected", accepted: "accepted" } as Record<string, string>,
+    missingKind: { field: "field", document: "document" } as Record<string, string>,
   },
   ar: {
     placeholder: "اكتب رسالتك…",
@@ -132,6 +138,9 @@ const STR = {
     done: "تم",
     caseTab: "طلبك",
     backToChat: "العودة للمحادثة",
+    caseStatus: { draft: "مسودة", ready: "جاهز", submitted: "تم الإرسال", escalated: "محوّل لموظف" } as Record<string, string>,
+    docStatus: { pending: "قيد الانتظار", uploaded: "تم الرفع", rejected: "مرفوض", accepted: "مقبول" } as Record<string, string>,
+    missingKind: { field: "حقل", document: "مستند" } as Record<string, string>,
   },
 } as const;
 
@@ -403,6 +412,43 @@ export function Experience({
     () => agent.journeys.slice(0, 4).map((j) => ({ key: j.key, label: tr(j.title, locale) })),
     [agent, locale]
   );
+  // A greeting that carries its own ```buttons service list (FB-1434) replaces
+  // the starter grid — showing both would duplicate the same options.
+  const greetingHasButtons = useMemo(() => /```\s*buttons/.test(tr(agent.greeting, locale)), [agent, locale]);
+
+  // Inline correction of captured values (feedback FB-1325): text-like fields of
+  // the ACTIVE journey get a pencil; consents/timestamps stay locked.
+  const editableKeys = useMemo(() => {
+    const set = new Set<string>();
+    const j = agent.journeys.find((x) => x.key === caseState?.journeyKey);
+    for (const s of j?.steps ?? [])
+      for (const f of s.fields)
+        if (f.type !== "boolean" && !/(_consent|_accepted|_acknowledged)(_at)?$/.test(f.key)) set.add(f.key);
+    return set;
+  }, [agent, caseState?.journeyKey]);
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [editVal, setEditVal] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const saveEdit = useCallback(async () => {
+    if (!editKey || !convId.current || editBusy) return;
+    setEditBusy(true);
+    try {
+      const res = await fetch("/api/case/field", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentSlug: agent.slug, conversationId: convId.current, key: editKey, value: editVal }),
+      });
+      const json = await res.json();
+      if (res.ok && json.case) {
+        setCaseState(json.case);
+        setEditKey(null);
+      }
+    } catch {
+      /* keep the editor open so the user can retry */
+    } finally {
+      setEditBusy(false);
+    }
+  }, [editKey, editVal, editBusy, agent.slug]);
 
   // Mirror of the engine's document `condition` evaluator (key == 'v', key != 'v',
   // bare-key truthy) so conditional slots only surface once their gate field says so.
@@ -436,6 +482,23 @@ export function Experience({
     return { done, total, pct: Math.round((done / total) * 100) };
   }, [caseState, agent, docApplies]);
 
+  // Full requirements checklist (feedback FB-1437: completed items must STAY
+  // visible, marked done — not vanish from the list once satisfied).
+  const checklist = useMemo(() => {
+    if (!caseState?.journeyKey) return [];
+    const j = agent.journeys.find((x) => x.key === caseState.journeyKey);
+    if (!j) return [];
+    const missingSet = new Set(caseState.readiness.missing.map((m) => `${m.kind}:${m.key}`));
+    const items: { kind: "field" | "document"; key: string; done: boolean }[] = [];
+    for (const s of j.steps) {
+      for (const f of s.fields) if (f.required) items.push({ kind: "field", key: f.key, done: !missingSet.has(`field:${f.key}`) });
+      for (const d of s.documents)
+        if (d.requirement === "mandatory" && docApplies(d.condition))
+          items.push({ kind: "document", key: d.key, done: !missingSet.has(`document:${d.key}`) });
+    }
+    return items;
+  }, [caseState, agent, docApplies]);
+
   // Document slots for the active journey, merged with current upload status, so
   // the user can upload proactively (PRD: document collection step). Conditional
   // documents stay hidden until their condition holds (e.g. agent EID only after
@@ -455,10 +518,11 @@ export function Experience({
 
   // Documents still awaiting an upload — drives the mobile toggle badge and the
   // live-sync poll (so a phone/QR upload doesn't need to keep polling forever).
-  const pendingDocCount = useMemo(
-    () => docSlots.filter((d) => d.status !== "uploaded" && d.status !== "accepted").length,
+  const pendingDocKeys = useMemo(
+    () => docSlots.filter((d) => d.status !== "uploaded" && d.status !== "accepted").map((d) => d.key),
     [docSlots]
   );
+  const pendingDocCount = pendingDocKeys.length;
 
   const uploadDoc = useCallback(
     async (key: string, file: File) => {
@@ -505,6 +569,7 @@ export function Experience({
       docs,
       statuses,
       uploadingKey,
+      pendingDocs: pendingDocKeys,
       onUpload: uploadDoc,
       onQr: openQrHandoff,
       strings: {
@@ -512,7 +577,7 @@ export function Experience({
         upTo: t.upTo, takePhoto: t.takePhoto, fromPhone: t.fromPhone, uploaded: t.uploaded,
       },
     };
-  }, [agent, caseState, locale, uploadingKey, uploadDoc, openQrHandoff, t]);
+  }, [agent, caseState, locale, uploadingKey, pendingDocKeys, uploadDoc, openQrHandoff, t]);
 
   // Live-sync: while documents are still pending (and nothing local is in
   // flight), poll the conversation so uploads made on a phone via the QR
@@ -822,22 +887,24 @@ export function Experience({
 
   // In-chat documents flow: when a new document lands (uploaded in the chat or via
   // the phone QR hand-off), fire one proactive turn so the agent confirms what was
-  // captured and asks for the next document. A baseline is taken on first load so
-  // resuming a conversation with prior uploads never triggers it.
-  const uploadedBaseline = useRef<number | null>(null);
+  // captured and asks for the next document. Server-side rejections (bad format,
+  // expired Emirates ID) fire it too, so the agent explains and asks for a valid
+  // document instead of the rejection sitting silently in the widget. A baseline
+  // is taken on first load so resuming a conversation with prior uploads never
+  // triggers it.
+  const uploadedBaseline = useRef<{ up: number; rej: number } | null>(null);
   useEffect(() => {
     if (!resumed || !agent.documentsInChat) return;
-    const uploaded = (caseState?.documents ?? []).filter((d) => d.status === "uploaded" || d.status === "accepted").length;
+    const docs = caseState?.documents ?? [];
+    const up = docs.filter((d) => d.status === "uploaded" || d.status === "accepted").length;
+    const rej = docs.filter((d) => d.status === "rejected").length;
     if (uploadedBaseline.current === null) {
-      uploadedBaseline.current = uploaded; // establish baseline, do not fire
+      uploadedBaseline.current = { up, rej }; // establish baseline, do not fire
       return;
     }
-    if (uploaded > uploadedBaseline.current) {
-      uploadedBaseline.current = uploaded;
-      if (!streaming) void send(undefined, { documentUploaded: true });
-    } else if (uploaded < uploadedBaseline.current) {
-      uploadedBaseline.current = uploaded;
-    }
+    const grew = up > uploadedBaseline.current.up || rej > uploadedBaseline.current.rej;
+    uploadedBaseline.current = { up, rej };
+    if (grew && !streaming) void send(undefined, { documentUploaded: true });
   }, [caseState, resumed, agent.documentsInChat, streaming, send]);
 
   // After sign-in, once the session has resumed, proactively run the account
@@ -880,7 +947,8 @@ export function Experience({
   } as React.CSSProperties;
 
   const missing = caseState?.readiness.missing ?? [];
-  const dataEntries = Object.entries(caseState?.data ?? {});
+  // Internal bookkeeping keys (extraction provenance etc.) never render.
+  const dataEntries = Object.entries(caseState?.data ?? {}).filter(([k]) => !k.startsWith("__"));
   // Show the assembled panel as soon as a journey is active and has document
   // slots (so the upload buttons appear immediately when the agent asks for
   // documents), or once any data / document exists. Only a journey with no
@@ -968,9 +1036,11 @@ export function Experience({
           <div className="dlg-messages" ref={scrollRef}>
             <div className="dlg-msg assistant">
               <span className="dlg-orb" aria-hidden="true" />
-              <div className="dlg-bubble"><Markdown text={tr(agent.greeting, locale)} /></div>
+              {/* Greeting gets onSelect so a ```buttons service list in it is
+                  tappable (feedback FB-1434: structured options, not prose). */}
+              <div className="dlg-bubble"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} /></div>
             </div>
-            {messages.length === 0 && starters.length > 0 ? (
+            {messages.length === 0 && starters.length > 0 && !greetingHasButtons ? (
               <div className="dlg-starters">
                 <span className="dlg-starters-label">{t.askAnything}</span>
                 <div className="dlg-starters-grid">
@@ -1087,7 +1157,7 @@ export function Experience({
                 <CaretLeft size={14} weight="bold" /> {t.backToChat}
               </button>
               <h2>{t.case}</h2>
-              {caseState && hasCase ? <span className={`dlg-status ${caseState.status}`}>{caseState.status}</span> : null}
+              {caseState && hasCase ? <span className={`dlg-status ${caseState.status}`}>{t.caseStatus[caseState.status] ?? caseState.status}</span> : null}
             </div>
 
             {!hasCase ? (
@@ -1133,7 +1203,39 @@ export function Experience({
                     {dataEntries.map(([k, v]) => (
                       <div className="dlg-field" key={k}>
                         <span className="dlg-field-label">{labelMap.get(k) ?? k}</span>
-                        <span className="dlg-field-value">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
+                        {editKey === k ? (
+                          <span className="dlg-field-edit">
+                            <input
+                              value={editVal}
+                              onChange={(e) => setEditVal(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") setEditKey(null); }}
+                              disabled={editBusy}
+                              autoFocus
+                            />
+                            <button type="button" className="dlg-field-editbtn ok" onClick={() => void saveEdit()} disabled={editBusy} aria-label="Save">
+                              <Check size={13} weight="bold" />
+                            </button>
+                            <button type="button" className="dlg-field-editbtn" onClick={() => setEditKey(null)} disabled={editBusy} aria-label="Cancel">
+                              <X size={13} weight="bold" />
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="dlg-field-value">
+                            {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                            {editableKeys.has(k) ? (
+                              // Pencil correction for extracted values (FB-1325).
+                              <button
+                                type="button"
+                                className="dlg-field-pencil"
+                                onClick={() => { setEditKey(k); setEditVal(typeof v === "object" ? JSON.stringify(v) : String(v)); }}
+                                aria-label={`Edit ${labelMap.get(k) ?? k}`}
+                                title={locale === "ar" ? "تعديل" : "Edit"}
+                              >
+                                <PencilSimple size={13} weight="bold" />
+                              </button>
+                            ) : null}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1162,7 +1264,7 @@ export function Experience({
                             </span>
                             <span className={`dlg-doc-status ${d.status}`}>
                               {uploaded ? <CheckCircle size={12} weight="fill" /> : null}
-                              {d.status}
+                              {t.docStatus[d.status] ?? d.status}
                             </span>
                           </div>
                           {uploaded ? (
@@ -1246,20 +1348,27 @@ export function Experience({
                       <CheckCircle size={18} weight="fill" color={c.success} />
                       {t.ready}
                     </div>
-                  ) : missing.length ? (
-                    missing.map((m) => (
-                      <div className="dlg-check todo" key={`${m.kind}:${m.key}`}>
-                        <Circle size={18} weight={iconWeight} />
+                  ) : null}
+                  {checklist.length ? (
+                    // Completed items stay listed and ticked (FB-1437) — the list
+                    // shows the full set of requirements, not only what's missing.
+                    checklist.map((m) => (
+                      <div className={`dlg-check ${m.done ? "done" : "todo"}`} key={`${m.kind}:${m.key}`}>
+                        {m.done ? (
+                          <CheckCircle size={18} weight="fill" color={c.success} />
+                        ) : (
+                          <Circle size={18} weight={iconWeight} />
+                        )}
                         {labelMap.get(m.key) ?? m.key}
-                        <span className="kind">{m.kind}</span>
+                        <span className="kind">{t.missingKind[m.kind] ?? m.kind}</span>
                       </div>
                     ))
-                  ) : (
+                  ) : !caseState!.readiness.complete ? (
                     <div className="dlg-check todo">
                       <ArrowRight size={16} weight="bold" />
                       {t.emptyBody}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </>
             )}

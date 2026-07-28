@@ -1,11 +1,15 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import type Anthropic from "@anthropic-ai/sdk";
 import { Locale } from "@dialog/config";
-import { resolveAdapters, runTurn, classifyIntent } from "@dialog/core";
-import { getDb, payments } from "@dialog/db";
+import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, adapterContext } from "@dialog/core";
+import { getDb, payments, documents as documentsTable } from "@dialog/db";
+import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerBoxes, knownEpglProfile } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile } from "@/lib/conversation";
+import { sendEmail } from "@/lib/email";
+import { notifyOpsForSubmission } from "@/lib/opsNotify";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
@@ -51,7 +55,7 @@ const PULSE_DIRECTIVE =
   "(System: the customer just signed in via UAE PASS. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
   "1) Greet them warmly (use their name once you have it from account data). " +
   "2) Use your tools to pull everything you can about their account. " +
-  "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
+  "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. If completed requests are on file (see the known customer record), add a short \"Recent activity\" list with each reference and date. " +
   "4) Only if NO PO Box is on file: welcome them, explain their account isn't linked to a PO Box yet, and offer — not require — to link one (\"if you have a box, tell me its number and emirate and I'll add it to your account\"). Never present the box number as a prerequisite for the pulse. " +
   "Use ONLY real data returned by tools — never invent boxes, dates, or fees.)";
 
@@ -70,6 +74,7 @@ const PAYMENT_SETTLED_DIRECTIVE =
 // the customer typed. Keeps the one-at-a-time upload loop moving.
 const DOCUMENT_UPLOADED_DIRECTIVE =
   "(System: the customer just uploaded a document inline and the case has been updated with any fields read from it — this is an internal notification, not a message they typed. " +
+  "0) If the newest document in the case state is REJECTED (see its rejectionReason — e.g. an expired Emirates ID or unsupported file), explain the reason plainly in one sentence and ask for a corrected/valid document by re-emitting that document's ```upload block; do not move on. Otherwise: " +
   "1) In one short sentence, confirm the document was received and note anything useful that was captured from it (do not dump every field). " +
   "2) If more documents are still needed for this journey, request the NEXT one by emitting its ```upload block (one document only). " +
   "3) If all required documents are in, move on: show a brief cards summary of the captured details for confirmation, or continue the journey. " +
@@ -89,6 +94,7 @@ function formatEpglProfileContext(p: Record<string, string>): string | undefined
   const company = p.company_name || p.company_name_ar;
   if (company) parts.push(`Company: ${company}${p.company_name_ar && p.company_name_ar !== company ? ` / ${p.company_name_ar}` : ""}`);
   if (p.trade_license_number) parts.push(`Trade license no: ${p.trade_license_number}${p.license_expiry_date ? ` (expires ${p.license_expiry_date})` : ""}`);
+  if (p.postal_license_number) parts.push(`Postal license no: ${p.postal_license_number}`);
   if (p.trade_name_en || p.trade_name_ar) parts.push(`Trade name: ${p.trade_name_en || p.trade_name_ar}`);
   if (p.emirate) parts.push(`Emirate: ${p.emirate}`);
   if (p.address_street) parts.push(`Address: ${p.address_street}`);
@@ -151,7 +157,7 @@ export async function POST(req: NextRequest) {
     // (Guest/Renewal Details+Pricing), so guest AND signed-in demos complete.
     mockSimulate: uaePassMockAllowed() && (session.userRef === MOCK_PERSONA_SUB || body.mock === true),
   });
-  const { tools: extraTools, exec: runExtraTool } = apiTools;
+  const { tools: baseExtraTools, exec: execIntegration } = apiTools;
 
   // Server-authoritative auth (sticky after UAE PASS), not the client's claim.
   const authenticated = session.authenticated;
@@ -179,12 +185,32 @@ export async function POST(req: NextRequest) {
       // existing PO Boxes so signed-in flows have account data to work with.
       customerContext = mockPersonaContext();
     } else {
-      const known = await knownCustomerBoxes(agent.id, userRef).catch(() => []);
-      if (known.length) {
-        const list = known.map((b) => `${b.box}${b.emirate ? ` (${b.emirate})` : ""}`).join(", ");
-        customerContext =
-          `This customer's PO Box${known.length > 1 ? "es" : ""} on file: ${list}. ` +
-          "For account questions, status checks, renewals, or the Account Pulse, use these immediately (fetch fresh details/pricing from backend tools) — do NOT ask for the box number or emirate again; briefly note you're using the box on file.";
+      const facts = await knownCustomerFacts(agent.id, userRef).catch(() => null);
+      if (facts && (facts.boxes.length || facts.contactPhone || facts.contactEmail || facts.history.length)) {
+        const parts: string[] = [];
+        if (facts.boxes.length) {
+          const list = facts.boxes.map((b) => `${b.box}${b.emirate ? ` (${b.emirate})` : ""}`).join(", ");
+          parts.push(
+            `PO Box${facts.boxes.length > 1 ? "es" : ""} on file: ${list} — for account questions, status checks, renewals, or the Account Pulse use these immediately (fetch fresh details/pricing from backend tools); do NOT ask for the box number or emirate again.`
+          );
+        }
+        // FB-1376: surface the customer's usual branch as an offer, never a pre-selection.
+        if (facts.preferredBranch) {
+          parts.push(`Usual branch: ${facts.preferredBranch} — when presenting branches you may highlight it with a badge (e.g. "Your usual branch"), but never pre-select it.`);
+        }
+        // FB-1374/FB-1395: contact details come from the profile, not re-typed.
+        if (facts.contactPhone || facts.contactEmail) {
+          parts.push(
+            `Contact on file: ${[facts.contactPhone, facts.contactEmail].filter(Boolean).join(", ")} — when a journey needs a contact phone or email, record these with collect_field and ask the customer only to confirm; never ask them to type these again.`
+          );
+        }
+        // FB-1397: completed requests double as the customer's account history.
+        if (facts.history.length) {
+          parts.push(
+            `Completed requests: ${facts.history.map((h) => `${h.reference} (${h.journey}${h.date ? `, ${h.date}` : ""})`).join("; ")} — present these when the customer asks about their history or a previous request.`
+          );
+        }
+        customerContext = `This customer's record from previous sessions: ${parts.join(" ")}`;
       }
     }
     if (customerContext) pulseDirective += ` (${customerContext})`;
@@ -199,6 +225,47 @@ export async function POST(req: NextRequest) {
 
   const a = { agentId: agent.id, conversationId: session.conversationId };
   const startJourney = session.state.journeyKey;
+
+  // Transactional email as a first-class tool (Round-2 feedback FB-1426: the
+  // assistant claimed confirmation emails that were never sent). The tool result
+  // is explicit about success vs failure, so the model can only claim "sent"
+  // after a real send — and can re-call it to resend.
+  const EMAIL_TOOL_NAME = "send_confirmation_email";
+  const emailTool: Anthropic.Tool = {
+    name: EMAIL_TOOL_NAME,
+    description:
+      "Send a transactional email to the customer (confirmation, receipt, reference number). Returns SENT or NOT SENT — only tell the customer an email was sent when this tool returns SENT. Call it again to resend if the customer says nothing arrived.",
+    input_schema: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "The customer's email address (from their profile or collected this session)" },
+        subject: { type: "string" },
+        body: { type: "string", description: "Plain-text email body (include the reference number and key details)" },
+      },
+      required: ["to", "subject", "body"],
+    },
+  };
+  const extraTools = [...baseExtraTools, emailTool];
+  const runExtraTool = async (name: string, input: Record<string, unknown>) => {
+    if (name !== EMAIL_TOOL_NAME) return execIntegration(name, input);
+    const to = String(input.to ?? "").trim();
+    const subject = String(input.subject ?? "").slice(0, 180) || `${agent.definition.name} confirmation`;
+    const res = await sendEmail({ to, subject, text: String(input.body ?? "") });
+    await audit({ ...a, actor: "agent", action: res.ok ? "email_sent" : "email_send_failed", payload: { to, subject, reason: res.reason } });
+    if (res.ok) {
+      return {
+        result: `EMAIL SENT to ${to}. You may now confirm to the customer that the email was sent. If they later say it hasn't arrived, suggest checking spam and offer to resend (call this tool again).`,
+      };
+    }
+    return {
+      result:
+        `EMAIL NOT SENT (${res.reason}). Do NOT tell the customer an email was sent. ` +
+        (res.reason === "email_not_configured"
+          ? "Email delivery is not configured in this environment — offer the receipt download link or the reference number instead, and apologise briefly."
+          : "Offer to try again, or provide the receipt download link / reference number instead."),
+      isError: true,
+    };
+  };
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -245,6 +312,7 @@ export async function POST(req: NextRequest) {
         let finalState = session.state;
         let finalText = "";
         let citedThisTurn = false;
+        let submittedRef: string | null = null;
 
         for await (const ev of runTurn({
           agent: agent.definition,
@@ -302,6 +370,7 @@ export async function POST(req: NextRequest) {
             await emitEvent({ type: "payment.initiated", ...std, referenceId: ev.reference, attributes: { reference: ev.reference, amount: ev.amount } });
             await audit({ ...a, actor: "agent", action: "payment_initiated", payload: { reference: ev.reference, amount: ev.amount } });
           } else if (ev.type === "submitted") {
+            submittedRef = ev.reference;
             await audit({ ...a, actor: "agent", action: "case_submitted", payload: { reference: ev.reference, journey: finalState.journeyKey } });
             await emitEvent({ type: "journey.completed", ...std, outcome: "completed", referenceId: ev.reference, attributes: { journey: finalState.journeyKey, reference: ev.reference } });
             await emitEvent({ type: "crm.case.created", ...std, referenceId: ev.reference, attributes: { reference: ev.reference } });
@@ -322,6 +391,110 @@ export async function POST(req: NextRequest) {
           const mapBlock = `\n\n\`\`\`map\nemirate: ${branchQuery.emirate}\nbundle: ${branchQuery.bundle}\n\`\`\`\n`;
           send({ type: "text", delta: mapBlock });
           finalText += mapBlock;
+        }
+
+        // Deterministic upload widget (feedback FB-1425: "AI says upload slots
+        // appeared but no upload fields display"): when the reply talks about
+        // uploading but contains no ```upload block, append the block(s) for the
+        // active journey's still-pending documents ourselves — the widget then
+        // always renders where the assistant said it would.
+        const activeJourney = findJourney(agent.definition, finalState.journeyKey);
+        if (agent.definition.documentsInChat && activeJourney && !/```\s*upload/i.test(finalText)) {
+          const docStatus = new Map(finalState.documents.map((d) => [d.key, d.status]));
+          const pendingDocs = activeJourney.steps
+            .flatMap((s) => s.documents)
+            .filter(
+              (d) =>
+                evalCondition(d.condition, finalState.data) &&
+                !["uploaded", "accepted"].includes(docStatus.get(d.key) ?? "")
+            );
+          const mentionsUpload = /upload|attach\b|attachment|ارفع|يرفع|برفع|رفع|حمّل|تحميل|إرفاق|أرفق|ارفاق/i.test(finalText);
+          if (pendingDocs.length && mentionsUpload) {
+            const blocks = pendingDocs
+              .slice(0, 2)
+              .map((d) => `\n\n\`\`\`upload\nkey: ${d.key}\n\`\`\``)
+              .join("");
+            send({ type: "text", delta: blocks });
+            finalText += blocks;
+          }
+        }
+
+        // Completed transaction extras (feedback FB-1396): a paid, submitted case
+        // always ends with a receipt download link (the model additionally offers
+        // email via the send_confirmation_email tool).
+        if (submittedRef && finalState.payment.status === "paid" && finalState.payment.reference && !finalText.includes("/api/receipt/")) {
+          const receiptUrl = `/api/receipt/${encodeURIComponent(finalState.payment.reference)}?c=${encodeURIComponent(session.conversationId)}`;
+          const receiptLine =
+            body.locale === "ar" ? `\n\n[تنزيل الإيصال](${receiptUrl})` : `\n\n[Download your receipt](${receiptUrl})`;
+          send({ type: "text", delta: receiptLine });
+          finalText += receiptLine;
+        }
+
+        // Back-office coordination (feedback FB-1391/FB-1392): key-delivery and
+        // MyHome submissions notify the branch/EMX teams like the website flow.
+        if (submittedRef) {
+          try {
+            const outcomes = await notifyOpsForSubmission({
+              reference: submittedRef,
+              journeyKey: finalState.journeyKey ?? "",
+              data: finalState.data,
+              agentName: agent.definition.name,
+            });
+            for (const o of outcomes) {
+              await audit({
+                ...a,
+                actor: "system",
+                action: o.result.ok ? "ops_notified" : "ops_notify_skipped",
+                payload: { kind: o.kind, to: o.to, trackingRef: o.trackingRef, reason: o.result.ok ? undefined : o.result.reason },
+              });
+            }
+          } catch (e) {
+            log.error("ops_notify_failed", e, { agentId: agent.id, reference: submittedRef });
+          }
+        }
+
+        // Documents follow the submission into the system of record (feedback
+        // FB-1326/FB-1402): after a Salesforce-backed submission succeeds, every
+        // uploaded document is pushed via the integration's uploadDocument
+        // operation, linked to the license request id — mirroring how the
+        // website attaches files to the case. Best-effort per file, audited.
+        const submitJourney = findJourney(agent.definition, finalState.journeyKey);
+        const uploadDocTool = submitJourney?.submission?.apiFlow?.saveTool
+          ? baseExtraTools.find((t) => /uploaddocument/i.test(t.name))?.name
+          : undefined;
+        if (submittedRef && uploadDocTool && adapters.storage?.get && /^[a-zA-Z0-9]{15,18}$/.test(submittedRef)) {
+          const sctx = adapterContext(agent.definition, agent.definition.integrations.storage);
+          for (const d of finalState.documents.filter((d) => d.status === "uploaded" || d.status === "accepted")) {
+            try {
+              const row = await getDb().query.documents.findFirst({
+                where: and(eq(documentsTable.caseId, session.caseId), eq(documentsTable.key, d.key)),
+                orderBy: [desc(documentsTable.createdAt)],
+              });
+              if (!row?.storageKey) continue;
+              const stored = await adapters.storage.get(sctx, { storageKey: row.storageKey });
+              if (!stored) {
+                await audit({ ...a, actor: "system", action: "sf_document_skipped", payload: { key: d.key, reason: "bytes_unavailable" } });
+                continue;
+              }
+              const fileName = d.fileName || `${d.key}.pdf`;
+              const res = await execIntegration(uploadDocTool, {
+                body: {
+                  licenseRequestId: submittedRef,
+                  fileName,
+                  fileType: (fileName.split(".").pop() ?? "pdf").toLowerCase(),
+                  versionData: Buffer.from(stored.bytes).toString("base64"),
+                },
+              });
+              await audit({
+                ...a,
+                actor: "system",
+                action: res.isError ? "sf_document_failed" : "sf_document_attached",
+                payload: { key: d.key, fileName, reference: submittedRef },
+              });
+            } catch (e) {
+              log.error("sf_document_push_failed", e, { agentId: agent.id, key: d.key, reference: submittedRef });
+            }
+          }
         }
 
         const cust = (authenticated ? "authenticated" : "guest") as "authenticated" | "guest";

@@ -77,6 +77,10 @@ export interface StorageAdapter {
     ctx: AdapterContext,
     input: { caseId: string; key: string; fileName: string; bytes: Uint8Array; contentType: string }
   ): Promise<{ storageKey: string }>;
+  /** Retrieve previously-stored bytes (e.g. to forward uploaded documents to the
+   *  system of record after submission — feedback FB-1326/FB-1402). Optional:
+   *  adapters that cannot read back return undefined/null. */
+  get?(ctx: AdapterContext, input: { storageKey: string }): Promise<{ bytes: Uint8Array; contentType: string } | null>;
 }
 
 /** Outbound notifications (future channels: WhatsApp, email). */

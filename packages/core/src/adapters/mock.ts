@@ -90,9 +90,25 @@ const mockKb: KBAdapter = {
   },
 };
 
+// Uploads are retained in memory (bounded) so they can be read back and
+// forwarded to the system of record after submission (FB-1326/FB-1402) — a
+// process-local stand-in for real object storage.
+const MOCK_STORE_MAX = 200;
+const mockStore = new Map<string, { bytes: Uint8Array; contentType: string }>();
 const mockStorage: StorageAdapter = {
   async put(_ctx, input) {
-    return { storageKey: `mock://${input.caseId}/${input.key}/${input.fileName}` };
+    const storageKey = `mock://${input.caseId}/${input.key}/${input.fileName}`;
+    mockStore.set(storageKey, { bytes: input.bytes, contentType: input.contentType });
+    // Bounded: evict the oldest entries once over the cap.
+    while (mockStore.size > MOCK_STORE_MAX) {
+      const oldest = mockStore.keys().next().value;
+      if (oldest === undefined) break;
+      mockStore.delete(oldest);
+    }
+    return { storageKey };
+  },
+  async get(_ctx, input) {
+    return mockStore.get(input.storageKey) ?? null;
   },
 };
 

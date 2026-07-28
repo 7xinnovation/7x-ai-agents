@@ -34,7 +34,7 @@ export default async function EmbedPage({
       steps: j.steps.map((s) => ({
         key: s.key,
         title: s.title,
-        fields: s.fields.map((f) => ({ key: f.key, label: f.label, required: f.validation.required })),
+        fields: s.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, required: f.validation.required })),
         documents: s.documents.map((doc) => ({
           key: doc.key,
           label: doc.label,

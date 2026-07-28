@@ -921,6 +921,37 @@ body {
   cursor: pointer;
 }
 
+/* ---- In-chat location picker (a ```locate block, FB-1432) ---- */
+.dlg-map-canvas.locate { height: 240px; }
+.dlg-locate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.dlg-locate-addr {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--c-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-locate-confirm {
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--c-primary);
+  color: var(--c-primary-fg);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+.dlg-locate-confirm:hover { filter: brightness(1.08); }
+.dlg-locate-confirm:active { transform: translateY(1px); }
+
 /* ---- Voice mode (speak replies + speech-to-chat) ---- */
 .dlg-voice-launch svg { color: var(--c-primary); }
 .dlg-voice-launch.is-on {
@@ -1648,6 +1679,62 @@ body {
   text-align: end;
   color: color-mix(in srgb, var(--c-text) 92%, var(--c-primary));
 }
+/* Inline correction of a captured value (pencil edit, FB-1325). */
+.dlg-field-pencil {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline-start: 6px;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  border-radius: 5px;
+  opacity: 0.55;
+  vertical-align: middle;
+}
+.dlg-field:hover .dlg-field-pencil { opacity: 1; }
+.dlg-field-pencil:hover { color: var(--c-primary); background: color-mix(in srgb, var(--c-primary) 9%, transparent); }
+.dlg-field-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  justify-content: flex-end;
+}
+.dlg-field-edit input {
+  flex: 1;
+  min-width: 0;
+  max-width: 180px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--c-primary) 40%, var(--c-border));
+  border-radius: 7px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  outline: none;
+}
+.dlg-field-editbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: var(--c-surface);
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+.dlg-field-editbtn.ok {
+  background: var(--c-primary);
+  border-color: var(--c-primary);
+  color: var(--c-primary-fg);
+}
+.dlg-field-editbtn:disabled { opacity: 0.5; cursor: default; }
 .dlg-doc-left {
   display: flex;
   align-items: center;
@@ -2036,6 +2123,40 @@ body {
 }
 .dlg-toggles-confirm:active {
   transform: scale(0.98);
+}
+.dlg-toggles-confirm:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Checkbox variant (style: checkbox) — acknowledgment consent, e.g. the EPGL
+   Declaration & Undertaking. Same row layout, a square check in place of the
+   switch track, on the reading side of the label. */
+.dlg-checkbox-box {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1.5px solid color-mix(in srgb, var(--c-text) 28%, var(--c-border));
+  background: var(--c-surface);
+  color: var(--c-primary-fg);
+  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out);
+}
+.dlg-checkbox-box svg {
+  width: 12px;
+  height: 12px;
+}
+.dlg-toggle.is-on .dlg-checkbox-box {
+  background: var(--c-primary);
+  border-color: var(--c-primary);
+}
+.dlg-toggles.is-checkbox .dlg-toggle:focus-visible .dlg-checkbox-box {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-primary) 24%, transparent);
 }
 
 /* QR hand-off modal — scan to upload from a phone (feedback FB-6, web). */

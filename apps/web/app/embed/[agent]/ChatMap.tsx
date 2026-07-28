@@ -38,7 +38,7 @@ function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: num
 }
 
 let mapboxLoader: Promise<any> | null = null;
-function loadMapbox(): Promise<any> {
+export function loadMapbox(): Promise<any> {
   const w = window as unknown as { mapboxgl?: unknown };
   if (w.mapboxgl) return Promise.resolve(w.mapboxgl);
   if (mapboxLoader) return mapboxLoader;
