@@ -81,7 +81,8 @@ function miniAgent(): AgentDefinition {
     },
     integrations: {} as AgentDefinition["integrations"],
     activeEnvironment: "production",
-  } as AgentDefinition;
+    // Test double: only the fields the dispatched tools read are populated.
+  } as unknown as AgentDefinition;
 }
 function stateFor(agent: AgentDefinition, data: Record<string, unknown>, opts: Partial<CaseState> = {}): CaseState {
   return {
