@@ -301,6 +301,19 @@ export async function executeOperation(
     const stored = spec.authType === "bearer" || spec.authType === "uaepass_test" ? spec.authValue : null;
     const identity = spec.authType === "uaepass_live" ? opts.identityToken : undefined;
     const bearer = runtimeToken ?? stored ?? identity ?? null;
+    /**
+     * WHICH credential we sent — this decides what a 401 means. Rejecting the
+     * customer's own UAE PASS session (which is short-lived) genuinely calls for
+     * signing in again; rejecting a service token says nothing about the customer
+     * and must never bounce them through sign-in.
+     */
+    const bearerSource: "session" | "service" | "identity" | "none" = runtimeToken
+      ? "session"
+      : stored
+        ? "service"
+        : identity
+          ? "identity"
+          : "none";
 
     // No session at all. A customer who IS already verified must never be told to
     // sign in again — that is a backend-availability problem, not an identity one.
@@ -312,11 +325,21 @@ export async function executeOperation(
           : "Start the sign-in (one-time passcode) flow to obtain a session, ") +
         "or offer a callback. Do not invent a result.";
 
+    // A gateway/app API key is a credential in its own right: the Emirates Post
+    // guest endpoints (Rental/FreeBoxes, Guest/Renewal/Details and /Pricing)
+    // authorise on X-API-KEY alone even though the swagger marks them secured. So
+    // an operation is only pre-blocked when we hold NO credential at all.
+    // Without this, removing the UAE PASS identity token from the bearer chain
+    // silently blocked those reads before they were even attempted — they had
+    // been passing the pre-gate only because that token happened to fill the
+    // bearer slot, never because the backend wanted it.
+    const hasGatewayKey = Boolean(spec.apiKey);
+
     // Pre-gate ONLY operations the spec explicitly marks as secured (and only when
-    // we have no session and it isn't itself a login op). Guest/public endpoints —
-    // and specs that declare no security at all — are NOT blocked here; the backend
-    // decides via a 401/403, which we translate gracefully below.
-    if (tokenAuth && !bearer && op.requiresAuth && !isAuthOperation(op)) {
+    // we have no credential at all and it isn't itself a login op). Guest/public
+    // endpoints — and specs that declare no security at all — are NOT blocked here;
+    // the backend decides via a 401/403, which we translate gracefully below.
+    if (tokenAuth && !bearer && !hasGatewayKey && op.requiresAuth && !isAuthOperation(op)) {
       return { result: signInMsg, isError: true };
     }
 
@@ -382,13 +405,29 @@ export async function executeOperation(
     // of a raw 401/403 (the backend is the source of truth for what needs a session).
     if ((res.status === 401 || res.status === 403) && tokenAuth && !isAuthOperation(op)) {
       if (!bearer) return { result: signInMsg, isError: true };
+      // What was rejected decides the remedy (FB-1485).
+      if (bearerSource === "identity") {
+        // The customer's own UAE PASS session was refused — these are short-lived,
+        // so it has most likely expired mid-conversation. Re-authenticating IS the
+        // fix here, so offering it is correct rather than a dead end.
+        return {
+          result:
+            "The customer's UAE PASS session was rejected by the backend — it has most likely EXPIRED (these sessions are short-lived). Explain in one short sentence that their sign-in needs refreshing, ask them to sign in with UAE PASS again to continue, and keep everything already collected. Do not start a one-time-passcode flow and do not invent a result.",
+          isError: true,
+        };
+      }
+      if (bearerSource === "session") {
+        return {
+          result:
+            "The backend session obtained earlier in this conversation was rejected (expired or invalid). Re-run the sign-in (one-time passcode) flow to obtain a fresh session, or offer a callback. Do not invent a result.",
+          isError: true,
+        };
+      }
+      // A service/app credential was refused. The customer's sign-in is irrelevant,
+      // so never bounce them through sign-in — that reads as being logged out.
       return {
-        result: opts.customerAuthenticated
-          ? // FB-1485: the customer is verified; this endpoint simply is not
-            // authorised for the credentials this deployment holds. Never bounce
-            // them back through sign-in — that reads as being logged out.
-            "This backend endpoint rejected the request's credentials. The customer's own sign-in is FINE: do NOT ask them to sign in again, do NOT say their session expired, and do NOT start a passcode flow. Say plainly that this particular detail is not available from the system at the moment, carry on with everything you can complete without it, and offer a callback only if it genuinely blocks them."
-          : "The customer's session was rejected (expired or invalid). Ask them to sign in again (one-time passcode) or offer a callback. Do not invent a result.",
+        result:
+          "This backend endpoint rejected the integration's own service credentials. The customer's sign-in is NOT the problem: do NOT ask them to sign in again, do NOT say their session expired, and do NOT start a passcode flow. Say plainly that this particular detail is not available from the system at the moment, carry on with everything you can complete without it, and offer a callback only if it genuinely blocks them.",
         isError: true,
       };
     }

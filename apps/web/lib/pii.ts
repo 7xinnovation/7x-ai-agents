@@ -15,14 +15,20 @@
 
 const norm = (key: string) => key.replace(/[_\s-]/g, "").toLowerCase();
 
-// Person-name keys, always masked. A bare "name" is NOT here — it's usually a
-// product/bundle/branch label; it is masked only via the sibling heuristic below.
+// Person-name keys, always masked — each one is unambiguously about a person.
 const NAME_KEYS = new Set([
   "customername", "customerfullname", "holdername", "boxholdername", "ownername",
   "applicantname", "contactname", "personname", "displayname", "fullname",
-  "firstname", "lastname", "middlename", "arabicname", "englishname",
-  "namear", "nameen", "customernamear", "customernameen",
+  "firstname", "lastname", "middlename",
+  "customernamear", "customernameen",
 ]);
+
+// Localised name keys that are only a PERSON's name in a person-shaped object.
+// Emirates Post uses exactly these for branch and bundle labels too (name_En,
+// nameAr on an office or a bundle), so masking them unconditionally turned
+// "Dubai Central Post Office" into "D**** C****** P*** *****e" for every guest
+// and left the agent describing branches it could not read.
+const CONTEXTUAL_NAME_KEYS = new Set(["namear", "nameen", "arabicname", "englishname"]);
 const EMAIL_KEYS = new Set(["email", "emailaddress", "emailid", "customeremail"]);
 const NUMBER_KEYS = new Set([
   "mobile", "mobileno", "mobilenumber", "phone", "phoneno", "phonenumber",
@@ -71,7 +77,12 @@ function redactString(normKey: string, value: string, personContext: boolean): s
   if (EMAIL_KEYS.has(normKey)) return maskEmail(value);
   if (NUMBER_KEYS.has(normKey)) return maskDigits(value);
   if (DROP_KEYS.has(normKey)) return "***";
-  if (NAME_KEYS.has(normKey) || (personContext && (normKey === "name" || normKey === "title"))) return maskName(value);
+  if (NAME_KEYS.has(normKey)) return maskName(value);
+  // A localised or bare name is only masked inside a person-shaped object, so
+  // branch/bundle/product labels survive intact for a guest.
+  if (personContext && (CONTEXTUAL_NAME_KEYS.has(normKey) || normKey === "name" || normKey === "title")) {
+    return maskName(value);
+  }
   return value;
 }
 

@@ -162,6 +162,26 @@ async function main() {
     check("FB-1485 authenticated + no session → no re-sign-in ask", r2.result.includes("do NOT ask them to sign in again"));
     const r3 = await executeOperation(bare, op, {}, undefined, { customerAuthenticated: false });
     check("FB-1485 guest + no session → sign-in guidance kept", r3.result.includes("needs the customer to be signed in"));
+
+    // An integration that declares uaepass_live DOES use the customer's UAE PASS
+    // token as its bearer — the arrangement Emirates Post actually runs on. This
+    // is what regressed when identity tokens were removed from every chain: the
+    // op then had no bearer at all and was refused before it was even attempted.
+    const liveSpec: EnvSpec = {
+      specUrl: "", baseUrl: "http://127.0.0.1:9", authType: "uaepass_live",
+      authValue: null, authHeader: null, apiKey: "gateway-key", operations: [],
+    };
+    const live = await executeOperation(liveSpec, op, {}, undefined, { identityToken: "uaepass-identity", customerAuthenticated: true });
+    check("FB-1485 uaepass_live sends the identity token as bearer", !live.result.includes("needs the customer to be signed in"), live.result.slice(0, 90));
+
+    // A gateway API key is a credential: an op the spec marks secured must not be
+    // refused before it is attempted when one is configured.
+    const keyOnly: EnvSpec = { ...liveSpec, apiKey: "gateway-key" };
+    const attempted = await executeOperation(keyOnly, op, {}, undefined, { customerAuthenticated: false });
+    check("FB-1485 gateway API key counts as a credential (not pre-blocked)", !attempted.result.includes("no active session is available yet"), attempted.result.slice(0, 90));
+    const noCreds: EnvSpec = { ...liveSpec, apiKey: null };
+    const blocked = await executeOperation(noCreds, op, {}, undefined, { customerAuthenticated: false });
+    check("FB-1485 no credential at all is still pre-blocked", blocked.result.includes("no active session is available yet"));
   }
 
   // ── FB-1323: the holder name reaches the model masked, in the asked shape ──
@@ -172,6 +192,20 @@ async function main() {
     check("FB-1323 no bullet characters leak through", !redactGuestPII(body).includes("•"));
     check("FB-1323 email masked", red.payload.email === "m***@e***");
     check("FB-1323 mobile keeps only the last 3 digits", red.payload.mobile === "*******567", red.payload.mobile);
+
+    // Branch and bundle labels are NOT people. Emirates Post returns them under
+    // nameEn/name_Ar, so masking those unconditionally left the agent reading
+    // "D**** C****** P*** *****e" instead of "Dubai Central Post Office".
+    const branch = JSON.parse(
+      redactGuestPII(JSON.stringify({ payload: [{ officeId: "201", nameEn: "Dubai Central Post Office", nameAr: "مكتب بريد دبي المركزي", gpsLat: "25.2" }] }))
+    );
+    check("branch names survive guest redaction", branch.payload[0].nameEn === "Dubai Central Post Office", branch.payload[0].nameEn);
+    const bundle = JSON.parse(redactGuestPII(JSON.stringify({ payload: [{ bundle_Id: "IN", name_En: "MyBox", bundle_Price: "300" }] })));
+    check("bundle names survive guest redaction", bundle.payload[0].name_En === "MyBox", bundle.payload[0].name_En);
+    // ...but a localised name on a PERSON-shaped object is still masked.
+    // "Mohammed Ali" → first word keeps its first letter, last word its last one.
+    const person = JSON.parse(redactGuestPII(JSON.stringify({ customer: { nameEn: "Mohammed Ali", email: "m@x.com" } })));
+    check("a person's localised name is still masked", person.customer.nameEn === "M******* **i", person.customer.nameEn);
   }
 
   // ── FB-1508: KB import reads text, and refuses what it cannot read ──
