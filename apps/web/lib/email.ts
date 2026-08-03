@@ -34,11 +34,21 @@ export function emailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY || process.env.EMAIL_WEBHOOK_URL);
 }
 
+/** Where email would be sent from, for diagnostics. */
+export function emailSender(): string {
+  return process.env.EMAIL_FROM || process.env.NOTIFICATION_FROM_EMAIL || "Dialog <onboarding@resend.dev>";
+}
+
 export async function sendEmail(input: EmailInput): Promise<EmailResult> {
   const to = input.to.trim();
   if (!isValidEmail(to)) return { ok: false, reason: `invalid_recipient:${to}` };
 
-  const from = process.env.EMAIL_FROM || "Dialog <onboarding@resend.dev>";
+  // EMAIL_FROM is the canonical name; NOTIFICATION_FROM_EMAIL is accepted as an
+  // alias so either spelling works in the deployment environment. The fallback is
+  // Resend's sandbox sender, which can ONLY deliver to the Resend account owner —
+  // so a real verified sending domain must be configured for customer email.
+  const from =
+    process.env.EMAIL_FROM || process.env.NOTIFICATION_FROM_EMAIL || "Dialog <onboarding@resend.dev>";
 
   try {
     if (process.env.RESEND_API_KEY) {
