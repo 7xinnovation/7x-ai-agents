@@ -4,7 +4,7 @@ import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
-import { simulateNxnMockOp } from "./mockPersona";
+import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 
 export type EnvKey = "staging" | "production";
 
@@ -108,6 +108,38 @@ export async function deleteEnvironment(agentId: string, id: string, env: EnvKey
 const prefix = (name: string) => name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 14).toLowerCase() || "api";
 
 /**
+ * Did a box-availability response actually carry any box numbers? Used to decide
+ * whether the staging test set is needed — so a working upstream response (even a
+ * shape we do not fully parse) always wins over the fallback.
+ */
+function hasBoxNumbers(result: string): boolean {
+  const body = result.slice(result.indexOf("\n") + 1);
+  if (!/^HTTP 2/.test(result)) return false;
+  try {
+    const json = JSON.parse(body);
+    let found = false;
+    const walk = (v: unknown, depth: number) => {
+      if (found || depth > 5 || v === null) return;
+      if (Array.isArray(v)) {
+        // A non-empty array of box-shaped entries (or bare numbers) counts.
+        if (v.length && v.some((x) => typeof x === "string" || typeof x === "number" || (x && typeof x === "object"))) found = true;
+        for (const x of v) walk(x, depth + 1);
+        return;
+      }
+      if (typeof v === "object") for (const x of Object.values(v as Record<string, unknown>)) walk(x, depth + 1);
+    };
+    // Only look under keys that would hold the list, so an error envelope with a
+    // populated "errors" array is not mistaken for availability.
+    for (const [k, v] of Object.entries(json as Record<string, unknown>)) {
+      if (/^(payload|data|result|freeboxes|availableboxnumbers|boxes)$/i.test(k)) walk(v, 0);
+    }
+    return found;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Login/token operations are callable WITHOUT an existing session — they are how
  * a session is obtained (e.g. UAE PASS-independent OTP: passwordLessToken →
  * verifyPasswordLessToken). Everything else is "protected" and needs a session.
@@ -196,6 +228,9 @@ export async function buildApiTools(
   // when the model forgets to emit the ```map block (which it does often).
   let lastBranchQuery: { emirate: string; bundle: string } | null = null;
   const asStr = (v: unknown) => (v === undefined || v === null ? "" : String(v).trim());
+  // How many times each branch's box list has been asked for this turn, so a
+  // "Refresh" pages further into the staging test set instead of repeating.
+  const freeBoxPages = new Map<string, number>();
 
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
@@ -237,6 +272,40 @@ export async function buildApiTools(
       const body = res.result.slice(res.result.indexOf("\n") + 1);
       const tok = extractSessionToken(body);
       if (tok) captured = tok;
+    }
+
+    // STAGING ONLY — reserved test box numbers.
+    // Emirates Post staging cannot serve box availability (Rental/FreeBoxes needs a
+    // live EP session, and there is no inventory behind it), so every rental journey
+    // stopped at the box-number step. When the real call cannot produce numbers, fall
+    // back to a deterministic reserved set so the journey can be tested end to end.
+    // Gated on the agent's activeEnvironment, so it disappears on its own the moment
+    // an agent is switched to production.
+    if (activeEnv === "staging" && /freeboxes/i.test(toolName) && !hasBoxNumbers(res.result)) {
+      const inp = (input ?? {}) as Record<string, unknown>;
+      const bundleId = asStr(inp.BundleId ?? inp.bundleId ?? inp.bundle_Id);
+      const locationId = asStr(inp.LocationId ?? inp.locationId ?? inp.OfficeId ?? inp.officeId);
+      // Each repeat call for the same branch pages further in, so "Refresh" shows a
+      // genuinely different set rather than the same numbers again.
+      const key = `${bundleId}|${locationId}`;
+      const page = freeBoxPages.get(key) ?? 0;
+      freeBoxPages.set(key, page + 1);
+      const boxes = stagingTestBoxNumbers(bundleId, locationId, page);
+      return {
+        result:
+          `HTTP 200 OK\n${JSON.stringify({
+            success: true,
+            stagingTestData: true,
+            count: boxes.length,
+            availableBoxNumbers: boxes,
+            freeBoxes: boxes.map((b) => ({ boxNumber: b, available: true })),
+          })}\n\nNOTE FOR THE ASSISTANT: Emirates Post staging does not publish live box availability, so these are ` +
+          `RESERVED TEST box numbers for this staging environment. Present them as the available box numbers for the ` +
+          `chosen branch and let the customer pick one so the journey can continue; "Refresh" returns a different set. ` +
+          `They are real, selectable choices for testing purposes — do not describe them as confirmed live inventory, ` +
+          `and if the customer asks whether these are live numbers, say plainly that this is a test environment.`,
+        isError: false,
+      };
     }
     return res;
   };

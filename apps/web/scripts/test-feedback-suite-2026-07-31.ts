@@ -9,13 +9,16 @@
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
+import { readFileSync } from "node:fs";
+const here = dirname(fileURLToPath(import.meta.url));
+config({ path: resolve(here, "../../../.env") });
 
 import type { AgentDefinition, CaseState } from "@dialog/config";
 import { emptyCase } from "@dialog/config";
 import { dispatchTool, registerMockAdapters, resolveAdapters, transcribeDocumentToText } from "@dialog/core";
 import { executeOperation, type EnvSpec } from "../lib/integrations";
 import { redactGuestPII } from "../lib/pii";
+import { stagingTestBoxNumbers } from "../lib/mockPersona";
 import type { ApiOperation } from "../lib/openapi";
 
 const results: [string, boolean, string?][] = [];
@@ -206,6 +209,39 @@ async function main() {
     // "Mohammed Ali" → first word keeps its first letter, last word its last one.
     const person = JSON.parse(redactGuestPII(JSON.stringify({ customer: { nameEn: "Mohammed Ali", email: "m@x.com" } })));
     check("a person's localised name is still masked", person.customer.nameEn === "M******* **i", person.customer.nameEn);
+  }
+
+  // ── Staging test boxes: Emirates Post staging serves no availability ──
+  {
+    const a = stagingTestBoxNumbers("MYHOME3", "201", 0);
+    const again = stagingTestBoxNumbers("MYHOME3", "201", 0);
+    check("staging boxes: 10 numbers per page", a.length === 10, String(a.length));
+    check("staging boxes: same branch always offers the same set", a.join() === again.join());
+    check("staging boxes: all numeric", a.every((b) => /^\d{4,6}$/.test(b)), a.join(","));
+    check("staging boxes: no duplicates within a page", new Set(a).size === a.length);
+
+    const page2 = stagingTestBoxNumbers("MYHOME3", "201", 1);
+    check("staging boxes: Refresh returns a different set", page2.join() !== a.join());
+    const otherBranch = stagingTestBoxNumbers("MYHOME3", "202", 0);
+    check("staging boxes: a different branch offers different numbers", otherBranch.join() !== a.join());
+    const otherBundle = stagingTestBoxNumbers("IN", "201", 0);
+    check("staging boxes: a different bundle offers different numbers", otherBundle.join() !== a.join());
+
+    // The fallback is gated on the agent's activeEnvironment, so switching an agent
+    // to production removes it with no code change. Guard that the gate is intact.
+    const integrations = readFileSync(resolve(here, "../lib/integrations.ts"), "utf8");
+    check(
+      "staging boxes: gated on activeEnv === staging",
+      /activeEnv === "staging" && \/freeboxes\/i\.test\(toolName\)/.test(integrations)
+    );
+    check(
+      "staging boxes: only used when the real call produced none",
+      integrations.includes("!hasBoxNumbers(res.result)")
+    );
+    check(
+      "staging boxes: labelled as test data for the assistant",
+      integrations.includes("stagingTestData") && integrations.includes("RESERVED TEST box numbers")
+    );
   }
 
   // ── FB-1508: KB import reads text, and refuses what it cannot read ──

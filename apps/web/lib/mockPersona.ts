@@ -92,6 +92,32 @@ function seededBoxNumbers(seed: string, n: number): string[] {
   return Array.from({ length: n }, (_, i) => String(base + i * 13 + (i % 5)));
 }
 
+/**
+ * Reserved PO Box numbers for STAGING testing.
+ *
+ * Emirates Post staging has no real box availability to offer: Rental/FreeBoxes
+ * needs a live EP session we do not hold, and there is no inventory behind it
+ * anyway. Without something to select, every rental journey stops at the box-number
+ * step and cannot be tested end to end.
+ *
+ * These numbers are deterministic per branch + bundle, so the same branch always
+ * offers the same boxes (a tester can re-run a scenario and get the same result),
+ * and `page` walks further into the list so "Refresh" shows a different set.
+ *
+ * Staging only — the caller gates this on the agent's activeEnvironment, so it
+ * disappears by itself when an agent is switched to production.
+ */
+export function stagingTestBoxNumbers(
+  bundleId: string,
+  locationId: string,
+  page = 0,
+  count = 10
+): string[] {
+  const all = seededBoxNumbers(`staging|${bundleId}|${locationId}`, count * 6);
+  const start = (page * count) % Math.max(all.length - count, 1);
+  return all.slice(start, start + count);
+}
+
 /** Simulate a mock EP response for the ops that can't hit the real API; null = not simulated. */
 export function simulateNxnMockOp(
   toolName: string,
