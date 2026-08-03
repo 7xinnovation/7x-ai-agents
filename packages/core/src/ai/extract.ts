@@ -217,3 +217,73 @@ export async function extractFieldsFromDocument(input: {
     return { values: {}, note: e instanceof Error ? e.message : "extraction_failed" };
   }
 }
+
+/** File extensions the KB importer can turn into text (FB-1508). */
+export const KB_IMPORT_EXTENSIONS = ["pdf", "txt", "md", "markdown", "png", "jpg", "jpeg", "webp"] as const;
+
+export interface TranscriptionResult {
+  text?: string;
+  error?: string;
+}
+
+/**
+ * Transcribe an uploaded document into plain text for knowledge-base ingest
+ * (FB-1508: admins need to import a document instead of pasting text).
+ *
+ * Plain text and markdown are decoded directly. PDFs and images go through the
+ * same Claude document/image blocks the field extractor uses, so scanned pages
+ * and Arabic content work without adding a PDF/OCR dependency. The model is told
+ * to TRANSCRIBE ONLY — never summarise or add anything — because whatever comes
+ * back becomes the grounding the agent cites to customers.
+ */
+export async function transcribeDocumentToText(input: {
+  fileName: string;
+  contentType: string;
+  bytes: Uint8Array;
+}): Promise<TranscriptionResult> {
+  const ext = (input.fileName.split(".").pop() ?? "").toLowerCase();
+  const isPdf = ext === "pdf" || input.contentType === "application/pdf";
+  const imageType = IMAGE_TYPES[ext] ?? (input.contentType.startsWith("image/") ? input.contentType : null);
+
+  if (ext === "txt" || ext === "md" || ext === "markdown" || input.contentType.startsWith("text/")) {
+    const text = Buffer.from(input.bytes).toString("utf8").trim();
+    return text ? { text } : { error: "empty_file" };
+  }
+  if (ext === "docx" || ext === "doc") {
+    return { error: "unsupported_word_document" };
+  }
+  if (!isPdf && !imageType) return { error: "unsupported_file_type" };
+
+  const b64 = Buffer.from(input.bytes).toString("base64");
+  const docBlock = isPdf
+    ? { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: b64 } }
+    : { type: "image" as const, source: { type: "base64" as const, media_type: imageType as string, data: b64 } };
+
+  const instruction =
+    "Transcribe this document into plain text for a knowledge base.\n" +
+    "Rules:\n" +
+    "- Output ONLY the text that is actually in the document. Never summarise, never add explanation, never invent a heading that is not there.\n" +
+    "- Preserve the document's own language and script (Arabic stays Arabic, English stays English). Do not translate.\n" +
+    "- Keep the reading order and the structure: headings on their own line, list items one per line, and a BLANK LINE between sections or paragraphs (each blank-line-separated block becomes one retrievable passage).\n" +
+    "- Render tables as readable lines of `label: value` pairs rather than ASCII art.\n" +
+    "- Skip page furniture (page numbers, repeated headers/footers, watermarks).\n" +
+    "- If the document contains no readable text, reply with exactly: NO_TEXT_FOUND";
+
+  try {
+    const client = getAnthropic();
+    const res = await client.messages.create({
+      model: fastModel(),
+      max_tokens: 8192,
+      messages: [{ role: "user", content: [docBlock as unknown as never, { type: "text", text: instruction }] }],
+    });
+    const text = res.content
+      .filter((c) => c.type === "text")
+      .map((c) => (c as { text: string }).text)
+      .join("")
+      .trim();
+    if (!text || /^NO_TEXT_FOUND$/im.test(text)) return { error: "no_text_found" };
+    return { text };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "transcription_failed" };
+  }
+}

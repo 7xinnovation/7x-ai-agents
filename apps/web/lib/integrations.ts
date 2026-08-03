@@ -138,14 +138,19 @@ export function extractSessionToken(body: string): string | null {
  * Build Claude tools + executor for the agent's ACTIVE environment. Each enabled
  * integration that has a spec for `activeEnv` contributes its operations.
  *
- * Session tokens (auth):
- *  - `uaePassToken`  : a live UAE PASS session forwarded by the embedding site.
- *  - `sessionToken`  : a token already obtained for THIS conversation (e.g. via the
- *                      OTP/passwordless flow on a previous turn), persisted on the
- *                      conversation.
- *  - captured at runtime: if a login op returns a token mid-turn, it is captured and
- *                      reused for subsequent protected calls; `getCapturedToken()`
- *                      lets the caller persist it for later turns.
+ * Session tokens (auth). These are NOT interchangeable (FB-1485):
+ *  - `sessionToken`  : a BACKEND session for THIS conversation (e.g. minted by the
+ *                      OTP/passwordless flow on a previous turn). Valid bearer for
+ *                      any token-auth integration.
+ *  - captured at runtime: if a login op returns a backend token mid-turn, it is
+ *                      captured and reused for subsequent protected calls;
+ *                      `getCapturedToken()` lets the caller persist it.
+ *  - `uaePassToken`  : a UAE PASS OIDC access token. It proves IDENTITY, it is not a
+ *                      backend API session, so it is only sent to integrations that
+ *                      declare authType "uaepass_live". Sending it to an integration
+ *                      holding its own service token (authType "uaepass_test") made
+ *                      every Emirates Post call 401 and the agent then asked an
+ *                      already-signed-in customer to sign in again.
  */
 export async function buildApiTools(
   agentId: string,
@@ -180,10 +185,11 @@ export async function buildApiTools(
     }
   }
 
-  // Runtime session token: a token captured this turn takes priority over one
-  // persisted from a previous turn, which takes priority over the UAE PASS passthrough.
+  // Runtime BACKEND session token: one captured this turn takes priority over one
+  // persisted from a previous turn. The UAE PASS identity token is deliberately NOT
+  // part of this chain — it is offered separately and only honoured by uaepass_live.
   let captured: string | null = null;
-  const runtimeToken = () => captured ?? opts.sessionToken ?? opts.uaePassToken ?? undefined;
+  const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
   // Remember the emirate + bundle of the most recent branch-locations lookup so
   // the route can deterministically render the "browse nearby branches" map even
@@ -218,8 +224,14 @@ export async function buildApiTools(
     // conversation isn't authenticated), backend responses are PII-redacted before
     // the model sees them — a guest proving knowledge of a box number must not
     // learn the holder's name, email, phone, or ID.
-    const identified = Boolean(opts.authenticated) || Boolean(runtimeToken());
-    const res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), { redactPII: !identified });
+    const identified = Boolean(opts.authenticated) || Boolean(runtimeToken()) || Boolean(opts.uaePassToken);
+    const res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), {
+      redactPII: !identified,
+      identityToken: opts.uaePassToken,
+      // Already-verified customer: a backend 401 must never be reported as "sign in
+      // again" (FB-1485) — their identity is fine, that backend session is not.
+      customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
+    });
     // Capture a freshly-minted session token from a login/token op for reuse.
     if (!res.isError && isAuthOperation(entry.op)) {
       const body = res.result.slice(res.result.indexOf("\n") + 1);
@@ -275,21 +287,30 @@ export async function executeOperation(
   op: ApiOperation,
   input: Record<string, unknown>,
   runtimeToken?: string,
-  opts: { redactPII?: boolean } = {}
+  opts: { redactPII?: boolean; identityToken?: string; customerAuthenticated?: boolean } = {}
 ): Promise<{ result: string; isError?: boolean }> {
   try {
     const tokenAuth = spec.authType === "bearer" || spec.authType === "uaepass_test" || spec.authType === "uaepass_live";
-    // Effective bearer: a runtime session (UAE PASS passthrough or OTP-minted token)
-    // wins; otherwise fall back to a stored token (bearer / uaepass_test).
+    // Effective bearer, in strict precedence (FB-1485):
+    //  1. a BACKEND session for this conversation (OTP-minted / captured this turn);
+    //  2. the integration's own stored service token (bearer / uaepass_test);
+    //  3. the UAE PASS identity token — ONLY for uaepass_live, which is the one
+    //     authType that documents the customer's UAE PASS session as its bearer.
+    // Sending a UAE PASS identity token to an integration that holds its own service
+    // token 401s the whole backend for signed-in customers.
     const stored = spec.authType === "bearer" || spec.authType === "uaepass_test" ? spec.authValue : null;
-    const bearer = runtimeToken ?? stored ?? null;
+    const identity = spec.authType === "uaepass_live" ? opts.identityToken : undefined;
+    const bearer = runtimeToken ?? stored ?? identity ?? null;
 
-    const signInMsg =
-      "This action needs the customer to be signed in, but no active session is available yet. " +
-      (spec.authType === "uaepass_live"
-        ? "Ask them to sign in with UAE PASS on the website, "
-        : "Start the sign-in (one-time passcode) flow to obtain a session, ") +
-      "or offer a callback. Do not invent a result.";
+    // No session at all. A customer who IS already verified must never be told to
+    // sign in again — that is a backend-availability problem, not an identity one.
+    const signInMsg = opts.customerAuthenticated
+      ? "This backend action could not be authorised: the customer is already signed in, so do NOT ask them to sign in again and do NOT start a passcode flow. Tell them this detail cannot be retrieved from the system right now, continue with whatever you can do without it, and offer a callback if it blocks them. Never invent a result."
+      : "This action needs the customer to be signed in, but no active session is available yet. " +
+        (spec.authType === "uaepass_live"
+          ? "Ask them to sign in with UAE PASS on the website, "
+          : "Start the sign-in (one-time passcode) flow to obtain a session, ") +
+        "or offer a callback. Do not invent a result.";
 
     // Pre-gate ONLY operations the spec explicitly marks as secured (and only when
     // we have no session and it isn't itself a login op). Guest/public endpoints —
@@ -360,10 +381,14 @@ export async function executeOperation(
     // Backend says auth is required/insufficient — translate to guidance instead
     // of a raw 401/403 (the backend is the source of truth for what needs a session).
     if ((res.status === 401 || res.status === 403) && tokenAuth && !isAuthOperation(op)) {
+      if (!bearer) return { result: signInMsg, isError: true };
       return {
-        result: bearer
-          ? "The customer's session was rejected (expired or invalid). Ask them to sign in again (one-time passcode) or offer a callback. Do not invent a result."
-          : signInMsg,
+        result: opts.customerAuthenticated
+          ? // FB-1485: the customer is verified; this endpoint simply is not
+            // authorised for the credentials this deployment holds. Never bounce
+            // them back through sign-in — that reads as being logged out.
+            "This backend endpoint rejected the request's credentials. The customer's own sign-in is FINE: do NOT ask them to sign in again, do NOT say their session expired, and do NOT start a passcode flow. Say plainly that this particular detail is not available from the system at the moment, carry on with everything you can complete without it, and offer a callback only if it genuinely blocks them."
+          : "The customer's session was rejected (expired or invalid). Ask them to sign in again (one-time passcode) or offer a callback. Do not invent a result.",
         isError: true,
       };
     }

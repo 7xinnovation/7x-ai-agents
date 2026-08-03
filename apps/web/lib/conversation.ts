@@ -8,8 +8,18 @@ export interface Session {
   caseId: string;
   state: CaseState;
   history: { role: "user" | "assistant"; content: string }[];
-  // Decrypted backend session token (e.g. OTP-minted) for this conversation, if any.
+  // Decrypted session token stored for this conversation, if any.
   sessionToken?: string;
+  /**
+   * Where that token came from. "backend" = a real backend session (e.g. minted by
+   * the OTP/passwordless flow) which may be used as the bearer for protected
+   * integration calls. "uaepass" = a UAE PASS OIDC access token, which proves
+   * IDENTITY only — it is NOT a backend API session, so it may only be used as a
+   * bearer by integrations that explicitly declare authType "uaepass_live"
+   * (FB-1485: using it everywhere made every Emirates Post call 401 for a
+   * signed-in customer, and the agent then asked them to sign in again).
+   */
+  sessionTokenKind?: "backend" | "uaepass";
   // Server-authoritative auth state for this conversation (sticky once signed in
   // via UAE PASS), used for journey gating instead of the client's claim.
   authenticated: boolean;
@@ -17,9 +27,34 @@ export interface Session {
   userRef?: string;
 }
 
-/** Persist an integration session token for a conversation (encrypted at rest). */
-export async function saveSessionToken(conversationId: string, token: string) {
-  await getDb().update(conversations).set({ sessionToken: encryptSecret(token) }).where(eq(conversations.id, conversationId));
+/**
+ * Marker prefix that records a stored token as a UAE PASS identity token rather
+ * than a backend API session. Kept inside the encrypted value so no schema change
+ * is needed; a value without the prefix is a backend session (legacy rows too).
+ */
+const UAEPASS_TOKEN_PREFIX = "uaepass:";
+
+/** Persist a session token for a conversation (encrypted at rest). */
+export async function saveSessionToken(
+  conversationId: string,
+  token: string,
+  kind: "backend" | "uaepass" = "backend"
+) {
+  const tagged = kind === "uaepass" ? `${UAEPASS_TOKEN_PREFIX}${token}` : token;
+  await getDb().update(conversations).set({ sessionToken: encryptSecret(tagged) }).where(eq(conversations.id, conversationId));
+}
+
+/** Split a stored token into its provenance + the raw token. */
+function readSessionToken(stored: string | null | undefined): {
+  token?: string;
+  kind?: "backend" | "uaepass";
+} {
+  const plain = decryptSecret(stored);
+  if (!plain) return {};
+  if (plain.startsWith(UAEPASS_TOKEN_PREFIX)) {
+    return { token: plain.slice(UAEPASS_TOKEN_PREFIX.length), kind: "uaepass" };
+  }
+  return { token: plain, kind: "backend" };
 }
 
 /** Mark a conversation as authenticated and record the external identity (e.g. UAE PASS sub). */
@@ -219,6 +254,7 @@ export async function getOrCreateSession(input: {
         .from(messages)
         .where(eq(messages.conversationId, conv.id))
         .orderBy(asc(messages.createdAt));
+      const stored = readSessionToken(conv.sessionToken);
       return {
         conversationId: conv.id,
         caseId: caseRow!.id,
@@ -226,7 +262,8 @@ export async function getOrCreateSession(input: {
         history: history
           .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-        sessionToken: decryptSecret(conv.sessionToken) ?? undefined,
+        sessionToken: stored.token,
+        sessionTokenKind: stored.kind,
         authenticated: effectiveAuth,
         userRef: input.userRef ?? conv.userRef ?? undefined,
       };

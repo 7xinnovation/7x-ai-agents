@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { AgentDefinition, CaseState } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
 import { adapterContext } from "../adapters/registry";
-import { setField, setDocument, setJourney, setPayment, findJourney } from "../case/engine";
+import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition } from "../case/engine";
 
 /** Tool schemas exposed to Claude. Generic across every agent/journey. */
 export const TOOL_DEFS: Anthropic.Tool[] = [
@@ -266,6 +266,18 @@ export async function dispatchTool(
     }
 
     case "request_authentication": {
+      // FB-1485: an already-authenticated customer must never be sent back through
+      // sign-in. Enforced here so a model slip (or a backend authorisation error it
+      // misreads as a session problem) cannot surface a sign-in prompt mid-journey.
+      if (ctx.authenticated) {
+        return {
+          result:
+            "IGNORE THIS CALL: the customer is already signed in and verified. Do not ask them to sign in, do not tell them their session expired, and do not surface a sign-in prompt. If a backend call failed, say that detail is unavailable right now and continue.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       events.push({ type: "auth_required", reason: String(input.reason ?? "") });
       return { result: "Authentication prompt surfaced to the user.", state, events };
     }
@@ -348,8 +360,15 @@ export async function dispatchTool(
       // Prefer the authoritative amount the model passes (from a backend pricing
       // tool); fall back to the journey's configured figure.
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
-      const amount = overrideAmount ?? sub.amount ?? 0;
+      const baseAmount = overrideAmount ?? sub.amount ?? 0;
       const currency = sub.currency ?? "AED";
+      // Conditional add-ons (FB-1430: the key-delivery courier fee must be part of
+      // the charged total, not a figure the model may forget). Declared on the
+      // journey and evaluated against the collected case data, so the fee is added
+      // deterministically whenever its condition holds.
+      const applicable = (sub.surcharges ?? []).filter((s) => evalCondition(s.when, state.data));
+      const surchargeTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
+      const amount = baseAmount + surchargeTotal;
       const actx = adapterContext(agent, agent.integrations.payment);
       const res = await adapters.payment.initiate(actx, {
         caseId: ctx.caseId,
@@ -357,6 +376,7 @@ export async function dispatchTool(
         currency,
         description: String(input.description ?? journey?.key ?? "service"),
         userRef: ctx.userRef,
+        locale: ctx.locale,
       });
       state = setPayment(state, {
         status: res.status,
@@ -367,8 +387,13 @@ export async function dispatchTool(
       });
       events.push({ type: "payment_initiated", reference: res.reference, link: res.link, amount, currency });
       events.push({ type: "case", state });
+      const breakdown = applicable.length
+        ? ` The total includes ${applicable
+            .map((s) => `${s.label.en} ${s.amount} ${currency}`)
+            .join(" + ")} on top of ${baseAmount} ${currency} — state this breakdown to the customer so no fee is a surprise.`
+        : "";
       return {
-        result: `Payment ${res.reference} initiated for ${amount} ${currency}. A secure "Pay now" card is now displayed to the customer inside the chat — do NOT paste any payment link or URL. Briefly tell them to complete the payment using the secure payment card shown below your message, then wait for payment confirmation before calling submit_case.`,
+        result: `Payment ${res.reference} initiated for ${amount} ${currency}.${breakdown} A secure "Pay now" card is now displayed to the customer inside the chat — do NOT paste any payment link or URL. Briefly tell them to complete the payment using the secure payment card shown below your message, then wait for payment confirmation before calling submit_case.`,
         state,
         events,
       };

@@ -1985,11 +1985,14 @@ body {
   color: var(--c-text-muted);
 }
 
-/* Inline action buttons (a ```buttons block) — e.g. "Proceed to payment". */
+/* Inline action buttons (a ```buttons block) — e.g. "Proceed to payment".
+   FB-1486: a short option set must sit on ONE line. Tight gap/padding plus
+   nowrap labels keep 2-3 options on a single row; `wrap` stays only as the
+   safety net for genuinely long sets so nothing ever overflows the bubble. */
 .dlg-chat-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   margin: 12px 0 4px;
   animation: dlg-in 0.35s var(--ease) both;
 }
@@ -1999,7 +2002,11 @@ body {
   font: inherit;
   font-size: 13.5px;
   font-weight: 600;
-  padding: 9px 16px;
+  padding: 8px 13px;
+  /* Never let a single label break across two lines inside its own pill. */
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
   border-radius: var(--r-pill);
   color: var(--c-text);
   background: var(--c-surface);

@@ -146,9 +146,15 @@ export async function POST(req: NextRequest) {
   // Dynamic tools from the agent's API integrations for the ACTIVE environment.
   // Auth precedence: live UAE PASS passthrough > this conversation's stored session
   // token (e.g. from a prior OTP login) > a freshly-minted token captured this turn.
+  // Two distinct kinds of token, never interchangeable (FB-1485): a backend session
+  // (OTP-minted for this conversation) is a bearer for protected ops; a UAE PASS
+  // identity token proves who the customer is and may only be sent to integrations
+  // that declare authType "uaepass_live".
+  const uaePassIdentityToken = session.sessionTokenKind === "uaepass" ? session.sessionToken : undefined;
+  const backendSessionToken = session.sessionTokenKind === "uaepass" ? undefined : session.sessionToken;
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
-    uaePassToken: body.uaePassToken,
-    sessionToken: session.sessionToken,
+    uaePassToken: body.uaePassToken ?? uaePassIdentityToken,
+    sessionToken: backendSessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
     authenticated: session.authenticated,
     // TEST-ONLY: in mock demo mode (server allows it + the embed was opened with
@@ -268,6 +274,14 @@ export async function POST(req: NextRequest) {
   };
 
   const encoder = new TextEncoder();
+  /**
+   * Best-effort work that must NOT hold the chat open (FB-1393/FB-1435: the chat
+   * kept showing "thinking" for seconds after the reply was complete, because the
+   * spinner only stops when this stream closes). Anything queued here is invisible
+   * to the customer and runs once the response has been delivered. Anything the
+   * NEXT turn depends on (the persisted message, the case state) stays inline.
+   */
+  const deferred: (() => Promise<void>)[] = [];
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
@@ -432,25 +446,32 @@ export async function POST(req: NextRequest) {
 
         // Back-office coordination (feedback FB-1391/FB-1392): key-delivery and
         // MyHome submissions notify the branch/EMX teams like the website flow.
+        // DEFERRED (FB-1393/FB-1435): sending these emails takes seconds, and the
+        // customer's chat stayed "thinking" for the whole time because the spinner
+        // only stops when this stream closes. Nothing here is customer-visible, so
+        // it runs after the response is finished.
         if (submittedRef) {
-          try {
-            const outcomes = await notifyOpsForSubmission({
-              reference: submittedRef,
-              journeyKey: finalState.journeyKey ?? "",
-              data: finalState.data,
-              agentName: agent.definition.name,
-            });
-            for (const o of outcomes) {
-              await audit({
-                ...a,
-                actor: "system",
-                action: o.result.ok ? "ops_notified" : "ops_notify_skipped",
-                payload: { kind: o.kind, to: o.to, trackingRef: o.trackingRef, reason: o.result.ok ? undefined : o.result.reason },
+          const ref = submittedRef;
+          deferred.push(async () => {
+            try {
+              const outcomes = await notifyOpsForSubmission({
+                reference: ref,
+                journeyKey: finalState.journeyKey ?? "",
+                data: finalState.data,
+                agentName: agent.definition.name,
               });
+              for (const o of outcomes) {
+                await audit({
+                  ...a,
+                  actor: "system",
+                  action: o.result.ok ? "ops_notified" : "ops_notify_skipped",
+                  payload: { kind: o.kind, to: o.to, trackingRef: o.trackingRef, reason: o.result.ok ? undefined : o.result.reason },
+                });
+              }
+            } catch (e) {
+              log.error("ops_notify_failed", e, { agentId: agent.id, reference: ref });
             }
-          } catch (e) {
-            log.error("ops_notify_failed", e, { agentId: agent.id, reference: submittedRef });
-          }
+          });
         }
 
         // Documents follow the submission into the system of record (feedback
@@ -458,43 +479,52 @@ export async function POST(req: NextRequest) {
         // uploaded document is pushed via the integration's uploadDocument
         // operation, linked to the license request id — mirroring how the
         // website attaches files to the case. Best-effort per file, audited.
+        // Also DEFERRED (FB-1393/FB-1435): each file is a base64 upload, so a
+        // multi-document submission held the chat open for seconds after the
+        // customer had already read the confirmation.
         const submitJourney = findJourney(agent.definition, finalState.journeyKey);
         const uploadDocTool = submitJourney?.submission?.apiFlow?.saveTool
           ? baseExtraTools.find((t) => /uploaddocument/i.test(t.name))?.name
           : undefined;
-        if (submittedRef && uploadDocTool && adapters.storage?.get && /^[a-zA-Z0-9]{15,18}$/.test(submittedRef)) {
+        const storageGet = adapters.storage?.get?.bind(adapters.storage);
+        if (submittedRef && uploadDocTool && storageGet && /^[a-zA-Z0-9]{15,18}$/.test(submittedRef)) {
+          const ref = submittedRef;
+          const tool = uploadDocTool;
+          const attachedDocs = finalState.documents.filter((d) => d.status === "uploaded" || d.status === "accepted");
           const sctx = adapterContext(agent.definition, agent.definition.integrations.storage);
-          for (const d of finalState.documents.filter((d) => d.status === "uploaded" || d.status === "accepted")) {
-            try {
-              const row = await getDb().query.documents.findFirst({
-                where: and(eq(documentsTable.caseId, session.caseId), eq(documentsTable.key, d.key)),
-                orderBy: [desc(documentsTable.createdAt)],
-              });
-              if (!row?.storageKey) continue;
-              const stored = await adapters.storage.get(sctx, { storageKey: row.storageKey });
-              if (!stored) {
-                await audit({ ...a, actor: "system", action: "sf_document_skipped", payload: { key: d.key, reason: "bytes_unavailable" } });
-                continue;
+          deferred.push(async () => {
+            for (const d of attachedDocs) {
+              try {
+                const row = await getDb().query.documents.findFirst({
+                  where: and(eq(documentsTable.caseId, session.caseId), eq(documentsTable.key, d.key)),
+                  orderBy: [desc(documentsTable.createdAt)],
+                });
+                if (!row?.storageKey) continue;
+                const stored = await storageGet(sctx, { storageKey: row.storageKey });
+                if (!stored) {
+                  await audit({ ...a, actor: "system", action: "sf_document_skipped", payload: { key: d.key, reason: "bytes_unavailable" } });
+                  continue;
+                }
+                const fileName = d.fileName || `${d.key}.pdf`;
+                const res = await execIntegration(tool, {
+                  body: {
+                    licenseRequestId: ref,
+                    fileName,
+                    fileType: (fileName.split(".").pop() ?? "pdf").toLowerCase(),
+                    versionData: Buffer.from(stored.bytes).toString("base64"),
+                  },
+                });
+                await audit({
+                  ...a,
+                  actor: "system",
+                  action: res.isError ? "sf_document_failed" : "sf_document_attached",
+                  payload: { key: d.key, fileName, reference: ref },
+                });
+              } catch (e) {
+                log.error("sf_document_push_failed", e, { agentId: agent.id, key: d.key, reference: ref });
               }
-              const fileName = d.fileName || `${d.key}.pdf`;
-              const res = await execIntegration(uploadDocTool, {
-                body: {
-                  licenseRequestId: submittedRef,
-                  fileName,
-                  fileType: (fileName.split(".").pop() ?? "pdf").toLowerCase(),
-                  versionData: Buffer.from(stored.bytes).toString("base64"),
-                },
-              });
-              await audit({
-                ...a,
-                actor: "system",
-                action: res.isError ? "sf_document_failed" : "sf_document_attached",
-                payload: { key: d.key, fileName, reference: submittedRef },
-              });
-            } catch (e) {
-              log.error("sf_document_push_failed", e, { agentId: agent.id, key: d.key, reference: submittedRef });
             }
-          }
+          });
         }
 
         const cust = (authenticated ? "authenticated" : "guest") as "authenticated" | "guest";
@@ -505,10 +535,14 @@ export async function POST(req: NextRequest) {
 
         await appendMessage(session.conversationId, "assistant", finalText);
         await saveCase(session.caseId, finalState);
-        // Persist a session token minted this turn (e.g. OTP login) for later turns.
+        // Persist a BACKEND session token minted this turn (e.g. OTP login) for later
+        // turns. Never overwrite a stored UAE PASS identity token with it: the two
+        // serve different integrations (uaepass_live needs the identity token), and
+        // one column holds one token — so identity wins and the captured token is
+        // used for this turn only.
         const captured = apiTools.getCapturedToken();
-        if (captured && captured !== session.sessionToken) {
-          await saveSessionToken(session.conversationId, captured);
+        if (captured && captured !== session.sessionToken && session.sessionTokenKind !== "uaepass") {
+          await saveSessionToken(session.conversationId, captured, "backend");
         }
       } catch (err) {
         log.error("chat_stream_failed", err, { agentId: agent.id, conversationId: session.conversationId });
@@ -517,6 +551,15 @@ export async function POST(req: NextRequest) {
         clearInterval(heartbeat);
         closed = true;
         controller.close();
+        // Now that the customer's turn is complete, drain the deferred work. Not
+        // awaited into the stream — failures are logged, never surfaced.
+        for (const job of deferred) {
+          try {
+            await job();
+          } catch (e) {
+            log.error("deferred_job_failed", e, { agentId: agent.id, conversationId: session.conversationId });
+          }
+        }
       }
     },
   });
