@@ -12,19 +12,41 @@ function sign(body: string): string {
 }
 
 /**
+ * Copy for the stand-in checkout, in both languages (FB-1445: an Arabic session
+ * must not be handed an English payment page). Locale arrives as ?lang= from the
+ * link the payment adapter builds.
+ */
+const PAY_STR = {
+  en: {
+    title: "Secure Payment", gateway: "Network International (mock gateway)", txn: "Transaction",
+    pay: "Pay now", cancel: "Cancel payment",
+    ok: "✓ Payment successful. Returning you to the chat…",
+    cancelled: "Payment cancelled. Returning you to the chat…",
+  },
+  ar: {
+    title: "دفع آمن", gateway: "نتورك إنترناشيونال (بوابة تجريبية)", txn: "رقم العملية",
+    pay: "ادفع الآن", cancel: "إلغاء الدفع",
+    ok: "✓ تم الدفع بنجاح. جارٍ إعادتك إلى المحادثة…",
+    cancelled: "تم إلغاء الدفع. جارٍ إعادتك إلى المحادثة…",
+  },
+} as const;
+
+/**
  * Mock payment gateway checkout page. Stands in for the Network International
  * hosted page: the customer "pays" and the page posts to our webhook (the real
  * gateway would call the webhook server-to-server).
  */
 export async function GET(req: NextRequest) {
   const ref = req.nextUrl.searchParams.get("ref") ?? "";
+  const locale: "en" | "ar" = req.nextUrl.searchParams.get("lang") === "ar" ? "ar" : "en";
+  const t = PAY_STR[locale];
   // Pre-compute the signed payloads server-side (the secret never reaches the page).
   const bodyPaid = JSON.stringify({ reference: ref, outcome: "paid" });
   const bodyFailed = JSON.stringify({ reference: ref, outcome: "failed" });
   const sigs = JSON.stringify({ paid: sign(bodyPaid), failed: sign(bodyFailed) });
   const bodies = JSON.stringify({ paid: bodyPaid, failed: bodyFailed });
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Secure Payment</title>
+  const html = `<!doctype html><html lang="${locale}" dir="${locale === "ar" ? "rtl" : "ltr"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${t.title}</title>
 <style>
   body{font-family:-apple-system,Segoe UI,system-ui,sans-serif;background:#f6f8fc;color:#0b1020;display:grid;place-items:center;min-height:100vh;margin:0}
   .card{background:#fff;border:1px solid #e7eaf3;border-radius:18px;padding:28px;max-width:380px;width:90%;box-shadow:0 16px 40px rgba(16,24,40,.08)}
@@ -36,10 +58,10 @@ export async function GET(req: NextRequest) {
   .done{display:none;text-align:center;color:#0f7a45;font-weight:600;margin-top:14px}
 </style></head><body>
 <div class="card">
-  <h1>Secure Payment</h1>
-  <p>Network International (mock gateway)<br>Transaction <code>${ref}</code></p>
-  <button class="pay" onclick="finish('paid')">Pay now</button>
-  <button class="cancel" onclick="finish('failed')">Cancel payment</button>
+  <h1>${t.title}</h1>
+  <p>${t.gateway}<br>${t.txn} <code>${ref}</code></p>
+  <button class="pay" onclick="finish('paid')">${t.pay}</button>
+  <button class="cancel" onclick="finish('failed')">${t.cancel}</button>
   <div class="done" id="done"></div>
 </div>
 <script>
@@ -50,7 +72,7 @@ async function finish(outcome){
   await fetch('/api/payments/webhook',{method:'POST',headers:headers,body:BODIES[outcome]});
   document.querySelectorAll('button').forEach(b=>b.style.display='none');
   var d=document.getElementById('done');d.style.display='block';
-  d.textContent = outcome==='paid' ? '✓ Payment successful. Returning you to the chat\\u2026' : 'Payment cancelled. Returning you to the chat\\u2026';
+  d.textContent = outcome==='paid' ? ${JSON.stringify(t.ok)} : ${JSON.stringify(t.cancelled)};
   // Opened as a popup from the chat — hand control back automatically.
   setTimeout(function(){ window.close(); }, 1400);
 }

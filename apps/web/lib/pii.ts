@@ -6,8 +6,11 @@
  * ID. An unauthenticated visitor only proves knowledge of a box number, so that
  * data must never reach the model (what the model doesn't see, it can't say).
  *
- * Values are masked, not dropped: "S••• S•••" still lets the agent say "the box
- * registered to S••• S•••" as a soft confirmation without disclosing identity.
+ * Values are masked, not dropped: a masked holder name still lets the agent say
+ * "the box registered to M*********** A**** *****B" as a soft confirmation without
+ * disclosing the identity (FB-1323 asked for exactly that pattern in the guest
+ * renewal flow: the first letter of the first name, the last letter of the last
+ * name, every other character starred, and the word lengths preserved).
  */
 
 const norm = (key: string) => key.replace(/[_\s-]/g, "").toLowerCase();
@@ -29,18 +32,32 @@ const NUMBER_KEYS = new Set([
 ]);
 const DROP_KEYS = new Set(["dateofbirth", "dob", "birthdate", "homeaddress", "addressline1", "addressline2"]);
 
-const maskName = (s: string) =>
-  s
-    .split(/\s+/)
-    .map((w) => (w ? `${w[0]}•••` : w))
+/**
+ * Mask a person's name to the shape the client asked for in FB-1323:
+ * "Mohammed Ali Alhabib" -> "M*********** A**** *****B". The first word keeps its
+ * leading letter, the last word keeps its trailing letter, and every word keeps its
+ * length so the customer can recognise their own name without it being disclosed.
+ * A single-word name keeps only its first letter.
+ */
+export const maskName = (s: string): string => {
+  const words = s.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return s;
+  return words
+    .map((w, i) => {
+      const stars = "*".repeat(Math.max(w.length - 1, 1));
+      if (words.length > 1 && i === words.length - 1) return `${stars}${w[w.length - 1]}`;
+      return `${w[0]}${stars}`;
+    })
     .join(" ");
+};
+// Asterisks throughout, matching the masking convention the client specified.
 const maskEmail = (s: string) => {
   const [local = "", domain = ""] = s.split("@");
-  return `${local[0] ?? ""}•••@${domain[0] ?? ""}•••`;
+  return `${local[0] ?? ""}***@${domain[0] ?? ""}***`;
 };
 const maskDigits = (s: string) => {
   const digits = s.replace(/\D/g, "");
-  return digits.length > 3 ? "•".repeat(digits.length - 3) + digits.slice(-3) : "•••";
+  return digits.length > 3 ? "*".repeat(digits.length - 3) + digits.slice(-3) : "***";
 };
 
 /** Does this object carry contact/identity fields (so its `name` is a person)? */
@@ -53,7 +70,7 @@ const looksLikePerson = (obj: Record<string, unknown>) =>
 function redactString(normKey: string, value: string, personContext: boolean): string {
   if (EMAIL_KEYS.has(normKey)) return maskEmail(value);
   if (NUMBER_KEYS.has(normKey)) return maskDigits(value);
-  if (DROP_KEYS.has(normKey)) return "•••";
+  if (DROP_KEYS.has(normKey)) return "***";
   if (NAME_KEYS.has(normKey) || (personContext && (normKey === "name" || normKey === "title"))) return maskName(value);
   return value;
 }

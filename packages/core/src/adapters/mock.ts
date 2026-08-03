@@ -120,7 +120,12 @@ const mockStorage: StorageAdapter = {
 const mockPayment: PaymentAdapter = {
   async initiate(_ctx, input) {
     const reference = ref("PAY");
-    return { reference, link: `/api/payments/mock-checkout?ref=${reference}&caseId=${input.caseId}`, status: "initiated" };
+    const lang = input.locale === "ar" ? "ar" : "en";
+    return {
+      reference,
+      link: `/api/payments/mock-checkout?ref=${reference}&caseId=${input.caseId}&lang=${lang}`,
+      status: "initiated",
+    };
   },
   async getStatus() {
     return { status: "initiated" };

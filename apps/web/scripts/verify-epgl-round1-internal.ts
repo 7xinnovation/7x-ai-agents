@@ -47,7 +47,8 @@ async function main() {
     ["FB-1450 declaration link", g("new_license").includes("(/declaration/epgl)") && g("renewal").includes("(/declaration/epgl)")],
     ["FB-1423 next-steps completion", g("new_license").includes("What happens next")],
     ["FB-1444 application-reference rule", g("new_license").includes("NEVER present a payment reference")],
-    ["FB-1439 global date-format rule", p.stable.includes("15 Aug 2026")],
+    // FB-1439 was re-opened on 2026-07-31: the format is now DD-MM-YYYY.
+    ["FB-1439 global date-format rule", p.stable.includes('"14-02-2027"')],
     ["FB-1424 FAQ KB (en+ar)", kb.filter((d) => /FAQ|الأسئلة الشائعة/.test(d.title)).length >= 2],
   ];
 

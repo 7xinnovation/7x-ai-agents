@@ -96,7 +96,15 @@ export interface NotificationAdapter {
 export interface PaymentAdapter {
   initiate(
     ctx: AdapterContext,
-    input: { caseId: string; amount: number; currency: string; description: string; userRef?: string }
+    input: {
+      caseId: string;
+      amount: number;
+      currency: string;
+      description: string;
+      userRef?: string;
+      /** Session language, so a hosted checkout page can be shown in it (FB-1445). */
+      locale?: string;
+    }
   ): Promise<{ reference: string; link?: string; status: "initiated" | "paid" }>;
   getStatus(ctx: AdapterContext, input: { reference: string }): Promise<{ status: "initiated" | "paid" | "failed" }>;
 }

@@ -146,6 +146,20 @@ const STR = {
 
 
 /**
+ * Render a captured value for the application panel. Dates are stored ISO
+ * (YYYY-MM-DD) but must always be SHOWN as DD-MM-YYYY (FB-1439), including any
+ * ISO timestamp the backend returned, so the panel never contradicts the chat.
+ */
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/;
+export function displayValue(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  const s = String(v);
+  const m = s.match(ISO_DATE_RE);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : s;
+}
+
+/**
  * QR hand-off (feedback FB-6, web): on a computer the customer scans this to open
  * the per-conversation mobile upload page on their phone; whatever they upload
  * there flows into the same case (the desktop polls the conversation and the
@@ -433,10 +447,13 @@ export function Experience({
     if (!editKey || !convId.current || editBusy) return;
     setEditBusy(true);
     try {
+      // Dates are shown and edited as DD-MM-YYYY (FB-1439) but stored ISO.
+      const dmy = editVal.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+      const value = dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : editVal;
       const res = await fetch("/api/case/field", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentSlug: agent.slug, conversationId: convId.current, key: editKey, value: editVal }),
+        body: JSON.stringify({ agentSlug: agent.slug, conversationId: convId.current, key: editKey, value }),
       });
       const json = await res.json();
       if (res.ok && json.case) {
@@ -996,12 +1013,14 @@ export function Experience({
               <span className="dlg-chip-tag">{locale === "ar" ? "EN" : "عربي"}</span>
             </button>
           ) : null}
+          {/* Once signed in this is a STATUS indicator, not a toggle (FB-1485): a
+              single tap used to flip the client back to guest while the server kept
+              the verified session, so the customer was told to sign in again
+              mid-conversation. Starting a new chat is how a session is dropped. */}
           <button
             className={`dlg-chip icon-only ${authenticated ? "is-on" : ""}`}
-            onClick={() => {
-              if (authenticated) { setAuthenticated(false); setAuthReason(null); }
-              else signIn();
-            }}
+            onClick={() => { if (!authenticated) signIn(); }}
+            aria-disabled={authenticated || undefined}
             aria-label={authenticated ? t.signedIn : t.signIn}
             title={authenticated ? t.signedIn : t.signIn}
           >
@@ -1221,13 +1240,13 @@ export function Experience({
                           </span>
                         ) : (
                           <span className="dlg-field-value">
-                            {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                            {displayValue(v)}
                             {editableKeys.has(k) ? (
                               // Pencil correction for extracted values (FB-1325).
                               <button
                                 type="button"
                                 className="dlg-field-pencil"
-                                onClick={() => { setEditKey(k); setEditVal(typeof v === "object" ? JSON.stringify(v) : String(v)); }}
+                                onClick={() => { setEditKey(k); setEditVal(displayValue(v)); }}
                                 aria-label={`Edit ${labelMap.get(k) ?? k}`}
                                 title={locale === "ar" ? "تعديل" : "Edit"}
                               >

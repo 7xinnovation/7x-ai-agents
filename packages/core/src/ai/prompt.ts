@@ -1,6 +1,6 @@
 import type { AgentDefinition, CaseState, Locale } from "@dialog/config";
 import { tr } from "@dialog/config";
-import { findJourney } from "../case/engine";
+import { findJourney, evalCondition } from "../case/engine";
 
 export interface SystemPrompt {
   /** Large, slow-changing prefix — marked cacheable so the up-to-6 tool rounds
@@ -101,7 +101,19 @@ ${journey.steps
         .map(
           (s) =>
             `  • ${s.key} (${tr(s.title, locale)})${s.requiresAuth ? " [auth]" : ""}\n` +
-            s.fields.map((f) => `      field ${f.key}: ${tr(f.label, locale)}${f.validation.required ? " *" : ""}`).join("\n") +
+            s.fields
+              .map(
+                (f) =>
+                  `      field ${f.key}: ${tr(f.label, locale)}${f.validation.required ? " *" : ""}` +
+                  // Enum choices are listed with their labels so the agent offers
+                  // exactly the configured options (and never invents one), and so
+                  // any fee carried on a label is disclosed with that choice
+                  // (FB-1430: the courier fee rides on the delivery option).
+                  (f.type === "enum" && f.options?.length
+                    ? ` — choices: ${f.options.map((o) => `${o.value} (${tr(o.label, locale)})`).join(", ")}`
+                    : "")
+              )
+              .join("\n") +
             (s.fields.length && s.documents.length ? "\n" : "") +
             s.documents.map((d) => `      document ${d.key}: ${tr(d.label, locale)} (${d.requirement})`).join("\n")
         )
@@ -122,7 +134,7 @@ ${journey.steps
   called the tool.
 - Formatting: simple markdown only (**bold** for key values, short "###" headings when a reply has sections, "-" bullets). NEVER use emojis or decorative symbols; keep a clean, professional, government-service tone. Express status in words ("Active", "Off"), not icons.
 - Punctuation: NEVER use an em-dash or en-dash ("—", "–"). Use a period, comma, colon, or parentheses instead. A plain hyphen is only for compound words and ranges. This keeps replies clean and human, not machine-generated.
-- Dates: whenever you SHOW a date to the customer (in prose, cards, or summaries), write it in one consistent, unambiguous format: "15 Aug 2026" in English, "15 أغسطس 2026" in Arabic. Never show raw ISO strings ("2026-08-15"), timestamps ("T00:00:00"), or numeric formats like 08/15/26 in customer-facing text. When RECORDING a date with collect_field, store the ISO form YYYY-MM-DD.
+- Dates: whenever you SHOW a date to the customer (in prose, cards, summaries, or panel values), write it as DAY-MONTH-YEAR with two-digit day and month and a four-digit year, separated by hyphens: "14-02-2027". Use that exact format in BOTH English and Arabic. Never show a raw ISO string ("2027-02-14"), a timestamp ("T00:00:00"), a month name ("14 Feb 2027"), or a month-first format ("02/14/2027"). When RECORDING a date with collect_field, store the ISO form YYYY-MM-DD.
 - Presenting choices: whenever you show PRODUCTS or OPTIONS the customer picks from (bundles, packages, add-ons, branches, available box numbers, durations, plans), render them as CARDS, never as a markdown table. Emit a fenced \`\`\`cards block, one \`- \` item per option, with \`key: value\` lines. Recognised keys: title, price, desc, badge (plus any extra label: value attributes). Example:
 \`\`\`cards
 - title: MyHome
@@ -161,7 +173,13 @@ total: AED 695.00
 - Emails and messages: NEVER tell the customer an email, SMS, or notification was sent unless a tool call actually sent it in this conversation and returned success. If sending failed or no sending tool is available, say so plainly and offer the alternative (e.g. a download link). If the customer says an email did not arrive, offer to resend it (call the sending tool again) — never insist it was sent.
 
 # Authentication
-The user is currently ${authenticated ? "AUTHENTICATED" : "a GUEST"}.
+The user is currently ${authenticated ? "AUTHENTICATED" : "a GUEST"}.${authenticated ? `
+This customer is ALREADY SIGNED IN. Never ask them to sign in again, never say their
+session expired or was disconnected, never call request_authentication, and never
+start a one-time-passcode flow. If a backend tool returns an authorisation error,
+that is a problem with that system's credentials, not with the customer: say the
+detail is unavailable right now, continue with everything you can do without it, and
+offer a callback only if it truly blocks them.` : ""}
 Only intents/journeys explicitly marked "(requires sign-in)" below need an
 authenticated user. For those, if a guest attempts one, briefly explain why and
 call request_authentication. Everything else — guest-allowed actions like
@@ -209,6 +227,24 @@ Rules:
 - NEVER say an upload field, slot, or button "appears", "is below", or "is available" without emitting the block in that same reply — without the block the customer sees nothing to click.
 - If a document was rejected (see its rejectionReason), explain why in one sentence and re-emit that document's upload block.` : ""}`;
 
+  // Conditional add-on fees declared on the journey (FB-1430). Every one is listed
+  // with the choice that triggers it, so the fee is on screen BEFORE the customer
+  // picks that option — and the ones already triggered are called out for the
+  // pre-payment summary. request_payment adds them to the charged total itself.
+  const surcharges = journey?.submission?.surcharges ?? [];
+  const surchargeBlock = surcharges.length
+    ? `\n- ADD-ON FEES you must disclose UP FRONT: ${surcharges
+        .map((s) => `${tr(s.label, locale)} = ${s.amount} ${journey?.submission?.currency ?? "AED"} (applies when ${s.when})`)
+        .join("; ")}. Show the fee ON the option itself when you present that choice — never reveal it only at payment. ${
+        surcharges.filter((s) => evalCondition(s.when, state.data)).length
+          ? `Currently applicable: ${surcharges
+              .filter((s) => evalCondition(s.when, state.data))
+              .map((s) => `${tr(s.label, locale)} (${s.amount})`)
+              .join(", ")} — include these as their own line(s) in the pre-payment summary; the payment total already contains them.`
+          : "None apply yet based on the customer's choices."
+      }`
+    : "";
+
   const volatile = `# This turn
 - Session language: ${locale === "ar" ? "ARABIC" : "ENGLISH"}. Every part of this reply — prose, card/button/toggle/summary labels — must be in this language.${intent ? `
 - Classified intent: "${intent.intent}" (confidence ${intent.confidence.toFixed(2)}).` : ""}${suggestedJourney ? `
@@ -217,7 +253,7 @@ ${journey?.submission?.apiFlow
       ? renderApiFlow(journey.submission.apiFlow)
       : journey?.submission?.requiresPayment
         ? `- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment — a secure payment card appears in the chat automatically, so never paste a link; WAIT for confirmation. Only call submit_case once payment status is "paid".`
-        : "- The active journey (if any) has no payment step."}${customerContext ? `
+        : "- The active journey (if any) has no payment step."}${surchargeBlock}${customerContext ? `
 
 # Known customer record (server-verified, from previous signed-in sessions)
 ${customerContext}` : ""}

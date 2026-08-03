@@ -51,6 +51,26 @@ export const Journey = z.object({
       // this is the conversational summary figure / fallback only).
       amount: z.number().optional(),
       currency: z.string().default("AED"),
+      /**
+       * Conditional add-on charges (e.g. a courier fee when the customer chooses key
+       * delivery instead of branch collection). Declarative so the fee is disclosed
+       * and charged deterministically rather than depending on the model remembering
+       * it (FB-1430: the delivery fee was only revealed at payment). `when` uses the
+       * same tiny expression grammar as document conditions, evaluated against the
+       * collected case data; a surcharge whose condition holds is added to the
+       * payment total by request_payment and named in its result so the agent can
+       * state it in the pre-payment summary.
+       */
+      surcharges: z
+        .array(
+          z.object({
+            key: z.string(),
+            label: LocalizedString,
+            amount: z.number(),
+            when: z.string(),
+          })
+        )
+        .default([]),
       // When present, the journey is completed END-TO-END through connected API
       // integration tools (authoritative pricing, order creation on the real
       // payment gateway, and payment confirmation) instead of the internal mock

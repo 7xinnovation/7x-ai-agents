@@ -72,13 +72,15 @@ export async function GET(req: NextRequest) {
       }
     }
     if (cid) {
-      // The token becomes the bearer for protected backend calls. In mock mode the
-      // "token" is a synthetic placeholder that no real backend (e.g. Emirates Post)
-      // would accept — saving it would only clobber the integration's stored service
-      // token and force a 401. So skip it: the mock persona stays authenticated for
-      // journey gating, and protected API calls fall back to the integration's own
-      // stored credentials.
-      if (!isMock) await saveSessionToken(cid, id.accessToken);
+      // Stored as an IDENTITY token (kind "uaepass"), not a backend API session:
+      // only integrations that declare authType "uaepass_live" may use it as their
+      // bearer. Anything else keeps using its own stored service credentials —
+      // FB-1485: a UAE PASS access token sent to Emirates Post 401s, and the agent
+      // then told an already-signed-in customer to sign in again.
+      // In mock mode the "token" is a synthetic placeholder no backend would
+      // accept, so it is not stored at all; the mock persona stays authenticated
+      // for journey gating.
+      if (!isMock) await saveSessionToken(cid, id.accessToken, "uaepass");
       await markAuthenticated(cid, id.sub);
     }
     return back({ uaepass: "ok" }, cid);
