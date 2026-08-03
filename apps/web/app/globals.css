@@ -539,16 +539,28 @@ body {
     0 0 0 1px color-mix(in srgb, var(--c-primary) 45%, transparent),
     0 8px 20px -14px color-mix(in srgb, var(--c-primary) 40%, rgba(16, 24, 40, 0.2));
 }
+/* Title + optional badge. The badge must be allowed to DROP TO ITS OWN LINE:
+   with a wide badge ("MOST AFFORDABLE") in a narrow grid column there is not
+   enough room for both, and the title was being squeezed to nothing. */
 .dlg-card-opt-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .dlg-card-opt-title {
   font-size: 14px;
   font-weight: 640;
   letter-spacing: -0.012em;
   color: var(--c-text);
+  /* The bubble sets word-break: break-word, which a card title must not inherit:
+     it lets a word break mid-character, which also collapses the flex item's
+     min-content width to a single letter — that is how "MyBox" rendered as one
+     character per line. `break-word` here (not `anywhere`) keeps the minimum at
+     the longest word, so the title always claims its width and the badge wraps
+     instead. */
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 .dlg-card-opt-badge {
   margin-inline-start: auto;
@@ -556,6 +568,7 @@ body {
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
+  max-width: 100%;
   font-size: 9.5px;
   font-weight: 650;
   text-transform: uppercase;
