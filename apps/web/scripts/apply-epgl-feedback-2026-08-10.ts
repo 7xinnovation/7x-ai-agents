@@ -153,11 +153,29 @@ interface Step { key: string; fields: Field[]; [k: string]: unknown }
 interface Journey { key: string; guidance?: string; steps: Step[]; [k: string]: unknown }
 interface Definition { persona: string; journeys: Journey[]; uploadsPerMessage?: number; [k: string]: unknown }
 
-/** Replace an existing marked block (re-run) or append a fresh one. */
+/**
+ * Replace an existing marked block (re-run) or append a fresh one.
+ *
+ * Only OUR block is removed, never the tail: other scripts append their own
+ * marker-guarded guidance to these journeys, and truncating at our marker would
+ * silently delete anything that landed after it. Our block is the marker line
+ * plus the `- ` bullets under it, so it ends at the first following line that is
+ * neither blank nor a bullet.
+ */
 function withBlock(guidance: string): string {
   const idx = guidance.indexOf(MARKER);
-  const base = (idx === -1 ? guidance : guidance.slice(0, idx)).trimEnd();
-  return `${base}\n\n${BLOCK}`;
+  if (idx === -1) return `${guidance.trimEnd()}\n\n${BLOCK}`;
+
+  const after = guidance.slice(idx + MARKER.length).split("\n");
+  let end = 0; // lines of ours to drop, past the marker line itself
+  for (let i = 1; i < after.length; i++) {
+    const line = after[i]!;
+    if (line.trim() === "" || line.startsWith("- ")) { end = i; continue; }
+    break;
+  }
+  const base = guidance.slice(0, idx).trimEnd();
+  const tail = after.slice(end + 1).join("\n").trim();
+  return [`${base}\n\n${BLOCK}`, tail].filter(Boolean).join("\n\n");
 }
 
 async function main() {
