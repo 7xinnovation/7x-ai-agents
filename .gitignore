@@ -11,3 +11,6 @@ out
 coverage
 packages/eval/report.json
 .dev-server.log
+
+# Production DB dumps — contain encrypted integration secrets; never commit.
+backups/
