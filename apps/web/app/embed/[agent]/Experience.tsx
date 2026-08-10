@@ -432,12 +432,18 @@ export function Experience({
 
   // Inline correction of captured values (feedback FB-1325): text-like fields of
   // the ACTIVE journey get a pencil; consents/timestamps stay locked.
+  // FB-1566: a journey may narrow this to the fields it marks `editable` — the
+  // customer's own contact details — leaving document-sourced values read-only.
+  // Journeys that mark nothing keep the original every-text-field behaviour.
   const editableKeys = useMemo(() => {
     const set = new Set<string>();
     const j = agent.journeys.find((x) => x.key === caseState?.journeyKey);
-    for (const s of j?.steps ?? [])
-      for (const f of s.fields)
-        if (f.type !== "boolean" && !/(_consent|_accepted|_acknowledged)(_at)?$/.test(f.key)) set.add(f.key);
+    const fields = (j?.steps ?? []).flatMap((s) => s.fields);
+    const curated = fields.some((f) => f.editable !== undefined);
+    for (const f of fields) {
+      if (f.type === "boolean" || /(_consent|_accepted|_acknowledged)(_at)?$/.test(f.key)) continue;
+      if (curated ? f.editable === true : true) set.add(f.key);
+    }
     return set;
   }, [agent, caseState?.journeyKey]);
   const [editKey, setEditKey] = useState<string | null>(null);
@@ -587,6 +593,7 @@ export function Experience({
       statuses,
       uploadingKey,
       pendingDocs: pendingDocKeys,
+      maxUploads: agent.uploadsPerMessage,
       onUpload: uploadDoc,
       onQr: openQrHandoff,
       strings: {

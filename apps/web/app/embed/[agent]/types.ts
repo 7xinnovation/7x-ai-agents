@@ -5,6 +5,10 @@ export interface PublicField {
   label: LocalizedString;
   required: boolean;
   type?: string;
+  // Whether the customer may correct this value from the case panel (FB-1566).
+  // Undefined on every field of a journey means "not curated" — the panel then
+  // falls back to making all text-like fields editable, as it always did.
+  editable?: boolean;
 }
 export interface PublicDocument {
   key: string;
@@ -37,6 +41,8 @@ export interface PublicAgent {
   documentsDisclaimer?: LocalizedString;
   // Uploads happen inline in the chat (panel Documents section suppressed).
   documentsInChat?: boolean;
+  // Cap on upload controls shown per assistant message (FB-1565).
+  uploadsPerMessage?: number;
   journeys: PublicJourney[];
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;

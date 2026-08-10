@@ -71,6 +71,18 @@ export const AgentDefinition = z.object({
   // case panel's Documents section is suppressed. When false (default) uploads
   // live in the right-side panel. Feedback: keep the upload in the chat.
   documentsInChat: z.boolean().default(false),
+  /**
+   * Hard cap on how many in-chat upload controls one assistant message may show
+   * (FB-1565: the next step must be a single, unambiguous ask). The prompt has
+   * always told the agent to request one document at a time, but at the opening
+   * turn it reliably attaches the whole preparation list's uploads at once, so
+   * the customer is handed several boxes before being asked for any of them.
+   * Prose alone did not hold; this enforces it at render time.
+   *
+   * Unset = no cap, which is what agents that legitimately pair blocks need
+   * (NXN emits Emirates ID front AND back in one reply by design).
+   */
+  uploadsPerMessage: z.number().int().positive().optional(),
   intents: z.array(Intent).default([]),
   journeys: z.array(Journey).default([]),
   guardrails: Guardrails.default({}),

@@ -28,13 +28,14 @@ export default async function EmbedPage({
     theme: d.theme,
     documentsDisclaimer: d.documentsDisclaimer,
     documentsInChat: d.documentsInChat,
+    uploadsPerMessage: d.uploadsPerMessage,
     journeys: d.journeys.map((j) => ({
       key: j.key,
       title: j.title,
       steps: j.steps.map((s) => ({
         key: s.key,
         title: s.title,
-        fields: s.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, required: f.validation.required })),
+        fields: s.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, required: f.validation.required, editable: f.editable })),
         documents: s.documents.map((doc) => ({
           key: doc.key,
           label: doc.label,

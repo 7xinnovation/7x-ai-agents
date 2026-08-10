@@ -13,6 +13,9 @@ export const runtime = "nodejs";
  *  - only fields declared on the ACTIVE journey can be edited;
  *  - consents/acknowledgments and their server-stamped timestamps cannot be
  *    edited here (they must go through the checkbox flow);
+ *  - where the journey curates editability (FB-1566), only fields marked
+ *    `editable: true` — the customer's own contact details — can be changed;
+ *    values read off an official document stay as the document stated them;
  *  - the same field validation as collect_field applies.
  */
 const Body = z.object({
@@ -35,9 +38,13 @@ export async function POST(req: NextRequest) {
   if (!caseRow) return NextResponse.json({ error: "conversation_not_found" }, { status: 404 });
 
   const journey = findJourney(agent.definition, caseRow.state.journeyKey);
-  const field = journey?.steps.flatMap((s) => s.fields).find((f) => f.key === key);
+  const journeyFields = journey?.steps.flatMap((s) => s.fields) ?? [];
+  const field = journeyFields.find((f) => f.key === key);
   if (!field) return NextResponse.json({ error: "unknown_field" }, { status: 400 });
-  if (PROTECTED_KEY.test(key) || field.type === "boolean") {
+  // A journey that marks editability anywhere opts into the curated allowlist;
+  // one that marks it nowhere keeps every text-like field editable.
+  const curated = journeyFields.some((f) => f.editable !== undefined);
+  if (PROTECTED_KEY.test(key) || field.type === "boolean" || (curated && field.editable !== true)) {
     return NextResponse.json({ error: "field_not_editable" }, { status: 400 });
   }
 

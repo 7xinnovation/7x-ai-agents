@@ -51,6 +51,20 @@ export const FieldDef: z.ZodType<FieldDefShape, z.ZodTypeDef, unknown> = z.lazy(
     // Whether this field came pre-filled from a system of record (renewal:
     // "do not ask for data EPGL already holds").
     prefillFrom: z.string().optional(),
+    /**
+     * Whether the customer may correct this value themselves from the case panel
+     * (FB-1566: "the only editable changes should be the client's preferred
+     * contact details"). Values read off an official document are the document's
+     * to state — letting the applicant retype them silently diverges the
+     * application from its evidence.
+     *
+     * Opt-in per journey: if ANY field of a journey sets this, only the fields
+     * that set it true get a pencil. A journey that declares it nowhere keeps the
+     * original behaviour (every text-like field editable), so agents that have
+     * not been curated are unaffected. Enforced server-side in
+     * `apps/web/app/api/case/field/route.ts`, not just hidden in the UI.
+     */
+    editable: z.boolean().optional(),
   })
 );
 
@@ -63,5 +77,6 @@ export interface FieldDefShape {
   validation: z.infer<typeof ValidationRule>;
   children?: FieldDefShape[];
   prefillFrom?: string;
+  editable?: boolean;
 }
 export type FieldDef = FieldDefShape;

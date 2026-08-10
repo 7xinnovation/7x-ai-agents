@@ -25,6 +25,9 @@ export interface UploadCtx {
   // rendering NOTHING (feedback FB-1425: "AI says upload slots appeared but no
   // upload fields display"), the pending documents' widgets render instead.
   pendingDocs?: string[];
+  // Cap on upload controls rendered per assistant message (FB-1565). Undefined
+  // = no cap, for agents that pair blocks deliberately (EID front + back).
+  maxUploads?: number;
   onUpload: (key: string, file: File) => void;
   onQr: () => void;
   strings: {
@@ -397,6 +400,8 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   // sometimes re-emits the same sentence across a tool round (they arrive as two
   // identical paragraphs), which reads as a stutter.
   let lastPara = "";
+  // Upload controls already rendered for THIS message (see uploadCtx.maxUploads).
+  let uploadsShown = 0;
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
@@ -419,6 +424,11 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         // nothing once the message is complete (FB-1425).
         if (uploadCtx) {
           for (const dkey of resolveUploadKeys(body, uploadCtx)) {
+            // FB-1565: one ask at a time. An agent that declares a per-message
+            // cap shows at most that many upload controls, however many blocks
+            // the model emitted; the extra documents are requested next turn.
+            if (uploadCtx.maxUploads !== undefined && uploadsShown >= uploadCtx.maxUploads) break;
+            uploadsShown++;
             nodes.push(<ChatUpload key={k++} dkey={dkey} ctx={uploadCtx} />);
           }
         }
@@ -428,7 +438,15 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
       if (isLocate) {
         // Optional `label: <cta text>` line; confirms send the pinned location.
         const labelLine = body.map((l) => l.match(/^\s*label\s*:\s*(.+?)\s*$/i)).find(Boolean);
-        if (onSelect) nodes.push(<ChatLocate key={k++} label={labelLine ? labelLine[1] : undefined} onSelect={onSelect} />);
+        if (onSelect)
+          nodes.push(
+            <ChatLocate
+              key={k++}
+              label={labelLine ? labelLine[1] : undefined}
+              locale={uploadCtx?.locale}
+              onSelect={onSelect}
+            />
+          );
         continue;
       }
       if (isButtons) {

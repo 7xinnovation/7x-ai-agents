@@ -23,6 +23,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ age
     theme: d.theme,
     documentsDisclaimer: d.documentsDisclaimer,
     documentsInChat: d.documentsInChat,
+    uploadsPerMessage: d.uploadsPerMessage,
     intents: d.intents.map((i) => ({ key: i.key, description: i.description })),
     journeys: d.journeys.map((j) => ({
       key: j.key,
@@ -31,7 +32,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ age
       steps: j.steps.map((s) => ({
         key: s.key,
         title: s.title,
-        fields: s.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, required: f.validation.required })),
+        fields: s.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, required: f.validation.required, editable: f.editable })),
         documents: s.documents.map((doc) => ({
           key: doc.key,
           label: doc.label,

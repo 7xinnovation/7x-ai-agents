@@ -49,5 +49,38 @@ for (const [name, text, expects] of cases) {
   console.log(` ${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  (missing: ${missing.join(", ")})`}`);
   if (!ok) fail++;
 }
-console.log(fail ? `\n${fail}/${cases.length} FAILED` : `\nAll ${cases.length} render checks passed.`);
+
+// FB-1565: an agent declaring uploadsPerMessage shows at most that many upload
+// controls per message, however many blocks the model emitted. Counted rather
+// than string-matched, and checked against the uncapped default so the cap is
+// shown to be what makes the difference.
+const TWO_BLOCKS = "```upload\nkey: trade_license\n```\n\nand also\n\n```upload\nkey: agent_eid_front\n```";
+// Count widget ROOTS — the widget's inner elements share the class prefix.
+const countWidgets = (html: string) => (html.match(/class="dlg-chat-upload"/g) ?? []).length;
+const capped = { ...(ctx as object), maxUploads: 1 } as unknown as UploadCtx;
+const extra: [string, number, number][] = [
+  ["no cap → both upload blocks render", countWidgets(render(TWO_BLOCKS)), 2],
+  [
+    "uploadsPerMessage=1 → only the first renders",
+    countWidgets(renderToStaticMarkup(<Markdown text={TWO_BLOCKS} onSelect={onSelect} uploadCtx={capped} />)),
+    1,
+  ],
+  [
+    "cap does not suppress a single block",
+    countWidgets(
+      renderToStaticMarkup(
+        <Markdown text={"```upload\nkey: trade_license\n```"} onSelect={onSelect} uploadCtx={capped} />
+      )
+    ),
+    1,
+  ],
+];
+for (const [name, got, want] of extra) {
+  const ok = got === want;
+  console.log(` ${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  (got ${got}, want ${want})`}`);
+  if (!ok) fail++;
+}
+
+const total = cases.length + extra.length;
+console.log(fail ? `\n${fail}/${total} FAILED` : `\nAll ${total} render checks passed.`);
 process.exit(fail ? 1 : 0);

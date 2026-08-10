@@ -2,6 +2,7 @@
 
 import React from "react";
 import { NavigationArrow, MapPin, ArrowClockwise, Warning, CheckCircle } from "@phosphor-icons/react";
+import type { Locale } from "@dialog/config";
 import { loadMapbox } from "./ChatMap";
 
 /**
@@ -12,10 +13,44 @@ import { loadMapbox } from "./ChatMap";
  * and on confirm sends the address + coordinates as the customer's reply. With
  * no Mapbox token or no geolocation it degrades to sharing raw coordinates, and
  * typing the address in chat always remains possible.
+ *
+ * FB-1567 (EPGL) asked for the applicant's physical address to be pinned on
+ * Google Maps. The picker itself stays Mapbox (one map library, one token), but
+ * the confirmed pin now carries a google.com/maps link so whoever reviews the
+ * application opens it in Google Maps. Its own chrome is localized, since the
+ * EPGL journeys run in Arabic as well as English (FB-1445).
  */
 const FALLBACK_CENTER = { lat: 25.2048, lng: 55.2708 }; // Dubai
 
-export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (text: string) => void }) {
+const LOC_STR = {
+  en: {
+    cta: "Pin the location on a map",
+    locating: "Getting your location…",
+    unavailable: "Location isn't available here — just type the address instead.",
+    shared: "Location shared",
+    adjust: "Drag the pin or tap the map to adjust",
+    use: "Use this location",
+    prefix: "Location",
+  },
+  ar: {
+    cta: "حدّد الموقع على الخريطة",
+    locating: "جارٍ تحديد موقعك…",
+    unavailable: "تحديد الموقع غير متاح هنا — يمكنك كتابة العنوان بدلاً من ذلك.",
+    shared: "تم مشاركة الموقع",
+    adjust: "اسحب المؤشر أو اضغط على الخريطة لضبط الموقع",
+    use: "استخدام هذا الموقع",
+    prefix: "الموقع",
+  },
+} as const;
+
+export function ChatLocate({
+  label, locale = "en", onSelect,
+}: {
+  label?: string;
+  locale?: Locale;
+  onSelect: (text: string) => void;
+}) {
+  const s = LOC_STR[locale === "ar" ? "ar" : "en"];
   const [phase, setPhase] = React.useState<"idle" | "loading" | "ready" | "sent" | "error">("idle");
   const [address, setAddress] = React.useState<string>("");
   const mapEl = React.useRef<HTMLDivElement | null>(null);
@@ -28,14 +63,14 @@ export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (tex
     if (!tokenRef.current) return;
     try {
       const r = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${p.lng},${p.lat}.json?access_token=${encodeURIComponent(tokenRef.current)}&limit=1&language=en`
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${p.lng},${p.lat}.json?access_token=${encodeURIComponent(tokenRef.current)}&limit=1&language=${locale === "ar" ? "ar" : "en"}`
       );
       const j = (await r.json()) as { features?: { place_name?: string }[] };
       setAddress(j.features?.[0]?.place_name ?? "");
     } catch {
       /* address stays empty — coordinates still work */
     }
-  }, []);
+  }, [locale]);
 
   const begin = async () => {
     if (phase !== "idle") return;
@@ -111,7 +146,14 @@ export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (tex
   const confirm = () => {
     const { lat, lng } = posRef.current;
     const coords = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    onSelect(address ? `Location: ${address} (${coords})` : `Location: ${coords}`);
+    // The Google Maps link goes with the reply so the pin is openable by whoever
+    // reviews the application, not just as bare coordinates (FB-1567).
+    const mapsUrl = `https://www.google.com/maps?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
+    onSelect(
+      address
+        ? `${s.prefix}: ${address} (${coords}) ${mapsUrl}`
+        : `${s.prefix}: ${coords} ${mapsUrl}`
+    );
     setPhase("sent");
   };
 
@@ -120,7 +162,7 @@ export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (tex
       <div className="dlg-map">
         <button type="button" className="dlg-map-cta" onClick={begin}>
           <NavigationArrow size={16} weight="fill" />
-          {label || "Pin the location on a map"}
+          {label || s.cta}
         </button>
       </div>
     );
@@ -130,7 +172,7 @@ export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (tex
       <div className="dlg-map">
         <div className="dlg-map-status">
           <ArrowClockwise size={15} weight="bold" className="spin" />
-          Getting your location…
+          {s.locating}
         </div>
       </div>
     );
@@ -140,7 +182,7 @@ export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (tex
       <div className="dlg-map">
         <div className="dlg-map-status is-error">
           <Warning size={15} weight="fill" />
-          Location isn&apos;t available here — just type the address instead.
+          {s.unavailable}
         </div>
       </div>
     );
@@ -150,7 +192,7 @@ export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (tex
       <div className="dlg-map">
         <div className="dlg-map-status">
           <CheckCircle size={15} weight="fill" />
-          Location shared{address ? `: ${address}` : ""}
+          {s.shared}{address ? `: ${address}` : ""}
         </div>
       </div>
     );
@@ -160,9 +202,9 @@ export function ChatLocate({ label, onSelect }: { label?: string; onSelect: (tex
       {mapboxRef.current ? <div ref={mapEl} className="dlg-map-canvas locate" /> : null}
       <div className="dlg-locate-row">
         <span className="dlg-map-pinicon"><MapPin size={15} weight="fill" /></span>
-        <span className="dlg-locate-addr">{address || "Drag the pin or tap the map to adjust"}</span>
+        <span className="dlg-locate-addr">{address || s.adjust}</span>
         <button type="button" className="dlg-locate-confirm" onClick={confirm}>
-          Use this location
+          {s.use}
         </button>
       </div>
     </div>
