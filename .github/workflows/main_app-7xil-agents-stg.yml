@@ -1,6 +1,17 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
+# Deploys apps/web (Next.js, npm workspaces monorepo) to Azure App Service.
+#
+# Rewritten from the portal-generated template, which deployed the repo but no
+# build output: it passed the whole tree between two jobs via
+# actions/upload-artifact@v4, and that action EXCLUDES DOTFILES by default — so
+# `.next` was silently dropped and App Service fell back to hostingstart.html.
+#
+# This builds and deploys in one job (no artifact hop, nothing to drop) and zips
+# explicitly. `.next/cache` is excluded: it is ~420 MB of local build cache and
+# has no business on the server — the actual build output is ~6 MB.
+#
+# NOTE: re-running "Deployment Center" in the Azure portal regenerates the
+# broken template over this file. If the site ever serves the Azure placeholder
+# again, check this workflow first.
 name: Build and deploy Node.js app to Azure Web App - app-7xil-agents-stg
 
 on:
@@ -10,46 +21,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js version
-        uses: actions/setup-node@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '24.x'
+          cache: 'npm'
 
-      - name: npm install, build, and test
-        run: |
-          npm install
-          npm run build --if-present
-          npm run test --if-present
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v4
-        with:
-          name: node-app
-          path: .
+      # The root script builds every workspace; apps/web is the deployable one.
+      - name: Build
+        run: npm run build --workspace apps/web
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: node-app
-      
-      - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
+      - name: Verify the build output exists
+        run: test -f apps/web/.next/BUILD_ID || (echo "::error::apps/web/.next was not produced" && exit 1)
+
+      # zip -r follows dotfiles, so .next travels; .git and the build cache do not.
+      - name: Package
+        run: zip -qry release.zip . -x '.git/*' 'apps/web/.next/cache/*'
+
+      - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: 'app-7xil-agents-stg'
           slot-name: 'Production'
-          package: .
+          package: release.zip
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_5DE762D0271D4835B16324A28E73C177 }}
