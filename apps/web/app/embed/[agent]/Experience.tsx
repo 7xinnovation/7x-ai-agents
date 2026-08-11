@@ -391,7 +391,7 @@ export function Experience({
   // One-shot flag: the in-chat payment card saw the webhook settle → have the
   // assistant confirm + continue as soon as no turn is streaming.
   const [paymentPulse, setPaymentPulse] = useState(false);
-  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [uploadingKeys, setUploadingKeys] = useState<Set<string>>(() => new Set());
   const [full] = useState(false);
   // Mobile (feedback FB-5): the case panel is a full-screen overlay toggled here.
   const [mobileCaseOpen, setMobileCaseOpen] = useState(false);
@@ -547,10 +547,17 @@ export function Experience({
   );
   const pendingDocCount = pendingDocKeys.length;
 
+  // Uploads may overlap: the customer picks the trade licence and, while the
+  // vision model is still reading it, picks the MOA. Both are legitimate, so
+  // both are tracked, and the case is only applied by whichever finishes LAST —
+  // an earlier response describes the case before the other document existed,
+  // and applying it after would make that document vanish from the panel.
+  const inflightUploads = useRef(0);
   const uploadDoc = useCallback(
     async (key: string, file: File) => {
       if (!convId.current) return;
-      setUploadingKey(key);
+      inflightUploads.current += 1;
+      setUploadingKeys((prev) => new Set(prev).add(key));
       try {
         const fd = new FormData();
         fd.append("agentSlug", agent.slug);
@@ -559,11 +566,18 @@ export function Experience({
         fd.append("file", file);
         const res = await fetch("/api/upload", { method: "POST", body: fd });
         const json = await res.json();
-        if (json.case) setCaseState(json.case);
+        inflightUploads.current -= 1;
+        // Still uploading something else? That request commits after this one
+        // and its response will carry both documents — let it do the update.
+        if (json.case && inflightUploads.current === 0) setCaseState(json.case);
       } catch {
-        /* ignore */
+        inflightUploads.current = Math.max(0, inflightUploads.current - 1);
       } finally {
-        setUploadingKey(null);
+        setUploadingKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
       }
     },
     [agent.slug]
@@ -591,7 +605,7 @@ export function Experience({
       locale,
       docs,
       statuses,
-      uploadingKey,
+      uploadingKeys,
       pendingDocs: pendingDocKeys,
       maxUploads: agent.uploadsPerMessage,
       onUpload: uploadDoc,
@@ -601,13 +615,13 @@ export function Experience({
         upTo: t.upTo, takePhoto: t.takePhoto, fromPhone: t.fromPhone, uploaded: t.uploaded,
       },
     };
-  }, [agent, caseState, locale, uploadingKey, pendingDocKeys, uploadDoc, openQrHandoff, t]);
+  }, [agent, caseState, locale, uploadingKeys, pendingDocKeys, uploadDoc, openQrHandoff, t]);
 
   // Live-sync: while documents are still pending (and nothing local is in
   // flight), poll the conversation so uploads made on a phone via the QR
   // hand-off appear in this panel without a manual refresh.
   useEffect(() => {
-    if (!convId.current || pendingDocCount === 0 || streaming || uploadingKey) return;
+    if (!convId.current || pendingDocCount === 0 || streaming || uploadingKeys.size) return;
     let alive = true;
     const id = window.setInterval(async () => {
       if (!convId.current) return;
@@ -624,7 +638,7 @@ export function Experience({
       alive = false;
       window.clearInterval(id);
     };
-  }, [pendingDocCount, streaming, uploadingKey]);
+  }, [pendingDocCount, streaming, uploadingKeys]);
 
   // Host site can push/refresh the UAE PASS session token at any time.
   useEffect(() => {
@@ -917,6 +931,7 @@ export function Experience({
   // is taken on first load so resuming a conversation with prior uploads never
   // triggers it.
   const uploadedBaseline = useRef<{ up: number; rej: number } | null>(null);
+  const pendingDocNotify = useRef(false);
   useEffect(() => {
     if (!resumed || !agent.documentsInChat) return;
     const docs = caseState?.documents ?? [];
@@ -928,7 +943,14 @@ export function Experience({
     }
     const grew = up > uploadedBaseline.current.up || rej > uploadedBaseline.current.rej;
     uploadedBaseline.current = { up, rej };
-    if (grew && !streaming) void send(undefined, { documentUploaded: true });
+    // A document that lands mid-turn must not be swallowed: dropping the
+    // notification is why a second upload could complete and still be asked for
+    // again. Remember it and fire once the current turn finishes.
+    if (grew) pendingDocNotify.current = true;
+    if (pendingDocNotify.current && !streaming) {
+      pendingDocNotify.current = false;
+      void send(undefined, { documentUploaded: true });
+    }
   }, [caseState, resumed, agent.documentsInChat, streaming, send]);
 
   // After sign-in, once the session has resumed, proactively run the account
@@ -1280,7 +1302,7 @@ export function Experience({
                     ) : null}
                     {docSlots.map((d) => {
                       const uploaded = d.status === "uploaded" || d.status === "accepted";
-                      const busy = uploadingKey === d.key;
+                      const busy = uploadingKeys.has(d.key);
                       return (
                         <div className="dlg-docslot" key={d.key}>
                           <div className="dlg-docslot-head">

@@ -16,7 +16,7 @@ const ctx = {
     agent_eid_front: { label: { en: "Agent EID (front)" }, requirement: "mandatory", acceptedFormats: ["jpg"], maxSizeMb: 10 },
   },
   statuses: {},
-  uploadingKey: null,
+  uploadingKeys: new Set<string>(),
   pendingDocs: ["trade_license"],
   onUpload: () => {},
   onQr: () => {},

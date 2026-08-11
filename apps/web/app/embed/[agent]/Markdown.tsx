@@ -19,7 +19,9 @@ export interface UploadCtx {
   locale: Locale;
   docs: Record<string, UploadDocMeta>;
   statuses: Record<string, { status: string; fileName?: string; rejectionReason?: string }>;
-  uploadingKey: string | null;
+  // Every upload currently in flight — overlapping uploads each show their
+  // own spinner instead of one clobbering the other.
+  uploadingKeys: Set<string>;
   // Active journey's documents still awaiting an upload (condition satisfied) —
   // the safety net when an ```upload block names no resolvable key: rather than
   // rendering NOTHING (feedback FB-1425: "AI says upload slots appeared but no
@@ -65,7 +67,7 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
   if (!doc) return null;
   const st = ctx.statuses[dkey];
   const uploaded = st?.status === "uploaded" || st?.status === "accepted";
-  const busy = ctx.uploadingKey === dkey;
+  const busy = ctx.uploadingKeys.has(dkey);
   const accept = doc.acceptedFormats.map((f) => "." + f).join(",");
   const t = ctx.strings;
   return (
