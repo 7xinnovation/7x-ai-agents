@@ -232,9 +232,21 @@ export async function buildApiTools(
   // "Refresh" pages further into the staging test set instead of repeating.
   const freeBoxPages = new Map<string, number>();
 
+  // The box's own expiry, learned from any renewal Details response this turn.
+  // Renewal pricing is only accepted on that box's ANNIVERSARY (see
+  // anniversaryExpiry) and the model kept substituting 31 December, so the date
+  // is corrected here rather than left to prompting.
+  let knownExpiry: { box: string; iso: string } | null = null;
+
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
+
+    // Renewal pricing: force the target expiry onto the box's own anniversary.
+    if (/renewal_pricing/i.test(toolName)) {
+      const corrected = correctPricingExpiry(input, knownExpiry);
+      if (corrected) input = corrected;
+    }
     // Read-only lookups are served from a short-lived cache. Profiling showed the
     // model re-fetching the same catalogue (bundles, branches) on consecutive
     // turns, and every repeat cost a whole model round (~3s) plus a call to a
@@ -323,11 +335,63 @@ export async function buildApiTools(
         isError: false,
       };
     }
+    // Remember the box's real expiry so a later pricing call can be put on its
+    // anniversary (the Details call always precedes pricing in this journey).
+    if (!res.isError && /renewal_details/i.test(toolName)) {
+      const iso = res.result.match(/"currentExpiryDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/)?.[1];
+      const box = res.result.match(/"boxNumber"\s*:\s*"?(\d+)/)?.[1];
+      if (iso) knownExpiry = { box: box ?? "", iso };
+    }
+
     if (cacheKey && !res.isError) writeCache(cacheKey, res);
     return res;
   };
 
   return { tools, exec, getCapturedToken: () => captured, getLastBranchQuery: () => lastBranchQuery };
+}
+
+/**
+ * Put a renewal's target expiry on the box's OWN anniversary.
+ *
+ * Emirates Post accepts a renewal price only for a date that is the box's
+ * current expiry with the same month and day, some whole number of years later,
+ * and strictly in the future. Verified on staging: a box expiring 27-12 prices
+ * on 27-12 and returns "SYSTEM ERROR ... 171" on 31-12; a past date is rejected
+ * too. Our guidance used to say "year-end", which happened to work only for the
+ * boxes that genuinely expire on 31 December and silently broke the rest.
+ *
+ * The correct date is arithmetic, not judgement, so it is computed here instead
+ * of being asked of the model: the YEAR the model chose is respected (that is
+ * the customer's chosen duration), while the month and day are taken from the
+ * box, and the result is advanced until it is in the future. Returns a new input
+ * object, or null when there is nothing to correct.
+ */
+export function correctPricingExpiry(
+  input: Record<string, unknown>,
+  known: { box: string; iso: string } | null,
+  today = new Date()
+): Record<string, unknown> | null {
+  if (!known) return null;
+  const body = (input?.body ?? input) as Record<string, unknown> | undefined;
+  if (!body || typeof body !== "object") return null;
+  const key = Object.keys(body).find((k) => k.toLowerCase() === "expirydate");
+  if (!key) return null;
+  const requested = String(body[key] ?? "");
+  const reqYear = Number(requested.slice(0, 4));
+  const [expYear, month, day] = known.iso.split("-").map(Number);
+  if (!reqYear || !expYear || !month || !day) return null;
+
+  // Keep the model's chosen year (the duration), take month/day from the box,
+  // then step forward whole years until the date is genuinely in the future.
+  let year = Math.max(reqYear, expYear);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const build = (y: number) => `${y}-${pad(month)}-${pad(day)}`;
+  while (new Date(`${build(year)}T00:00:00Z`).getTime() <= today.getTime()) year++;
+
+  const fixed = `${build(year)}T00:00:00`;
+  if (fixed === requested) return null;
+  const nextBody = { ...body, [key]: fixed };
+  return input?.body ? { ...input, body: nextBody } : nextBody;
 }
 
 /**
