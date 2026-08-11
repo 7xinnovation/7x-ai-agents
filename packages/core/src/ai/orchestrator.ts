@@ -78,8 +78,12 @@ export type OrchestratorEvent =
   | { type: "error"; message: string };
 
 const MAX_TOOL_ROUNDS = 6;
-const MAX_RETRIES = 2;
-const RETRY_BASE_MS = 400;
+// Retries live here rather than in the SDK (see the stream call below). Three
+// attempts with ~0.7s / 1.4s / 2.8s backoff rides out a brief throttle in a few
+// seconds; anything longer is a capacity problem that waiting cannot fix, and a
+// prompt failure beats a two-minute spinner.
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 700;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -170,6 +174,15 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
             system,
             tools: cachedTools,
             messages,
+          }, {
+            // The SDK's own retries are DISABLED here because they stack with the
+            // loop below: on a 429 the SDK honours Azure's retry-after (60s) up to
+            // maxRetries, and then this loop retries the whole round and does it
+            // all again. One throttled tool round could burn minutes with the
+            // customer watching a spinner (observed: a 42s gap between the tool
+            // results and the next token). Retrying is handled here instead, with
+            // a bounded backoff measured in seconds.
+            maxRetries: 0,
           });
           for await (const ev of stream) {
             if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
