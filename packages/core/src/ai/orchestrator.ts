@@ -87,6 +87,27 @@ const RETRY_BASE_MS = 700;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Total time a single turn may spend WAITING on retries. Chosen so a brief
+ * throttle recovers without the customer noticing much, while a sustained one
+ * fails fast: waiting cannot create capacity, and a two-minute spinner is worse
+ * than a prompt "we're busy".
+ */
+const RETRY_BUDGET_MS = 20_000;
+
+/**
+ * How long the provider asked us to wait, in ms, if it said so — either via the
+ * retry-after header or the message body (Azure phrases it as "Please wait N
+ * seconds before retrying"). Undefined when there is no usable hint.
+ */
+function retryAfterMs(err: unknown): number | undefined {
+  const e = err as { headers?: Record<string, string>; message?: string } | undefined;
+  const header = e?.headers?.["retry-after"];
+  if (header && /^\d+$/.test(header.trim())) return Number(header.trim()) * 1000;
+  const m = /wait\s+(\d+)\s+seconds?/i.exec(e?.message ?? "");
+  return m ? Number(m[1]) * 1000 : undefined;
+}
+
 /** Transient API failures worth retrying (overload, rate limit, gateway, network). */
 function isTransient(err: unknown): boolean {
   const e = err as { status?: number; name?: string } | undefined;
@@ -146,6 +167,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
   // round, the two text runs would otherwise concatenate with no break (e.g.
   // "…right away!To look up…"). Insert a paragraph separator before the next
   // round's first text so the segments read as distinct messages.
+  let retryBudgetMs = RETRY_BUDGET_MS;
   let pendingSeparator = false;
   // Emit at most one apiFlow submission per turn (a successful saveTool call).
   let submittedThisTurn = false;
@@ -196,9 +218,17 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           final = await stream.finalMessage();
           break;
         } catch (err) {
-          if (!textStarted && isTransient(err) && attempt < MAX_RETRIES) {
+          if (!textStarted && isTransient(err) && attempt < MAX_RETRIES && retryBudgetMs > 0) {
             attempt++;
-            await sleep(RETRY_BASE_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 120));
+            // A throttled provider tells us how long to wait; honour it when it
+            // is short rather than guessing, but never spend more than the
+            // budget in total — beyond that it is a capacity shortfall, and
+            // waiting only turns a fast error into a long silence.
+            const hinted = retryAfterMs(err);
+            const backoff = RETRY_BASE_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 120);
+            const wait = Math.min(hinted ?? backoff, retryBudgetMs);
+            retryBudgetMs -= wait;
+            await sleep(wait);
             continue;
           }
           throw err;

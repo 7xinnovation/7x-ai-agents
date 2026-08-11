@@ -84,6 +84,25 @@ function sse(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
+/**
+ * A short, honest message for the customer. Provider errors carry quota details
+ * and internal identifiers that mean nothing to an applicant and should never
+ * appear in a government-service chat.
+ */
+function customerFacingError(err: unknown, locale: "en" | "ar"): string {
+  const status = (err as { status?: number } | undefined)?.status;
+  const text = err instanceof Error ? err.message : "";
+  const busy = status === 429 || /rate limit|overloaded|529/i.test(text);
+  if (busy) {
+    return locale === "ar"
+      ? "الخدمة مشغولة حالياً. يرجى إعادة إرسال رسالتك بعد لحظات — لم يُفقد أي شيء من طلبك."
+      : "The service is busy right now. Please send your message again in a moment — nothing in your application was lost.";
+  }
+  return locale === "ar"
+    ? "حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى — لم يُفقد أي شيء من طلبك."
+    : "Something went wrong on our side. Please try again — nothing in your application was lost.";
+}
+
 // Render a signed-in EPGL customer's on-file company profile into a system-prompt
 // note (feedback FB-2/FB-3): account/company details + EID come from the Salesforce
 // customer profile; quarterly leviable-income figures come from IDEP/company data.
@@ -563,7 +582,11 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         log.error("chat_stream_failed", err, { agentId: agent.id, conversationId: session.conversationId });
-        send({ type: "error", message: err instanceof Error ? err.message : "stream_failed" });
+        // Never relay the provider's own text: a throttled model returned a raw
+        // 429 JSON blob ("Rate limit of 50000 per 60s exceeded for
+        // UserByModelByMinuteUncachedInputTokens…") straight into the chat.
+        // The full error is already logged above for us.
+        send({ type: "error", message: customerFacingError(err, body.locale) });
       } finally {
         clearInterval(heartbeat);
         // Already closed means the client cancelled — closing again throws and
