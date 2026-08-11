@@ -34,6 +34,13 @@ export const DOC_TYPES = [
   "emirates_id",
   "passport",
   "financial_statement",
+  // Renewal-round feedback: a Form 9 uploaded into the trade-licence slot was
+  // accepted, because the taxonomy had no name for it and the classifier had to
+  // force-fit an official-looking document to the nearest type. Naming these
+  // three is what lets the slot gate reject them.
+  "form_9",
+  "audited_financial_statement",
+  "acknowledgement_letter",
   "declaration",
   "business_card",
   "other",
@@ -49,6 +56,9 @@ export const DOC_TYPE_LABELS: Record<DocType, { en: string; ar: string }> = {
   emirates_id: { en: "Emirates ID card", ar: "بطاقة هوية إماراتية" },
   passport: { en: "Passport", ar: "جواز سفر" },
   financial_statement: { en: "Financial statement", ar: "بيان مالي" },
+  form_9: { en: "Form 9", ar: "النموذج 9" },
+  audited_financial_statement: { en: "Audited Financial Statements (AFS)", ar: "البيانات المالية المدققة" },
+  acknowledgement_letter: { en: "Acknowledgement letter", ar: "خطاب إقرار" },
   declaration: { en: "Declaration / undertaking form", ar: "نموذج إقرار وتعهد" },
   business_card: { en: "Business card", ar: "بطاقة أعمال" },
   other: { en: "Unrecognised document", ar: "مستند غير معروف" },
@@ -134,6 +144,12 @@ export async function extractFieldsFromDocument(input: {
     "You are examining an uploaded document for a UAE government service application.\n" +
     (input.expected ? `The customer was ASKED to upload: "${input.expected.label}". First classify what this file actually is — do NOT assume it is what was requested.\n` : "") +
     "Step 1 — CLASSIFY: decide what this document IS from the fixed list in the field \"" + DOC_TYPE_KEY + "\" below. If it is none of those (a random photo, letter, invoice…), use \"other\". A business card is \"business_card\", never a license.\n" +
+    "  Tell these apart carefully — they are commonly confused and must NEVER be classified as a trade license:\n" +
+    "  • \"form_9\" — a Form 9 / Form No. 9 return or declaration of postal revenue submitted to the regulator. It reports revenue figures per period. It is NOT a license of any kind.\n" +
+    "  • \"audited_financial_statement\" — audited financial statements / AFS, an auditor's report or signed balance sheet and income statement for a financial year.\n" +
+    "  • \"acknowledgement_letter\" — a letter acknowledging receipt or completion (e.g. of an audit or submission), usually on letterhead and signed.\n" +
+    "  • \"financial_statement\" — an unaudited statement or a plain quarterly trial balance.\n" +
+    "  A trade or postal LICENSE grants the right to operate and carries a license number, issuing authority and expiry date. If the document reports figures or acknowledges a submission rather than granting a right to operate, it is NOT a license — classify it as one of the four above.\n" +
     "Step 2 — EXTRACT: return ONLY the fields whose values are VISIBLY PRINTED on this document. Extract these fields (key: description):\n" +
     fieldList +
     "\n\nRules:\n" +

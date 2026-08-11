@@ -26,9 +26,52 @@ function acceptedDocTypes(key: string, label: string): DocType[] | null {
   const k = `${key} ${label}`.toLowerCase();
   if (/emirates.?id|eid|هوية/.test(k)) return ["emirates_id"];
   if (/moa|memorandum|تأسيس/.test(k)) return ["moa"];
-  if (/financial|statement|مالي/.test(k)) return ["financial_statement"];
-  if (/declaration|undertaking|commitment|إقرار|تعهد/.test(k)) return ["declaration"];
+  // The specific revenue documents come BEFORE the generic financial/licence
+  // tests: a Form 9 slot must not fall through to "financial_statement", and a
+  // Form 9 must never satisfy a licence slot (renewal-round feedback).
+  if (/form.?0?9|نموذج.?9/.test(k)) return ["form_9"];
+  if (/audited|afs|مدقق/.test(k)) return ["audited_financial_statement", "financial_statement"];
+  if (/acknowledg|إقرار.?استلام|خطاب/.test(k)) return ["acknowledgement_letter"];
+  if (/financial|statement|مالي/.test(k)) return ["financial_statement", "audited_financial_statement"];
+  if (/declaration|undertaking|commitment|تعهد/.test(k)) return ["declaration"];
   if (/trade|postal|licen[cs]e|approval|رخصة|موافقة/.test(k)) return ["trade_license", "initial_approval", "postal_license"];
+  return null;
+}
+
+/**
+ * Cross-check an uploaded document against what the application already holds
+ * (renewal-round feedback: "cross-reference uploaded files against registered
+ * entity data before acceptance" — a mismatched company's trade licence was
+ * being accepted).
+ *
+ * Only identifiers we can compare unambiguously are checked, and only when BOTH
+ * sides are present: the first document of a journey has nothing to contradict.
+ * Returns a customer-facing reason, or null when nothing conflicts.
+ */
+const IDENTITY_CHECKS: { key: string; label: string; normalize: (s: string) => string }[] = [
+  { key: "trade_license_number", label: "trade licence number", normalize: (s) => s.replace(/[^0-9a-z]/gi, "").toLowerCase() },
+  { key: "postal_license_number", label: "postal licence number", normalize: (s) => s.replace(/[^0-9a-z]/gi, "").toLowerCase() },
+  { key: "company_name", label: "company name", normalize: (s) => s.replace(/\b(llc|l\.l\.c|fze|fzc|est|establishment|company|co|trading|general)\b/gi, "").replace(/[^a-z0-9]/gi, "").toLowerCase() },
+];
+
+function entityMismatch(
+  existing: Record<string, unknown>,
+  extracted: Record<string, unknown>
+): string | null {
+  for (const check of IDENTITY_CHECKS) {
+    const before = existing[check.key];
+    const after = extracted[check.key];
+    if (typeof before !== "string" || typeof after !== "string") continue;
+    const a = check.normalize(before);
+    const b = check.normalize(after);
+    if (!a || !b || a === b) continue;
+    // Substring either way covers an abbreviated vs full legal name.
+    if (a.includes(b) || b.includes(a)) continue;
+    return (
+      `This document's ${check.label} (${after}) does not match the one already on this application (${before}). ` +
+      `Please upload the document for the same company, or correct the details first.`
+    );
+  }
   return null;
 }
 
@@ -161,6 +204,31 @@ export async function POST(req: NextRequest) {
       payload: { key, fileName: file.name, classified: extraction.docType },
     });
     return NextResponse.json({ case: state, rejected: true, reason: mismatchReason });
+  }
+
+  // Cross-check against the entity already on the application: the right KIND of
+  // document for the WRONG company must not be accepted either.
+  const conflict = entityMismatch(caseRow.state.data ?? {}, extraction.values ?? {});
+  if (conflict) {
+    const reason =
+      sessionLocale === "ar"
+        ? `بيانات هذا المستند لا تطابق الشركة المسجلة في هذا الطلب. يرجى رفع مستند الشركة نفسها، أو تصحيح البيانات أولاً.`
+        : conflict;
+    const state = setDocument(agent.definition, caseRow.state, {
+      key,
+      status: "rejected",
+      fileName: file.name,
+      rejectionReason: reason,
+    });
+    await saveCase(caseRow.caseId, state);
+    await audit({
+      agentId: agent.id,
+      conversationId,
+      actor: "system",
+      action: "document_rejected_entity_mismatch",
+      payload: { key, fileName: file.name },
+    });
+    return NextResponse.json({ case: state, rejected: true, reason });
   }
 
   // Feedback (Round 2): detect an expired Emirates ID and request a valid one
