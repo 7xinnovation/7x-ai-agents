@@ -265,6 +265,15 @@ function renderInline(text: string): React.ReactNode[] {
     ) },
     { re: /\*\*([^*]+)\*\*/, make: (m) => <strong>{renderInline(m[1]!)}</strong> },
     { re: /`([^`]+)`/, make: (m) => <code className="dlg-md-code">{m[1]}</code> },
+    // A MASKED VALUE is literal text, not emphasis. Guest results star out the
+    // holder's name (FB-1323: "O*** A****** ******m"), and those runs of
+    // asterisks were being consumed as italic markers — the customer saw a
+    // mangled name like "O* A**** ****m" and could no longer recognise their
+    // own. Any run of two or more asterisks is therefore emitted verbatim.
+    // Placed after **bold** so a genuine bold span, which matches at the same
+    // position, still wins; single-asterisk italics are unaffected because this
+    // needs two in a row.
+    { re: /[A-Za-z0-9؀-ۿ*]*\*{2,}[A-Za-z0-9؀-ۿ*]*/, make: (m) => m[0] },
     { re: /_([^_]+)_|\*([^*\s][^*]*)\*/, make: (m) => <em>{m[1] ?? m[2]}</em> },
   ];
 
