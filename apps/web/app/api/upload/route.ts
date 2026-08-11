@@ -14,7 +14,7 @@ import { eq } from "drizzle-orm";
 import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getCase, saveCase, audit } from "@/lib/conversation";
+import { getCase, mutateCase, audit } from "@/lib/conversation";
 
 /**
  * Which classified document types are acceptable for a given document slot,
@@ -128,13 +128,14 @@ export async function POST(req: NextRequest) {
   const adapters = resolveAdapters(agent.definition);
 
   if (reason) {
-    const state = setDocument(agent.definition, caseRow.state, {
-      key,
-      status: "rejected",
-      fileName: file.name,
-      rejectionReason: reason,
-    });
-    await saveCase(caseRow.caseId, state);
+    const state = await mutateCase(caseRow.caseId, (fresh) =>
+      setDocument(agent.definition, fresh, {
+        key,
+        status: "rejected",
+        fileName: file.name,
+        rejectionReason: reason,
+      })
+    );
     return NextResponse.json({ case: state, rejected: true, reason });
   }
 
@@ -189,13 +190,14 @@ export async function POST(req: NextRequest) {
       sessionLocale === "ar"
         ? `الملف المرفوع يبدو أنه ${typeLabel} وليس "${reqLabel}". يرجى رفع المستند الصحيح.`
         : `This file looks like a ${typeLabel}, not the requested "${reqLabel}". Please upload the correct document.`;
-    const state = setDocument(agent.definition, caseRow.state, {
-      key,
-      status: "rejected",
-      fileName: file.name,
-      rejectionReason: mismatchReason,
-    });
-    await saveCase(caseRow.caseId, state);
+    const state = await mutateCase(caseRow.caseId, (fresh) =>
+      setDocument(agent.definition, fresh, {
+        key,
+        status: "rejected",
+        fileName: file.name,
+        rejectionReason: mismatchReason,
+      })
+    );
     await audit({
       agentId: agent.id,
       conversationId,
@@ -214,13 +216,14 @@ export async function POST(req: NextRequest) {
       sessionLocale === "ar"
         ? `بيانات هذا المستند لا تطابق الشركة المسجلة في هذا الطلب. يرجى رفع مستند الشركة نفسها، أو تصحيح البيانات أولاً.`
         : conflict;
-    const state = setDocument(agent.definition, caseRow.state, {
-      key,
-      status: "rejected",
-      fileName: file.name,
-      rejectionReason: reason,
-    });
-    await saveCase(caseRow.caseId, state);
+    const state = await mutateCase(caseRow.caseId, (fresh) =>
+      setDocument(agent.definition, fresh, {
+        key,
+        status: "rejected",
+        fileName: file.name,
+        rejectionReason: reason,
+      })
+    );
     await audit({
       agentId: agent.id,
       conversationId,
@@ -241,13 +244,14 @@ export async function POST(req: NextRequest) {
       sessionLocale === "ar"
         ? `الهوية الإماراتية منتهية الصلاحية (انتهت في ${extraction.docExpiryDate}). يرجى رفع هوية سارية المفعول.`
         : `This Emirates ID is expired (expiry date ${extraction.docExpiryDate}). Please upload a valid, unexpired Emirates ID.`;
-    const state = setDocument(agent.definition, caseRow.state, {
-      key,
-      status: "rejected",
-      fileName: file.name,
-      rejectionReason: expiredReason,
-    });
-    await saveCase(caseRow.caseId, state);
+    const state = await mutateCase(caseRow.caseId, (fresh) =>
+      setDocument(agent.definition, fresh, {
+        key,
+        status: "rejected",
+        fileName: file.name,
+        rejectionReason: expiredReason,
+      })
+    );
     await audit({
       agentId: agent.id,
       conversationId,
@@ -258,34 +262,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ case: state, rejected: true, reason: expiredReason });
   }
 
-  let state = setDocument(agent.definition, caseRow.state, {
-    key,
-    status: "uploaded",
-    fileName: file.name,
-  });
-
-  // Re-upload replaces its own data (FB-1442: values from an earlier file in
-  // this slot must not survive a replacement — e.g. another company's license).
-  // Fields filled by OTHER documents or typed by the customer are untouched.
-  const docFields = { ...((state.data[DOC_FIELDS_KEY] as Record<string, string[]> | undefined) ?? {}) };
-  const previouslyFilled = docFields[key] ?? [];
-  if (previouslyFilled.length) {
-    const cleared = { ...state.data };
-    for (const fk of previouslyFilled) delete cleared[fk];
-    state = recomputeReadiness(agent.definition, { ...state, data: cleared });
-  }
-
+  // Everything from here runs against the FRESHEST case state, not the snapshot
+  // read before extraction: a document uploaded in parallel finished while the
+  // vision model was reading this one, and writing the stale snapshot back would
+  // erase it.
   const extractedKeys: string[] = [];
-  for (const [fieldKey, value] of Object.entries(extraction.values)) {
-    // Do not overwrite a value the customer already provided.
-    if (state.data[fieldKey] !== undefined && state.data[fieldKey] !== null && state.data[fieldKey] !== "") continue;
-    const r = setField(agent.definition, state, fieldKey, value);
-    if (!r.error) { state = r.state; extractedKeys.push(fieldKey); }
-  }
-  docFields[key] = extractedKeys;
-  state = { ...state, data: { ...state.data, [DOC_FIELDS_KEY]: docFields } };
+  const state = await mutateCase(caseRow.caseId, (fresh) => {
+    let next = setDocument(agent.definition, fresh, {
+      key,
+      status: "uploaded",
+      fileName: file.name,
+    });
 
-  await saveCase(caseRow.caseId, state);
+    // Re-upload replaces its own data (FB-1442: values from an earlier file in
+    // this slot must not survive a replacement — e.g. another company's license).
+    // Fields filled by OTHER documents or typed by the customer are untouched.
+    const docFields = { ...((next.data[DOC_FIELDS_KEY] as Record<string, string[]> | undefined) ?? {}) };
+    const previouslyFilled = docFields[key] ?? [];
+    if (previouslyFilled.length) {
+      const cleared = { ...next.data };
+      for (const fk of previouslyFilled) delete cleared[fk];
+      next = recomputeReadiness(agent.definition, { ...next, data: cleared });
+    }
+
+    extractedKeys.length = 0;
+    for (const [fieldKey, value] of Object.entries(extraction.values)) {
+      // Do not overwrite a value the customer already provided.
+      if (next.data[fieldKey] !== undefined && next.data[fieldKey] !== null && next.data[fieldKey] !== "") continue;
+      const r = setField(agent.definition, next, fieldKey, value);
+      if (!r.error) { next = r.state; extractedKeys.push(fieldKey); }
+    }
+    docFields[key] = extractedKeys;
+    return { ...next, data: { ...next.data, [DOC_FIELDS_KEY]: docFields } };
+  });
   await getDb()
     .insert(documentsTable)
     .values({ caseId: caseRow.caseId, key, status: "uploaded", fileName: file.name, storageKey });

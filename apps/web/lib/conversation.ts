@@ -301,6 +301,35 @@ export async function saveCase(caseId: string, state: CaseState) {
   await getDb().update(cases).set({ state, updatedAt: new Date() }).where(eq(cases.id, caseId));
 }
 
+/**
+ * Read-modify-write the case under a row lock.
+ *
+ * A plain getCase() → mutate → saveCase() loses concurrent work: the case is one
+ * jsonb blob, so whoever saves last overwrites the other's changes with a state
+ * they read before it existed. That is not theoretical — uploading a second
+ * document while the first was still being read by the vision model (several
+ * seconds) silently un-uploaded the first, and the agent then asked for it again.
+ *
+ * `mutate` runs INSIDE the transaction against the freshest state, so parallel
+ * uploads queue on the lock and each sees the previous one's result.
+ */
+export async function mutateCase(
+  caseId: string,
+  mutate: (state: CaseState) => CaseState
+): Promise<CaseState> {
+  return await getDb().transaction(async (tx) => {
+    const [row] = await tx
+      .select({ state: cases.state })
+      .from(cases)
+      .where(eq(cases.id, caseId))
+      .for("update");
+    if (!row) throw new Error("case_not_found");
+    const next = mutate(row.state as CaseState);
+    await tx.update(cases).set({ state: next, updatedAt: new Date() }).where(eq(cases.id, caseId));
+    return next;
+  });
+}
+
 export async function audit(input: {
   agentId?: string;
   conversationId?: string;
