@@ -63,12 +63,18 @@ async function main() {
     // The prompt must disclose it up front, and flag it once chosen.
     const state: CaseState = { ...emptyCase(), journeyKey: jk, data: { key_delivery: "deliver" } };
     const pj = buildSystemPrompt(nxn, state, "en", true, true, undefined, undefined);
-    check(`FB-1430 ${jk}: prompt discloses the fee up front`, pj.volatile.includes("ADD-ON FEES you must disclose UP FRONT"));
-    check(`FB-1430 ${jk}: prompt marks it applicable once chosen`, pj.volatile.includes("Currently applicable"));
+    // What matters is that the model SEES it. The journey definition (fee list,
+    // enum choices) now lives in the cacheable prefix and only the "which fees
+    // apply right now" line stays volatile, so assert against the whole prompt —
+    // and pin the applicable line to the volatile tail, since it is the part that
+    // must not be cached.
+    const seen = `${pj.stable}\n${pj.volatile}`;
+    check(`FB-1430 ${jk}: prompt discloses the fee up front`, seen.includes("ADD-ON FEES you must disclose UP FRONT"));
+    check(`FB-1430 ${jk}: prompt marks it applicable once chosen`, pj.volatile.includes("Fees currently applicable"));
     // The fee also has to reach the model ON the option it is choosing between —
     // the journey block lists enum choices with their labels for exactly this.
-    check(`FB-1430 ${jk}: fee-bearing option reaches the model`, pj.volatile.includes("deliver (Deliver to address (AED 25 courier fee))"));
-    check(`FB-1430 ${jk}: free option is labelled free`, pj.volatile.includes("branch_pickup (Collect from branch (free))"));
+    check(`FB-1430 ${jk}: fee-bearing option reaches the model`, seen.includes("deliver (Deliver to address (AED 25 courier fee))"));
+    check(`FB-1430 ${jk}: free option is labelled free`, seen.includes("branch_pickup (Collect from branch (free))"));
   }
 
   // ── FB-1445 Arabic parity: no English-only customer-facing label anywhere ──

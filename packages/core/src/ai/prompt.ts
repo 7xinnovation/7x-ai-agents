@@ -120,6 +120,24 @@ ${journey.steps
         .join("\n")}${journey.guidance ? `\n\nHow to run this journey:\n${journey.guidance}` : ""}`
     : "No active journey yet. Recognise intent first, then start the matching journey with set_journey.";
 
+  // The fee LIST comes from the journey definition, so it is cacheable; which
+  // fees currently apply depends on the customer's answers, so that one line
+  // stays in the volatile tail.
+  const surcharges = journey?.submission?.surcharges ?? [];
+  const feeDeclaration = surcharges.length
+    ? `\n- ADD-ON FEES you must disclose UP FRONT: ${surcharges
+        .map((s) => `${tr(s.label, locale)} = ${s.amount} ${journey?.submission?.currency ?? "AED"} (applies when ${s.when})`)
+        .join("; ")}. Show the fee ON the option itself when you present that choice — never reveal it only at payment.`
+    : "";
+  const applicableFees = surcharges.length
+    ? surcharges.filter((s) => evalCondition(s.when, state.data)).length
+      ? `\n- Fees currently applicable: ${surcharges
+          .filter((s) => evalCondition(s.when, state.data))
+          .map((s) => `${tr(s.label, locale)} (${s.amount})`)
+          .join(", ")} — include these as their own line(s) in the pre-payment summary; the payment total already contains them.`
+      : "\n- No add-on fee applies yet based on the customer's choices."
+    : "";
+
   const stable = `You are ${agent.name}, a conversational assistant. ${agent.persona}
 
 # Conversational contract
@@ -226,50 +244,38 @@ Rules:
 - <document_key> must be one of the ACTIVE journey's document keys exactly as listed in the case state (e.g. agent_eid_front) — never invent or rename a key.
 - Request ONE document at a time (front/back of the same card may be two blocks in one reply). After each upload the system notifies you; then request the next document.
 - NEVER say an upload field, slot, or button "appears", "is below", or "is available" without emitting the block in that same reply — without the block the customer sees nothing to click.
-- If a document was rejected (see its rejectionReason), explain why in one sentence and re-emit that document's upload block.` : ""}`;
+- If a document was rejected (see its rejectionReason), explain why in one sentence and re-emit that document's upload block.` : ""}
 
-  // Conditional add-on fees declared on the journey (FB-1430). Every one is listed
-  // with the choice that triggers it, so the fee is on screen BEFORE the customer
-  // picks that option — and the ones already triggered are called out for the
-  // pre-payment summary. request_payment adds them to the charged total itself.
-  const surcharges = journey?.submission?.surcharges ?? [];
-  const surchargeBlock = surcharges.length
-    ? `\n- ADD-ON FEES you must disclose UP FRONT: ${surcharges
-        .map((s) => `${tr(s.label, locale)} = ${s.amount} ${journey?.submission?.currency ?? "AED"} (applies when ${s.when})`)
-        .join("; ")}. Show the fee ON the option itself when you present that choice — never reveal it only at payment. ${
-        surcharges.filter((s) => evalCondition(s.when, state.data)).length
-          ? `Currently applicable: ${surcharges
-              .filter((s) => evalCondition(s.when, state.data))
-              .map((s) => `${tr(s.label, locale)} (${s.amount})`)
-              .join(", ")} — include these as their own line(s) in the pre-payment summary; the payment total already contains them.`
-          : "None apply yet based on the customer's choices."
-      }`
-    : "";
-
-  const volatile = `# This turn
-- Session language: ${locale === "ar" ? "ARABIC" : "ENGLISH"}. Every part of this reply — prose, card/button/toggle/summary labels — must be in this language.${intent ? `
-- Classified intent: "${intent.intent}" (confidence ${intent.confidence.toFixed(2)}).` : ""}${suggestedJourney ? `
-- This intent maps to journey "${suggestedJourney}". If the user wants to proceed (and is authenticated when the journey requires it), call set_journey("${suggestedJourney}") NOW, then collect the fields one at a time. Do not ask for details before starting the journey.` : ""}
-${journey?.submission?.apiFlow
-      ? renderApiFlow(journey.submission.apiFlow)
+# The active journey
+${journeyBlock}${journey?.submission?.apiFlow
+      ? `\n${renderApiFlow(journey.submission.apiFlow)}`
       : journey?.submission?.requiresPayment
-        ? `- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment — a secure payment card appears in the chat automatically, so never paste a link; WAIT for confirmation. Only call submit_case once payment status is "paid".`
-        : "- The active journey (if any) has no payment step."}${surchargeBlock}${customerContext ? `
-
-# Known customer record (server-verified, from previous signed-in sessions)
-${customerContext}` : ""}
-
-# Current case state
-${journeyBlock}
-Collected data: ${JSON.stringify(state.data)}
-Documents: ${JSON.stringify(state.documents)}
-Payment: ${JSON.stringify(state.payment)}
-Submission readiness: ${state.readiness.complete ? "READY" : `NOT READY — missing ${JSON.stringify(state.readiness.missing)}`}
+        ? `\n- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment — a secure payment card appears in the chat automatically, so never paste a link; WAIT for confirmation. Only call submit_case once payment status is "paid".`
+        : "\n- The active journey (if any) has no payment step."}${feeDeclaration}
 ${journey?.submission?.apiFlow
       ? journey.submission.apiFlow.saveTool
         ? "This journey is completed through the integration tools described above — finish it there; do NOT call submit_case."
         : "This journey reads details and pricing from the integration tools, but it is FINALISED with submit_case: once payment status is \"paid\", call submit_case ONCE to complete it and give the customer the returned reference. It is NOT complete until submit_case succeeds."
       : "When the case is ready (and paid, if required) and the user confirms, call submit_case. Before submitting, run a final check and tell the user the reference number you receive."}`;
+
+  // Conditional add-on fees declared on the journey (FB-1430). Every one is listed
+  // with the choice that triggers it, so the fee is on screen BEFORE the customer
+  // picks that option — and the ones already triggered are called out for the
+  // pre-payment summary. request_payment adds them to the charged total itself.
+
+  const volatile = `# This turn
+- Session language: ${locale === "ar" ? "ARABIC" : "ENGLISH"}. Every part of this reply — prose, card/button/toggle/summary labels — must be in this language.${intent ? `
+- Classified intent: "${intent.intent}" (confidence ${intent.confidence.toFixed(2)}).` : ""}${suggestedJourney ? `
+- This intent maps to journey "${suggestedJourney}". If the user wants to proceed (and is authenticated when the journey requires it), call set_journey("${suggestedJourney}") NOW, then collect the fields one at a time. Do not ask for details before starting the journey.` : ""}${applicableFees}${customerContext ? `
+
+# Known customer record (server-verified, from previous signed-in sessions)
+${customerContext}` : ""}
+
+# Current case state
+Collected data: ${JSON.stringify(state.data)}
+Documents: ${JSON.stringify(state.documents)}
+Payment: ${JSON.stringify(state.payment)}
+Submission readiness: ${state.readiness.complete ? "READY" : `NOT READY — missing ${JSON.stringify(state.readiness.missing)}`}`;
 
   return { stable, volatile };
 }
