@@ -235,6 +235,22 @@ export async function buildApiTools(
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
+    // Read-only lookups are served from a short-lived cache. Profiling showed the
+    // model re-fetching the same catalogue (bundles, branches) on consecutive
+    // turns, and every repeat cost a whole model round (~3s) plus a call to a
+    // backend that is not always healthy. Cached only for GETs, only on success,
+    // and keyed so a different customer or a different privacy view can never
+    // read another's entry (see readCache).
+    const cacheKey = readCacheKey(entry.op, toolName, input, opts, runtimeToken());
+    if (cacheKey) {
+      const hit = readCache(cacheKey);
+      if (process.env.DIALOG_DEBUG_CACHE === "1") {
+        console.log(`[lookup-cache] ${hit ? "HIT " : "miss"} ${toolName} ${JSON.stringify(input ?? {})}`);
+      }
+      if (hit) return hit;
+    } else if (process.env.DIALOG_DEBUG_CACHE === "1") {
+      console.log(`[lookup-cache] skip ${toolName} (${entry.op.method}${isAuthOperation(entry.op) ? ", auth op" : ""})`);
+    }
     // TEST-ONLY: for the mock persona, substitute realistic responses for the EP
     // ops that can't hit the real API (no live session / fake box) so the demo
     // completes. Branch locations are real (auth=false), so not simulated here.
@@ -307,10 +323,75 @@ export async function buildApiTools(
         isError: false,
       };
     }
+    if (cacheKey && !res.isError) writeCache(cacheKey, res);
     return res;
   };
 
   return { tools, exec, getCapturedToken: () => captured, getLastBranchQuery: () => lastBranchQuery };
+}
+
+/**
+ * Short-lived cache for read-only integration lookups.
+ *
+ * Why: profiling a live NXN rental showed Rental/Bundle fetched again on the very
+ * next turn. Each repeat is a full model round (~3s) plus a call to a backend
+ * that is not always healthy, so caching removes both the latency and a failure
+ * mode. Catalogue data (bundles, branches, expiry dates) does not change within
+ * a conversation.
+ *
+ * Safety — the key includes everything that could change what a caller is
+ * allowed to see, so an entry can never be served to the wrong person:
+ *   - the operation and its exact inputs,
+ *   - the caller's PRIVACY VIEW (guest results are PII-redacted; an identified
+ *     caller must not be served a redacted entry, nor the reverse),
+ *   - a fingerprint of the session token in play (a customer's own session can
+ *     make the backend return their record rather than a public one).
+ * Writes, auth/login operations and error responses are never cached.
+ */
+const LOOKUP_TTL_MS = 90_000;
+const LOOKUP_CACHE_MAX = 400;
+const lookupCache = new Map<string, { at: number; value: { result: string; isError?: boolean } }>();
+
+/** Cheap, non-reversible fingerprint — the token itself is never used as a key. */
+function fingerprint(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+
+function readCacheKey(
+  op: ApiOperation,
+  toolName: string,
+  input: Record<string, unknown>,
+  opts: { authenticated?: boolean; uaePassToken?: string; mockSimulate?: boolean },
+  token: string | undefined
+): string | null {
+  if (op.method.toUpperCase() !== "GET") return null;   // never cache writes
+  if (isAuthOperation(op)) return null;                 // never cache token minting
+  const identified = Boolean(opts.authenticated) || Boolean(token) || Boolean(opts.uaePassToken);
+  return [
+    toolName,
+    JSON.stringify(input ?? {}),
+    identified ? "id" : "guest",
+    token ? fingerprint(token) : "-",
+  ].join("|");
+}
+
+function readCache(key: string): { result: string; isError?: boolean } | null {
+  const hit = lookupCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > LOOKUP_TTL_MS) { lookupCache.delete(key); return null; }
+  return hit.value;
+}
+
+function writeCache(key: string, value: { result: string; isError?: boolean }) {
+  lookupCache.set(key, { at: Date.now(), value });
+  // Bounded: drop the oldest entries once over the cap (insertion-ordered Map).
+  while (lookupCache.size > LOOKUP_CACHE_MAX) {
+    const oldest = lookupCache.keys().next().value;
+    if (oldest === undefined) break;
+    lookupCache.delete(oldest);
+  }
 }
 
 /**

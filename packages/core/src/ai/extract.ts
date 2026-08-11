@@ -1,5 +1,5 @@
 import type { AgentDefinition, CaseState, FieldDef, Locale } from "@dialog/config";
-import { getAnthropic, fastModel } from "./anthropic";
+import { getAnthropic, withFastModel } from "./anthropic";
 import { findJourney } from "../case/engine";
 
 /**
@@ -175,11 +175,11 @@ export async function extractFieldsFromDocument(input: {
 
   try {
     const client = getAnthropic();
-    const res = await client.messages.create({
-      model: fastModel(),
+    const res = await withFastModel((model) => client.messages.create({
+      model,
       max_tokens: 1024,
       messages: [{ role: "user", content: [docBlock as unknown as never, { type: "text", text: instruction }] }],
-    });
+    }));
     const text = res.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
     const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
     const parsed = JSON.parse(json) as Record<string, unknown>;
@@ -289,11 +289,11 @@ export async function transcribeDocumentToText(input: {
 
   try {
     const client = getAnthropic();
-    const res = await client.messages.create({
-      model: fastModel(),
+    const res = await withFastModel((model) => client.messages.create({
+      model,
       max_tokens: 8192,
       messages: [{ role: "user", content: [docBlock as unknown as never, { type: "text", text: instruction }] }],
-    });
+    }));
     const text = res.content
       .filter((c) => c.type === "text")
       .map((c) => (c as { text: string }).text)
