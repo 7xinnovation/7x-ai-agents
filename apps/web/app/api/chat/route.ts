@@ -282,15 +282,32 @@ export async function POST(req: NextRequest) {
    * NEXT turn depends on (the persisted message, the case state) stays inline.
    */
   const deferred: (() => Promise<void>)[] = [];
+  // Tracked out here so cancel() can reach them: when the BROWSER goes away
+  // (navigation, refresh, network blip) the stream is cancelled and the
+  // controller is closed under us. Without this, the next send() threw
+  // "Invalid state: Controller is already closed", which aborted the turn
+  // mid-flight — so the assistant's reply and the collected case data were
+  // never persisted and the customer had to start that turn again.
+  let closed = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream({
     async start(controller) {
-      let closed = false;
-      const send = (ev: unknown) => { if (!closed) controller.enqueue(encoder.encode(sse(ev))); };
+      // Writing to a stream nobody is reading is not an error worth failing the
+      // turn over: mark it closed and let the work finish so the reply is saved.
+      const send = (ev: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(sse(ev)));
+        } catch {
+          closed = true;
+        }
+      };
       // Heartbeat: keep the SSE connection alive while the model is thinking or a
       // tool round is running (no bytes flow then), so browsers/proxies don't drop
       // it as idle. SSE comment lines (": ...") are ignored by the client parser.
-      const heartbeat = setInterval(() => {
-        if (!closed) { try { controller.enqueue(encoder.encode(": ping\n\n")); } catch { /* closed */ } }
+      heartbeat = setInterval(() => {
+        if (closed) return;
+        try { controller.enqueue(encoder.encode(": ping\n\n")); } catch { closed = true; }
       }, 15000);
       try {
         send({ type: "session", conversationId: session.conversationId });
@@ -549,8 +566,12 @@ export async function POST(req: NextRequest) {
         send({ type: "error", message: err instanceof Error ? err.message : "stream_failed" });
       } finally {
         clearInterval(heartbeat);
-        closed = true;
-        controller.close();
+        // Already closed means the client cancelled — closing again throws and
+        // would skip the deferred drain below.
+        if (!closed) {
+          closed = true;
+          try { controller.close(); } catch { /* client already gone */ }
+        }
         // Now that the customer's turn is complete, drain the deferred work. Not
         // awaited into the stream — failures are logged, never surfaced.
         for (const job of deferred) {
@@ -561,6 +582,12 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+    },
+    // The consumer went away. Stop writing; the turn itself carries on so the
+    // reply and case state still get persisted and the customer can resume.
+    cancel() {
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
     },
   });
 
