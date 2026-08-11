@@ -41,6 +41,14 @@ export async function classifyIntent(
     ],
     tool_choice: { type: "tool", name: "classify" },
     messages: [{ role: "user", content: message }],
+  }, {
+    // This runs CONCURRENTLY with the customer's actual turn, so it is the call
+    // most likely to be rate-limited — and the SDK then honours a 60s
+    // retry-after, twice, while the reply sits finished and undelivered. It is
+    // best-effort (the caller already swallows failures and the journey can start
+    // on the next turn), so it fails fast rather than retrying.
+    timeout: 8000,
+    maxRetries: 0,
   });
 
   const block = res.content.find((c) => c.type === "tool_use");

@@ -98,6 +98,23 @@ function isTransient(err: unknown): boolean {
  * until the model produces a final answer. Yielded events are transport-agnostic
  * (the web app maps them to SSE).
  */
+/**
+ * Resolve `p`, or give up after `ms` and return undefined. The promise is left
+ * running (its result is simply ignored) and its rejection is swallowed, so an
+ * abandoned best-effort call can never surface as an unhandled rejection.
+ */
+async function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p.catch(() => undefined),
+      new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), ms); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function* runTurn(input: RunTurnInput): AsyncGenerator<OrchestratorEvent> {
   const { agent, locale, authenticated } = input;
   let state = input.case;
@@ -177,10 +194,17 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
       messages.push({ role: "assistant", content: final.content });
 
       // The first round has streamed — resolve the concurrently-running intent
-      // classification now (it's ready by this point) so it gates set_journey
-      // this round and informs the prompt on later rounds.
+      // classification now so it gates set_journey this round and informs the
+      // prompt on later rounds.
+      //
+      // NEVER block the turn on it. It usually IS ready here, but when the
+      // classifier is rate-limited the customer watches a spinner for minutes
+      // after their reply was already complete (observed: reply at 2.7s, stream
+      // held open to 120s). Intent is an optimisation — without it the journey
+      // simply starts a turn later — so it gets a short grace period and is then
+      // abandoned.
       if (intent === undefined && pendingIntent) {
-        intent = await pendingIntent;
+        intent = await raceTimeout(pendingIntent, 2500);
         pendingIntent = undefined;
       }
 
