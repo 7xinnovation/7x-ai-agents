@@ -34,6 +34,36 @@ export function fastModel(): string {
 }
 
 /**
+ * Model for INTENT CLASSIFICATION.
+ *
+ * This picks one label from a fixed list through a forced tool call, and it runs
+ * concurrently with the customer's own turn — so it wants to be small and quick,
+ * and it cannot produce malformed output whatever model runs it. Measured on the
+ * live intent sets (2026-08-11): a small model matched or beat the main model on
+ * accuracy (NXN 15/15 both; EPGL 12/12 vs 11/12) at roughly half the latency.
+ *
+ * Defaults to the small model and falls back automatically where it is not
+ * deployed, so an environment without it gets "slower", never "broken".
+ */
+export function classifierModel(): string {
+  return process.env.DIALOG_CLASSIFIER_MODEL ?? process.env.DIALOG_FAST_MODEL ?? "claude-haiku-4-5";
+}
+
+/**
+ * Model for DOCUMENT EXTRACTION.
+ *
+ * Deliberately NOT tied to DIALOG_FAST_MODEL. Reading a trade licence or an
+ * Emirates ID is accuracy-critical — a misread licence number or a hallucinated
+ * company name reaches a government submission — and getting it right took
+ * dedicated work. It therefore stays on the main model unless someone opts in
+ * explicitly, and setting the classifier to a small model can never drag it
+ * along by accident.
+ */
+export function extractionModel(): string {
+  return process.env.DIALOG_EXTRACTION_MODEL ?? resolveModel();
+}
+
+/**
  * True when an error means "this model is not available here" rather than a
  * transient failure. Azure AI Foundry reports an undeployed model as
  * DeploymentNotFound (404); the direct API uses not_found_error.
@@ -63,21 +93,25 @@ function isModelUnavailable(err: unknown): boolean {
  * documents auto-filling an application. The fallback is remembered for the
  * process, so the cost is paid once rather than on every call.
  */
-let fastModelUnavailable = false;
+const unavailableModels = new Set<string>();
 
-export async function withFastModel<T>(run: (model: string) => Promise<T>): Promise<T> {
-  const fast = fastModel();
+export async function withModelFallback<T>(model: string, run: (model: string) => Promise<T>): Promise<T> {
   const main = resolveModel();
-  if (fastModelUnavailable || fast === main) return run(main);
+  if (model === main || unavailableModels.has(model)) return run(main);
   try {
-    return await run(fast);
+    return await run(model);
   } catch (err) {
     if (!isModelUnavailable(err)) throw err;
-    fastModelUnavailable = true;
+    unavailableModels.add(model);
     console.warn(
-      `[ai] fast model "${fast}" is not available on this endpoint — falling back to "${main}" for side tasks. ` +
-      `Deploy it (or unset DIALOG_FAST_MODEL) to get the faster path back.`
+      `[ai] model "${model}" is not deployed on this endpoint — falling back to "${main}" for this task. ` +
+      `Deploy it to get the faster path back.`
     );
     return run(main);
   }
+}
+
+/** @deprecated prefer withModelFallback(classifierModel(), …) — kept for callers still on the old name. */
+export async function withFastModel<T>(run: (model: string) => Promise<T>): Promise<T> {
+  return withModelFallback(fastModel(), run);
 }

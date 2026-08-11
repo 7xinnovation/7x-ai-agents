@@ -1,5 +1,5 @@
 import type { AgentDefinition, CaseState, FieldDef, Locale } from "@dialog/config";
-import { getAnthropic, withFastModel } from "./anthropic";
+import { getAnthropic, extractionModel, withModelFallback } from "./anthropic";
 import { findJourney } from "../case/engine";
 
 /**
@@ -175,7 +175,7 @@ export async function extractFieldsFromDocument(input: {
 
   try {
     const client = getAnthropic();
-    const res = await withFastModel((model) => client.messages.create({
+    const res = await withModelFallback(extractionModel(), (model) => client.messages.create({
       model,
       max_tokens: 1024,
       messages: [{ role: "user", content: [docBlock as unknown as never, { type: "text", text: instruction }] }],
@@ -289,7 +289,7 @@ export async function transcribeDocumentToText(input: {
 
   try {
     const client = getAnthropic();
-    const res = await withFastModel((model) => client.messages.create({
+    const res = await withModelFallback(extractionModel(), (model) => client.messages.create({
       model,
       max_tokens: 8192,
       messages: [{ role: "user", content: [docBlock as unknown as never, { type: "text", text: instruction }] }],

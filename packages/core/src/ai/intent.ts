@@ -1,6 +1,6 @@
 import type { AgentDefinition, Locale } from "@dialog/config";
 import { tr } from "@dialog/config";
-import { getAnthropic, withFastModel } from "./anthropic";
+import { getAnthropic, classifierModel, withModelFallback } from "./anthropic";
 
 export interface IntentResult {
   intent: string; // one of the agent's intent keys, or "unknown"
@@ -21,7 +21,7 @@ export async function classifyIntent(
   const list = agent.intents.map((i) => `- ${i.key}: ${tr(i.description, locale)}`).join("\n");
 
   const client = getAnthropic();
-  const res = await withFastModel((model) => client.messages.create({
+  const res = await withModelFallback(classifierModel(), (model) => client.messages.create({
     model,
     max_tokens: 200,
     system: `You classify a user's message into exactly one supported intent for the assistant "${agent.name}". If none clearly applies, use "unknown". Respond only via the classify tool.\n\nSupported intents:\n${list}`,
