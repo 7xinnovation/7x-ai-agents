@@ -91,7 +91,9 @@ function sse(event: unknown): string {
  */
 function customerFacingError(err: unknown, locale: "en" | "ar"): string {
   const status = (err as { status?: number } | undefined)?.status;
-  const text = err instanceof Error ? err.message : "";
+  // Accepts a thrown error or an already-stringified message (runTurn's error
+  // event carries the latter).
+  const text = err instanceof Error ? err.message : typeof err === "string" ? err : "";
   const busy = status === 429 || /rate limit|overloaded|529/i.test(text);
   if (busy) {
     return locale === "ar"
@@ -381,6 +383,14 @@ export async function POST(req: NextRequest) {
           extraTools,
           runExtraTool,
         })) {
+          // runTurn yields its own error event, which would otherwise reach the
+          // customer verbatim — the provider's raw 429 body was appearing in the
+          // chat this way, bypassing the catch below.
+          if (ev.type === "error") {
+            log.error("turn_failed", ev.message, { agentId: agent.id, conversationId: session.conversationId });
+            send({ type: "error", message: customerFacingError(ev.message, body.locale) });
+            continue;
+          }
           send(ev);
           // Standard analytics attributes shared by every event this turn.
           const std = {
