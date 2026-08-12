@@ -236,15 +236,62 @@ export async function buildApiTools(
   // Renewal pricing is only accepted on that box's ANNIVERSARY (see
   // anniversaryExpiry) and the model kept substituting 31 December, so the date
   // is corrected here rather than left to prompting.
-  let knownExpiry: { box: string; iso: string } | null = null;
+  let knownExpiry: { box: string; iso: string; bundle?: string } | null = null;
+
+  /** Learn the box's expiry from any renewal Details response, cached or fresh. */
+  const rememberExpiry = (toolName: string, r: { result: string; isError?: boolean }) => {
+    if (r.isError || !/renewal_details/i.test(toolName)) return;
+    const iso = r.result.match(/"currentExpiryDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/)?.[1];
+    if (!iso) return;
+    const box = r.result.match(/"boxNumber"\s*:\s*"?(\d+)/)?.[1];
+    // The bundle id is quoted straight after it in poBoxSubscriptionDetails and
+    // is what pricing must be asked for when the bundle is not being changed.
+    const bundle = r.result.match(/"bundle"\s*:\s*"([^"]+)"/)?.[1];
+    knownExpiry = { box: box ?? "", iso, bundle };
+  };
+
+  /**
+   * Pricing was asked for a box whose expiry we have not seen this turn. Look it
+   * up from the box number the pricing call itself carries, so the anniversary
+   * correction still applies. Best-effort: a failure here just leaves the date
+   * as the model supplied it, exactly as before.
+   */
+  const learnExpiryForPricing = async (input: Record<string, unknown>) => {
+    const body = ((input?.body ?? input) ?? {}) as Record<string, unknown>;
+    const pick = (...names: string[]) => {
+      for (const n of names) {
+        const k = Object.keys(body).find((x) => x.toLowerCase() === n);
+        if (k && body[k]) return String(body[k]);
+      }
+      return "";
+    };
+    const box = pick("boxnumber", "box");
+    const emirate = pick("emiratecode", "emirate");
+    if (!box) return;
+    const detailsTool = [...map.keys()].find((t) => /guest_renewal_details/i.test(t)) ?? [...map.keys()].find((t) => /renewal_details/i.test(t));
+    if (!detailsTool) return;
+    try {
+      const r = await exec(detailsTool, { BoxNumber: box, EmirateCode: emirate });
+      rememberExpiry(detailsTool, r);
+    } catch {
+      /* best-effort */
+    }
+  };
 
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
 
     // Renewal pricing: force the target expiry onto the box's own anniversary.
+    // The box's expiry is normally learned from the Details call earlier in the
+    // turn, but it may not be: Details can be served from the cache below, and
+    // in a multi-turn renewal it may have been called in an earlier request
+    // altogether (a different process, even a different instance). So if the
+    // expiry is not known, fetch it — the same cache usually makes that free —
+    // rather than letting the date fall back to whatever the model guessed.
     if (/renewal_pricing/i.test(toolName)) {
-      const corrected = correctPricingExpiry(input, knownExpiry);
+      if (!knownExpiry) await learnExpiryForPricing(input);
+      const corrected = correctPricingInputs(input, knownExpiry);
       if (corrected) input = corrected;
     }
     // Read-only lookups are served from a short-lived cache. Profiling showed the
@@ -259,7 +306,11 @@ export async function buildApiTools(
       if (process.env.DIALOG_DEBUG_CACHE === "1") {
         console.log(`[lookup-cache] ${hit ? "HIT " : "miss"} ${toolName} ${JSON.stringify(input ?? {})}`);
       }
-      if (hit) return hit;
+      // A cached Details response still teaches us the box's expiry. Reading it
+      // here matters: this early return sits BEFORE the capture further down, so
+      // without it the anniversary correction above quietly stopped working the
+      // moment the cache warmed up.
+      if (hit) { rememberExpiry(toolName, hit); return hit; }
     } else if (process.env.DIALOG_DEBUG_CACHE === "1") {
       console.log(`[lookup-cache] skip ${toolName} (${entry.op.method}${isAuthOperation(entry.op) ? ", auth op" : ""})`);
     }
@@ -335,14 +386,7 @@ export async function buildApiTools(
         isError: false,
       };
     }
-    // Remember the box's real expiry so a later pricing call can be put on its
-    // anniversary (the Details call always precedes pricing in this journey).
-    if (!res.isError && /renewal_details/i.test(toolName)) {
-      const iso = res.result.match(/"currentExpiryDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/)?.[1];
-      const box = res.result.match(/"boxNumber"\s*:\s*"?(\d+)/)?.[1];
-      if (iso) knownExpiry = { box: box ?? "", iso };
-    }
-
+    rememberExpiry(toolName, res);
     if (cacheKey && !res.isError) writeCache(cacheKey, res);
     return res;
   };
@@ -366,31 +410,48 @@ export async function buildApiTools(
  * box, and the result is advanced until it is in the future. Returns a new input
  * object, or null when there is nothing to correct.
  */
-export function correctPricingExpiry(
+export function correctPricingInputs(
   input: Record<string, unknown>,
-  known: { box: string; iso: string } | null,
+  known: { box: string; iso: string; bundle?: string } | null,
   today = new Date()
 ): Record<string, unknown> | null {
   if (!known) return null;
   const body = (input?.body ?? input) as Record<string, unknown> | undefined;
   if (!body || typeof body !== "object") return null;
-  const key = Object.keys(body).find((k) => k.toLowerCase() === "expirydate");
-  if (!key) return null;
-  const requested = String(body[key] ?? "");
-  const reqYear = Number(requested.slice(0, 4));
-  const [expYear, month, day] = known.iso.split("-").map(Number);
-  if (!reqYear || !expYear || !month || !day) return null;
+  const find = (name: string) => Object.keys(body).find((k) => k.toLowerCase() === name);
+  const nextBody = { ...body };
+  let changed = false;
 
-  // Keep the model's chosen year (the duration), take month/day from the box,
-  // then step forward whole years until the date is genuinely in the future.
-  let year = Math.max(reqYear, expYear);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const build = (y: number) => `${y}-${pad(month)}-${pad(day)}`;
-  while (new Date(`${build(year)}T00:00:00Z`).getTime() <= today.getTime()) year++;
+  // ── expiry: the box's own anniversary, in the future ──
+  const key = find("expirydate");
+  if (key) {
+    const requested = String(body[key] ?? "");
+    const reqYear = Number(requested.slice(0, 4));
+    const [expYear, month, day] = known.iso.split("-").map(Number);
+    if (reqYear && expYear && month && day) {
+      // Keep the model's chosen year (the duration), take month/day from the box,
+      // then step forward whole years until the date is genuinely in the future.
+      let year = Math.max(reqYear, expYear);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const build = (y: number) => `${y}-${pad(month)}-${pad(day)}`;
+      while (new Date(`${build(year)}T00:00:00Z`).getTime() <= today.getTime()) year++;
+      const fixed = `${build(year)}T00:00:00`;
+      if (fixed !== requested) { nextBody[key] = fixed; changed = true; }
+    }
+  }
 
-  const fixed = `${build(year)}T00:00:00`;
-  if (fixed === requested) return null;
-  const nextBody = { ...body, [key]: fixed };
+  // ── bundle: unless the customer is CHANGING bundle, it is the box's current
+  // one. The model was guessing here too and retrying after the same opaque
+  // error, which cost a round and sometimes failed outright.
+  const bundleKey = find("newbundleid") ?? find("bundleid");
+  const changedKey = find("isbundlechanged");
+  const isChanging = changedKey ? body[changedKey] === true || String(body[changedKey]).toLowerCase() === "true" : false;
+  if (bundleKey && known.bundle && !isChanging && String(body[bundleKey] ?? "") !== known.bundle) {
+    nextBody[bundleKey] = known.bundle;
+    changed = true;
+  }
+
+  if (!changed) return null;
   return input?.body ? { ...input, body: nextBody } : nextBody;
 }
 
