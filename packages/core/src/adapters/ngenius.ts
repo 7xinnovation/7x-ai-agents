@@ -25,6 +25,11 @@ function cfgOf(ctx: AdapterContext): NgConfig {
   return { baseUrl, outletRef, apiKey };
 }
 
+/** A gateway-acceptable email, or nothing. */
+function isEmail(v: unknown): v is string {
+  return typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
+}
+
 async function accessToken(cfg: NgConfig): Promise<string> {
   const res = await fetch(`${cfg.baseUrl}/identity/auth/access-token`, {
     method: "POST",
@@ -54,11 +59,20 @@ export const ngeniusPayment: PaymentAdapter = {
         action: "SALE",
         amount: { currencyCode: input.currency, value: Math.round(input.amount * 100) },
         merchantOrderReference: input.caseId,
-        emailAddress: input.userRef ?? undefined,
+        // ONLY a real address. This used to be input.userRef — an identity, not
+        // an email — and N-Genius rejects anything else with 422 "must be a
+        // well-formed email address", killing the payment at the end of the
+        // journey. Omitting it is accepted; guessing is not.
+        emailAddress: isEmail(input.email) ? input.email : undefined,
         merchantAttributes: { redirectUrl: (ctx.settings.redirectUrl as string) || undefined },
       }),
     });
-    if (!res.ok) throw new Error(`N-Genius create order failed: ${res.status}`);
+    if (!res.ok) {
+      // Carry the gateway's own reason: a bare status told us nothing when this
+      // failed in production and the payload had to be reconstructed by hand.
+      const detail = (await res.text().catch(() => "")).slice(0, 300);
+      throw new Error(`N-Genius create order failed: ${res.status}${detail ? ` — ${detail}` : ""}`);
+    }
     const order = (await res.json()) as {
       reference: string;
       _links?: { payment?: { href?: string }; "payment-authorization"?: { href?: string } };

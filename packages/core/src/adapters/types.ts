@@ -102,6 +102,13 @@ export interface PaymentAdapter {
       currency: string;
       description: string;
       userRef?: string;
+      /**
+       * The customer's email, for the gateway's receipt. Separate from userRef
+       * on purpose: userRef is an IDENTITY (a UAE PASS sub), and N-Genius
+       * rejects a non-address outright — "must be a well-formed email address",
+       * HTTP 422, which failed the payment at the very end of the journey.
+       */
+      email?: string;
       /** Session language, so a hosted checkout page can be shown in it (FB-1445). */
       locale?: string;
     }

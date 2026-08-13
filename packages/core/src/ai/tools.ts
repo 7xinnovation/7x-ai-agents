@@ -146,6 +146,21 @@ export interface DispatchResult {
   isError?: boolean;
 }
 
+/**
+ * The customer's email address from the collected case data, for a payment
+ * receipt. Returns undefined rather than a guess: a gateway that is handed a
+ * non-address rejects the whole order.
+ */
+function customerEmail(state: CaseState): string | undefined {
+  const data = (state.data ?? {}) as Record<string, unknown>;
+  const preferred = ["contact_email", "email", "accountant_email", "owner_email"];
+  for (const key of [...preferred, ...Object.keys(data)]) {
+    const v = data[key];
+    if (typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim())) return v.trim();
+  }
+  return undefined;
+}
+
 export async function dispatchTool(
   name: string,
   input: Record<string, unknown>,
@@ -376,6 +391,7 @@ export async function dispatchTool(
         currency,
         description: String(input.description ?? journey?.key ?? "service"),
         userRef: ctx.userRef,
+        email: customerEmail(state),
         locale: ctx.locale,
       });
       state = setPayment(state, {
