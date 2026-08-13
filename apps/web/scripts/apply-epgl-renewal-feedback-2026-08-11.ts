@@ -112,17 +112,24 @@ const VALIDATION_RULE =
   "of the file's data is applied: state the reason in one plain sentence, re-emit that document's ```upload block, and " +
   "never confirm receipt or move on. Never describe a rejected document as uploaded, and never carry a value from one.";
 
+// Corrected 2026-08-13. The original was headed "QUARTERS FOLLOW THE LICENCE,
+// NOT THE CALENDAR", and the agent duly invented offset month windows: a licence
+// starting 19 March produced "Q1 2025 (Apr-Jun 2025)". IDEP's own integration
+// answers are explicit that filings are CALENDAR quarters and that the licence
+// start governs only WHEN a company first becomes obliged to file. That also
+// matches the QA feedback ("starts with Q1, it can be Q2, Q3, Q4 depending on
+// the license start date") — the START moves, the month ranges do not.
 const PERIOD_RULE =
-  "- QUARTERS FOLLOW THE LICENCE, NOT THE CALENDAR: a company's licensing period does not necessarily start in January, " +
-  "so its four reporting quarters may run Q3, Q4, Q1, Q2. NEVER assume the first quarter is Q1 of a calendar year. " +
-  "Work it out like this: take the licence period start from the licence you were given (or the Form 9), record which " +
-  "quarter it starts in as license_period_start_quarter, and record financial_year as the YEAR THAT FIRST QUARTER " +
-  "FALLS IN. The four income fields are then the 1st, 2nd, 3rd and 4th quarter OF THAT PERIOD in order — " +
-  "leviable_income_q1 is the period's FIRST quarter whatever it is called on the calendar. Whenever you name a quarter " +
-  "to the customer, name it in full with its calendar label and year (\"Q3 2023\", not \"Q1\"), and if they tell you " +
-  "their first quarter is Q3 2023, take that as the period start and derive the rest — do not keep asking for \"Q1\". " +
-  "If the licence gives you the start date, do not ask at all: state the four quarters you derived and ask them to " +
-  "confirm.";
+  "- QUARTERS ARE CALENDAR QUARTERS; THE LICENCE ONLY DECIDES WHICH ONE YOU START AT: the month ranges are fixed and " +
+  "NEVER move — Q1 = January-March, Q2 = April-June, Q3 = July-September, Q4 = October-December. A licence beginning " +
+  "19 March does NOT make its first quarter run April-June; it begins reporting at Q1, because 19 March falls in Q1. " +
+  "What the licence period decides is WHICH quarter the reporting starts at: a period starting in July starts at Q3. " +
+  "Take the licence period start from the licence or the Form 9 history, record its calendar quarter as " +
+  "license_period_start_quarter and the year that quarter falls in as financial_year. The four income fields are then " +
+  "that quarter and the three that follow it, each with its true calendar quarter and year, rolling the year over " +
+  "after Q4. Whenever you name a quarter to the customer, give its calendar label, its year AND its real months " +
+  "(\"Q3 2025 (Jul-Sep 2025)\"). If a Form 9 row already carries a quarter and year, use exactly those — never " +
+  "renumber or re-date them.";
 
 const FORM9_RULE =
   "- READ THE FIGURES, DO NOT DICTATE THEM: the quarterly leviable-income figures are printed on the Form 9. Once it is " +

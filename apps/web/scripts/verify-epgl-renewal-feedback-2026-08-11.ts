@@ -89,17 +89,21 @@ async function main() {
   check("6", "income fields name the period, not the calendar",
     ["leviable_income_q1", "leviable_income_q2", "leviable_income_q3", "leviable_income_q4"]
       .every((k) => /quarter of the licensing period/i.test(fields.find((f) => f.key === k)?.label?.en ?? "")));
-  check("6", "guidance forbids assuming calendar Q1",
-    /NEVER assume the first quarter is Q1 of a calendar year/.test(g));
-  check("6", "quarters are named with their calendar label and year",
-    /name it in full with its calendar label and year/.test(g));
-  check("6", "a customer saying \"my Q1 is Q3 2023\" is understood",
-    /if they tell you\s*\n?\s*their first quarter is Q3 2023, take that as the period start/.test(g) ||
-    /take that as the period start and derive the rest/.test(g));
-  check("7", "financial year is the first quarter's year",
-    /the year the licensing period's first quarter/i.test(fields.find((f) => f.key === "financial_year")?.label?.en ?? ""));
-  check("7", "guidance states the same rule",
-    /record financial_year as the YEAR THAT FIRST QUARTER/.test(g));
+  // These pin the CORRECTED semantics. The first version of this rule was headed
+  // "quarters follow the licence, not the calendar" and the agent produced
+  // "Q1 2025 (Apr-Jun 2025)" — calendar names over licence-anniversary months.
+  check("6", "month ranges are stated and fixed",
+    /Q1 = January-March/.test(g) && /Q4 = October-December/.test(g));
+  check("6", "re-mapping months to the licence anniversary is forbidden",
+    /does NOT make its first quarter run April-June/.test(g));
+  check("6", "the licence decides only WHICH quarter reporting starts at",
+    /decides is WHICH quarter the reporting starts at/.test(g));
+  check("6", "quarters are named with label, year AND real months",
+    /give its calendar label, its year AND its real months/.test(g));
+  check("6", "a quarter already on a Form 9 row is used verbatim",
+    /use exactly those — never/.test(g) && /renumber or re-date them/.test(g));
+  check("7", "financial year is the year the first quarter falls in",
+    /the year that quarter falls in as financial_year/.test(g));
   check("6", "Salesforce rows get the real calendar quarter",
     /QUARTER DERIVATION \(2026-08-11\)/.test(String(renewal.submission?.apiFlow?.notes ?? "")));
   check("6", "the derivation is spelled out with an example",
