@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { AgentDefinition, CaseState } from "@dialog/config";
+import type { AgentDefinition, CaseState, Journey, LocalizedString } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
 import { adapterContext } from "../adapters/registry";
 import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition } from "../case/engine";
@@ -159,6 +159,44 @@ function customerEmail(state: CaseState): string | undefined {
     if (typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim())) return v.trim();
   }
   return undefined;
+}
+
+/** The add-on fees whose condition currently holds. */
+export function applicableSurcharges(
+  sub: NonNullable<Journey["submission"]>,
+  data: Record<string, unknown>
+): { key: string; label: LocalizedString; amount: number; when: string }[] {
+  return (sub.surcharges ?? []).filter((s) => evalCondition(s.when, data));
+}
+
+/**
+ * What to charge: the journey's price plus any add-on fee whose condition holds
+ * (FB-1430 — the courier fee must be IN the charged total, not a figure the model
+ * has to remember).
+ *
+ * The subtlety that bit us: `override` is whatever the model passed. That is the
+ * authoritative figure when a backend pricing tool produced it — but as soon as
+ * the model has quoted a total ONCE, the figure it passes next time already
+ * contains the fee. Adding to it again charged 300 -> 325 -> 350 across repeated
+ * payment links for the same unchanged selection. So whenever a fee applies, the base
+ * comes from the journey definition and the override is ignored; the result is
+ * then the same no matter how many times a link is reissued.
+ */
+export function chargeableAmount(
+  sub: NonNullable<Journey["submission"]>,
+  data: Record<string, unknown>,
+  override?: number
+): number {
+  const surchargeTotal = applicableSurcharges(sub, data).reduce((sum, s) => sum + s.amount, 0);
+  // A journey that declares fees AND carries its own price is computed entirely
+  // from the definition. The override is ignored even when no fee currently
+  // applies: it is whatever the model last quoted, so on a switch BACK to the
+  // free option it still carries the old fee and the customer keeps paying it.
+  if ((sub.surcharges ?? []).length > 0 && sub.amount !== undefined) {
+    return sub.amount + surchargeTotal;
+  }
+  // Otherwise the price genuinely comes from a backend pricing tool.
+  return (override ?? sub.amount ?? 0) + surchargeTotal;
 }
 
 export async function dispatchTool(
@@ -372,18 +410,10 @@ export async function dispatchTool(
         return { result: "User must authenticate before payment.", state, events };
       }
       if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
-      // Prefer the authoritative amount the model passes (from a backend pricing
-      // tool); fall back to the journey's configured figure.
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
-      const baseAmount = overrideAmount ?? sub.amount ?? 0;
       const currency = sub.currency ?? "AED";
-      // Conditional add-ons (FB-1430: the key-delivery courier fee must be part of
-      // the charged total, not a figure the model may forget). Declared on the
-      // journey and evaluated against the collected case data, so the fee is added
-      // deterministically whenever its condition holds.
-      const applicable = (sub.surcharges ?? []).filter((s) => evalCondition(s.when, state.data));
-      const surchargeTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
-      const amount = baseAmount + surchargeTotal;
+      const amount = chargeableAmount(sub, state.data, overrideAmount);
+      const applicable = applicableSurcharges(sub, state.data);
       const actx = adapterContext(agent, agent.integrations.payment);
       const res = await adapters.payment.initiate(actx, {
         caseId: ctx.caseId,
@@ -406,7 +436,7 @@ export async function dispatchTool(
       const breakdown = applicable.length
         ? ` The total includes ${applicable
             .map((s) => `${s.label.en} ${s.amount} ${currency}`)
-            .join(" + ")} on top of ${baseAmount} ${currency} — state this breakdown to the customer so no fee is a surprise.`
+            .join(" + ")} on top of ${amount - applicable.reduce((sum, s) => sum + s.amount, 0)} ${currency} — state this breakdown to the customer so no fee is a surprise.`
         : "";
       return {
         result: `Payment ${res.reference} initiated for ${amount} ${currency}.${breakdown} A secure "Pay now" card is now displayed to the customer inside the chat — do NOT paste any payment link or URL. Briefly tell them to complete the payment using the secure payment card shown below your message, then wait for payment confirmation before calling submit_case.`,
