@@ -15,6 +15,7 @@ import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
+import { companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -185,6 +186,9 @@ export async function POST(req: NextRequest) {
     mockSimulate: uaePassMockAllowed() && (session.userRef === MOCK_PERSONA_SUB || body.mock === true),
   });
   const { tools: baseExtraTools, exec: execIntegration } = apiTools;
+  // The company/Form 9 reads are EPGL's Salesforce org; offering them to another
+  // tenant's agent would be meaningless (and lib/epglRead would throw).
+  const hasEpglSalesforce = agent.definition.tenantSlug === "epgl";
 
   // Server-authoritative auth (sticky after UAE PASS), not the client's claim.
   const authenticated = session.authenticated;
@@ -272,8 +276,81 @@ export async function POST(req: NextRequest) {
       required: ["to", "subject", "body"],
     },
   };
-  const extraTools = [...baseExtraTools, emailTool];
+  // Company + Form 9 reads (FB-1268 / FB-1269). Salesforce serves these over the
+  // standard SOQL query endpoint; the statements are fixed server-side and the
+  // model supplies only a value, so it can never compose a query. See lib/epglRead.
+  const COMPANY_TOOL = "epgl_company_lookup";
+  const FORM9_TOOL = "epgl_form9_history";
+  const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
+    ? [
+        {
+          name: COMPANY_TOOL,
+          description:
+            "Look up a company already registered with EPGL by its TRADE LICENCE NUMBER. Returns the registered company details (names in English and Arabic, licence number and expiry, emirate, regulator, postal licence number and status) and the contacts on file with their Emirates ID and designation. Use it as soon as you know the trade licence number — from the customer or read off their uploaded licence — and ask the customer to CONFIRM what comes back instead of asking them to type it. Returns no match for a company EPGL has never licensed.",
+          input_schema: {
+            type: "object",
+            properties: {
+              tradeLicenseNumber: { type: "string", description: "The trade licence number exactly as printed on the licence" },
+            },
+            required: ["tradeLicenseNumber"],
+          },
+        },
+        {
+          name: FORM9_TOOL,
+          description:
+            "Quarterly Form 9 revenue submissions already filed for a company, newest first, using the accountId returned by " +
+            COMPANY_TOOL +
+            ". Each quarter carries its calendar quarter and year, the licence period start and end dates, and the leviable and non-leviable revenue. Use it to fill the renewal's financial summary and to work out which quarters the licence period covers — never ask the customer to type figures this returns.",
+          input_schema: {
+            type: "object",
+            properties: {
+              accountId: { type: "string", description: "Salesforce account id from epgl_company_lookup" },
+            },
+            required: ["accountId"],
+          },
+        },
+      ]
+    : [];
+
+  const extraTools = [...baseExtraTools, emailTool, ...epglReadTools];
   const runExtraTool = async (name: string, input: Record<string, unknown>) => {
+    if (name === COMPANY_TOOL || name === FORM9_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      try {
+        if (name === COMPANY_TOOL) {
+          const found = await companyByTradeLicense(agent.id, env, String(input.tradeLicenseNumber ?? ""));
+          if (!found.length) {
+            return {
+              result:
+                "NO MATCH: EPGL has no company registered under that trade licence number. Do not treat this as an error — continue collecting the details from the customer and their documents as normal.",
+            };
+          }
+          // A licence number can match a parent AND its branches; the filing always
+          // belongs to the main company, so never silently pick one.
+          if (found.length > 1) {
+            return {
+              result:
+                `MORE THAN ONE COMPANY is registered under that trade licence number (${found.length}). ` +
+                "Show the customer the names and ask which is theirs before using any of them:\n" +
+                JSON.stringify(found),
+            };
+          }
+          return { result: JSON.stringify(found[0]) };
+        }
+        const quarters = await form9ByAccountId(agent.id, env, String(input.accountId ?? ""));
+        return {
+          result: quarters.length
+            ? JSON.stringify(quarters)
+            : "NO FORM 9 SUBMISSIONS on file for this company yet — collect the quarterly figures from the customer as normal.",
+        };
+      } catch (err) {
+        log.error("epgl_read_failed", err, { ...a, tool: name });
+        return {
+          result: `LOOKUP UNAVAILABLE: ${err instanceof Error ? err.message : "unknown error"}. Continue with the customer's own answers and documents; do not tell them the system is broken.`,
+          isError: true,
+        };
+      }
+    }
     if (name !== EMAIL_TOOL_NAME) return execIntegration(name, input);
     const to = String(input.to ?? "").trim();
     const subject = String(input.subject ?? "").slice(0, 180) || `${agent.definition.name} confirmation`;
