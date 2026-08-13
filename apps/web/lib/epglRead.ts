@@ -35,6 +35,13 @@ export interface EpglCompany {
   emirate?: string;
   regulator?: string;
   postalLicenseNumber?: string;
+  /**
+   * The licence RECORD id (Account.EPG_License__c) — NOT the printed licence
+   * number. A renewal's finance rows need this in EPG_License_No__c, which is an
+   * id-type lookup: sending the number is rejected with "id value of incorrect
+   * type", which is what blocked renewal submissions.
+   */
+  licenseRecordId?: string;
   /** Plain text, derived from the org's HTML-formula status field. */
   licenseStatus?: string;
   licenseExpiry?: string;
@@ -155,7 +162,7 @@ async function query<T>(agentId: string, env: EnvKey, soql: string): Promise<T[]
 const COMPANY_FIELDS =
   "Id, Name, EPG_Company_Name_Arabic__c, EPG_Trade_Name_in_English__c, EPG_Trade_Name_in_Arabic__c, " +
   "EPG_Trade_license_no__c, EPG_Trade_license_Expiry_date__c, EPG_Emirates__c, EPG_Regulator__c, " +
-  "EPG_License_Number__c, EPG_License_Status__c, EPG_License_Expiry_Date__c, " +
+  "EPG_License_Number__c, EPG_License__c, EPG_License_Status__c, EPG_License_Expiry_Date__c, " +
   "(SELECT FirstName, LastName, Email, Phone, EPG_Emirates_Id__c, EPG_Designation__c FROM Contacts)";
 
 function toCompany(r: Record<string, any>): EpglCompany {
@@ -170,6 +177,7 @@ function toCompany(r: Record<string, any>): EpglCompany {
     emirate: r.EPG_Emirates__c ?? undefined,
     regulator: r.EPG_Regulator__c ?? undefined,
     postalLicenseNumber: r.EPG_License_Number__c ?? undefined,
+    licenseRecordId: r.EPG_License__c ?? undefined,
     licenseStatus: plainLicenseStatus(r.EPG_License_Status__c),
     licenseExpiry: r.EPG_License_Expiry_Date__c ?? undefined,
     contacts: ((r.Contacts?.records ?? []) as Record<string, any>[]).map((c) => ({
