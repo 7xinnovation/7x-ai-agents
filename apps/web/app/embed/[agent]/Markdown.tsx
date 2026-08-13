@@ -657,8 +657,13 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
       i++;
     } else {
       const para: string[] = [];
+      // A paragraph ends at the next block, INCLUDING a fence. Without the fence
+      // test a line like "1. Current trade / postal licence" followed straight by
+      // ```upload (no blank line) swallowed the whole block, so the upload widget
+      // rendered as literal backticks and `key: updated_trade_license` lost its
+      // underscores to italics.
       const isBlock = (l: string) =>
-        /^\s*[-*]\s+/.test(l) || /^\s*(-{3,}|\*{3,})\s*$/.test(l) || /^\s*#{1,4}\s+/.test(l) || /^\s*>\s?/.test(l);
+        /^\s*```/.test(l) || /^\s*[-*]\s+/.test(l) || /^\s*(-{3,}|\*{3,})\s*$/.test(l) || /^\s*#{1,4}\s+/.test(l) || /^\s*>\s?/.test(l);
       while (i < lines.length && lines[i]!.trim() !== "" && !isBlock(lines[i]!)) {
         para.push(lines[i]!);
         i++;

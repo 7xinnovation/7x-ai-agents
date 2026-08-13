@@ -39,6 +39,12 @@ const cases: [string, string, string[]][] = [
   ["toggles checkbox with markdown link label", "```toggles\nstyle: checkbox\n- terms_accepted: I agree to the [Terms](https://example.com/tc)\nconfirm: Agree\n```", ["dlg-toggles", "href=\"https://example.com/tc\"", "dlg-checkbox-box"]],
   ["cards block renders options", "```cards\n- title: MyHome\n  price: AED 695 / year\n```", ["dlg-card-opt", "MyHome", "AED 695 / year"]],
   ["map block renders browse CTA", "```map\nemirate: DXB\nbundle: MYHOME3\n```", ["dlg-map"]],
+  // A fence directly after a line of text, with no blank line between — the model
+  // writes numbered lists this way and the paragraph used to swallow the block,
+  // rendering literal backticks instead of an upload widget.
+  ["fence straight after text still renders", "1. Current trade / postal licence\n```upload\nkey: trade_license\n```", ["dlg-chat-upload", "Trade License"]],
+  ["that text is not shown as raw backticks", "1. Current trade / postal licence\n```upload\nkey: trade_license\n```", ["Current trade / postal licence"]],
+  ["several fenced uploads in one numbered list", "1. First\n```upload\nkey: trade_license\n```\n2. Second\n```upload\nkey: agent_eid_front\n```", ["Trade License", "Agent EID (front)"]],
 ];
 
 let fail = 0;
