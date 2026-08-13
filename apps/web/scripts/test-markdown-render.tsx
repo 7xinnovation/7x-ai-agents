@@ -47,7 +47,34 @@ const cases: [string, string, string[]][] = [
   ["several fenced uploads in one numbered list", "1. First\n```upload\nkey: trade_license\n```\n2. Second\n```upload\nkey: agent_eid_front\n```", ["Trade License", "Agent EID (front)"]],
 ];
 
-let fail = 0;
+// Streaming reveals a fenced block one character at a time, so the renderer sees
+// every partial prefix of it (```s, ```su, ```sum …). None match the block
+// matcher, and a paragraph branch that consumed nothing before checking them
+// spun forever and locked the tab. Render EVERY prefix of a realistic reply and
+// require each to terminate.
+const STREAMED = [
+  "Got your company details. Here's what we have on file:\n```summary\n- Company: QUIQUP DELIVERY L.L.C\n- Postal licence: 284\n```\nIs that right?",
+  "1. Current trade / postal licence\n```upload\nkey: trade_license\n```",
+  "Here is some code:\n```json\n{\"a\": 1}\n```\ndone",
+].join("\n\n");
+
+let streamedFail = 0;
+for (let n = 1; n <= STREAMED.length; n++) {
+  try {
+    render(STREAMED.slice(0, n));
+  } catch (e) {
+    console.log(` FAIL  streaming prefix of length ${n} threw: ${(e as Error).message}`);
+    streamedFail++;
+    break;
+  }
+}
+console.log(
+  streamedFail === 0
+    ? ` PASS  every streaming prefix renders (${STREAMED.length} prefixes, no hang)`
+    : " FAIL  streaming prefixes"
+);
+
+let fail = streamedFail;
 for (const [name, text, expects] of cases) {
   const html = render(text);
   const missing = expects.filter((e) => !html.includes(e));

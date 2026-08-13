@@ -656,7 +656,6 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
     } else if (line.trim() === "") {
       i++;
     } else {
-      const para: string[] = [];
       // A paragraph ends at the next block, INCLUDING a fence. Without the fence
       // test a line like "1. Current trade / postal licence" followed straight by
       // ```upload (no blank line) swallowed the whole block, so the upload widget
@@ -664,6 +663,13 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
       // underscores to italics.
       const isBlock = (l: string) =>
         /^\s*```/.test(l) || /^\s*[-*]\s+/.test(l) || /^\s*(-{3,}|\*{3,})\s*$/.test(l) || /^\s*#{1,4}\s+/.test(l) || /^\s*>\s?/.test(l);
+      // The first line is ALWAYS consumed, so this branch can never fail to
+      // advance `i`. It reaches here having matched no earlier branch, which
+      // includes a fence the block matcher rejected — a half-typed one mid-stream
+      // (```s … ```sum) or an unrecognised type (```json). Testing isBlock before
+      // taking anything left those spinning forever and locked up the tab.
+      const para: string[] = [lines[i]!];
+      i++;
       while (i < lines.length && lines[i]!.trim() !== "" && !isBlock(lines[i]!)) {
         para.push(lines[i]!);
         i++;
