@@ -44,6 +44,10 @@ export interface PublicAgent {
   // Cap on upload controls shown per assistant message (FB-1565).
   uploadsPerMessage?: number;
   journeys: PublicJourney[];
+  // Origins permitted to embed this agent. Also the allow-list for the host
+  // handoff: a postMessage carrying a session token is only read when it comes
+  // from one of these. Empty means no host may hand us a token.
+  allowedOrigins?: string[];
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;
   // Whether GPT Realtime voice mode is configured (AZURE_REALTIME_* env present).

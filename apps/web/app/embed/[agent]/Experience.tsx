@@ -641,14 +641,38 @@ export function Experience({
   }, [pendingDocCount, streaming, uploadingKeys]);
 
   // Host site can push/refresh the UAE PASS session token at any time.
+  //
+  // `source: "dialog-host"` is a convention, not a credential — any frame can put
+  // that string in a message. So the sender's ORIGIN is checked against the
+  // agent's allowedOrigins before the token is taken. The token is still verified
+  // server-side on every turn (lib/hostToken); this just stops an unrelated page
+  // from feeding us one at all.
+  //
+  // With allowedOrigins unset the check cannot be made, so no token is accepted —
+  // an agent that has not been told who may embed it has no way to know whose
+  // message this is. Configure allowedOrigins for any agent using the handoff.
+  const allowedOrigins = agent.allowedOrigins ?? [];
   useEffect(() => {
+    const permitted = new Set(
+      allowedOrigins
+        .map((o: string) => {
+          try {
+            return new URL(o).origin;
+          } catch {
+            return "";
+          }
+        })
+        .filter(Boolean)
+    );
     const onMsg = (e: MessageEvent) => {
       const m = e.data as { source?: string; uaePassToken?: string };
-      if (m?.source === "dialog-host" && typeof m.uaePassToken === "string") uaePass.current = m.uaePassToken;
+      if (m?.source !== "dialog-host" || typeof m.uaePassToken !== "string") return;
+      if (!permitted.has(e.origin)) return;
+      uaePass.current = m.uaePassToken;
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, []);
+  }, [allowedOrigins]);
 
   // Resume a prior session for this agent (PRD: partial-application retention).
   useEffect(() => {

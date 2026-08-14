@@ -26,6 +26,7 @@ export default async function EmbedPage({
     locales: d.locales,
     greeting: d.greeting,
     theme: d.theme,
+    allowedOrigins: d.allowedOrigins,
     documentsDisclaimer: d.documentsDisclaimer,
     documentsInChat: d.documentsInChat,
     uploadsPerMessage: d.uploadsPerMessage,

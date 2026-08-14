@@ -7,7 +7,8 @@ import { getDb, payments, documents as documentsTable } from "@dialog/db";
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated } from "@/lib/conversation";
+import { hostTokenConfigured, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
@@ -175,8 +176,43 @@ export async function POST(req: NextRequest) {
   // that declare authType "uaepass_live".
   const uaePassIdentityToken = session.sessionTokenKind === "uaepass" ? session.sessionToken : undefined;
   const backendSessionToken = session.sessionTokenKind === "uaepass" ? undefined : session.sessionToken;
+
+  /**
+   * The host handoff: UAE PASS -> emiratespost.ae -> NXN authenticates -> NXN
+   * issues a SIGNED token -> the embed posts it here -> we validate it, and only
+   * then does it become the customer's identity and the bearer for Emirates
+   * Post's protected endpoints.
+   *
+   * It arrives over postMessage from whatever page framed us, so it is attacker-
+   * controlled input until the signature says otherwise. Emirates Post would
+   * reject a forged one, but we would already have treated the holder as that
+   * customer. Unverified, it is dropped: it never reaches an integration and it
+   * never marks a conversation signed in.
+   */
+  let hostToken: string | undefined;
+  if (body.uaePassToken) {
+    const v = verifyHostToken(body.uaePassToken);
+    if (v.ok) {
+      hostToken = body.uaePassToken;
+      // The verified subject is the identity — never the client's `userRef` claim.
+      if (!session.authenticated || session.userRef !== v.claims.sub) {
+        await markAuthenticated(session.conversationId, v.claims.sub);
+        session.authenticated = true;
+        session.userRef = v.claims.sub;
+      }
+    } else {
+      log.warn("host_token_rejected", {
+        agentId: agent.id,
+        conversationId: session.conversationId,
+        reason: v.reason,
+        // Distinguishes "NXN sent us something bad" from "we are not set up yet",
+        // which look identical from the customer's side and need opposite fixes.
+        configured: hostTokenConfigured(),
+      });
+    }
+  }
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
-    uaePassToken: body.uaePassToken ?? uaePassIdentityToken,
+    uaePassToken: hostToken ?? uaePassIdentityToken,
     sessionToken: backendSessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
     authenticated: session.authenticated,
@@ -368,7 +404,7 @@ export async function POST(req: NextRequest) {
       const env = agent.definition.activeEnvironment ?? "production";
       // The customer's own session is what the MOE endpoints mean by "requires
       // UAE PASS"; a GSB service credential, once configured, takes precedence.
-      const caller = backendSessionToken ?? body.uaePassToken ?? uaePassIdentityToken;
+      const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
       try {
         if (name === AUTHORITIES_TOOL) {
           const list = await listIssuingEntities(agent.id, env, caller);
