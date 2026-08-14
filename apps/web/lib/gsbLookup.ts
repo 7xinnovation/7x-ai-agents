@@ -292,3 +292,64 @@ export async function companyByLicence(
     })),
   };
 }
+
+export interface CustomerPoBox {
+  boxNumber?: string;
+  emirate?: string;
+  branch?: string;
+  bundleId?: string;
+  expiryDate?: string;
+  status?: string;
+  isOwner?: boolean;
+}
+
+/**
+ * The PO Boxes already held under a customer's Emirates ID.
+ *
+ * This is the closest thing the API has to "show what they have under their
+ * Emirates ID", and it was easy to miss: it lives on the USERS service, is named
+ * after a mobile number, and takes EmiratesId as an optional query parameter.
+ *
+ * It does NOT return companies or trade licences. Searching both specs for every
+ * endpoint that accepts an Emirates ID turns up five, and this is the only one
+ * that returns anything a customer owns — the rest set it (Account update, agent
+ * update) or attach images of it. There is no companies-by-Emirates-ID lookup to
+ * find, which is why the corporate flow verifies ownership through a licence
+ * number instead of filtering a list by the ID.
+ *
+ * Protected, like everything else in this tier, so it answers only for a
+ * signed-in customer.
+ */
+export async function poBoxesByEmiratesId(
+  agentId: string,
+  env: EnvKey,
+  emiratesId: string,
+  callerToken?: string
+): Promise<CustomerPoBox[]> {
+  const eid = normaliseEmiratesId(emiratesId);
+  if (!eid) throw new Error("Emirates ID is not in an accepted format");
+  const c = await creds(agentId, env);
+  const url = new URL(`${c.baseUrl.replace(/\/$/, "")}/users/api/v1/PoBoxes/getpoboxesbymobile`);
+  url.searchParams.set("EmiratesId", eid);
+
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (c.apiKey) headers["X-API-KEY"] = c.apiKey;
+  headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const detail = (await res.text()).slice(0, 200);
+    throw new Error(`GSB PoBoxes/getpoboxesbymobile failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`);
+  }
+  const json = (await res.json()) as { payload?: unknown };
+  const rows = Array.isArray(json?.payload) ? (json.payload as Record<string, any>[]) : [];
+  return rows.map((r) => ({
+    boxNumber: r.boxNumber ?? r.poBoxNumber ?? r.box_No ?? undefined,
+    emirate: r.emirateName ?? r.emirate ?? r.emirateCode ?? undefined,
+    branch: r.officeName ?? r.branchName ?? undefined,
+    bundleId: r.bundleId ?? r.bundle_Id ?? undefined,
+    expiryDate: r.expiryDate ?? r.currentExpiryDate ?? undefined,
+    status: r.status ?? r.boxStatus ?? undefined,
+    isOwner: typeof r.isOwner === "boolean" ? r.isOwner : undefined,
+  }));
+}

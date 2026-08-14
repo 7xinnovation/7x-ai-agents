@@ -17,7 +17,7 @@ import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
 import { companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
-import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch } from "@/lib/gsbLookup";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId } from "@/lib/gsbLookup";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -396,6 +396,7 @@ export async function POST(req: NextRequest) {
   const AUTHORITIES_TOOL = "nxn_issuing_authorities";
   const COMPANIES_TOOL = "nxn_companies_by_authority";
   const LICENCE_TOOL = "nxn_company_by_licence";
+  const MYBOXES_TOOL = "nxn_boxes_for_customer";
   const gsbTools: Anthropic.Tool[] = isNxn
     ? [
         {
@@ -417,6 +418,16 @@ export async function POST(req: NextRequest) {
           },
         },
         {
+          name: MYBOXES_TOOL,
+          description:
+            "The PO Boxes already held under the signed-in customer's Emirates ID. Use it to show what they already have before creating another, and to answer \"what boxes do I have\". Pass the VERIFIED Emirates ID from the known-customer note, never one the customer typed.",
+          input_schema: {
+            type: "object",
+            properties: { emiratesId: { type: "string", description: "The customer's verified Emirates ID" } },
+            required: ["emiratesId"],
+          },
+        },
+        {
           name: LICENCE_TOOL,
           description:
             "Look up one company by its trade licence number and check who owns it. Pass emiratesId as well to have the ownership check done for you: it compares the customer's Emirates ID against the licence's registered owners. This is the only lookup that can confirm the licence is really theirs.",
@@ -435,7 +446,7 @@ export async function POST(req: NextRequest) {
 
   const extraTools = [...baseExtraTools, emailTool, ...epglReadTools, ...gsbTools];
   const runExtraTool = async (name: string, input: Record<string, unknown>) => {
-    if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL) {
+    if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL || name === MYBOXES_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       // The customer's own session is what the MOE endpoints mean by "requires
       // UAE PASS"; a GSB service credential, once configured, takes precedence.
@@ -447,6 +458,14 @@ export async function POST(req: NextRequest) {
             result: list.length
               ? JSON.stringify(list)
               : "NO AUTHORITIES RETURNED. Do not substitute a list of your own — tell the customer you cannot pull the list and ask for the authority name printed on their licence, or the trade licence number.",
+          };
+        }
+        if (name === MYBOXES_TOOL) {
+          const boxes = await poBoxesByEmiratesId(agent.id, env, String(input.emiratesId ?? ""), caller);
+          return {
+            result: boxes.length
+              ? JSON.stringify(boxes)
+              : "NO PO BOXES are held under this Emirates ID. Say so plainly and continue — it is a normal answer for a first-time customer, not an error.",
           };
         }
         if (name === COMPANIES_TOOL) {
