@@ -8,7 +8,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated } from "@/lib/conversation";
-import { hostTokenConfigured, verifyHostToken } from "@/lib/hostToken";
+import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
@@ -191,22 +191,44 @@ export async function POST(req: NextRequest) {
    */
   let hostToken: string | undefined;
   if (body.uaePassToken) {
-    const v = verifyHostToken(body.uaePassToken);
-    if (v.ok) {
+    // Two shapes, decided by what the token IS rather than by configuration:
+    // a signed JWS is verified against a key; Emirates Post's identity-service
+    // token is opaque, so it is validated by using it (GET /api/v1/Account),
+    // which also returns the customer's Emirates ID.
+    const looksSigned = body.uaePassToken.split(".").length === 3;
+    let sub: string | undefined;
+    let reason = "";
+
+    if (looksSigned && hostTokenConfigured()) {
+      const v = verifyHostToken(body.uaePassToken);
+      if (v.ok) sub = v.claims.sub;
+      else reason = v.reason;
+    } else {
+      const usersBase = await epUsersBaseUrl(agent.id, agent.definition.activeEnvironment ?? "production");
+      if (!usersBase) reason = "no Emirates Post users service configured for this environment";
+      else {
+        const v = await introspectEmiratesPostToken(body.uaePassToken, usersBase);
+        if (v.ok) sub = v.identity.sub;
+        else reason = v.reason;
+      }
+    }
+
+    if (sub) {
       hostToken = body.uaePassToken;
       // The verified subject is the identity — never the client's `userRef` claim.
-      if (!session.authenticated || session.userRef !== v.claims.sub) {
-        await markAuthenticated(session.conversationId, v.claims.sub);
+      if (!session.authenticated || session.userRef !== sub) {
+        await markAuthenticated(session.conversationId, sub);
         session.authenticated = true;
-        session.userRef = v.claims.sub;
+        session.userRef = sub;
       }
     } else {
       log.warn("host_token_rejected", {
         agentId: agent.id,
         conversationId: session.conversationId,
-        reason: v.reason,
+        reason,
         // Distinguishes "NXN sent us something bad" from "we are not set up yet",
         // which look identical from the customer's side and need opposite fixes.
+        signed: looksSigned,
         configured: hostTokenConfigured(),
       });
     }

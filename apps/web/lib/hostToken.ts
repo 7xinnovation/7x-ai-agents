@@ -1,4 +1,5 @@
 import { createHmac, createPublicKey, createVerify, timingSafeEqual } from "node:crypto";
+import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 
 /**
  * Validation for the signed token the host site hands the embedded agent.
@@ -46,6 +47,92 @@ export type HostTokenResult =
 /** Is any verification material configured? When false, every token is rejected. */
 export function hostTokenConfigured(): boolean {
   return Boolean(process.env.HOST_TOKEN_HS256_SECRET || process.env.HOST_TOKEN_PUBLIC_KEY);
+}
+
+/**
+ * Emirates Post confirmed how the handoff actually works, and it is not a JWT.
+ *
+ *   UAE PASS -> emiratespost.ae -> NXN sends the AUTH CODE to
+ *   /services/pobox/users/api/v1/Account/Token -> their identity service returns
+ *   an opaque accessToken -> that token is the bearer their protected endpoints
+ *   want, and it is what reaches the widget.
+ *
+ * The code is exchanged with THEIR UAE PASS client (the failure body names
+ * "Origin: box-stg.emiratespost.ae"), which is why the widget has to sit behind
+ * their sign-in rather than running its own — a code issued to our client is not
+ * one they can redeem.
+ *
+ * An opaque token has no signature to check, so it is validated by USING it:
+ * GET /api/v1/Account returns the customer when the token is good and 401s when
+ * it is not. That is a real check, not a assumption, and it hands back the
+ * identity at the same time — including the Emirates ID the GSB ownership check
+ * needs, which no signed claim would have given us for free.
+ *
+ * Results are cached briefly: without it every chat turn would pay a round trip
+ * to Emirates Post before the model is even called.
+ */
+export interface EpIdentity {
+  /** UAE PASS subject — the stable identifier for this customer. */
+  sub: string;
+  emiratesId?: string;
+  mobileNumber?: string;
+  name?: string;
+  /** Emirates Post's own numeric user id. */
+  epUserId?: number;
+}
+
+const INTROSPECT_TTL_MS = 60_000;
+const introspectCache = new Map<string, { at: number; result: EpIdentity | null }>();
+
+/** Never key a cache on a bearer in the clear — a heap dump should not leak sessions. */
+function cacheKey(token: string): string {
+  return createHmac("sha256", "host-token-cache").update(token).digest("base64url");
+}
+
+export async function introspectEmiratesPostToken(
+  token: string,
+  usersBaseUrl: string
+): Promise<{ ok: true; identity: EpIdentity } | { ok: false; reason: string }> {
+  if (!token) return { ok: false, reason: "no token" };
+  const key = cacheKey(token);
+  const hit = introspectCache.get(key);
+  if (hit && Date.now() - hit.at < INTROSPECT_TTL_MS) {
+    return hit.result ? { ok: true, identity: hit.result } : { ok: false, reason: "rejected by Emirates Post (cached)" };
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${usersBaseUrl.replace(/\/$/, "")}/api/v1/Account`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+  } catch (e) {
+    // A network failure is NOT proof the token is bad, so it is not cached as a
+    // rejection — that would turn a blip into a sign-out for everyone holding one.
+    return { ok: false, reason: `could not reach Emirates Post: ${(e as Error).message}` };
+  }
+
+  if (res.status === 401) {
+    introspectCache.set(key, { at: Date.now(), result: null });
+    return { ok: false, reason: "rejected by Emirates Post" };
+  }
+  if (!res.ok) return { ok: false, reason: `Emirates Post returned HTTP ${res.status}` };
+
+  const body = (await res.json().catch(() => null)) as { payload?: Record<string, unknown> } | null;
+  const u = body?.payload;
+  if (!u) return { ok: false, reason: "no user in the response" };
+
+  const sub = String(u.uaePassId ?? u.emiratesId ?? u.id ?? "").trim();
+  if (!sub) return { ok: false, reason: "no identifier on the user record" };
+
+  const identity: EpIdentity = {
+    sub,
+    emiratesId: typeof u.emiratesId === "string" ? u.emiratesId : undefined,
+    mobileNumber: typeof u.mobileNumber === "string" ? u.mobileNumber : undefined,
+    name: [u.firstNameEN, u.lastNameEN].filter((x) => typeof x === "string" && x).join(" ").trim() || undefined,
+    epUserId: typeof u.id === "number" ? u.id : undefined,
+  };
+  introspectCache.set(key, { at: Date.now(), result: identity });
+  return { ok: true, identity };
 }
 
 const b64urlToBuf = (s: string) => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
@@ -145,4 +232,19 @@ export function verifyHostToken(token: unknown, now = Date.now()): HostTokenResu
   if (!claims.sub || typeof claims.sub !== "string") return { ok: false, reason: "no subject claim" };
 
   return { ok: true, claims };
+}
+
+/**
+ * The users service sits on a DIFFERENT path prefix from the PO Box API
+ * (/services/pobox/users vs /services/pobox), which is why Account/Token is
+ * absent from the swagger we were originally given and the token exchange looked
+ * like it did not exist at all.
+ *
+ * Derived from the NXN integration's own base URL so staging and production
+ * follow it automatically rather than needing a second setting to keep in sync.
+ */
+export async function epUsersBaseUrl(agentId: string, env: EnvKey): Promise<string | undefined> {
+  const row = (await listIntegrations(agentId)).find((r) => /nxn/i.test(r.name));
+  const spec = row?.environments[env] as EnvSpec | undefined;
+  return spec?.baseUrl ? `${spec.baseUrl.replace(/\/$/, "")}/users` : undefined;
 }
