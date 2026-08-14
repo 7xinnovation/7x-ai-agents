@@ -1,6 +1,6 @@
 import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery, registerSalesforceAdapter, registerNgeniusAdapter, registerUaePassAdapter } from "@dialog/core";
-import type { KBAdapter, KBResult } from "@dialog/core";
-import { getDb, kbChunks, kbDocuments } from "@dialog/db";
+import type { KBAdapter, KBResult, StorageAdapter } from "@dialog/core";
+import { getDb, kbChunks, kbDocuments, documentBlobs } from "@dialog/db";
 import { and, eq, sql, inArray } from "drizzle-orm";
 
 let initialised = false;
@@ -84,6 +84,52 @@ export function ensureAdapters() {
     },
   };
   registerAdapter("knowledge", "neon", () => neonKb);
+
+  /**
+   * Durable document storage in Postgres.
+   *
+   * The only storage provider registered before this was "mock", which keeps the
+   * bytes in a 200-entry in-process Map. Uploads survived until the next restart,
+   * eviction or scale event — and submission reads them back to attach to
+   * Salesforce, so an application could be filed without the trade licence it was
+   * approved on. There is an audit action for it (sf_document_skipped /
+   * bytes_unavailable), which is the shape of a failure someone expected.
+   *
+   * put() upserts on storageKey so re-uploading the same document key replaces the
+   * bytes rather than accumulating orphans; get() returns null for anything not
+   * found, which the submission path already treats as "skip and audit" rather
+   * than an error.
+   */
+  const pgStorage: StorageAdapter = {
+    async put(_ctx, input) {
+      const storageKey = `pg://${input.caseId}/${input.key}/${input.fileName}`;
+      const bytes = Buffer.from(input.bytes);
+      await getDb()
+        .insert(documentBlobs)
+        .values({
+          storageKey,
+          caseId: input.caseId,
+          contentType: input.contentType || "application/octet-stream",
+          sizeBytes: bytes.length,
+          bytes,
+        })
+        .onConflictDoUpdate({
+          target: documentBlobs.storageKey,
+          set: { bytes, contentType: input.contentType || "application/octet-stream", sizeBytes: bytes.length },
+        });
+      return { storageKey };
+    },
+    async get(_ctx, input) {
+      const [row] = await getDb()
+        .select({ bytes: documentBlobs.bytes, contentType: documentBlobs.contentType })
+        .from(documentBlobs)
+        .where(eq(documentBlobs.storageKey, input.storageKey))
+        .limit(1);
+      if (!row) return null;
+      return { bytes: new Uint8Array(row.bytes), contentType: row.contentType };
+    },
+  };
+  registerAdapter("storage", "postgres", () => pgStorage);
 
   initialised = true;
 }

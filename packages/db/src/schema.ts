@@ -168,6 +168,35 @@ export const cases = pgTable(
   (t) => ({ convIdx: index("cases_conversation_idx").on(t.conversationId) })
 );
 
+/**
+ * The BYTES of an uploaded document, kept out of `documents` so listing a case's
+ * documents never drags multi-megabyte payloads through the query.
+ *
+ * These lived only in a 200-entry in-process Map before (the "mock" storage
+ * adapter, which was the sole provider registered anywhere). The record said
+ * "uploaded" and the bytes were gone on the next restart — and because submission
+ * reads them back to attach to Salesforce, an application could be filed without
+ * the trade licence it was approved on.
+ *
+ * Postgres rather than blob storage: the files are small and bounded (10 MB cap,
+ * a few thousand a year), they are read back once at submission and archived in
+ * Salesforce, and keeping them here makes the bytes transactional with the case
+ * and subject to the same retention and PII handling. If the volume ever changes
+ * shape, the adapter is the only thing that has to move.
+ */
+export const documentBlobs = pgTable("document_blobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Matches documents.storage_key — the adapter's handle for these bytes. */
+  storageKey: text("storage_key").notNull().unique(),
+  caseId: uuid("case_id")
+    .notNull()
+    .references(() => cases.id, { onDelete: "cascade" }),
+  contentType: text("content_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  bytes: customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" })("bytes").notNull(),
+  createdAt: ts(),
+});
+
 /** Uploaded documents bound to a case. */
 export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().defaultRandom(),
