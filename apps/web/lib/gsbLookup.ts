@@ -167,7 +167,8 @@ async function get<T>(
   env: EnvKey,
   path: string,
   params: Record<string, string>,
-  callerToken?: string
+  callerToken?: string,
+  auth: "bearer" | "api-key-only" = "bearer"
 ): Promise<T[]> {
   const c = await creds(agentId, env);
   const url = new URL(`${c.baseUrl}${path}`);
@@ -175,7 +176,7 @@ async function get<T>(
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (c.apiKey) headers["X-API-KEY"] = c.apiKey;
-  headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
+  if (auth === "bearer") headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
 
   const res = await fetch(url, { headers });
   if (!res.ok) {
@@ -188,9 +189,30 @@ async function get<T>(
   return Array.isArray(payload) ? payload : [payload];
 }
 
-/** The issuing authorities. THE ONLY valid source for that list — never compose one. */
+/**
+ * The issuing authorities. THE ONLY valid source for that list — never compose one.
+ *
+ * Served by the GUEST endpoint, which authorises on the environment's X-API-KEY
+ * alone — no bearer, no GSB credential. Verified against both box-stg and box:
+ * 55 authorities with their codes, English and Arabic names, emirate and
+ * free-zone flag. The MOE variant needs a bearer nobody has yet and is kept only
+ * as a fallback, so this list does not wait on the GSB credential.
+ *
+ * (An earlier probe reported this endpoint as 401 on both hosts. That probe was
+ * sending the ENCRYPTED api key string — listIntegrations does not decrypt — so
+ * it was testing a garbage credential, not the endpoint.)
+ */
 export async function listIssuingEntities(agentId: string, env: EnvKey, callerToken?: string): Promise<IssuingEntity[]> {
-  const rows = await get<Record<string, any>>(agentId, env, "/api/MOE/GetIssuingEntities", {}, callerToken);
+  let rows: Record<string, any>[];
+  try {
+    rows = await get<Record<string, any>>(agentId, env, "/api/Guest/GetIssuingEntitiesEscher", {}, undefined, "api-key-only");
+  } catch (guestErr) {
+    try {
+      rows = await get<Record<string, any>>(agentId, env, "/api/MOE/GetIssuingEntities", {}, callerToken);
+    } catch {
+      throw guestErr; // the guest failure is the one worth reporting
+    }
+  }
   return rows.map((r) => ({
     code: String(r.entCode ?? ""),
     nameEn: r.entEn ?? undefined,
