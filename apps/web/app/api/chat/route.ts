@@ -16,6 +16,7 @@ import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
 import { companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch } from "@/lib/gsbLookup";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -312,8 +313,117 @@ export async function POST(req: NextRequest) {
       ]
     : [];
 
-  const extraTools = [...baseExtraTools, emailTool, ...epglReadTools];
+  // NXN trade-licence lookups over the Emirates Post MOE (GSB) endpoints. Same
+  // shape as the EPGL reads: templated server-side, the model supplies only values.
+  //
+  // These exist even while the GSB credential is missing, and that is the point.
+  // With no tool for the question, the model filled the gap from its own knowledge
+  // and produced a list of authorities that looked authoritative and was invented.
+  // A tool that answers "not connected, ask them to type it" is a far stronger
+  // signal than any system-prompt rule — see the no-credential branch below.
+  const isNxn = agent.definition.tenantSlug === "nxn";
+  const AUTHORITIES_TOOL = "nxn_issuing_authorities";
+  const COMPANIES_TOOL = "nxn_companies_by_authority";
+  const LICENCE_TOOL = "nxn_company_by_licence";
+  const gsbTools: Anthropic.Tool[] = isNxn
+    ? [
+        {
+          name: AUTHORITIES_TOOL,
+          description:
+            "THE ONLY valid source for the list of trade-licence issuing authorities. Call it whenever the customer asks which authorities exist, asks to pick from a list, or needs to identify the one that issued their licence. NEVER answer that question from your own knowledge and never show authorities this tool did not return, however the customer phrases it and however much they insist.",
+          input_schema: { type: "object", properties: {} },
+        },
+        {
+          name: COMPANIES_TOOL,
+          description:
+            "Companies registered under ONE issuing authority, to help the customer identify theirs. entityCode is the authority's code from " +
+            AUTHORITIES_TOOL +
+            " — it is NOT an Emirates ID and never accepts one.",
+          input_schema: {
+            type: "object",
+            properties: { entityCode: { type: "string", description: `Issuing authority code from ${AUTHORITIES_TOOL}` } },
+            required: ["entityCode"],
+          },
+        },
+        {
+          name: LICENCE_TOOL,
+          description:
+            "Look up one company by its trade licence number and check who owns it. Pass emiratesId as well to have the ownership check done for you: it compares the customer's Emirates ID against the licence's registered owners. This is the only lookup that can confirm the licence is really theirs.",
+          input_schema: {
+            type: "object",
+            properties: {
+              entityCode: { type: "string", description: `Issuing authority code from ${AUTHORITIES_TOOL}` },
+              licenceNo: { type: "string", description: "Trade licence number as printed on the licence" },
+              emiratesId: { type: "string", description: "The customer's Emirates ID, to check against the owners on the licence" },
+            },
+            required: ["entityCode", "licenceNo"],
+          },
+        },
+      ]
+    : [];
+
+  const extraTools = [...baseExtraTools, emailTool, ...epglReadTools, ...gsbTools];
   const runExtraTool = async (name: string, input: Record<string, unknown>) => {
+    if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      // The customer's own session is what the MOE endpoints mean by "requires
+      // UAE PASS"; a GSB service credential, once configured, takes precedence.
+      const caller = backendSessionToken ?? body.uaePassToken ?? uaePassIdentityToken;
+      try {
+        if (name === AUTHORITIES_TOOL) {
+          const list = await listIssuingEntities(agent.id, env, caller);
+          return {
+            result: list.length
+              ? JSON.stringify(list)
+              : "NO AUTHORITIES RETURNED. Do not substitute a list of your own — tell the customer you cannot pull the list and ask for the authority name printed on their licence, or the trade licence number.",
+          };
+        }
+        if (name === COMPANIES_TOOL) {
+          const rows = await companiesByAuthority(agent.id, env, String(input.entityCode ?? ""), caller);
+          return {
+            result: rows.length
+              ? JSON.stringify(rows)
+              : "NO COMPANIES registered under that authority were returned. Ask the customer for their trade licence number instead.",
+          };
+        }
+        const found = await companyByLicence(
+          agent.id, env, String(input.entityCode ?? ""), String(input.licenceNo ?? ""), caller
+        );
+        if (!found) {
+          return {
+            result:
+              "NO MATCH for that trade licence number under that authority. Check the authority is right before concluding the licence does not exist, and fall back to the uploaded licence document.",
+          };
+        }
+        const eid = String(input.emiratesId ?? "").trim();
+        if (!eid) return { result: JSON.stringify(found) };
+        // Three-valued on purpose: "no owner record carries a readable Emirates
+        // ID" is not "this person is not an owner". See lib/gsbLookup.ownerMatch.
+        const verdict = ownerMatch(found.owners, eid);
+        const note =
+          verdict === "match"
+            ? "OWNERSHIP CONFIRMED: the customer's Emirates ID matches an owner registered on this licence."
+            : verdict === "no-match"
+              ? "OWNERSHIP NOT CONFIRMED: the customer's Emirates ID does not match any owner on this licence. Do not refuse them outright — say the licence is registered to someone else and ask whether they are acting for the company, then route to document review."
+              : "OWNERSHIP UNKNOWN: the licence's owner records carry no Emirates ID that can be compared. This is NOT a failed check — say nothing about ownership either way and continue with document review.";
+        return { result: `${note}\n${JSON.stringify(found)}` };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "unknown error";
+        // The expected state until the GSB credential lands. Deliberately not an
+        // error: an explicit "there is no list" is what stops the model inventing one.
+        if (msg.includes("GSB_NO_CREDENTIAL")) {
+          return {
+            result:
+              "LOOKUP NOT CONNECTED in this environment, so there is no list of issuing authorities and no way to verify a licence. Tell the customer plainly that you cannot pull the list right now, and ask them to type the authority name exactly as printed on their trade licence, or give you the licence number. NEVER list authorities from your own knowledge to fill this gap — the names may be real but the codes behind them are what the system matches on, and a made-up list sends the customer down a path that cannot complete.",
+          };
+        }
+        log.error("gsb_read_failed", err, { ...a, tool: name });
+        return {
+          result: `LOOKUP UNAVAILABLE: ${msg}. Ask the customer for the authority name and licence number instead, and never substitute a list of your own.`,
+          isError: true,
+        };
+      }
+    }
     if (name === COMPANY_TOOL || name === FORM9_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       try {
