@@ -11,6 +11,9 @@
  *   2  companies under an authority  needs the Emirates Post session
  *   3  company by trade licence      needs the session; returns the owners
  *   4  ownership check               compares an Emirates ID to those owners
+ *   5  boxes under the Emirates ID   needs the session; its 200 schema is EMPTY
+ *                                    in the spec, so its field mapping is the
+ *                                    least trustworthy thing here
  *
  * Steps 2-4 need a token. Emirates Post issues it from
  * /services/pobox/users/api/v1/Account/Token in exchange for a UAE PASS code, and
@@ -37,7 +40,7 @@ config({
 import { getDb, agents } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import type { EnvKey } from "../lib/integrations";
-import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch } from "../lib/gsbLookup";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId } from "../lib/gsbLookup";
 import { epUsersBaseUrl, introspectEmiratesPostToken } from "../lib/hostToken";
 
 const token = arg("--token");
@@ -121,6 +124,26 @@ async function main() {
       }
     } catch (e) {
       bad(`3. company by licence — ${(e as Error).message}`);
+    }
+  }
+
+  // 5. Boxes under the Emirates ID. Its 200 schema is EMPTY in the spec, so the
+  // field mapping in poBoxesByEmiratesId is a guess until something real comes
+  // back — this is the step most likely to need adjusting, and the one worth
+  // reading the raw output of rather than trusting the shape.
+  if (!token || !eid) skip("5. boxes under the Emirates ID — needs --token and --eid");
+  else {
+    try {
+      const boxes = await poBoxesByEmiratesId(agent.id, env, eid, token);
+      ok(`5. boxes under this Emirates ID — ${boxes.length} returned`);
+      if (boxes.length) {
+        const b = boxes[0]!;
+        const mapped = Object.entries(b).filter(([, v]) => v !== undefined).length;
+        console.log(`          first: ${JSON.stringify(b)}`);
+        if (!mapped) console.log("          ! every field came back undefined — the response shape differs from the guess, fix poBoxesByEmiratesId");
+      }
+    } catch (e) {
+      bad(`5. boxes under the Emirates ID — ${(e as Error).message}`);
     }
   }
 
