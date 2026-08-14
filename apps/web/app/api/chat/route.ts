@@ -190,6 +190,7 @@ export async function POST(req: NextRequest) {
    * never marks a conversation signed in.
    */
   let hostToken: string | undefined;
+  let verifiedEmiratesId: string | undefined;
   if (body.uaePassToken) {
     // Two shapes, decided by what the token IS rather than by configuration:
     // a signed JWS is verified against a key; Emirates Post's identity-service
@@ -208,8 +209,10 @@ export async function POST(req: NextRequest) {
       if (!usersBase) reason = "no Emirates Post users service configured for this environment";
       else {
         const v = await introspectEmiratesPostToken(body.uaePassToken, usersBase);
-        if (v.ok) sub = v.identity.sub;
-        else reason = v.reason;
+        if (v.ok) {
+          sub = v.identity.sub;
+          verifiedEmiratesId = v.identity.emiratesId;
+        } else reason = v.reason;
       }
     }
 
@@ -287,6 +290,16 @@ export async function POST(req: NextRequest) {
         // FB-1376: surface the customer's usual branch as an offer, never a pre-selection.
         if (facts.preferredBranch) {
           parts.push(`Usual branch: ${facts.preferredBranch} — when presenting branches you may highlight it with a badge (e.g. "Your usual branch"), but never pre-select it.`);
+        }
+        // The Emirates ID Emirates Post returned for this verified session. It is
+        // what the GSB ownership check compares against, so surfacing it here is
+        // what stops the agent asking for something we were already told — and
+        // stops it accepting an Emirates ID the customer typed, which would let
+        // anyone claim ownership of any licence.
+        if (verifiedEmiratesId) {
+          parts.push(
+            `Verified Emirates ID for this signed-in customer: ${verifiedEmiratesId} — this came from Emirates Post, not from the customer. Use it as the emiratesId for nxn_company_by_licence when checking whether they own a trade licence, and never ask them to type their Emirates ID for that check.`
+          );
         }
         // FB-1374/FB-1395: contact details come from the profile, not re-typed.
         if (facts.contactPhone || facts.contactEmail) {
