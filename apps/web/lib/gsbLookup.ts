@@ -1,0 +1,256 @@
+import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
+import { decryptSecret, isEncrypted } from "./crypto";
+
+/**
+ * Trade-licence lookups for NXN, over the Emirates Post MOE (GSB) endpoints.
+ *
+ * WHAT THESE ENDPOINTS ACTUALLY DO — this differs from how the feature was
+ * described, and the difference decides the flow:
+ *
+ *   GetIssuingEntities()                      -> the issuing authorities
+ *   GetEntitiesById(entityCode)               -> companies under ONE AUTHORITY
+ *   GetEntitiesByLicenseNo(entityCode, no)    -> one company + its owners
+ *
+ * `entityCode` is documented by the backend as "Entity code from
+ * GetIssuingEntities" — an ISSUING AUTHORITY code. It is not an Emirates ID and
+ * does not accept one. The customer's Emirates ID appears ONLY inside
+ * ownerDetails[] on the by-licence-number response, i.e. as something to CHECK a
+ * licence against, never as something to search by. There is no Emirates-ID-keyed
+ * lookup in this API.
+ *
+ * So the supported shape is: authority -> licence number -> company + owners ->
+ * compare the customer's Emirates ID against the owners returned. That last step
+ * is `ownerMatch` below, and it is the GSB ownership check the corporate journey
+ * currently says is not integrated.
+ *
+ * As with lib/epglRead, the request is templated HERE and the model only supplies
+ * values that are validated first — an operation the model composes freely is a
+ * prompt-injection surface, and these reads carry company ownership data.
+ */
+
+const INTEGRATION_NAME = /nxn/i;
+
+/** UAE Emirates ID: 15 digits, conventionally shown 784-YYYY-NNNNNNN-C. */
+const EID_DIGITS = /^\d{15}$/;
+/** Issuing-authority codes come back from GetIssuingEntities as small integers. */
+const ENTITY_CODE = /^\d{1,10}$/;
+/** Trade licence numbers vary by authority; keep it permissive but bounded. */
+const LICENCE_NO = /^[A-Za-z0-9][A-Za-z0-9\-/ ]{0,38}$/;
+
+export interface IssuingEntity {
+  code: string;
+  nameEn?: string;
+  nameAr?: string;
+  emirateNameEn?: string;
+  emirateNameAr?: string;
+  isFreeZone: boolean;
+}
+
+export interface GsbCompany {
+  tradeLicenseNo?: string;
+  nameEn?: string;
+  nameAr?: string;
+  emirateCode?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  issuingEntityCode?: string;
+}
+
+export interface GsbOwner {
+  nameEn?: string;
+  nameAr?: string;
+  emiratesId?: string;
+}
+
+/**
+ * Strip formatting so "784-1980-1234567-1" and "784198012345671" compare equal.
+ * Returns null when what is left is not a 15-digit Emirates ID, so a malformed
+ * value can never accidentally equal another malformed value.
+ */
+export function normaliseEmiratesId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const digits = raw.replace(/\D/g, "");
+  return EID_DIGITS.test(digits) ? digits : null;
+}
+
+/**
+ * Does this Emirates ID belong to one of the licence's owners?
+ *
+ * Deliberately three-valued. "No owner on the licence carries a readable Emirates
+ * ID" is NOT the same as "this person is not an owner", and collapsing the two
+ * would let a licence with unreadable owner records read as a failed ownership
+ * check — or, worse the other way, let an unchecked licence pass as verified.
+ * The caller must handle `unknown` by falling back to document review.
+ */
+export function ownerMatch(owners: GsbOwner[], emiratesId: string): "match" | "no-match" | "unknown" {
+  const want = normaliseEmiratesId(emiratesId);
+  if (!want) return "unknown";
+  const known = owners.map((o) => normaliseEmiratesId(o.emiratesId)).filter((v): v is string => v !== null);
+  if (!known.length) return "unknown";
+  return known.includes(want) ? "match" : "no-match";
+}
+
+function assertShape(value: string, pattern: RegExp, what: string): string {
+  const v = String(value ?? "").trim();
+  if (!pattern.test(v)) throw new Error(`${what} is not in an accepted format`);
+  return v;
+}
+
+interface Creds {
+  baseUrl: string;
+  apiKey?: string;
+  /** A service bearer held by the integration itself, if one is configured. */
+  serviceToken?: string;
+  oauth?: { tokenUrl: string; clientId: string; clientSecret: string };
+}
+
+let cached: { token: string; at: number } | null = null;
+const TOKEN_TTL_MS = 20 * 60_000;
+
+async function creds(agentId: string, env: EnvKey): Promise<Creds> {
+  const rows = await listIntegrations(agentId);
+  const row = rows.find((r) => INTEGRATION_NAME.test(r.name) && r.environments[env]);
+  const spec = row?.environments[env] as EnvSpec | undefined;
+  if (!spec) throw new Error("NXN integration is not configured for this environment");
+
+  const secret = isEncrypted(spec.authValue) ? decryptSecret(spec.authValue) : spec.authValue;
+  const apiKey = isEncrypted(spec.apiKey) ? decryptSecret(spec.apiKey) : spec.apiKey;
+
+  return {
+    baseUrl: String(spec.baseUrl).replace(/\/$/, ""),
+    apiKey: (apiKey as string) || undefined,
+    // A plain stored token is only a service bearer for the token-bearing auth types.
+    serviceToken:
+      spec.authType === "bearer" || spec.authType === "uaepass_test" ? ((secret as string) || undefined) : undefined,
+    oauth:
+      spec.oauthTokenUrl && spec.oauthClientId && secret
+        ? { tokenUrl: spec.oauthTokenUrl, clientId: spec.oauthClientId, clientSecret: secret as string }
+        : undefined,
+  };
+}
+
+/**
+ * The bearer for a GSB read, in precedence order:
+ *   1. an OAuth client-credentials token, when GSB credentials are configured;
+ *   2. the integration's own stored service token;
+ *   3. the caller's bearer — the customer's session, which is what the endpoint
+ *      summaries mean by "requires UAE PASS".
+ *
+ * The MOE endpoints answer 401 to the API key alone (verified against box-stg),
+ * so a read with no bearer at all is refused here rather than sent.
+ */
+async function bearerFor(c: Creds, callerToken?: string): Promise<string> {
+  if (c.oauth) {
+    if (cached && Date.now() - cached.at < TOKEN_TTL_MS) return cached.token;
+    const res = await fetch(c.oauth.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: c.oauth.clientId,
+        client_secret: c.oauth.clientSecret,
+      }).toString(),
+    });
+    if (!res.ok) throw new Error(`GSB token request failed (HTTP ${res.status})`);
+    const json = (await res.json()) as { access_token?: string };
+    if (!json.access_token) throw new Error("GSB token response had no access_token");
+    cached = { token: json.access_token, at: Date.now() };
+    return json.access_token;
+  }
+  const t = c.serviceToken ?? callerToken;
+  if (!t) throw new Error("GSB_NO_CREDENTIAL");
+  return t;
+}
+
+async function get<T>(
+  agentId: string,
+  env: EnvKey,
+  path: string,
+  params: Record<string, string>,
+  callerToken?: string
+): Promise<T[]> {
+  const c = await creds(agentId, env);
+  const url = new URL(`${c.baseUrl}${path}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (c.apiKey) headers["X-API-KEY"] = c.apiKey;
+  headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const detail = (await res.text()).slice(0, 200);
+    throw new Error(`GSB ${path} failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`);
+  }
+  const json = (await res.json()) as { payload?: T[] | T };
+  const payload = json?.payload;
+  if (payload === undefined || payload === null) return [];
+  return Array.isArray(payload) ? payload : [payload];
+}
+
+/** The issuing authorities. THE ONLY valid source for that list — never compose one. */
+export async function listIssuingEntities(agentId: string, env: EnvKey, callerToken?: string): Promise<IssuingEntity[]> {
+  const rows = await get<Record<string, any>>(agentId, env, "/api/MOE/GetIssuingEntities", {}, callerToken);
+  return rows.map((r) => ({
+    code: String(r.entCode ?? ""),
+    nameEn: r.entEn ?? undefined,
+    nameAr: r.entAr ?? undefined,
+    emirateNameEn: r.entEmirateNameEn ?? undefined,
+    emirateNameAr: r.entEmirateNameAr ?? undefined,
+    isFreeZone: Number(r.entFreezoneFlag ?? 0) === 1,
+  }));
+}
+
+function toCompany(r: Record<string, any>): GsbCompany {
+  return {
+    tradeLicenseNo: r.tradeLicenseNo ?? undefined,
+    nameEn: r.entityNameEn ?? undefined,
+    nameAr: r.entityNameAr ?? undefined,
+    emirateCode: r.entityEmirateCode ?? undefined,
+    issueDate: r.licenseIssueDate ?? undefined,
+    expiryDate: r.licenseExpiryDate ?? undefined,
+    issuingEntityCode: r.issueEntityCode ?? undefined,
+  };
+}
+
+/** Companies registered under one issuing authority. `entityCode` is an AUTHORITY code. */
+export async function companiesByAuthority(
+  agentId: string,
+  env: EnvKey,
+  entityCode: string,
+  callerToken?: string
+): Promise<GsbCompany[]> {
+  const code = assertShape(entityCode, ENTITY_CODE, "issuing authority code");
+  const rows = await get<Record<string, any>>(agentId, env, "/api/MOE/GetEntitiesById", { entityCode: code }, callerToken);
+  return rows.map(toCompany);
+}
+
+/**
+ * One company by trade licence number, with its owners.
+ *
+ * This is the only call that returns Emirates IDs, and so the only one that can
+ * answer "does this customer own this licence" — see `ownerMatch`.
+ */
+export async function companyByLicence(
+  agentId: string,
+  env: EnvKey,
+  entityCode: string,
+  licenceNo: string,
+  callerToken?: string
+): Promise<{ company: GsbCompany; owners: GsbOwner[] } | null> {
+  const code = assertShape(entityCode, ENTITY_CODE, "issuing authority code");
+  const no = assertShape(licenceNo, LICENCE_NO, "trade licence number");
+  const rows = await get<Record<string, any>>(
+    agentId, env, "/api/MOE/GetEntitiesByLicenseNo", { entityCode: code, licenseNo: no }, callerToken
+  );
+  const first = rows[0];
+  if (!first?.entityDetails) return null;
+  return {
+    company: toCompany(first.entityDetails),
+    owners: ((first.ownerDetails ?? []) as Record<string, any>[]).map((o) => ({
+      nameEn: o.nameEn ?? undefined,
+      nameAr: o.nameAr ?? undefined,
+      emiratesId: o.emiratesId ?? undefined,
+    })),
+  };
+}
