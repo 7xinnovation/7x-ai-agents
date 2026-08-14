@@ -57,6 +57,17 @@ const TONE: Record<Status, { fg: string; bg: string; ring: string; solid: string
 const statusOf = (n: number): Status => (n >= 85 ? "complete" : n >= 45 ? "partial" : "gap");
 const hue = (n: number) => TONE[statusOf(n)].solid;
 
+/** Live counters worth showing beside the scores, in reading order. */
+const EVIDENCE_FIGURES: { key: string; label: string }[] = [
+  { key: "conversations", label: "Conversations" },
+  { key: "journeysStarted", label: "Journeys started" },
+  { key: "journeysCompleted", label: "Journeys completed" },
+  { key: "paymentsCompleted", label: "Payments confirmed" },
+  { key: "callbacks", label: "Callbacks raised" },
+  { key: "auditedActions", label: "Audited actions" },
+  { key: "knowledgeRetrievals", label: "Grounded answers" },
+];
+
 /** The project ships no animation library, so the preference is read directly. */
 function useReducedMotion() {
   const [reduce, setReduce] = useState(false);
@@ -197,6 +208,40 @@ export default function ReadinessPage() {
     return m;
   }, [data]);
 
+  /** How much was actually examined, across every service and criterion. */
+  const checkTotals = useMemo(() => {
+    let met = 0, unmet = 0, na = 0;
+    for (const s of data?.services ?? []) {
+      for (const cr of s.criteria) {
+        for (const c of cr.checks) {
+          if (c.na) na++;
+          else if (c.ok) met++;
+          else unmet++;
+        }
+      }
+    }
+    return { met, unmet, na, applied: met + unmet };
+  }, [data]);
+
+  /** NXN against EPGL, since the two agents differ materially. */
+  const entityRollup = useMemo(() => {
+    const by = new Map<string, number[]>();
+    for (const s of data?.services ?? []) {
+      by.set(s.service.entity, [...(by.get(s.service.entity) ?? []), s.score]);
+    }
+    return [...by.entries()].map(([entity, scores]) => ({
+      entity,
+      count: scores.length,
+      score: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+    }));
+  }, [data]);
+
+  /** Total readiness recoverable if every listed action were taken. */
+  const recoverable = useMemo(
+    () => Math.round((data?.suggestions ?? []).reduce((n, s) => n + s.impact, 0) * 10) / 10,
+    [data]
+  );
+
   if (loading && !data) {
     return (
       <div className="grid min-h-[70vh] place-content-center gap-3 text-center">
@@ -303,16 +348,58 @@ export default function ReadinessPage() {
       </header>
 
       {/* ── Services. Also the legend for the six-segment bars below. ──────── */}
-      <section className="mt-5 grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
-        {data.services.map((s) => (
-          <div key={s.service.id} className="min-w-0 rounded-lg border border-line bg-surface p-3.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[10px] font-semibold tracking-wide text-muted">{s.service.entity}</span>
-              <span className="text-[15px] font-semibold tabular-nums" style={{ color: hue(s.score) }}>{s.score}%</span>
-            </div>
-            <p className="mt-1.5 truncate text-[12px] leading-snug text-ink-2">{s.service.name}</p>
+      <section className="mt-6">
+        <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="text-[13px] font-semibold text-ink">Services in scope</h2>
+          <div className="flex items-center gap-2">
+            {entityRollup.map((e) => (
+              <span key={e.entity} className="rounded-full bg-surface px-2.5 py-1 text-[11px] text-muted ring-1 ring-inset ring-line">
+                {e.entity} <span className="font-semibold tabular-nums" style={{ color: hue(e.score) }}>{e.score}%</span>
+                <span className="ml-1 text-muted">across {e.count}</span>
+              </span>
+            ))}
           </div>
-        ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
+          {data.services.map((s) => (
+            <div key={s.service.id} className="min-w-0 rounded-lg border border-line bg-surface p-3.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] font-semibold tracking-wide text-muted">{s.service.entity}</span>
+                <span className="text-[15px] font-semibold tabular-nums" style={{ color: hue(s.score) }}>{s.score}%</span>
+              </div>
+              <p className="mt-1.5 truncate text-[12px] leading-snug text-ink-2" title={s.service.name}>{s.service.name}</p>
+              <p className="mt-1 truncate text-[10px] text-muted" dir="rtl" lang="ar">{s.service.nameAr}</p>
+              <div className="mt-2.5 flex items-center justify-between border-t border-line-soft pt-2 text-[10px] text-muted">
+                <span>{s.criteria.filter((c) => c.status === "complete").length}/{s.criteria.length} met</span>
+                <span className="tabular-nums">{s.environment}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── What the assessment could actually observe. These counts are the
+           difference between a claim and a measurement, so they are shown
+           rather than folded into the scores. ─────────────────────────────── */}
+      <section className="mt-5 rounded-2xl border border-line bg-surface px-6 py-5">
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="text-[13px] font-semibold text-ink">Evidence on record</h2>
+          <p className="text-[11px] text-muted">
+            {checkTotals.applied.toLocaleString()} checks across {data.services.length} services ·{" "}
+            {checkTotals.met.toLocaleString()} met, {checkTotals.unmet.toLocaleString()} unmet,{" "}
+            {checkTotals.na.toLocaleString()} not applicable
+          </p>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4 lg:grid-cols-7 lg:divide-x lg:divide-line">
+          {EVIDENCE_FIGURES.map((f, i) => (
+            <div key={f.key} className={cn("min-w-0", i > 0 && "lg:pl-6")}>
+              <dt className="truncate text-[11px] text-muted" title={f.label}>{f.label}</dt>
+              <dd className="mt-1.5 text-[18px] font-semibold leading-none tabular-nums text-ink">
+                {Number(data.signals[f.key] ?? 0).toLocaleString()}
+              </dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       {/* ── Master and detail ─────────────────────────────────────────────── */}
@@ -351,7 +438,12 @@ export default function ReadinessPage() {
                           </span>
                         )}
                       </div>
-                      <div className="mt-1.5"><ServiceBars scores={scores} /></div>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <ServiceBars scores={scores} />
+                        <span className="text-[10px] tabular-nums text-muted">
+                          {row.servicesComplete}/{data.services.length} met
+                        </span>
+                      </div>
                     </div>
                     <span className="shrink-0 text-[14px] font-semibold tabular-nums" style={{ color: hue(row.score) }}>
                       {row.score}
@@ -366,30 +458,54 @@ export default function ReadinessPage() {
         {sel && (
           <div className="min-w-0 rounded-2xl border border-line bg-surface xl:sticky xl:top-6">
             <div className="border-b border-line px-6 py-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0 max-w-2xl">
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <h2 className="text-[18px] font-semibold tracking-tight text-ink">{sel.criterion.domain}</h2>
-                    <span className={cn(
-                      "rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
-                      TONE[sel.status].bg, TONE[sel.status].fg, TONE[sel.status].ring
-                    )}>
-                      {TONE[sel.status].label}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-[13.5px] leading-relaxed text-ink-2">{sel.criterion.requirement}</p>
-                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted" dir="rtl" lang="ar">
-                    {sel.criterion.requirementAr}
-                  </p>
+              {/* Score sits on the title line. In a right-hand column it wrapped
+                  under the requirement text on narrower panels, where text-right
+                  no longer means anything and the figure floated mid-paragraph. */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+                  <h2 className="text-[18px] font-semibold tracking-tight text-ink">{sel.criterion.domain}</h2>
+                  <span className={cn(
+                    "rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                    TONE[sel.status].bg, TONE[sel.status].fg, TONE[sel.status].ring
+                  )}>
+                    {TONE[sel.status].label}
+                  </span>
                 </div>
-                <div className="text-right">
-                  <div className="text-[30px] font-semibold leading-none tabular-nums" style={{ color: hue(sel.score) }}>
-                    {sel.score}%
-                  </div>
-                  <p className="mt-2 text-[11px] text-muted">
-                    Evidence: <span dir="rtl" lang="ar" className="font-medium text-ink-2">{sel.criterion.evidenceArtefact}</span>
-                  </p>
-                </div>
+                <span
+                  className="shrink-0 text-[28px] font-semibold leading-none tabular-nums"
+                  style={{ color: hue(sel.score) }}
+                >
+                  {sel.score}%
+                </span>
+              </div>
+
+              {/* Arabic runs inline in brackets rather than as its own RTL line.
+                  The brackets live INSIDE the isolate: left outside, they are
+                  neutral characters that get re-resolved when the Arabic wraps,
+                  and both ends render as an opening bracket on separate lines.
+                  Trailing full stop dropped, since it sits inside parentheses
+                  that already follow the English sentence. */}
+              <p className="mt-2.5 max-w-3xl text-[13.5px] leading-relaxed text-ink-2">
+                {sel.criterion.requirement}{" "}
+                <bdi dir="rtl" lang="ar" className="text-muted">
+                  ({sel.criterion.requirementAr.replace(/\s*[.]\s*$/, "")})
+                </bdi>
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted">
+                <span>
+                  Evidence required:{" "}
+                  <bdi lang="ar" className="font-medium text-ink-2">{sel.criterion.evidenceArtefact}</bdi>
+                </span>
+                <span className="text-line">|</span>
+                <span>
+                  {selChecks.length} requirements checked ·{" "}
+                  <span className="font-medium text-[#b42318]">
+                    {selChecks.filter((r) => r.fail.length).length} unmet
+                  </span>
+                </span>
+                <span className="text-line">|</span>
+                <span>Met in {sel.servicesComplete} of {data.services.length} services</span>
               </div>
 
               {/* Per-service scores for this requirement, in the strip's order. */}
@@ -440,6 +556,12 @@ export default function ReadinessPage() {
                               n/a for {row.na.length}
                             </span>
                           )}
+                          {/* Weight makes the arithmetic legible: a reviewer can
+                              see why one unmet check moves the score further
+                              than another. */}
+                          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted">
+                            weight {row.weight}
+                          </span>
                         </div>
 
                         {/* The auditable part: what was found, and where services differ. */}
@@ -474,9 +596,16 @@ export default function ReadinessPage() {
 
       {/* ── Ranked actions ────────────────────────────────────────────────── */}
       <section className="mt-8">
-        <div className="mb-3.5 flex items-baseline justify-between gap-4">
+        <div className="mb-3.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <h2 className="text-[15px] font-semibold tracking-tight text-ink">What to fix next</h2>
-          <p className="text-[12px] text-muted">Ranked by readiness points recovered</p>
+          {/* Deliberately not "takes readiness to 100%": the actions close every
+              gap this assessment can observe, which is not the same as passing
+              the federal gate. */}
+          <p className="text-[12px] text-muted">
+            {data.suggestions.length} actions worth{" "}
+            <span className="font-semibold text-ink">+{recoverable} points</span>, closing every gap the
+            assessment can currently see
+          </p>
         </div>
         <ol className="overflow-hidden rounded-2xl border border-line bg-surface">
           {data.suggestions.map((s, i) => {
