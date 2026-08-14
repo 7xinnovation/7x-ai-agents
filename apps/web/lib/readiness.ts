@@ -163,6 +163,8 @@ interface Ctx {
   kbCount: number;
   /** Adapter binding for payment, or "none" when the agent declares no payment integration. */
   paymentProvider: string;
+  /** Non-secret settings on that binding (gateway base URL, outlet, redirect). */
+  paymentSettings: Record<string, unknown>;
   /** Which environment of the connected backends is live: staging or production. */
   environment: string;
   events: Record<string, number>;
@@ -413,6 +415,12 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
     const src = priceSource(j);
     const gateway = c.paymentProvider;
     const realGateway = gateway !== "none" && gateway !== "mock";
+    // A gateway can be real and still be pointed at its sandbox — which takes no
+    // money and settles nothing, while looking entirely healthy from the outside.
+    // That exact misconfiguration reached production on 2026-08-14, so it is
+    // checked from the binding's own base URL rather than assumed correct.
+    const gatewayUrl = String(c.paymentSettings.baseUrl ?? "");
+    const sandbox = /sandbox|\.test\b|localhost|127\.0\.0\.1/i.test(gatewayUrl);
     return [
       { label: "Fees disclosed before the choice that incurs them", weight: 2, ok: true,
         detail: `Add-on fees are shown on the option itself and itemised again in the pre-payment summary${(j?.submission?.surcharges?.length ?? 0) > 0 ? `; ${j!.submission!.surcharges.length} conditional surcharge(s) declared and applied deterministically` : ""}`,
@@ -435,6 +443,13 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
             ? "The payment binding is still the internal mock spine — no live gateway is connected for this service"
             : "No payment integration is bound to this agent at all; the fee cannot currently be collected in the conversation",
         fix: "Connect the live payment gateway so the fee is actually collected in the conversation." },
+      { label: "The gateway points at its live endpoint, not a sandbox", weight: 3, ok: realGateway && !sandbox, na: !realGateway,
+        detail: !realGateway
+          ? `No live gateway is connected yet, so there is no endpoint to check (${NA})`
+          : sandbox
+            ? `The ${gateway} binding points at ${gatewayUrl} — a sandbox. A customer sent there would complete a payment page that takes no money and settles nothing.`
+            : `The ${gateway} binding points at ${gatewayUrl}${c.paymentSettings.outletRef ? `, outlet ${String(c.paymentSettings.outletRef).slice(0, 8)}…` : ""} — a live endpoint`,
+        fix: "Point the payment binding at the gateway's production endpoint and outlet before customers are sent to it." },
       { label: "Settles through UAE Sadad (سداد الإمارات)", weight: 3, ok: gateway === "sadad",
         detail: `The guide requires government payments to execute through UAE Sadad. This service is bound to "${gateway}", so the requirement is not met.`,
         fix: "Route the government payment through UAE Sadad, or obtain a documented exemption confirming the entity's own gateway satisfies the requirement." },
@@ -529,6 +544,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
       backendOps,
       kbCount: Number(kbCount),
       paymentProvider: def.integrations?.payment?.provider ?? "none",
+      paymentSettings: def.integrations?.payment?.settings ?? {},
       environment: env,
       events,
       auditActions,
@@ -596,6 +612,13 @@ export async function assessReadiness(): Promise<ReadinessReport> {
   const overall = Math.round(services.reduce((n, s) => n + s.score, 0) / (services.length || 1));
   const overallBand = overall >= 85 ? "Launch ready" : overall >= 70 ? "Nearly ready" : overall >= 50 ? "Substantial gaps" : "Not ready";
   const envs = [...new Set(services.map((s) => s.environment))];
+  // Name the gateway each agent is bound to, so a reader can tell at a glance
+  // which database this assessment actually read.
+  const gateways = [...new Set(
+    SERVICES.map((s) => bySlug.get(s.agentSlug))
+      .filter(Boolean)
+      .map((r) => AgentDefinition.parse(r!.definition).integrations?.payment?.provider ?? "none")
+  )];
 
   return {
     generatedAt: new Date().toISOString(),
@@ -613,6 +636,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
       auditedActions: Object.values(auditActions).reduce((a, b) => a + b, 0),
       knowledgeRetrievals: events["knowledge.retrieved"] ?? 0,
       backendEnvironment: envs.join(", "),
+      paymentGateway: gateways.join(", "),
     },
     notes: [
       "Every score is computed at load time from the deployed system — the stored journey definitions, the enabled backend operations, the adapter bindings, the knowledge base, and the audit and analytics tables. No figure on this page is hand-entered.",

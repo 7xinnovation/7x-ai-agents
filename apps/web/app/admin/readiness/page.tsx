@@ -101,9 +101,15 @@ export default function ReadinessPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string>("governance");
   const [tick, setTick] = useState(REFRESH_MS / 1000);
+  const [running, setRunning] = useState(false);
   const first = useRef(true);
 
   const load = useCallback(async () => {
+    setRunning(true);
+    // The assessment takes a few seconds against a cold connection. Hold the
+    // running state briefly either way so a manual re-analysis visibly happens
+    // rather than appearing to do nothing when the score is unchanged.
+    const started = Date.now();
     try {
       const r = await fetch("/api/admin/readiness", { cache: "no-store" });
       const j = await r.json();
@@ -113,7 +119,10 @@ export default function ReadinessPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      const elapsed = Date.now() - started;
+      if (elapsed < 600) await new Promise((res) => setTimeout(res, 600 - elapsed));
       setLoading(false);
+      setRunning(false);
       setTick(REFRESH_MS / 1000);
     }
   }, []);
@@ -212,23 +221,28 @@ export default function ReadinessPage() {
               يجب أن يكون لكل متطلب دليل قابل للمراجعة والتدقيق، وليس تأكيداً وصفياً فقط
             </p>
           </div>
-          <div className="flex flex-col items-end gap-2.5">
+          <div className="flex flex-col items-end gap-3">
+            <button
+              onClick={() => void load()}
+              disabled={running}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[13px] font-semibold text-ink shadow-lg transition",
+                running ? "cursor-wait opacity-70" : "hover:bg-white/90 active:scale-[0.98]"
+              )}
+            >
+              <RefreshCw className={cn("size-3.5", running && "animate-spin")} />
+              {running ? "Reanalyzing…" : "Reanalyze"}
+            </button>
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white/85 ring-1 ring-inset ring-white/15">
               <span className="relative flex size-2">
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#17b26a] opacity-70" />
+                <span className={cn("absolute inline-flex size-full rounded-full bg-[#17b26a] opacity-70", running ? "animate-pulse" : "animate-ping")} />
                 <span className="relative inline-flex size-2 rounded-full bg-[#17b26a]" />
               </span>
-              Live · refreshes in {tick}s
+              {running ? "Reading the live system…" : `Auto-refresh in ${tick}s`}
             </span>
             <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] text-white/55 ring-1 ring-inset ring-white/10">
               Assessed {assessed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
-            <button
-              onClick={() => void load()}
-              className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-medium text-white/85 ring-1 ring-inset ring-white/15 transition hover:bg-white/15"
-            >
-              <RefreshCw className="size-3" /> Re-assess now
-            </button>
           </div>
         </div>
       </header>
@@ -296,9 +310,11 @@ export default function ReadinessPage() {
               </div>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[13px] sm:grid-cols-3">
                 {Object.entries(data.signals).map(([k, v]) => (
-                  <div key={k}>
+                  // min-w-0 lets the label actually truncate — without it a long
+                  // signal name forces the column wider and the page scrolls.
+                  <div key={k} className="min-w-0">
                     <dt className="truncate text-[11px] capitalize text-muted">{k.replace(/([A-Z])/g, " $1").toLowerCase()}</dt>
-                    <dd className="font-semibold tabular-nums text-ink">{typeof v === "number" ? v.toLocaleString() : v}</dd>
+                    <dd className="truncate font-semibold tabular-nums text-ink">{typeof v === "number" ? v.toLocaleString() : v}</dd>
                   </div>
                 ))}
               </dl>
