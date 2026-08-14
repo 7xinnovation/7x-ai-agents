@@ -4,7 +4,7 @@
   "type": "module",
   "main": "./dist/dialog.js",
   "scripts": {
-    "build": "tsup src/index.ts --format iife --global-name DialogEmbed --minify --out-dir dist --no-dts && mv dist/index.global.js dist/dialog.js",
+    "build": "tsup src/index.ts --format iife --global-name DialogEmbed --minify --out-dir dist --no-dts && mv dist/index.global.js dist/dialog.js && cp dist/dialog.js ../../apps/web/public/dialog.js",
     "dev": "tsup src/index.ts --format iife --global-name DialogEmbed --watch --out-dir dist"
   },
   "devDependencies": {

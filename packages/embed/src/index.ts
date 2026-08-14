@@ -21,6 +21,8 @@ interface BootConfig {
   locale: string;
   position: "bottom-right" | "bottom-left";
   uaePassToken?: string;
+  /** localStorage key the host keeps the access token under. */
+  tokenKey?: string;
 }
 
 const STYLE_ID = "dialog-embed-style";
@@ -36,8 +38,31 @@ function readConfig(): BootConfig {
     host,
     locale: d.locale || "en",
     position: d.position === "bottom-left" ? "bottom-left" : "bottom-right",
-    uaePassToken: d.uaepassToken || undefined,
+    uaePassToken: d.uaepassToken || readStoredToken(d.tokenKey) || undefined,
+    tokenKey: d.tokenKey || DEFAULT_TOKEN_KEY,
   };
+}
+
+/**
+ * Emirates Post stores the signed-in customer's access token in localStorage
+ * under "accessToken" (confirmed by their team). Reading it here means the host
+ * page needs no integration work at all — dropping the script tag is the whole
+ * job.
+ *
+ * Wrapped because localStorage throws outright in some privacy modes and inside
+ * a partitioned third-party context; the assistant must still load for a guest
+ * rather than dying on the way up. `data-token-key` overrides the name for a host
+ * that keeps it somewhere else.
+ */
+const DEFAULT_TOKEN_KEY = "accessToken";
+
+function readStoredToken(key?: string): string | null {
+  try {
+    const v = window.localStorage.getItem(key || DEFAULT_TOKEN_KEY);
+    return v && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function injectStyles(cfg: BootConfig) {
@@ -119,11 +144,34 @@ function boot() {
   const upt = cfg.uaePassToken ? `&upt=${encodeURIComponent(cfg.uaePassToken)}` : "";
   frame.src = `${cfg.host}/embed/${encodeURIComponent(cfg.agent)}?locale=${cfg.locale}&embedded=1${upt}`;
 
-  // Host can refresh the UAE PASS session token at runtime (e.g. after sign-in):
+  const push = (token: string) =>
+    frame.contentWindow?.postMessage({ source: "dialog-host", uaePassToken: token }, cfg.host);
+
+  // Host can still refresh the token explicitly:
   //   window.Dialog.setUaePassToken("<token>")
-  (window as unknown as { Dialog?: Record<string, unknown> }).Dialog = {
-    setUaePassToken: (token: string) => frame.contentWindow?.postMessage({ source: "dialog-host", uaePassToken: token }, cfg.host),
+  (window as unknown as { Dialog?: Record<string, unknown> }).Dialog = { setUaePassToken: push };
+
+  /**
+   * Follow the stored token for the life of the page.
+   *
+   * The customer usually signs in AFTER the assistant has loaded, so the token
+   * read at boot is very often absent — treating that as "guest, permanently"
+   * would mean the assistant stays signed out through a sign-in happening right
+   * next to it. `storage` catches other tabs; localStorage fires nothing for a
+   * write in THIS tab, so it is also polled, cheaply and only while the value has
+   * actually changed.
+   */
+  let lastSeen = cfg.uaePassToken ?? null;
+  const sync = () => {
+    const token = readStoredToken(cfg.tokenKey);
+    if (token === lastSeen) return;
+    lastSeen = token;
+    if (token) push(token);
   };
+  window.addEventListener("storage", (e) => {
+    if (!e.key || e.key === (cfg.tokenKey || DEFAULT_TOKEN_KEY)) sync();
+  });
+  setInterval(sync, 2000);
 
   const launcher = document.createElement("button");
   launcher.className = "dlg-launcher";
