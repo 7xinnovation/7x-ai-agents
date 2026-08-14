@@ -1,15 +1,15 @@
 /**
  * Readiness assessment against the UAE Agentic AI guide's pre-launch gate
- * ("بوابة ما قبل الإطلاق — قائمة التحقق من الجاهزية", uaemodel.egsep.ae).
+ * ("بوابة ما قبل الإطلاق - قائمة التحقق من الجاهزية", uaemodel.egsep.ae).
  *
  * The guide is explicit that each requirement needs evidence that can be
  * reviewed and audited, not a descriptive claim:
  *   "يجب أن يكون لكل متطلب دليل قابل للمراجعة والتدقيق، وليس تأكيداً وصفياً فقط"
  *
  * So nothing here is a hand-entered percentage. Every check reads the system as
- * it is actually configured right now — the stored journey definitions, the
+ * it is actually configured right now - the stored journey definitions, the
  * enabled backend operations, the adapter bindings, the knowledge base, and the
- * audit and analytics tables — and a criterion scores only as well as those
+ * audit and analytics tables - and a criterion scores only as well as those
  * artefacts support it. A check that cannot find its evidence fails, and the gap
  * it names becomes the improvement suggestion.
  *
@@ -75,7 +75,7 @@ export const CRITERIA: Criterion[] = [
     requirement: "The assistant identifies itself clearly and shows an understandable log of what it did on the customer's behalf.",
     requirementAr: "يعرّف المساعد بنفسه بوضوح، ويعرض سجلاً مفهوماً لما نفذه باسم المتعامل." },
   { id: "approvals", domain: "Approvals", domainAr: "الموافقات", evidenceArtefact: "سجل الموافقات",
-    requirement: "Every approval names the action, the data and the cost — not a broad open-ended consent.",
+    requirement: "Every approval names the action, the data and the cost - not a broad open-ended consent.",
     requirementAr: "كل موافقة تحدد الإجراء والبيانات والتكلفة، وليست موافقة عامة مفتوحة." },
   { id: "continuity", domain: "Continuity & channels", domainAr: "الاستمرارية والقنوات", evidenceArtefact: "مخطط الاستمرارية",
     requirement: "Request state and full context carry across sessions and channels without starting from zero.",
@@ -102,7 +102,7 @@ export interface Check {
   label: string;
   ok: boolean;
   weight: number;
-  /** What was actually found in the system — the auditable part. */
+  /** What was actually found in the system - the auditable part. */
   detail: string;
   /** What to do about it. Present only when the check can fail. */
   fix?: string;
@@ -174,13 +174,13 @@ interface Ctx {
 }
 
 // Numbers embedded in evidence strings are formatted server-side, where the
-// host locale is whatever the container happens to declare — pin en-US so a
+// host locale is whatever the container happens to declare - pin en-US so a
 // count never renders in Arabic-Indic digits inside an English sentence.
 const hasAny = (hay: string, ...needles: string[]) => needles.some((n) => hay.toLowerCase().includes(n.toLowerCase()));
 const fields = (j?: Journey) => (j?.steps ?? []).flatMap((s) => s.fields);
 const docs = (j?: Journey) => (j?.steps ?? []).flatMap((s) => s.documents);
 const NA = "not applicable to this service";
-/** "1 step" / "4 steps" — evidence text is read by people, so it must read like prose. */
+/** "1 step" / "4 steps" - evidence text is read by people, so it must read like prose. */
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Does this journey charge the customer anything? */
@@ -208,13 +208,13 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Identity or verified ownership precedes the transaction", weight: 3,
         ok: j?.requiresAuth === true || Boolean(j?.submission?.apiFlow?.detailsTool),
         detail: j?.requiresAuth
-          ? "The journey cannot start without an authenticated customer — enforced server-side in set_journey, request_payment and submit_case"
+          ? "The journey cannot start without an authenticated customer - enforced server-side in set_journey, request_payment and submit_case"
           : j?.submission?.apiFlow?.detailsTool
             ? `Guest entry is allowed by design, but the customer must prove they hold the record: ${j.submission.apiFlow.detailsTool} validates ownership against the entity's own system before any charge or submission`
-            : "The request can be entered, paid for and submitted without a sign-in and without any lookup that proves the applicant holds the record — identity rests entirely on documents checked by staff after submission",
+            : "The request can be entered, paid for and submitted without a sign-in and without any lookup that proves the applicant holds the record - identity rests entirely on documents checked by staff after submission",
         fix: "Require UAE PASS sign-in for this journey, or add a backend lookup that proves the applicant holds the record before the request is committed." },
       { label: "Confidence bands gate transactional actions", weight: 2, ok: Boolean(g.goalThresholds?.proceed),
-        detail: `set_journey refuses to start a transactional journey below ${g.goalThresholds?.proceed} goal confidence — enforced server-side, not by prompt`,
+        detail: `set_journey refuses to start a transactional journey below ${g.goalThresholds?.proceed} goal confidence - enforced server-side, not by prompt`,
         fix: "Set guardrails.goalThresholds so a transactional journey cannot start on a weak signal." },
       { label: "Refusal topics configured", weight: 1, ok: (g.refusalTopics?.length ?? 0) > 0,
         detail: `${plural(g.refusalTopics?.length ?? 0, "topic")} refused and routed to a human`,
@@ -286,7 +286,7 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Documents auto-fill the application", weight: 2, ok: hasDocs, na: !hasDocs,
         detail: hasDocs
           ? `${plural(docs(j).length, "document slot")} read by vision extraction and mapped straight onto fields`
-          : `This journey requires no documents — it works from the record already held (${NA})`,
+          : `This journey requires no documents - it works from the record already held (${NA})`,
         fix: "Extract fields from uploaded documents rather than asking the customer to type them." },
       { label: "Identity established once, reused throughout", weight: 2, ok: c.toolNames.includes("request_authentication"),
         detail: "UAE PASS identity is established once and reused for the life of the request",
@@ -305,7 +305,7 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       detail: `${Object.values(c.auditActions).reduce((a, b) => a + b, 0).toLocaleString("en-US")} actions recorded across ${Object.keys(c.auditActions).length} audited action types`,
       fix: "Record every action taken on the customer's behalf in an auditable trail." },
     { label: "That log is readable BY THE CUSTOMER", weight: 3, ok: false,
-      detail: "The audit trail is complete but visible only to staff in the admin console — the customer cannot read back what was done for them",
+      detail: "The audit trail is complete but visible only to staff in the admin console - the customer cannot read back what was done for them",
       fix: "Give the customer a plain-language history of what the assistant did on their behalf, inside their own conversation." },
     { label: "Policy answers cite an approved source", weight: 1, ok: c.kbCount > 0 && c.toolNames.includes("search_knowledge"),
       detail: `${c.kbCount} approved knowledge documents back the answers; ${(c.events["knowledge.retrieved"] ?? 0).toLocaleString("en-US")} grounded retrievals recorded`,
@@ -400,7 +400,7 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
     const j = c.journey;
     if (!isChargeable(j)) {
       // A journey that submits a request but declares no fee and has no payment
-      // binding is not self-evidently free — it is far more likely that the fee
+      // binding is not self-evidently free - it is far more likely that the fee
       // exists and the payment path simply is not wired yet. Marking that
       // "not applicable" would forgive the gap, so it is raised for confirmation.
       const unwired = Boolean(j?.submission) && c.paymentProvider === "none";
@@ -409,13 +409,13 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
           detail: `This service carries no fee, so the payment requirement does not apply (${NA})` }];
       }
       return [{ label: "Fee handling is defined for this service", weight: 3, ok: false,
-        detail: "The service submits a request but declares no fee, and the agent has no payment integration bound at all. If this government service carries a fee, none of the payment requirement is currently met — the customer cannot be quoted or charged in the conversation.",
-        fix: "Confirm whether this service carries a government fee. If it does, wire the payment path — quote the fee from the entity's pricing service and settle it through UAE Sadad after explicit approval." }];
+        detail: "The service submits a request but declares no fee, and the agent has no payment integration bound at all. If this government service carries a fee, none of the payment requirement is currently met - the customer cannot be quoted or charged in the conversation.",
+        fix: "Confirm whether this service carries a government fee. If it does, wire the payment path - quote the fee from the entity's pricing service and settle it through UAE Sadad after explicit approval." }];
     }
     const src = priceSource(j);
     const gateway = c.paymentProvider;
     const realGateway = gateway !== "none" && gateway !== "mock";
-    // A gateway can be real and still be pointed at its sandbox — which takes no
+    // A gateway can be real and still be pointed at its sandbox - which takes no
     // money and settles nothing, while looking entirely healthy from the outside.
     // That exact misconfiguration reached production on 2026-08-14, so it is
     // checked from the binding's own base URL rather than assumed correct.
@@ -431,7 +431,7 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
           : `The charge is a fixed ${j?.submission?.amount} ${j?.submission?.currency} held in configuration; a tariff change would not reach the customer until the configuration is edited`,
         fix: "Quote the fee from the entity's pricing service so a tariff change reaches the customer immediately." },
       { label: "Explicit recorded approval precedes the charge", weight: 2, ok: fields(j).some((f) => /terms_accepted|declaration_accepted/.test(f.key)),
-        detail: "Terms acceptance is enforced server-side before a payment can be initiated — the gate is in code, not in the prompt",
+        detail: "Terms acceptance is enforced server-side before a payment can be initiated - the gate is in code, not in the prompt",
         fix: "Require an explicit, recorded approval before a payment can be initiated." },
       { label: "Card details never reach the assistant", weight: 2, ok: true,
         detail: "Payment completes on the gateway's own hosted page; no card data passes through the conversation",
@@ -440,15 +440,15 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
         detail: realGateway
           ? `Settles through the ${gateway} gateway`
           : gateway === "mock"
-            ? "The payment binding is still the internal mock spine — no live gateway is connected for this service"
+            ? "The payment binding is still the internal mock spine - no live gateway is connected for this service"
             : "No payment integration is bound to this agent at all; the fee cannot currently be collected in the conversation",
         fix: "Connect the live payment gateway so the fee is actually collected in the conversation." },
       { label: "The gateway points at its live endpoint, not a sandbox", weight: 3, ok: realGateway && !sandbox, na: !realGateway,
         detail: !realGateway
           ? `No live gateway is connected yet, so there is no endpoint to check (${NA})`
           : sandbox
-            ? `The ${gateway} binding points at ${gatewayUrl} — a sandbox. A customer sent there would complete a payment page that takes no money and settles nothing.`
-            : `The ${gateway} binding points at ${gatewayUrl}${c.paymentSettings.outletRef ? `, outlet ${String(c.paymentSettings.outletRef).slice(0, 8)}…` : ""} — a live endpoint`,
+            ? `The ${gateway} binding points at ${gatewayUrl} - a sandbox. A customer sent there would complete a payment page that takes no money and settles nothing.`
+            : `The ${gateway} binding points at ${gatewayUrl}${c.paymentSettings.outletRef ? `, outlet ${String(c.paymentSettings.outletRef).slice(0, 8)}…` : ""} - a live endpoint`,
         fix: "Point the payment binding at the gateway's production endpoint and outlet before customers are sent to it." },
       { label: "Settles through UAE Sadad (سداد الإمارات)", weight: 3, ok: gateway === "sadad",
         detail: `The guide requires government payments to execute through UAE Sadad. This service is bound to "${gateway}", so the requirement is not met.`,
@@ -577,7 +577,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
     };
   });
 
-  // Suggestions are derived from failed checks — never authored by hand.
+  // Suggestions are derived from failed checks - never authored by hand.
   const grouped = new Map<string, Suggestion>();
   for (const s of services) {
     for (const cr of s.criteria) {
@@ -639,7 +639,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
       paymentGateway: gateways.join(", "),
     },
     notes: [
-      "Every score is computed at load time from the deployed system — the stored journey definitions, the enabled backend operations, the adapter bindings, the knowledge base, and the audit and analytics tables. No figure on this page is hand-entered.",
+      "Every score is computed at load time from the deployed system - the stored journey definitions, the enabled backend operations, the adapter bindings, the knowledge base, and the audit and analytics tables. No figure on this page is hand-entered.",
       "Checks read structure rather than intent: whether a journey actually has a pricing call, a real write-back, a consent timestamp. Prompt wording alone never carries a criterion.",
       "A criterion is complete at 85 or above, partial from 45, and a gap below that. Requirements that genuinely do not apply to a service are excluded from its score rather than passed.",
     ],
