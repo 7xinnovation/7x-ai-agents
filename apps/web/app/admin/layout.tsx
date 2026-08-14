@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Space_Grotesk } from "next/font/google";
-import { LayoutGrid, MessagesSquare, Inbox, Activity, BarChart3, Users, Search, ArrowUpRight, LogOut, PanelLeftClose, PanelLeftOpen, Menu, X } from "lucide-react";
+import { LayoutGrid, MessagesSquare, Inbox, Activity, BarChart3, Users, Search, ArrowUpRight, LogOut, PanelLeftClose, PanelLeftOpen, Menu, X, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const grotesk = Space_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-grotesk", display: "swap" });
@@ -16,6 +16,7 @@ const NAV = [
   { href: "/admin/inbox", label: "Inbox", icon: Inbox, exact: false },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3, exact: false },
   { href: "/admin/activity", label: "Activity", icon: Activity, exact: true },
+  { href: "/admin/readiness", label: "Readiness", icon: ShieldCheck, exact: false },
   { href: "/admin/users", label: "Users", icon: Users, exact: false },
 ];
 
