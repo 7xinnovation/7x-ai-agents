@@ -1,7 +1,9 @@
 import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery, registerSalesforceAdapter, registerNgeniusAdapter, registerUaePassAdapter } from "@dialog/core";
-import type { KBAdapter, KBResult, StorageAdapter } from "@dialog/core";
-import { getDb, kbChunks, kbDocuments, documentBlobs } from "@dialog/db";
-import { and, eq, sql, inArray } from "drizzle-orm";
+import type { CRMAdapter, KBAdapter, KBResult, StorageAdapter } from "@dialog/core";
+import { getDb, kbChunks, kbDocuments, documentBlobs, cases, conversations } from "@dialog/db";
+import { and, desc, eq, sql, inArray } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { sendEmail } from "./email";
 
 let initialised = false;
 
@@ -130,6 +132,101 @@ export function ensureAdapters() {
     },
   };
   registerAdapter("storage", "postgres", () => pgStorage);
+
+  /**
+   * A CRM that answers from what we actually know, for tenants with no CRM.
+   *
+   * The mock it replaces was not a stub that failed — it was a stub that
+   * SUCCEEDED, confidently, with invented data: any status question returned
+   * "Under Review"; a callback request returned a reference and reached nobody;
+   * renewal prefill offered "Demo Trading LLC", PO Box 50500, licence CN-1234567.
+   * In production those are wrong answers delivered with a straight face, which is
+   * worse than an error the customer can act on.
+   *
+   * Nothing here invents anything. Status comes from this customer's own cases in
+   * our database. Callbacks and manual requests are emailed to the branch ops
+   * mailbox, so a person genuinely receives them. Prefill returns nothing at all,
+   * because we hold no system-of-record data to prefill from — the renewal
+   * journeys read the real values from Emirates Post instead.
+   */
+  const opsCrm: CRMAdapter = {
+    async createCase(_ctx, input) {
+      // Journeys that submit to Emirates Post use apiFlow.saveTool and never reach
+      // here. What is left is the manage-an-existing-box flow, which a human
+      // actions — so the reference has to correspond to a message someone gets.
+      const reference = `NXN-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const to = process.env.NXN_BRANCH_OPS_EMAIL?.trim();
+      if (!to) throw new Error("No ops mailbox configured (NXN_BRANCH_OPS_EMAIL) — cannot record this request");
+      const res = await sendEmail({
+        to,
+        subject: `[${reference}] ${input.journeyKey} request from the assistant`,
+        text: `Reference: ${reference}\nJourney: ${input.journeyKey}\nCustomer: ${input.userRef ?? "guest"}\n\n${JSON.stringify(input.data, null, 2)}`,
+      });
+      // A reference for a request nobody received is the mock's failure mode.
+      if (!res.ok) throw new Error(`Could not send this request to the branch team (${res.reason})`);
+      return { reference };
+    },
+
+    async getStatus(_ctx, input) {
+      if (!input.userRef && !input.reference) return null;
+      const db = getDb();
+      const rows = await db
+        .select({ state: cases.state, updatedAt: cases.updatedAt })
+        .from(cases)
+        .innerJoin(conversations, eq(conversations.id, cases.conversationId))
+        .where(input.reference ? sql`${cases.state} ->> 'reference' = ${input.reference}` : eq(conversations.userRef, input.userRef))
+        .orderBy(desc(cases.updatedAt))
+        .limit(1);
+      const state = rows[0]?.state as { status?: string; reference?: string; readiness?: { missing?: string[] } } | undefined;
+      if (!state) return null;
+      const missing = state.readiness?.missing ?? [];
+      const status =
+        state.status === "submitted"
+          ? `Submitted${state.reference ? ` (reference ${state.reference})` : ""}`
+          : state.status === "escalated"
+            ? "With the team"
+            : missing.length
+              ? "In progress — not yet submitted"
+              : "Ready to submit";
+      return {
+        status,
+        missing,
+        nextSteps:
+          state.status === "submitted"
+            ? ["The team will be in touch about this request."]
+            : missing.length
+              ? ["Finish the outstanding items and submit."]
+              : ["Confirm the details to submit."],
+      };
+    },
+
+    async createCallback(_ctx, input) {
+      const reference = `CB-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const to = process.env.NXN_BRANCH_OPS_EMAIL?.trim();
+      if (!to) throw new Error("No ops mailbox configured (NXN_BRANCH_OPS_EMAIL) — cannot arrange a callback");
+      const res = await sendEmail({
+        to,
+        subject: `[${reference}] Callback requested via the assistant`,
+        text: `Reference: ${reference}\nName: ${input.name}\nPhone: ${input.phone}\nEmail: ${input.email ?? "-"}\nCustomer: ${input.userRef ?? "guest"}\n\nReason:\n${input.reason}`,
+      });
+      if (!res.ok) throw new Error(`Could not pass the callback to the team (${res.reason})`);
+      return { reference };
+    },
+
+    async findDuplicate() {
+      // We hold no system of record to check against, and a confident "no
+      // duplicate" is a claim we cannot support. Null means "unknown", which the
+      // caller already treats as "carry on".
+      return null;
+    },
+
+    async getRecord() {
+      // Never prefill from data we do not have. The mock's canned company details
+      // would otherwise appear in a real customer's renewal.
+      return null;
+    },
+  };
+  registerAdapter("crm", "ops", () => opsCrm);
 
   initialised = true;
 }
