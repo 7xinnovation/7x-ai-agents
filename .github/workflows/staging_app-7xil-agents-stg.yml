@@ -10,14 +10,17 @@
 # has no business on the server — the actual build output is ~6 MB.
 #
 # NOTE: re-running "Deployment Center" in the Azure portal regenerates the
-# broken template over this file. If the site ever serves the Azure placeholder
-# again, check this workflow first.
+# broken template — as `main_app-7xil-agents-stg.yml`, alongside this file
+# rather than over it, so you would get two workflows both deploying staging.
+# If the site ever serves the Azure placeholder again, look here first.
+#
+# Branch mapping: `staging` -> app-7xil-agents-stg, `main` -> app-7xil-agents-prod.
 name: Build and deploy Node.js app to Azure Web App - app-7xil-agents-stg
 
 on:
   push:
     branches:
-      - main
+      - staging
   workflow_dispatch:
 
 jobs:
