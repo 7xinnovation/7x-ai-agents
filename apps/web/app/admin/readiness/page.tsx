@@ -248,7 +248,9 @@ export default function ReadinessPage() {
           }}
         />
         <div className="relative">
-          <div className="flex flex-wrap items-start justify-between gap-6">
+          {/* The title block is short now, so it centres against the ring
+              rather than hanging from the top with a gap beneath it. */}
+          <div className="flex flex-wrap items-center justify-between gap-6">
             <div className="min-w-0 max-w-2xl">
               <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.14em] text-white/50">
                 <ShieldCheck className="size-3.5" />
@@ -257,13 +259,6 @@ export default function ReadinessPage() {
               <h1 className="mt-3 text-[28px] font-semibold leading-[1.1] tracking-tight sm:text-[34px]">
                 Pre-launch readiness
               </h1>
-              <p className="mt-2.5 text-[14px] leading-relaxed text-white/65">
-                Six government services measured against the guide&rsquo;s twelve requirements, recomputed from the
-                deployed configuration every time this page loads.
-              </p>
-              <p className="mt-3 text-[13px] leading-relaxed text-white/40" dir="rtl" lang="ar">
-                يجب أن يكون لكل متطلب دليل قابل للمراجعة والتدقيق، وليس تأكيداً وصفياً فقط
-              </p>
             </div>
 
             <div className="flex items-center gap-6">
