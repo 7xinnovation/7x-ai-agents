@@ -9,7 +9,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-gsb-lookup.ts
  */
-import { normaliseEmiratesId, ownerMatch, type GsbOwner } from "../lib/gsbLookup";
+import { cleanEntityName, normaliseEmiratesId, ownerMatch, type GsbOwner } from "../lib/gsbLookup";
 
 let failed = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -53,6 +53,19 @@ check(
   ownerMatch([owner("N/A"), owner("784-1975-7654321-9")], "784-1990-1111111-1"),
   "no-match"
 );
+
+console.log("\ncleanEntityName");
+// Real value from the box-stg registry — the note is part of the name field.
+check(
+  "strips an internal maintenance note",
+  cleanEntityName("Fujairah Culture & Media Authority (FCMA)TO-BE-REMOVE-OR-ASSIGN-TO-NEW-ED"),
+  "Fujairah Culture & Media Authority (FCMA)"
+);
+check("leaves a clean name alone", cleanEntityName("Dubai Silicon Oasis"), "Dubai Silicon Oasis");
+check("keeps a legitimate parenthetical", cleanEntityName("Abu Dhabi Media Free Zone (TwoFour54)"), "Abu Dhabi Media Free Zone (TwoFour54)");
+check("strips DO NOT USE", cleanEntityName("Some Authority DO NOT USE"), "Some Authority");
+check("a name that is only a note becomes undefined", cleanEntityName("TO-BE-REMOVED"), undefined);
+check("non-string", cleanEntityName(null), undefined);
 
 console.log(failed ? `\n${failed} check(s) FAILED` : "\nall checks passed");
 process.exit(failed ? 1 : 0);

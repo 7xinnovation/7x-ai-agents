@@ -90,6 +90,22 @@ export function ownerMatch(owners: GsbOwner[], emiratesId: string): "match" | "n
   return known.includes(want) ? "match" : "no-match";
 }
 
+/**
+ * Some registry names carry internal maintenance notes, e.g.
+ * "Fujairah Culture & Media Authority (FCMA)TO-BE-REMOVE-OR-ASSIGN-TO-NEW-ED".
+ * These reach the customer as the label on a button, so they are stripped here
+ * rather than left to the model to notice — it did strip that one, but it had no
+ * instruction to, and the next such note will be worded differently.
+ */
+export function cleanEntityName(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const cleaned = raw
+    .replace(/\s*TO[\s-]?BE[\s-]?REMOVE[D]?[\s-]?.*$/i, "")
+    .replace(/\s*(DO[\s-]?NOT[\s-]?USE|DUPLICATE|OBSOLETE|TEST[\s-]?ONLY)\b.*$/i, "")
+    .trim();
+  return cleaned || undefined;
+}
+
 function assertShape(value: string, pattern: RegExp, what: string): string {
   const v = String(value ?? "").trim();
   if (!pattern.test(v)) throw new Error(`${what} is not in an accepted format`);
@@ -215,8 +231,8 @@ export async function listIssuingEntities(agentId: string, env: EnvKey, callerTo
   }
   return rows.map((r) => ({
     code: String(r.entCode ?? ""),
-    nameEn: r.entEn ?? undefined,
-    nameAr: r.entAr ?? undefined,
+    nameEn: cleanEntityName(r.entEn),
+    nameAr: cleanEntityName(r.entAr),
     emirateNameEn: r.entEmirateNameEn ?? undefined,
     emirateNameAr: r.entEmirateNameAr ?? undefined,
     isFreeZone: Number(r.entFreezoneFlag ?? 0) === 1,
