@@ -163,7 +163,7 @@ const COMPANY_FIELDS =
   "Id, Name, EPG_Company_Name_Arabic__c, EPG_Trade_Name_in_English__c, EPG_Trade_Name_in_Arabic__c, " +
   "EPG_Trade_license_no__c, EPG_Trade_license_Expiry_date__c, EPG_Emirates__c, EPG_Regulator__c, " +
   "EPG_License_Number__c, EPG_License__c, EPG_License_Status__c, EPG_License_Expiry_Date__c, " +
-  "(SELECT FirstName, LastName, Email, Phone, EPG_Emirates_Id__c, EPG_Designation__c FROM Contacts)";
+  "(SELECT FirstName, LastName, Email, Phone, EPG_Emirates_Id__c, LegalEntity_Profile_Person_EmiratesID__c, EPG_Designation__c FROM Contacts)";
 
 function toCompany(r: Record<string, any>): EpglCompany {
   return {
@@ -185,7 +185,7 @@ function toCompany(r: Record<string, any>): EpglCompany {
       lastName: c.LastName ?? undefined,
       email: c.Email ?? undefined,
       phone: c.Phone ?? undefined,
-      emiratesId: c.EPG_Emirates_Id__c ?? undefined,
+      emiratesId: c.EPG_Emirates_Id__c ?? c.LegalEntity_Profile_Person_EmiratesID__c ?? undefined,
       designations: String(c.EPG_Designation__c ?? "").split(";").map((s) => s.trim()).filter(Boolean),
     })),
   };
@@ -210,6 +210,41 @@ export async function companyByTradeLicense(
   const rows = await query<Record<string, any>>(
     agentId, env,
     `SELECT ${COMPANY_FIELDS} FROM Account WHERE EPG_Trade_license_no__c = '${v}'`
+  );
+  return rows.map(toCompany);
+}
+
+/**
+ * Company profile for the person signed in, found by their Emirates ID.
+ *
+ * Salesforce confirmed the gap and the field: "sign-in gives us the customer's
+ * Emirates ID rather than a trade license number, so we can't yet identify the
+ * company from the signed-in user. Contacts already carry EPG_Emirates_ID__c."
+ * That last sentence is what makes this buildable without waiting — the field is
+ * already there, so the join is ours to write.
+ *
+ * Matched through Contact rather than Account, because the Emirates ID belongs to
+ * a PERSON: the same individual can appear on several companies, so this returns
+ * every Account they are a contact on and the caller must let them choose rather
+ * than assume the first.
+ *
+ * Both spellings are queried. An Emirates ID is written 784-YYYY-NNNNNNN-C by
+ * people and often stored as 15 bare digits, and matching only the form the
+ * customer happened to sign in with would report "no company" for a customer
+ * whose record is perfectly good.
+ */
+export async function companyByEmiratesId(
+  agentId: string,
+  env: EnvKey,
+  emiratesId: string
+): Promise<EpglCompany[]> {
+  const digits = String(emiratesId ?? "").replace(/\D/g, "");
+  if (!/^\d{15}$/.test(digits)) throw new Error("Emirates ID is not in an accepted format");
+  const dashed = `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 14)}-${digits.slice(14)}`;
+  const rows = await query<Record<string, any>>(
+    agentId, env,
+    `SELECT ${COMPANY_FIELDS} FROM Account WHERE Id IN ` +
+      `(SELECT AccountId FROM Contact WHERE EPG_Emirates_Id__c IN ('${soqlLiteral(digits)}', '${soqlLiteral(dashed)}'))`
   );
   return rows.map(toCompany);
 }

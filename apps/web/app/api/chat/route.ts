@@ -16,7 +16,7 @@ import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
-import { companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
+import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId } from "@/lib/gsbLookup";
 import { log } from "@/lib/logger";
 
@@ -352,6 +352,7 @@ export async function POST(req: NextRequest) {
   // standard SOQL query endpoint; the statements are fixed server-side and the
   // model supplies only a value, so it can never compose a query. See lib/epglRead.
   const COMPANY_TOOL = "epgl_company_lookup";
+  const COMPANY_BY_EID_TOOL = "epgl_company_by_emirates_id";
   const FORM9_TOOL = "epgl_form9_history";
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
@@ -365,6 +366,16 @@ export async function POST(req: NextRequest) {
               tradeLicenseNumber: { type: "string", description: "The trade licence number exactly as printed on the licence" },
             },
             required: ["tradeLicenseNumber"],
+          },
+        },
+        {
+          name: COMPANY_BY_EID_TOOL,
+          description:
+            "Find the companies a signed-in customer is a contact on, using their EMIRATES ID. Use it as soon as they are signed in and you do not yet have a trade licence number — sign-in gives you their Emirates ID, not a licence. Returns every company they are on: one, confirm it; several, let them pick; none, carry on and ask for the trade licence number as normal.",
+          input_schema: {
+            type: "object",
+            properties: { emiratesId: { type: "string", description: "The customer's Emirates ID, 15 digits, dashed or bare" } },
+            required: ["emiratesId"],
           },
         },
         {
@@ -514,9 +525,26 @@ export async function POST(req: NextRequest) {
         };
       }
     }
-    if (name === COMPANY_TOOL || name === FORM9_TOOL) {
+    if (name === COMPANY_TOOL || name === FORM9_TOOL || name === COMPANY_BY_EID_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       try {
+        if (name === COMPANY_BY_EID_TOOL) {
+          const found = await companyByEmiratesId(agent.id, env, String(input.emiratesId ?? ""));
+          if (!found.length) {
+            return {
+              result:
+                "NO COMPANY is on file against that Emirates ID. This is normal — not every contact record carries one — so do not treat it as a problem: ask for the trade licence number and continue as usual.",
+            };
+          }
+          if (found.length > 1) {
+            return {
+              result:
+                `This person is a contact on ${found.length} companies. Show the names and ask which one this application is for before using any of them:\n` +
+                JSON.stringify(found),
+            };
+          }
+          return { result: JSON.stringify(found[0]) };
+        }
         if (name === COMPANY_TOOL) {
           const found = await companyByTradeLicense(agent.id, env, String(input.tradeLicenseNumber ?? ""));
           if (!found.length) {
