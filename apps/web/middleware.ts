@@ -59,6 +59,7 @@ export async function middleware(req: NextRequest) {
 async function embedCsp(req: NextRequest) {
   const slug = req.nextUrl.pathname.split("/")[2] ?? "";
   let ancestors = "*";
+  let diag = "not-attempted";
   try {
     // Behind a reverse proxy (Azure App Service, Railway) req.nextUrl.origin is
     // the INTERNAL origin, so fetching our own API through it fails and the catch
@@ -70,16 +71,21 @@ async function embedCsp(req: NextRequest) {
     const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || req.headers.get("host");
     const base = host ? `${proto}://${host}` : req.nextUrl.origin;
     const r = await fetch(new URL(`/api/agents/${encodeURIComponent(slug)}`, base));
+    diag = `base=${base} status=${r.status}`;
     if (r.ok) {
       const cfg = await r.json();
       const origins: string[] = Array.isArray(cfg.allowedOrigins) ? cfg.allowedOrigins : [];
+      diag += ` origins=${origins.length}`;
       if (origins.length) ancestors = ["'self'", ...origins].join(" ");
     }
-  } catch {
-    /* fall back to allow-all */
+  } catch (e) {
+    diag = `fetch-failed: ${e instanceof Error ? e.message : "unknown"}`;
   }
   const res = NextResponse.next();
   res.headers.set("Content-Security-Policy", `frame-ancestors ${ancestors}`);
+  // Why the header came out as it did, on request. Without this the allow-all
+  // fallback is indistinguishable from a deliberate open policy.
+  if (req.nextUrl.searchParams.get("cspdebug") === "1") res.headers.set("X-CSP-Debug", diag);
   return res;
 }
 
