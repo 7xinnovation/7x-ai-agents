@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uaePassConfigured, uaePassMock, uaePassMockAllowed, buildAuthorizeUrl, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
+import { getAgentBySlug } from "@/lib/agents";
 
 export const runtime = "nodejs";
 
@@ -10,12 +11,18 @@ export const runtime = "nodejs";
  * Query: cid (conversationId), agent (slug), returnTo (embed URL to come back to).
  */
 export async function GET(req: NextRequest) {
-  if (!uaePassConfigured()) {
-    return NextResponse.json({ error: "uaepass_not_configured", hint: "Set UAEPASS_CLIENT_ID/SECRET/BASE." }, { status: 501 });
-  }
   const origin = requestOrigin(req);
   const cid = req.nextUrl.searchParams.get("cid") ?? "";
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
+  // Each tenant registers its own UAE PASS client, so which credentials apply
+  // depends on which agent is signing in — see cfg() in lib/uaepass.
+  const tenant = agent ? (await getAgentBySlug(agent))?.definition.tenantSlug : undefined;
+  if (!uaePassConfigured(tenant)) {
+    return NextResponse.json(
+      { error: "uaepass_not_configured", hint: `Set UAEPASS_CLIENT_ID/SECRET/BASE${tenant ? ` or the ${tenant.toUpperCase()}-scoped variants` : ""}.` },
+      { status: 501 }
+    );
+  }
   const returnTo = req.nextUrl.searchParams.get("returnTo") || `${origin}/embed/${agent}`;
   // Popup mode: the embed opened this flow in a popup window (it can't redirect
   // its own iframe to UAE PASS — frame-ancestors forbids it). The callback then
@@ -31,7 +38,7 @@ export async function GET(req: NextRequest) {
   // full flow can be tested without a real UAE PASS session.
   const target = wantMock
     ? `${origin}/api/uaepass/callback?code=MOCK_CODE&state=${state}`
-    : buildAuthorizeUrl(resolveRedirectUri(origin), state);
+    : buildAuthorizeUrl(resolveRedirectUri(origin), state, tenant);
 
   const res = NextResponse.redirect(target);
   res.cookies.set("uaepass_flow", JSON.stringify({ state, cid, agent, returnTo, popup, mock: wantMock }), {

@@ -13,8 +13,6 @@ export const runtime = "nodejs";
  * session bearer reused for protected integration calls), then returns to the embed.
  */
 export async function GET(req: NextRequest) {
-  if (!uaePassConfigured()) return NextResponse.json({ error: "uaepass_not_configured" }, { status: 501 });
-
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const err = req.nextUrl.searchParams.get("error");
@@ -23,6 +21,11 @@ export async function GET(req: NextRequest) {
   // Honour the mock decision made at login, but only if this deployment still
   // permits it (guards against a stale cookie after the flag is turned off).
   const isMock = uaePassMockAllowed() && Boolean(flow.mock);
+  // The code was issued to the tenant's OWN UAE PASS client at login, so it can
+  // only be redeemed with that tenant's credentials. Reading them from the flow
+  // cookie's agent keeps both halves of the round trip on the same client.
+  const flowTenant = flow.agent ? (await getAgentBySlug(flow.agent))?.definition.tenantSlug : undefined;
+  if (!uaePassConfigured(flowTenant)) return NextResponse.json({ error: "uaepass_not_configured" }, { status: 501 });
 
   const back = (params: Record<string, string>, cid: string | undefined = flow.cid) => {
     // Popup flow: hand the result back to the chat via postMessage and close —
@@ -59,7 +62,7 @@ export async function GET(req: NextRequest) {
     // sign-in → session → authenticated flow is testable without registration.
     const id = isMock
       ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: MOCK_PERSONA_SUB, name: MOCK_PERSONA_NAME }
-      : await exchangeCode(code, resolveRedirectUri(requestOrigin(req)));
+      : await exchangeCode(code, resolveRedirectUri(requestOrigin(req)), flowTenant);
     // Signed in before the first message → no conversation exists yet. Create it
     // here so the verified identity has somewhere to live; the redirect's ?cid=
     // pins it in the embed, and the post-sign-in pulse lands in it.

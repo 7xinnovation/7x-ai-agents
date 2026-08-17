@@ -14,8 +14,10 @@ export function uaePassMock(): boolean {
   return process.env.UAEPASS_MOCK === "1";
 }
 
-export function uaePassConfigured(): boolean {
-  return uaePassMock() || Boolean(process.env.UAEPASS_CLIENT_ID && process.env.UAEPASS_CLIENT_SECRET);
+export function uaePassConfigured(tenant?: string): boolean {
+  if (uaePassMock()) return true;
+  const { clientId, clientSecret } = credentials(tenant);
+  return Boolean(clientId && clientSecret);
 }
 
 /**
@@ -64,19 +66,73 @@ export function resolveRedirectUri(origin: string): string {
   return origin ? `${origin}/api/uaepass/callback` : (process.env.UAEPASS_REDIRECT_URI ?? "");
 }
 
-function cfg() {
+/**
+ * UAE PASS credentials, per tenant.
+ *
+ * Each tenant registers its OWN UAE PASS client: NXN's is Emirates Post's PO Box
+ * client (redirects at box.emiratespost.ae), EPGL will have a different one. The
+ * config used to be a single set of app-level env vars, which meant whichever
+ * tenant was configured last silently owned sign-in for every agent on the app —
+ * and with NXN's prod client in place, an EPGL sign-in would have been sent to
+ * Emirates Post's redirect and failed with callback.not.match.
+ *
+ * A tenant override is `<VAR>_<TENANT>`, e.g. UAEPASS_CLIENT_ID_EPGL. The plain
+ * names remain the default, so an app with one tenant needs no change. Secrets
+ * stay in the environment rather than the agent definition, which is not
+ * encrypted.
+ */
+function envFor(name: string, tenant?: string): string | undefined {
+  if (tenant) {
+    const scoped = process.env[`${name}_${tenant.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`];
+    if (scoped) return scoped;
+  }
+  return process.env[name];
+}
+
+/**
+ * The client id and secret are resolved as a PAIR, from the same source.
+ *
+ * Falling back per-variable would let a half-configured tenant pair its own
+ * client id with another tenant's secret — a mismatch UAE PASS rejects in a way
+ * that reads like a UAE PASS outage rather than a missing env var. If either
+ * tenant-scoped half is set, both must come from the tenant scope.
+ */
+function credentials(tenant?: string): { clientId: string; clientSecret: string } {
+  const suffix = tenant ? `_${tenant.toUpperCase().replace(/[^A-Z0-9]/g, "_")}` : "";
+  if (suffix) {
+    const id = process.env[`UAEPASS_CLIENT_ID${suffix}`];
+    const secret = process.env[`UAEPASS_CLIENT_SECRET${suffix}`];
+    if (id || secret) return { clientId: id ?? "", clientSecret: secret ?? "" };
+  }
   return {
-    base: (process.env.UAEPASS_BASE || "https://stg-id.uaepass.ae").replace(/\/$/, ""),
     clientId: process.env.UAEPASS_CLIENT_ID ?? "",
     clientSecret: process.env.UAEPASS_CLIENT_SECRET ?? "",
-    scope: process.env.UAEPASS_SCOPE || "urn:uae:digitalid:profile:general",
-    acr: process.env.UAEPASS_ACR || "urn:safelayer:tws:policies:authentication:level:low",
   };
 }
 
+function cfg(tenant?: string) {
+  const { clientId, clientSecret } = credentials(tenant);
+  return {
+    // The non-secret settings still fall back individually — a tenant that only
+    // differs by client can keep sharing the base, scope and ACR.
+    base: (envFor("UAEPASS_BASE", tenant) || "https://stg-id.uaepass.ae").replace(/\/$/, ""),
+    clientId,
+    clientSecret,
+    scope: envFor("UAEPASS_SCOPE", tenant) || "urn:uae:digitalid:profile:general",
+    acr: envFor("UAEPASS_ACR", tenant) || "urn:safelayer:tws:policies:authentication:level:low",
+  };
+}
+
+/** Which tenants have their own UAE PASS client configured. For diagnostics. */
+export function uaePassTenantsConfigured(): string[] {
+  return Object.keys(process.env)
+    .filter((k) => k.startsWith("UAEPASS_CLIENT_ID_"))
+    .map((k) => k.slice("UAEPASS_CLIENT_ID_".length));
+}
+
 /** Build the UAE PASS authorize URL the customer is redirected to. */
-export function buildAuthorizeUrl(redirectUri: string, state: string): string {
-  const c = cfg();
+export function buildAuthorizeUrl(redirectUri: string, state: string, tenant?: string): string {
+  const c = cfg(tenant);
   const u = new URL(`${c.base}/idshub/authorize`);
   u.searchParams.set("response_type", "code");
   u.searchParams.set("client_id", c.clientId);
@@ -95,8 +151,8 @@ export interface UaePassIdentity {
 }
 
 /** Exchange the auth code for an access token + verified identity. */
-export async function exchangeCode(code: string, redirectUri: string): Promise<UaePassIdentity> {
-  const c = cfg();
+export async function exchangeCode(code: string, redirectUri: string, tenant?: string): Promise<UaePassIdentity> {
+  const c = cfg(tenant);
   const basic = Buffer.from(`${c.clientId}:${c.clientSecret}`).toString("base64");
   const tokenRes = await fetch(`${c.base}/idshub/token`, {
     method: "POST",
