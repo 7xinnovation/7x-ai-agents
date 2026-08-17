@@ -60,7 +60,16 @@ async function embedCsp(req: NextRequest) {
   const slug = req.nextUrl.pathname.split("/")[2] ?? "";
   let ancestors = "*";
   try {
-    const r = await fetch(new URL(`/api/agents/${encodeURIComponent(slug)}`, req.nextUrl.origin));
+    // Behind a reverse proxy (Azure App Service, Railway) req.nextUrl.origin is
+    // the INTERNAL origin, so fetching our own API through it fails and the catch
+    // below quietly served frame-ancestors * — an agent with configured origins
+    // was embeddable from anywhere, which is the opposite of what setting them
+    // means. Derive the public origin from the proxy's forwarded headers, the
+    // same way lib/uaepass does for the sign-in round trip.
+    const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || req.nextUrl.protocol.replace(/:$/, "");
+    const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || req.headers.get("host");
+    const base = host ? `${proto}://${host}` : req.nextUrl.origin;
+    const r = await fetch(new URL(`/api/agents/${encodeURIComponent(slug)}`, base));
     if (r.ok) {
       const cfg = await r.json();
       const origins: string[] = Array.isArray(cfg.allowedOrigins) ? cfg.allowedOrigins : [];
