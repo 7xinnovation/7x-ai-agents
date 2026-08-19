@@ -3958,3 +3958,42 @@ body {
     display: none;
   }
 }
+
+/* Voice control, in the composer beside Send.
+   It used to sit in the header, three icons away from the input, which read as a
+   page-level setting rather than another way to say the thing you are about to
+   type. Quieter than Send on purpose: Send is the primary action, and a filled
+   accent mic next to a filled accent Send gives the row two focal points. */
+.dlg-mic {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--r-pill);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--c-text-muted);
+  background: transparent;
+  transition: color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+.dlg-mic:hover {
+  color: var(--c-primary);
+  background: color-mix(in srgb, var(--c-primary) 8%, transparent);
+}
+.dlg-mic:active { transform: scale(0.94); }
+.dlg-mic.is-on {
+  color: var(--c-primary-fg);
+  background: var(--c-primary);
+}
+/* Listening and speaking need to differ at a glance, not only by colour —
+   a pulse says "live" where a static tint does not. */
+.dlg-mic.is-listening { animation: dlg-mic-pulse 1.4s ease-in-out infinite; }
+.dlg-mic.is-speaking { animation: dlg-mic-pulse 0.9s ease-in-out infinite; }
+@keyframes dlg-mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-primary) 45%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--c-primary) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dlg-mic.is-listening, .dlg-mic.is-speaking { animation: none; }
+}

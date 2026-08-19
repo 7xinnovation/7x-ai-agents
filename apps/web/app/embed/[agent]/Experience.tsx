@@ -18,6 +18,8 @@ import {
   ArrowClockwise,
   LockSimple,
   ArrowSquareOut,
+  ArrowsOutSimple,
+  ArrowsInSimple,
   Camera,
   DeviceMobile,
   Info,
@@ -369,11 +371,14 @@ export function Experience({
   initialLocale,
   initialConversationId,
   uaePassToken,
+  embedded,
 }: {
   agent: PublicAgent;
   initialLocale: Locale;
   initialConversationId?: string;
   uaePassToken?: string;
+  /** Rendered inside the launcher iframe, so the host can be asked to expand. */
+  embedded?: boolean;
 }) {
   const uaePass = useRef<string | undefined>(uaePassToken);
   const [locale, setLocale] = useState<Locale>(initialLocale);
@@ -639,6 +644,28 @@ export function Experience({
       window.clearInterval(id);
     };
   }, [pendingDocCount, streaming, uploadingKeys]);
+
+  /**
+   * Ask the host page to give the widget the full window, and back again.
+   *
+   * The loader has always handled these messages; nothing ever sent one, so the
+   * split view with the application panel was unreachable from inside the
+   * iframe. Targeted at the referrer's origin rather than "*" — the action is
+   * not sensitive, but a message broadcast to every frame is a habit worth not
+   * forming.
+   */
+  const [expanded, setExpanded] = useState(false);
+  const toggleExpanded = useCallback(() => {
+    const next = !expanded;
+    setExpanded(next);
+    let target = "*";
+    try {
+      if (document.referrer) target = new URL(document.referrer).origin;
+    } catch {
+      /* keep "*" */
+    }
+    window.parent?.postMessage({ source: "dialog", action: next ? "expand" : "collapse" }, target);
+  }, [expanded]);
 
   // Host site can push/refresh the UAE PASS session token at any time.
   //
@@ -1046,16 +1073,6 @@ export function Experience({
           </span>
         </div>
         <div className="dlg-actions">
-          {voiceReady && voice.supported ? (
-            <button
-              className={`dlg-chip icon-only dlg-voice-launch${voice.active ? " is-on" : ""}${voice.listening ? " is-listening" : ""}${voice.speaking ? " is-speaking" : ""}`}
-              onClick={voice.toggle}
-              aria-label={voice.active ? "Turn off voice mode" : "Turn on voice mode"}
-              title={voice.active ? "Voice mode on" : "Talk to the assistant"}
-            >
-              <Microphone size={16} weight={voice.active ? "fill" : iconWeight} />
-            </button>
-          ) : null}
           {agent.locales.length > 1 ? (
             <button
               className="dlg-chip lang"
@@ -1088,6 +1105,16 @@ export function Experience({
           >
             <ArrowClockwise size={16} weight={iconWeight} />
           </button>
+          {embedded ? (
+            <button
+              className="dlg-chip icon-only"
+              onClick={toggleExpanded}
+              aria-label={expanded ? t.collapse : t.expand}
+              title={expanded ? t.collapse : t.expand}
+            >
+              {expanded ? <ArrowsInSimple size={16} weight={iconWeight} /> : <ArrowsOutSimple size={16} weight={iconWeight} />}
+            </button>
+          ) : null}
           {hasCase ? (
             <button
               className="dlg-chip dlg-mobile-toggle"
@@ -1214,6 +1241,17 @@ export function Experience({
                 placeholder={t.placeholder}
                 rows={1}
               />
+              {voiceReady && voice.supported ? (
+                <button
+                  type="button"
+                  className={`dlg-mic${voice.active ? " is-on" : ""}${voice.listening ? " is-listening" : ""}${voice.speaking ? " is-speaking" : ""}`}
+                  onClick={voice.toggle}
+                  aria-label={voice.active ? "Turn off voice mode" : "Turn on voice mode"}
+                  title={voice.active ? "Voice mode on" : "Talk to the assistant"}
+                >
+                  <Microphone size={18} weight={voice.active ? "fill" : iconWeight} />
+                </button>
+              ) : null}
               <button className="dlg-send" onClick={() => void send()} disabled={streaming || !input.trim()} aria-label="Send">
                 <PaperPlaneRight size={18} weight="fill" />
               </button>
