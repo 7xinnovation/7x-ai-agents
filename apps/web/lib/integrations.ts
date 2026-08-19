@@ -682,12 +682,17 @@ export async function executeOperation(
       if (!bearer) return { result: signInMsg, isError: true };
       // What was rejected decides the remedy (FB-1485).
       if (bearerSource === "identity") {
-        // The customer's own UAE PASS session was refused — these are short-lived,
-        // so it has most likely expired mid-conversation. Re-authenticating IS the
-        // fix here, so offering it is correct rather than a dead end.
+        // The customer's own UAE PASS token was refused. TWO different causes look
+        // identical from here and we cannot tell them apart:
+        //   (a) the session genuinely expired mid-conversation — re-signing in fixes it;
+        //   (b) this backend does not accept a UAE PASS token as its bearer at all
+        //       (Emirates Post mints its OWN session via Account/passwordLessToken),
+        //       in which case re-signing in yields another token that fails the same
+        //       way, and the customer loops forever.
+        // So do not state a cause we have not established, and cap the retry at one.
         return {
           result:
-            "The customer's UAE PASS session was rejected by the backend — it has most likely EXPIRED (these sessions are short-lived). Explain in one short sentence that their sign-in needs refreshing, ask them to sign in with UAE PASS again to continue, and keep everything already collected. Do not start a one-time-passcode flow and do not invent a result.",
+            "The backend rejected the customer's UAE PASS token for this action. Do NOT tell them their session expired — we cannot tell whether it lapsed or whether this backend does not accept UAE PASS tokens at all, and stating a cause we do not know is a guess presented as fact. If you have NOT already asked them to sign in again in this conversation: say their sign-in could not be verified, ask them to sign in with UAE PASS once more, and keep everything already collected. If you HAVE already asked and it failed again, STOP asking — a second failure means re-authenticating is not the fix. Say this cannot be completed automatically right now and offer a callback. Never start a one-time-passcode flow and never invent a result.",
           isError: true,
         };
       }
