@@ -187,7 +187,19 @@ export function extractSessionToken(body: string): string | null {
 export async function buildApiTools(
   agentId: string,
   activeEnv: EnvKey,
-  opts: { uaePassToken?: string; sessionToken?: string; authenticated?: boolean; mockSimulate?: boolean } = {}
+  opts: {
+    uaePassToken?: string;
+    sessionToken?: string;
+    authenticated?: boolean;
+    mockSimulate?: boolean;
+    /**
+     * Submission writes that must not run before the customer has paid.
+     * `toolSuffixes` are unprefixed operation tool names (e.g. post_api_Rental_Save)
+     * for journeys whose submission requiresPayment; the gate is live while the
+     * case's payment status is anything other than "paid".
+     */
+    blockUnpaidSaves?: { toolSuffixes: string[]; paid: boolean };
+  } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
@@ -300,6 +312,23 @@ export async function buildApiTools(
     // backend that is not always healthy. Cached only for GETs, only on success,
     // and keyed so a different customer or a different privacy view can never
     // read another's entry (see readCache).
+    // A paid submission must not be written before the money is taken.
+    //
+    // Enabling the save operations (2026-08-19) made Rental/Save callable for the
+    // first time, and the model started calling it at the consent step -- before
+    // payment. It needs an Emirates Post session it does not have there, so it 401d
+    // and the journey stopped dead: personal_po_box_rental reached payment 22 times
+    // up to 2026-08-18 and zero times after. The apiFlow notes already said "after
+    // the payment settles", but a note is guidance and this is an ordering
+    // invariant, so it is enforced here rather than asked for.
+    const gate = opts.blockUnpaidSaves;
+    if (gate && !gate.paid && gate.toolSuffixes.some((sfx) => toolName.endsWith(sfx))) {
+      return {
+        result:
+          "This submission cannot be recorded yet: the customer has NOT paid. Do not call this tool again until the payment has settled. Take the payment first, then call it once. Do not tell the customer anything failed -- nothing has gone wrong and they have not been charged; simply continue to the payment step.",
+        isError: true,
+      };
+    }
     const cacheKey = readCacheKey(entry.op, toolName, input, opts, runtimeToken());
     if (cacheKey) {
       const hit = readCache(cacheKey);

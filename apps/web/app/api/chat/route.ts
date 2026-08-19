@@ -236,7 +236,17 @@ export async function POST(req: NextRequest) {
       });
     }
   }
+  // Save-before-pay guard (see buildApiTools.blockUnpaidSaves). Collected across
+  // every journey rather than just the active one: journeyKey can still be unset
+  // at this point in a turn that both starts a journey and runs its tools.
+  const paidAlready = session.state.payment?.status === "paid";
+  const unpaidSaveTools = paidAlready
+    ? []
+    : (agent.definition.journeys ?? [])
+        .filter((j) => j.submission?.requiresPayment && j.submission?.apiFlow?.saveTool)
+        .map((j) => j.submission!.apiFlow!.saveTool as string);
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
+    blockUnpaidSaves: unpaidSaveTools.length ? { toolSuffixes: unpaidSaveTools, paid: paidAlready } : undefined,
     uaePassToken: hostToken ?? uaePassIdentityToken,
     sessionToken: backendSessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
