@@ -1,0 +1,104 @@
+<!doctype html>
+<!--
+  Dialog token bridge
+  ===================
+
+  Host this file on the origin that HOLDS the signed-in session token -- the one
+  whose localStorage the token is written to:
+
+      https://box-stg.emiratespost.ae/dialog-bridge.html   (staging)
+      https://box.emiratespost.ae/dialog-bridge.html       (production)
+      https://app.epgl.ae/dialog-bridge.html               (EPGL)
+
+  WHY THIS EXISTS
+  ---------------
+  localStorage is scoped to an ORIGIN, not a domain. A script running on
+  www.emiratespost.ae cannot read a token stored by box.emiratespost.ae: same
+  company, same domain, different origin, no sharing -- and no storage event
+  crosses that boundary either. So when the assistant is embedded on one subdomain
+  and the session lives on another, something has to be served FROM the token's own
+  origin to read it. That is this page. It is framed, hidden, by the assistant
+  loader, reads its own localStorage, and hands the token to the parent.
+
+  It is not needed at all when the assistant is embedded on the same origin as the
+  session -- the loader reads localStorage directly in that case.
+
+  WHAT IT DOES NOT DO
+  -------------------
+  It never broadcasts. It answers a request only after checking that the request
+  came from an origin on ALLOWED_PARENTS below, and it replies to that origin
+  alone. An unlisted page gets nothing, and a page cannot learn the token by
+  framing this file.
+
+  TO INSTALL
+  ----------
+  1. Set TOKEN_KEY to the localStorage key your portal keeps the token under.
+  2. Set ALLOWED_PARENTS to the pages that embed the assistant. Exact origins,
+     no wildcards, no trailing slash.
+  3. Serve this file over HTTPS from the token's origin.
+  4. Tell 7X the URL. It goes on the assistant's script tag as data-bridge-url.
+
+  Serve it WITHOUT `X-Frame-Options: DENY` and without a frame-ancestors CSP that
+  excludes the parents above, or the browser will refuse to frame it and the
+  handoff will fail silently. If the portal sets a site-wide X-Frame-Options,
+  exempt this one path.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Dialog token bridge</title>
+  </head>
+  <body>
+    <script>
+      (function () {
+        "use strict";
+
+        /** localStorage key holding the signed-in customer's access token. */
+        var TOKEN_KEY = "accessToken";
+
+        /** Origins permitted to ask. Exact match, no wildcards, no trailing slash. */
+        var ALLOWED_PARENTS = [
+          "https://www-stg.emiratespost.ae",
+          "https://www.emiratespost.ae",
+          "https://emiratespost.ae"
+        ];
+
+        function readToken() {
+          try {
+            var v = window.localStorage.getItem(TOKEN_KEY);
+            return v && v.trim() ? v.trim() : null;
+          } catch (e) {
+            // Storage can throw outright in some privacy modes. Answer "no token"
+            // rather than break the page that framed us.
+            return null;
+          }
+        }
+
+        function reply(origin) {
+          if (ALLOWED_PARENTS.indexOf(origin) === -1) return;
+          var token = readToken();
+          if (!token) return;
+          window.parent.postMessage({ source: "dialog-bridge", token: token }, origin);
+        }
+
+        // Answer a request from the loader. The origin is taken from the EVENT, never
+        // from the message body -- a sender cannot claim to be someone else, because
+        // the browser sets e.origin and the reply goes only to that same origin.
+        window.addEventListener("message", function (e) {
+          if (!e.data || e.data.source !== "dialog-bridge-request") return;
+          reply(e.origin);
+        });
+
+        // A sign-in that happens after the page loaded. `storage` fires in this frame
+        // when another window on this origin writes -- the portal's own login tab, or
+        // the sign-in popup. Push to every allowed parent rather than wait to be
+        // asked, so the assistant reflects the sign-in immediately.
+        window.addEventListener("storage", function (e) {
+          if (e.key && e.key !== TOKEN_KEY) return;
+          for (var i = 0; i < ALLOWED_PARENTS.length; i++) reply(ALLOWED_PARENTS[i]);
+        });
+      })();
+    </script>
+  </body>
+</html>

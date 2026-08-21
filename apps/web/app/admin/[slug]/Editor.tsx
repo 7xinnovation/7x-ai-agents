@@ -207,9 +207,19 @@ export function Editor({ slug }: { slug: string }) {
               </li>
             </ul>
             <p className="mt-2 text-[12.5px] text-muted">
-              The handoff needs the script on the <strong>same origin</strong> as the token &mdash; a
-              plain <code className="rounded bg-surface px-1 py-0.5 font-mono">&lt;iframe&gt;</code> instead
-              of this tag renders the assistant but can never authenticate it.
+              Assistant on one subdomain, session on another (
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">www.example.ae</code> vs{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">portal.example.ae</code>)? Storage
+              does not cross an origin, so the host serves a small bridge page from the token&apos;s own
+              origin and it is named here with{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">data-bridge-url</code>. Ask 7X for{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">docs/host-token-bridge.html</code>.
+              Both subdomains must sit under one registrable domain.
+            </p>
+            <p className="mt-2 text-[12.5px] text-muted">
+              Either way the tag itself must be on the host page: a plain{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">&lt;iframe&gt;</code> in place of it
+              renders the assistant but can never authenticate it.
             </p>
           </div>
           <div className="mt-4 flex flex-wrap gap-2.5">

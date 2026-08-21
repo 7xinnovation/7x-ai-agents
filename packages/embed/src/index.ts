@@ -23,6 +23,19 @@ interface BootConfig {
   uaePassToken?: string;
   /** localStorage key the host keeps the access token under. */
   tokenKey?: string;
+  /**
+   * URL of a token bridge page the host serves on the origin that HOLDS the token.
+   *
+   * localStorage is per-ORIGIN, so a script on www.emiratespost.ae cannot read a
+   * token stored by box.emiratespost.ae -- same domain, different origin, no
+   * sharing and no storage event across the boundary. When the assistant is
+   * embedded on one subdomain and the session lives on another, the host serves a
+   * small page from the token's own origin; we frame it hidden, and it reads its
+   * own localStorage and hands the token over.
+   *
+   * Not needed when the script and the token share an origin.
+   */
+  bridgeUrl?: string;
 }
 
 const STYLE_ID = "dialog-embed-style";
@@ -40,6 +53,7 @@ function readConfig(): BootConfig {
     position: d.position === "bottom-left" ? "bottom-left" : "bottom-right",
     uaePassToken: d.uaepassToken || readStoredToken(d.tokenKey) || undefined,
     tokenKey: d.tokenKey || DEFAULT_TOKEN_KEY,
+    bridgeUrl: d.bridgeUrl || undefined,
   };
 }
 
@@ -172,6 +186,53 @@ function boot() {
     if (!e.key || e.key === (cfg.tokenKey || DEFAULT_TOKEN_KEY)) sync();
   });
   setInterval(sync, 2000);
+
+  /**
+   * Cross-subdomain handoff. The bridge is framed from the origin that owns the
+   * token, so ITS localStorage is the one with the session in it.
+   *
+   * We ask rather than wait: the bridge cannot know our origin unaided, so it
+   * validates the request's origin against its own allow-list and replies to that
+   * origin only. Re-asking on an interval covers a sign-in that happens later --
+   * the bridge also pushes unprompted when it sees its own storage change, so this
+   * is a floor on latency, not the only path.
+   *
+   * Same-site subdomains are not a third-party context, so this is not subject to
+   * storage partitioning: the bridge sees the real localStorage, not a partitioned
+   * copy of it.
+   */
+  if (cfg.bridgeUrl) {
+    let bridgeOrigin = "";
+    try {
+      bridgeOrigin = new URL(cfg.bridgeUrl).origin;
+    } catch {
+      bridgeOrigin = "";
+    }
+    if (bridgeOrigin) {
+      const bridge = document.createElement("iframe");
+      bridge.setAttribute("aria-hidden", "true");
+      bridge.title = "Dialog token bridge";
+      bridge.style.cssText = "position:absolute;width:0;height:0;border:0;visibility:hidden;left:-9999px;";
+      bridge.src = cfg.bridgeUrl;
+
+      const ask = () => bridge.contentWindow?.postMessage({ source: "dialog-bridge-request" }, bridgeOrigin);
+
+      window.addEventListener("message", (e) => {
+        if (e.origin !== bridgeOrigin) return;
+        const m = e.data as { source?: string; token?: unknown };
+        if (m?.source !== "dialog-bridge" || typeof m.token !== "string" || !m.token) return;
+        if (m.token === lastSeen) return;
+        lastSeen = m.token;
+        push(m.token);
+      });
+
+      bridge.addEventListener("load", () => {
+        ask();
+        setInterval(ask, 5000);
+      });
+      document.body.appendChild(bridge);
+    }
+  }
 
   const launcher = document.createElement("button");
   launcher.className = "dlg-launcher";
