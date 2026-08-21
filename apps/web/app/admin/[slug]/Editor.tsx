@@ -35,6 +35,7 @@ export function Editor({ slug }: { slug: string }) {
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedRelay, setCopiedRelay] = useState(false);
   const [msg, setMsg] = useState<{ k: "ok" | "err"; t: string } | null>(null);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
 
@@ -59,6 +60,40 @@ export function Editor({ slug }: { slug: string }) {
 
   const snippet = useMemo(() => `<script src="${origin}/dialog.js"\n        data-agent="${def.slug || "agent-slug"}"\n        data-host="${origin}"\n        data-locale="${def.locales[0] ?? "en"}"></script>`, [origin, def.slug, def.locales]);
 
+  /**
+   * Cookie domain for the token relay, guessed from the allowed origins.
+   *
+   * Taken as the registrable domain shared by MOST of them: EPGL's list includes a
+   * Salesforce sandbox host, and treating every entry equally would offer
+   * ".site.com". The last two labels are the right answer for a .ae or .com domain
+   * and the wrong one for a multi-part suffix like .co.uk, so this is shown as a
+   * value to confirm rather than one to paste blind.
+   */
+  const relayDomain = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of def.allowedOrigins) {
+      let host = "";
+      try {
+        host = new URL(o).hostname;
+      } catch {
+        continue;
+      }
+      if (!host.includes(".") || /^(localhost|127\.0\.0\.1|\[?::1)/.test(host)) continue;
+      const labels = host.split(".");
+      const registrable = labels.slice(-2).join(".");
+      counts.set(registrable, (counts.get(registrable) ?? 0) + 1);
+    }
+    let best = "";
+    let bestN = 0;
+    for (const [d, n] of counts) if (n > bestN) { best = d; bestN = n; }
+    return best ? `.${best}` : ".example.ae";
+  }, [def.allowedOrigins]);
+
+  const relaySnippet = useMemo(
+    () => `<script src="${origin}/dialog-relay.js"\n        data-domain="${relayDomain}"></script>`,
+    [origin, relayDomain]
+  );
+
   const save = useCallback(async () => {
     setMsg(null);
     let parsed: Record<string, unknown>;
@@ -74,6 +109,7 @@ export function Editor({ slug }: { slug: string }) {
   }, [def, nested, status, tenantName, isNew, router]);
 
   const copy = async () => { try { await navigator.clipboard.writeText(snippet); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {} };
+  const copyRelay = async () => { try { await navigator.clipboard.writeText(relaySnippet); setCopiedRelay(true); setTimeout(() => setCopiedRelay(false), 1600); } catch {} };
 
   if (loading) return <div className="grid h-64 place-items-center text-muted">Loading…</div>;
   const c = def.theme.colors;
@@ -178,46 +214,64 @@ export function Editor({ slug }: { slug: string }) {
           <pre className="overflow-x-auto rounded-xl bg-[#0b1020] p-4 font-mono text-[12.5px] leading-relaxed text-slate-100">{snippet}</pre>
           <p className="mt-3 text-[12.5px] text-muted">Drop this on any approved site. The launcher adopts this agent&apos;s brand color automatically.{def.allowedOrigins.length ? ` Embedding is restricted to: ${def.allowedOrigins.join(", ")}.` : " Add Allowed origins (Identity tab) to restrict where it can be embedded."}</p>
           {/*
-            * Signed-in handoff. The script tag is ALSO the token listener -- it reads
-            * localStorage at boot, follows `storage` events and polls, so a host that
-            * keeps the session there needs no integration work at all. Without saying
-            * so here, an integrator has no way to know: they get asked to "add a
-            * listener script" and there is nothing more to add.
+            * Signed-in handoff, as two cases rather than prose.
+            *
+            * Same origin: the assistant tag is already the listener -- it reads
+            * localStorage, follows `storage` and polls, so there is nothing to add.
+            * Different subdomain: localStorage cannot cross an origin, so the relay
+            * mirrors the token into a domain-scoped cookie and the tag reads that.
+            *
+            * The relay snippet is shown here, copyable, because the host team is the
+            * audience and "ask 7X for a file" is where an integration stalls.
             */}
           <div className="mt-4 rounded-xl border border-[var(--color-line)] bg-bg p-4">
             <p className="text-[12.5px] font-semibold">Signed-in customers</p>
             <p className="mt-1.5 text-[12.5px] text-muted">
-              The same script is the token listener &mdash; there is no second script to add. On a host
-              where the customer is already signed in, it reads the session token from{" "}
+              The tag above is already the token listener. Where the customer signs in on the{" "}
+              <strong>same origin</strong> that shows the assistant, it reads the session token from{" "}
               <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code> (key{" "}
               <code className="rounded bg-surface px-1 py-0.5 font-mono">accessToken</code>), follows later
-              sign-ins, and hands it to the assistant, which verifies it server-side. Two things to know:
+              sign-ins, and hands it over &mdash; nothing else to install.
             </p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-[12.5px] text-muted">
+            <p className="mt-2.5 text-[12.5px] text-muted">
+              Signing in on a <strong>different subdomain</strong> (say the assistant on{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">www</code>, the portal on{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">box</code>)? Storage never crosses an
+              origin, so add this second tag <strong>on the sign-in page</strong>. It copies the token into a
+              cookie scoped to the whole domain, which the tag above then reads.
+            </p>
+            <div className="mt-2.5 flex items-center justify-between gap-2">
+              <span className="text-[12.5px] font-semibold">Relay snippet &mdash; sign-in page only</span>
+              <Button variant="outline" size="sm" onClick={copyRelay}>
+                {copiedRelay ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copiedRelay ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <pre className="mt-1.5 overflow-x-auto rounded-xl bg-[#0b1020] p-4 font-mono text-[12.5px] leading-relaxed text-slate-100">{relaySnippet}</pre>
+            <ul className="mt-2.5 list-disc space-y-1 pl-5 text-[12.5px] text-muted">
               <li>
-                Different key? Add{" "}
-                <code className="rounded bg-surface px-1 py-0.5 font-mono">data-token-key=&quot;yourKey&quot;</code>{" "}
-                to the tag above.
+                Confirm <code className="rounded bg-surface px-1 py-0.5 font-mono">data-domain</code> is the
+                domain both subdomains sit under &mdash; it is guessed from the allowed origins above. The
+                relay refuses to install without it rather than guess for itself.
               </li>
               <li>
-                Token not in <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code>{" "}
-                (a cookie-based portal, for instance)? Push it instead:{" "}
+                Token under a different key? Add{" "}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono">data-token-key=&quot;yourKey&quot;</code>{" "}
+                to <em>both</em> tags.
+              </li>
+              <li>
+                Not in <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code> at all
+                (a cookie-session portal)? Skip the relay and push it from their page:{" "}
                 <code className="rounded bg-surface px-1 py-0.5 font-mono">window.Dialog.setUaePassToken(token)</code>.
-                Call it again to refresh.
+              </li>
+              <li>
+                The cookie is readable by script on every subdomain of{" "}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono">{relayDomain}</code>. If that is
+                not acceptable, ask 7X for the bridge-page alternative, which keeps the token on its own
+                origin.
               </li>
             </ul>
-            <p className="mt-2 text-[12.5px] text-muted">
-              Assistant on one subdomain, session on another (
-              <code className="rounded bg-surface px-1 py-0.5 font-mono">www.example.ae</code> vs{" "}
-              <code className="rounded bg-surface px-1 py-0.5 font-mono">portal.example.ae</code>)? Storage
-              does not cross an origin, so the host serves a small bridge page from the token&apos;s own
-              origin and it is named here with{" "}
-              <code className="rounded bg-surface px-1 py-0.5 font-mono">data-bridge-url</code>. Ask 7X for{" "}
-              <code className="rounded bg-surface px-1 py-0.5 font-mono">docs/host-token-bridge.html</code>.
-              Both subdomains must sit under one registrable domain.
-            </p>
-            <p className="mt-2 text-[12.5px] text-muted">
-              Either way the tag itself must be on the host page: a plain{" "}
+            <p className="mt-2.5 text-[12.5px] text-muted">
+              Either way the tag must be on the host page: a plain{" "}
               <code className="rounded bg-surface px-1 py-0.5 font-mono">&lt;iframe&gt;</code> in place of it
               renders the assistant but can never authenticate it.
             </p>
