@@ -24,6 +24,15 @@ interface BootConfig {
   /** localStorage key the host keeps the access token under. */
   tokenKey?: string;
   /**
+   * Cookie holding the token, written by dialog-relay.js on the sign-in subdomain.
+   *
+   * localStorage is per-ORIGIN, so a token stored by box.example.ae is invisible to
+   * a script on www.example.ae. A cookie can be scoped to the whole domain, so the
+   * relay mirrors it into one and we read it here. Checked after localStorage --
+   * a token on our own origin is the more direct source when both exist.
+   */
+  tokenCookie?: string;
+  /**
    * URL of a token bridge page the host serves on the origin that HOLDS the token.
    *
    * localStorage is per-ORIGIN, so a script on www.emiratespost.ae cannot read a
@@ -51,8 +60,13 @@ function readConfig(): BootConfig {
     host,
     locale: d.locale || "en",
     position: d.position === "bottom-left" ? "bottom-left" : "bottom-right",
-    uaePassToken: d.uaepassToken || readStoredToken(d.tokenKey) || undefined,
+    uaePassToken:
+      d.uaepassToken ||
+      readStoredToken(d.tokenKey) ||
+      readCookieToken(d.tokenCookie) ||
+      undefined,
     tokenKey: d.tokenKey || DEFAULT_TOKEN_KEY,
+    tokenCookie: d.tokenCookie || DEFAULT_TOKEN_COOKIE,
     bridgeUrl: d.bridgeUrl || undefined,
   };
 }
@@ -69,6 +83,34 @@ function readConfig(): BootConfig {
  * that keeps it somewhere else.
  */
 const DEFAULT_TOKEN_KEY = "accessToken";
+
+/** Cookie dialog-relay.js writes on the sign-in subdomain. */
+const DEFAULT_TOKEN_COOKIE = "dlg_host_token";
+
+/**
+ * Token relayed from a sibling subdomain via a domain-scoped cookie.
+ *
+ * Unlike localStorage this needs no permission and cannot throw, but it is only
+ * ever present when the host has installed dialog-relay.js on the origin that
+ * signs the customer in.
+ */
+function readCookieToken(name?: string): string | null {
+  const key = `${name || DEFAULT_TOKEN_COOKIE}=`;
+  const parts = String(document.cookie || "").split(";");
+  for (const part of parts) {
+    const p = part.trim();
+    if (!p.startsWith(key)) continue;
+    const raw = p.slice(key.length);
+    if (!raw) return null;
+    try {
+      const v = decodeURIComponent(raw);
+      return v.trim() ? v.trim() : null;
+    } catch {
+      return raw.trim() ? raw.trim() : null;
+    }
+  }
+  return null;
+}
 
 function readStoredToken(key?: string): string | null {
   try {
@@ -177,7 +219,7 @@ function boot() {
    */
   let lastSeen = cfg.uaePassToken ?? null;
   const sync = () => {
-    const token = readStoredToken(cfg.tokenKey);
+    const token = readStoredToken(cfg.tokenKey) ?? readCookieToken(cfg.tokenCookie);
     if (token === lastSeen) return;
     lastSeen = token;
     if (token) push(token);
