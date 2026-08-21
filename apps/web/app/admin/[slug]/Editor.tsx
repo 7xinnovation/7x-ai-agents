@@ -177,6 +177,41 @@ export function Editor({ slug }: { slug: string }) {
         <Card><CardHeader><CardTitle>Install snippet</CardTitle><Button variant="outline" size="sm" onClick={copy}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copied ? "Copied" : "Copy"}</Button></CardHeader><CardContent>
           <pre className="overflow-x-auto rounded-xl bg-[#0b1020] p-4 font-mono text-[12.5px] leading-relaxed text-slate-100">{snippet}</pre>
           <p className="mt-3 text-[12.5px] text-muted">Drop this on any approved site. The launcher adopts this agent&apos;s brand color automatically.{def.allowedOrigins.length ? ` Embedding is restricted to: ${def.allowedOrigins.join(", ")}.` : " Add Allowed origins (Identity tab) to restrict where it can be embedded."}</p>
+          {/*
+            * Signed-in handoff. The script tag is ALSO the token listener -- it reads
+            * localStorage at boot, follows `storage` events and polls, so a host that
+            * keeps the session there needs no integration work at all. Without saying
+            * so here, an integrator has no way to know: they get asked to "add a
+            * listener script" and there is nothing more to add.
+            */}
+          <div className="mt-4 rounded-xl border border-[var(--color-line)] bg-bg p-4">
+            <p className="text-[12.5px] font-semibold">Signed-in customers</p>
+            <p className="mt-1.5 text-[12.5px] text-muted">
+              The same script is the token listener &mdash; there is no second script to add. On a host
+              where the customer is already signed in, it reads the session token from{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code> (key{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">accessToken</code>), follows later
+              sign-ins, and hands it to the assistant, which verifies it server-side. Two things to know:
+            </p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-[12.5px] text-muted">
+              <li>
+                Different key? Add{" "}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono">data-token-key=&quot;yourKey&quot;</code>{" "}
+                to the tag above.
+              </li>
+              <li>
+                Token not in <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code>{" "}
+                (a cookie-based portal, for instance)? Push it instead:{" "}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono">window.Dialog.setUaePassToken(token)</code>.
+                Call it again to refresh.
+              </li>
+            </ul>
+            <p className="mt-2 text-[12.5px] text-muted">
+              The handoff needs the script on the <strong>same origin</strong> as the token &mdash; a
+              plain <code className="rounded bg-surface px-1 py-0.5 font-mono">&lt;iframe&gt;</code> instead
+              of this tag renders the assistant but can never authenticate it.
+            </p>
+          </div>
           <div className="mt-4 flex flex-wrap gap-2.5">
             <a href={`/embed/${def.slug}`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--color-line)] bg-surface px-4 text-sm font-semibold hover:bg-bg"><ExternalLink className="h-4 w-4" /> Full-page experience</a>
             <a href={`/demo?agent=${def.slug}`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-xl border border-[var(--color-line)] bg-surface px-4 text-sm font-semibold hover:bg-bg"><ExternalLink className="h-4 w-4" /> Host page demo</a>
