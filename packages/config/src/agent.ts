@@ -60,6 +60,23 @@ export const AgentDefinition = z.object({
   locales: z.array(Locale).min(1).default(["en"]),
   // Origins allowed to embed this agent (CORS + iframe frame-ancestors).
   allowedOrigins: z.array(z.string()).default([]),
+  /**
+   * The HOST's own sign-in page.
+   *
+   * When set, the widget's sign-in button opens THIS page in a popup instead of
+   * running our own UAE PASS flow. The host already has a registered UAE PASS
+   * client and callback, so the customer signs in on their portal and the token
+   * lands in that origin's localStorage. Our embed loader runs first-party on the
+   * host page, so a `storage` event from the popup reaches it and it hands the
+   * token to the widget, which verifies it server-side before trusting it.
+   *
+   * This only works where the widget is embedded on the SAME origin as the login
+   * (box.emiratespost.ae, app.epgl.ae) -- a different origin gets no storage event
+   * and would need the host to postMessage the token to us explicitly.
+   *
+   * Left unset, sign-in behaves as before and runs our own UAE PASS flow.
+   */
+  hostLoginUrl: z.string().url().optional(),
   greeting: LocalizedString,
   theme: Theme,
   // Shown above the document upload slots in the case panel and on the mobile

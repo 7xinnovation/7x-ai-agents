@@ -48,6 +48,10 @@ export interface PublicAgent {
   // handoff: a postMessage carrying a session token is only read when it comes
   // from one of these. Empty means no host may hand us a token.
   allowedOrigins?: string[];
+  // The host portal's own sign-in page. When set, the sign-in button opens it in a
+  // popup and we wait for the host's token rather than running our own UAE PASS
+  // flow. See hostLoginUrl in packages/config/src/agent.ts.
+  hostLoginUrl?: string;
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;
   // Whether GPT Realtime voice mode is configured (AZURE_REALTIME_* env present).

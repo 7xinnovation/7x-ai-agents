@@ -387,6 +387,8 @@ export function Experience({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
+  /** Host sign-in popup, so a window closed without a token can be reported. */
+  const hostLoginWin = useRef<Window | null>(null);
   const [authReason, setAuthReason] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
   const [toolStatus, setToolStatus] = useState<string | null>(null);
@@ -695,7 +697,27 @@ export function Experience({
       const m = e.data as { source?: string; uaePassToken?: string };
       if (m?.source !== "dialog-host" || typeof m.uaePassToken !== "string") return;
       if (!permitted.has(e.origin)) return;
-      uaePass.current = m.uaePassToken;
+      const token = m.uaePassToken;
+      uaePass.current = token;
+      // Reflect the sign-in now rather than at the next message. The token is
+      // verified SERVER-side before the UI changes -- a host that hands us junk
+      // leaves the widget signed out, which is the honest outcome.
+      void (async () => {
+        try {
+          const res = await fetch("/api/uaepass/host", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agent: agent.slug, token, cid: convId.current ?? undefined }),
+          });
+          if (!res.ok) return;
+          setAuthenticated(true);
+          setAuthReason(null);
+          setSignedInPulse(true);
+          hostLoginWin.current = null;
+        } catch {
+          /* leave signed out; the next chat turn re-verifies the same token */
+        }
+      })();
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
@@ -777,6 +799,28 @@ export function Experience({
   // centered popup; the callback posts the result back and the chat continues in
   // place. Falls back to a full redirect if the popup is blocked.
   const signIn = useCallback(() => {
+    // The host portal owns sign-in (its own UAE PASS client, its own registered
+    // callback). Opening it in a POPUP rather than navigating keeps the
+    // conversation alive; the token then arrives from the embed loader, which sees
+    // the host's localStorage write because it runs first-party on that page.
+    if (agent.hostLoginUrl && typeof window !== "undefined") {
+      const w = 480;
+      const h = 720;
+      const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
+      const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
+      const win = window.open(agent.hostLoginUrl, "dlg-host-login", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+      if (!win) {
+        setAuthReason(
+          locale === "ar"
+            ? "يرجى السماح بالنوافذ المنبثقة لتسجيل الدخول، ثم المحاولة مرة أخرى."
+            : "Please allow pop-ups to sign in, then try again."
+        );
+        return;
+      }
+      hostLoginWin.current = win;
+      setAuthReason(null);
+      return;
+    }
     if (agent.uaePassEnabled && typeof window !== "undefined") {
       // Pass the embed's own URL so the server returns the user (and targets the
       // popup postMessage) at this exact origin — never the server's internal one.
@@ -801,7 +845,33 @@ export function Experience({
       setAuthenticated(true);
       setAuthReason(null);
     }
-  }, [agent.uaePassEnabled, agent.slug]);
+  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.slug, locale]);
+
+  /**
+   * The host sign-in popup closed. If no token reached us, say so instead of
+   * leaving the customer looking at a button that appears to have done nothing.
+   *
+   * The token can land a moment after the window closes (the loader polls the
+   * host's localStorage every 2s), so allow a grace period before reporting a
+   * failure -- otherwise a successful sign-in is announced as a failed one.
+   */
+  useEffect(() => {
+    if (authenticated) return;
+    const id = setInterval(() => {
+      const win = hostLoginWin.current;
+      if (!win || !win.closed) return;
+      hostLoginWin.current = null;
+      setTimeout(() => {
+        if (uaePass.current) return;
+        setAuthReason(
+          locale === "ar"
+            ? "لم يكتمل تسجيل الدخول. حاول مرة أخرى."
+            : "Sign-in did not complete. Please try again."
+        );
+      }, 3000);
+    }, 700);
+    return () => clearInterval(id);
+  }, [authenticated, locale]);
 
   // Result of the popup sign-in, posted by the callback page.
   useEffect(() => {
