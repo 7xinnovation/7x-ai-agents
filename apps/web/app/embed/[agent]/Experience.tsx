@@ -713,6 +713,16 @@ export function Experience({
           setAuthenticated(true);
           setAuthReason(null);
           setSignedInPulse(true);
+          // Close the sign-in popup ourselves. It is cross-origin, so we cannot
+          // watch it for a "done" signal and the host has no reason to close a
+          // window it did not open -- when already signed in their login URL just
+          // lands in the portal and sits there. A window opened by script may be
+          // closed by script, so the arriving token IS the completion signal.
+          try {
+            hostLoginWin.current?.close();
+          } catch {
+            /* already gone, or refused -- nothing useful to do either way */
+          }
           hostLoginWin.current = null;
         } catch {
           /* leave signed out; the next chat turn re-verifies the same token */
