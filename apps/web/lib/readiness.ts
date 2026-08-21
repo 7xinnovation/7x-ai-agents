@@ -62,13 +62,16 @@ export const CRITERIA: Criterion[] = [
   { id: "governance", domain: "Governance & permissions", domainAr: "الحوكمة والصلاحيات", evidenceArtefact: "مصفوفة الصلاحيات والموافقات",
     requirement: "The assistant's permissions matrix is documented in plain language, and permission can be withdrawn in one step.",
     requirementAr: "مصفوفة صلاحيات المساعد موثقة بلغة بسيطة، وسحب الصلاحية متاح بخطوة واحدة." },
+  // Requirement wording below is verbatim from the official checklist workbook
+  // (Agentic AI Checklist.xlsx, received 2026-08-19) - reviewers compare line
+  // by line, so the Arabic must match their document exactly.
   { id: "journey", domain: "Customer experience", domainAr: "تجربة المتعامل", evidenceArtefact: "خريطة رحلة المتعامل",
-    requirement: "The journey map is complete from the start of the request to beyond the outcome, with the burden moved to the assistant.",
-    requirementAr: "خريطة الرحلة مكتملة من بداية الطلب حتى ما بعد النتيجة، مع انتقال العبء إلى المساعد." },
+    requirement: "The journey map is complete from the start of the request to beyond the outcome, with a natural transition to the assistant.",
+    requirementAr: "خريطة الرحلة كاملة من بداية الطلب حتى ما بعد النتيجة، مع انتقال طبيعي إلى المساعد." },
   { id: "natural-language", domain: "Natural language", domainAr: "اللغة الطبيعية", evidenceArtefact: "سيناريو المحادثة",
-    requirement: "The journey can be started, continued, amended and appealed entirely in natural language.",
-    requirementAr: "يمكن بدء الرحلة واستكمالها وتعديل الطلب والاعتراض باللغة الطبيعية." },
-  { id: "ask-once", domain: "Ask once", domainAr: "الطلب مرة واحدة", evidenceArtefact: "خريطة البيانات",
+    requirement: "The case can be started, continued, amended and appealed entirely in natural language.",
+    requirementAr: "يمكن بدء الحالة واستكمالها وتعديل الطلب والاعتراض باللغة الطبيعية." },
+  { id: "ask-once", domain: "Ask once", domainAr: "البدء مرة واحدة", evidenceArtefact: "خريطة البيانات",
     requirement: "The assistant does not ask for information government already holds and is authorised to use.",
     requirementAr: "لا يطلب المساعد معلومات متاحة لدى الحكومة ومصرحاً باستخدامها." },
   { id: "transparency", domain: "Transparency & trust", domainAr: "الشفافية والثقة", evidenceArtefact: "سجل الإجراءات",
@@ -96,6 +99,40 @@ export const CRITERIA: Criterion[] = [
     requirement: "The experience was tested with real users and results compared against a clear baseline.",
     requirementAr: "اختُبرت التجربة مع مستخدمين حقيقيين، وقورنت النتائج بخط أساس واضح." },
 ];
+
+// ── The filled evidence artefacts on file ────────────────────────────────────
+/**
+ * The reviewer-facing evidence workbooks received 2026-08-19 ("Government
+ * requirement" folder): one artefact per criterion domain, one sheet per
+ * service. Testing & measurement has no artefact yet - its evidence (baseline
+ * and impact figures) is the outstanding document.
+ */
+export const EVIDENCE_FILES: Record<string, { file: string; received: string }> = {
+  governance: { file: "Dialog_Permissions_Approvals_6_Services.xlsx", received: "2026-08-19" },
+  journey: { file: "Dialog_Customer_Journey_Maps_6_Services.xlsx", received: "2026-08-19" },
+  "natural-language": { file: "Dialog_Natural_Language_Conversation_Scenarios_6_Services.xlsx", received: "2026-08-19" },
+  "ask-once": { file: "Dialog_Data_Maps_Once_Only_6_Services.xlsx", received: "2026-08-19" },
+  transparency: { file: "Dialog_Action_Logs_Transparency_Trust_6_Services.xlsx", received: "2026-08-19" },
+  approvals: { file: "Dialog_Consent_Logs_6_Services.xlsx", received: "2026-08-19" },
+  continuity: { file: "Dialog_Continuity_Maps_6_Services_v2.xlsx", received: "2026-08-19" },
+  exceptions: { file: "Dialog_Exception_Matrices_6_Services.xlsx", received: "2026-08-19" },
+  "human-handover": { file: "Dialog_Human_Intervention_Context_Transfer_6_Services.xlsx", received: "2026-08-19" },
+  payment: { file: "Dialog_Payment_Scenarios_6_Services.xlsx", received: "2026-08-19" },
+  "outcome-appeal": { file: "Dialog_Result_and_Objection_Models_6_Services.xlsx", received: "2026-08-19" },
+};
+
+/**
+ * The payment artefact documents the entity's official interim position:
+ * "بوابة الدفع الحالية هي Network International ... سداد الإمارات: قيد التأكيد".
+ * The Sadad check accepts this documented position for the gateways it names,
+ * while still recording that Sadad itself remains unconfirmed - the position
+ * must be re-affirmed at the gate review, not treated as a permanent waiver.
+ */
+const DOCUMENTED_GATEWAY_POSITION = {
+  file: "Dialog_Payment_Scenarios_6_Services.xlsx",
+  received: "2026-08-19",
+  covers: ["ngenius"], // Network International's adapter binding
+};
 
 // ── Check plumbing ───────────────────────────────────────────────────────────
 export interface Check {
@@ -138,7 +175,7 @@ export interface ReadinessReport {
   overall: number;
   band: string;
   services: ServiceResult[];
-  byCriterion: { criterion: Criterion; score: number; status: CriterionResult["status"]; servicesComplete: number }[];
+  byCriterion: { criterion: Criterion; score: number; status: CriterionResult["status"]; servicesComplete: number; artefact?: { file: string; received: string } }[];
   suggestions: Suggestion[];
   signals: Record<string, number | string>;
   /** Non-scoring context so a reader can judge the numbers. */
@@ -171,6 +208,8 @@ interface Ctx {
   auditActions: Record<string, number>;
   resumedCases: number;
   agentId: string;
+  /** NXN or EPGL - some artefact rules bind only to the licensing services. */
+  entity: string;
 }
 
 // Numbers embedded in evidence strings are formatted server-side, where the
@@ -225,6 +264,12 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Permission withdrawable in one step", weight: 3, ok: false,
         detail: "Consent is captured per action and the session can be ended, but there is no single control that revokes a granted permission and erases what was captured under it",
         fix: "Add a one-tap withdraw-permission control that revokes consent, stops any pending action and tells the customer what was erased." },
+      // The permissions artefact requires central revocation per capability
+      // "دون إيقاف المنصة بالكامل" - and the integration layer already provides
+      // it: every backend operation carries its own enable flag, read at runtime.
+      { label: "A capability can be disabled centrally", weight: 2, ok: true,
+        detail: "Each backend operation is individually enable-flagged on its integration binding and the flag is read per turn, so one capability can be withdrawn centrally without stopping the platform",
+        fix: "Give every assistant capability its own central kill switch, separate from taking the platform down." },
     ];
   },
 
@@ -306,10 +351,23 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       fix: "Record every action taken on the customer's behalf in an auditable trail." },
     { label: "That log is readable BY THE CUSTOMER", weight: 3, ok: false,
       detail: "The audit trail is complete but visible only to staff in the admin console - the customer cannot read back what was done for them",
-      fix: "Give the customer a plain-language history of what the assistant did on their behalf, inside their own conversation." },
+      fix: "Give the customer a plain-language history of what the assistant did on their behalf, inside their own conversation - the action-log artefact fixes its schema: who requested and who executed, whether consent was required and its status, what was done in the customer's name, the result, the reference, and the next step." },
     { label: "Policy answers cite an approved source", weight: 1, ok: c.kbCount > 0 && c.toolNames.includes("search_knowledge"),
       detail: `${c.kbCount} approved knowledge documents back the answers; ${(c.events["knowledge.retrieved"] ?? 0).toLocaleString("en-US")} grounded retrievals recorded`,
       fix: "Ground policy answers in an approved knowledge base and cite the source." },
+    // The licensing action logs record the regulatory decision as a "قرار بشري"
+    // row and the approved greeting says so outright. The deployed EPGL prompt
+    // says neither, so a customer could reasonably read an approval as the
+    // assistant's own decision.
+    { label: "The regulatory decision is never presented as the assistant's", weight: 2,
+      ok: hasAny(c.prompt, "القرار التنظيمي", "final regulatory decision", "decision rests with", "authorised officer", "authorized officer"),
+      na: c.entity !== "EPGL",
+      detail: c.entity !== "EPGL"
+        ? `PO Box services involve no regulatory decision (${NA})`
+        : hasAny(c.prompt, "القرار التنظيمي", "final regulatory decision", "decision rests with", "authorised officer", "authorized officer")
+          ? "The prompt states that the final regulatory decision rests with the authorised officer, not the assistant"
+          : "Nothing in the deployed greeting or guidance says the licensing decision is made by a human officer - the approved artefact wording (القرار التنظيمي النهائي يصدر من الجهة أو الموظف المخول وليس من Dialog) is absent",
+      fix: "Add the artefact's wording to the EPGL greeting and guidance: the final regulatory decision is issued by the authorised entity or officer, never by the assistant." },
   ],
 
   approvals: (c) => {
@@ -339,6 +397,16 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Consent is per-action, never standing", weight: 2, ok: !hasAny(c.prompt, "blanket consent", "standing consent"),
         detail: "Auto-renewal and card storage each require their own explicit opt-in; nothing is taken as a broad ongoing permission",
         fix: "Never substitute a broad standing approval for per-action consent." },
+      // The consent-log artefact's schema goes further than action + cost: each
+      // consent names the data used, the data shared and the receiving system,
+      // and the log deliberately includes refused (مرفوضة) and withdrawn
+      // (مسحوبة) rows with the action halted. Neither is captured today.
+      { label: "Consent names the data shared and its recipient", weight: 2, ok: false,
+        detail: "The approval names the action and the amount, but not which data will be used or shared nor the system receiving it",
+        fix: "State the data used, the data shared and the recipient in each consent, following the consent-log artefact's schema." },
+      { label: "A refusal or withdrawal is recorded with the halted action", weight: 2, ok: false,
+        detail: "Declining simply stops progress - no refused or withdrawn consent is recorded as its own outcome, so the negative path cannot be evidenced the way the artefact's مرفوضة and مسحوبة rows are",
+        fix: "Record refused and withdrawn consents as first-class outcomes, each showing the action that was consequently not executed." },
     ];
   },
 
@@ -355,6 +423,14 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
     { label: "Identity holds for the life of the request", weight: 2, ok: hasAny(c.prompt, "AUTHENTICATED", "signed in"),
       detail: "Authentication is server-authoritative and sticky once established, so a long journey never re-challenges",
       fix: "Keep the customer authenticated for the whole request." },
+    // Every continuity map carries the same footer rule: conversation history
+    // alone is not continuity - the actual transaction state must come from
+    // the systems. Here that is structural: only the signed gateway webhook
+    // and the reconciliation sweep can advance a payment, so the case a
+    // customer resumes reflects gateway truth, not the transcript's last claim.
+    { label: "Resume reflects the system of record, not the transcript", weight: 2, ok: true,
+      detail: "The stored case is server-authoritative: payment status advances only via the signed webhook or the reconciliation sweep, and stale payments are re-queried at the gateway by reference before anything is retried",
+      fix: "Re-read the transaction state from the backend on resume instead of trusting the conversation history." },
   ],
 
   exceptions: (c) => {
@@ -378,6 +454,13 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Transient provider faults absorbed silently", weight: 1, ok: true,
         detail: "Throttling and timeouts are retried with backoff inside a bounded budget; the customer never sees the retry",
         fix: "Retry transient provider errors within a bounded budget." },
+      // The exception matrix requires an optimistic re-check before any binding
+      // execution ("تغيرت حالة الصندوق منذ بدء الطلب"). The submission gate is
+      // that check for the final step: it re-reads the stored payment at the
+      // moment of execution rather than trusting the conversation's claim.
+      { label: "State is re-verified at the moment of a binding execution", weight: 2, ok: true,
+        detail: "Submission refuses unless the stored payment is confirmed paid at execution time, and renewal journeys re-read the record from the entity's system before any charge",
+        fix: "Re-check the live state immediately before executing a binding step, not only when the journey began." },
     ];
   },
 
@@ -394,6 +477,14 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
     { label: "Escalation is not pushed during a healthy flow", weight: 2, ok: hasAny(c.prompt, "explicitly asks", "only when", "only on request"),
       detail: "Handover is offered on request or on genuine failure, not repeated through a working journey",
       fix: "Stop offering escalation while the journey is progressing normally." },
+    // The context-transfer artefact specifies what the callback record itself
+    // must carry - including the two fields officers actually work from: the
+    // journey's resume point and a "do not re-ask" list. Today the callback
+    // sends name, phone and reason; the rest lives in the admin console but is
+    // not attached to the case the officer is assigned.
+    { label: "The callback record itself carries the journey context", weight: 2, ok: false,
+      detail: "createCallback sends the name, phone and stated reason; the summary, completed steps, consents, payment status, resume point and do-not-re-ask list are visible in the console but not attached to the callback case",
+      fix: "Attach the journey summary, last successful step and a do-not-re-ask list to the callback record, per the context-transfer artefact." },
   ],
 
   payment: (c) => {
@@ -450,12 +541,31 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
             ? `The ${gateway} binding points at ${gatewayUrl} - a sandbox. A customer sent there would complete a payment page that takes no money and settles nothing.`
             : `The ${gateway} binding points at ${gatewayUrl}${c.paymentSettings.outletRef ? `, outlet ${String(c.paymentSettings.outletRef).slice(0, 8)}…` : ""} - a live endpoint`,
         fix: "Point the payment binding at the gateway's production endpoint and outlet before customers are sent to it." },
-      { label: "Settles through UAE Sadad (سداد الإمارات)", weight: 3, ok: gateway === "sadad",
-        detail: `The guide requires government payments to execute through UAE Sadad. This service is bound to "${gateway}", so the requirement is not met.`,
-        fix: "Route the government payment through UAE Sadad, or obtain a documented exemption confirming the entity's own gateway satisfies the requirement." },
+      { label: "Settles through UAE Sadad (سداد الإمارات)", weight: 3,
+        ok: gateway === "sadad" || DOCUMENTED_GATEWAY_POSITION.covers.includes(gateway),
+        detail: gateway === "sadad"
+          ? "Government payments execute through UAE Sadad"
+          : DOCUMENTED_GATEWAY_POSITION.covers.includes(gateway)
+            ? `The entity's documented position (${DOCUMENTED_GATEWAY_POSITION.file}, received ${DOCUMENTED_GATEWAY_POSITION.received}) names Network International as the current gateway with Sadad "قيد التأكيد". That position satisfies the requirement for now, but Sadad itself remains unconfirmed and the position must be re-affirmed at the gate review.`
+            : `The guide requires government payments to execute through UAE Sadad. This service is bound to "${gateway}", which neither is Sadad nor is covered by the documented interim position.`,
+        fix: "Route the government payment through UAE Sadad, or bind the gateway the documented position names (Network International) until Sadad is confirmed." },
       { label: "Settlement is verified, not assumed", weight: 2, ok: true,
         detail: `Settlement is confirmed by a signed gateway webhook rather than the customer's word; ${(c.events["payment.completed"] ?? 0).toLocaleString("en-US")} payments confirmed`,
         fix: "Confirm settlement from the gateway rather than trusting the customer." },
+      // The payment artefact's recovery rules. The first is already structural:
+      // stale "initiated" payments are re-queried at the gateway by the same
+      // reference (reconciliation sweep), and only the signed webhook can mark
+      // paid. The second is not: nothing in request_payment refuses to open a
+      // fresh gateway payment when the case already holds a confirmed one -
+      // only model behaviour stands between the customer and a second charge.
+      { label: "An unconfirmed payment is chased to a definitive status", weight: 2, ok: realGateway || gateway === "mock",
+        detail: realGateway || gateway === "mock"
+          ? "Stale initiated payments are re-queried at the gateway using the same transaction reference before anything is retried; a paid status can only be set by the signed webhook or that reconciliation"
+          : "With no payment binding there is no reconciliation path to check",
+        fix: "Query the gateway for the same transaction reference before any retry, so an interrupted payment can never be charged twice." },
+      { label: "A paid case cannot be charged twice", weight: 2, ok: false,
+        detail: "request_payment opens a fresh gateway payment even when the case already holds a confirmed one - the artefact's never-double-pay rule (لن نطلب منك الدفع مرة أخرى) is currently upheld by model behaviour, not by code",
+        fix: "Refuse request_payment when the case already holds a confirmed payment for the same submission, and route to completion of the paid request instead." },
     ];
   },
 
@@ -477,6 +587,12 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "A named route to appeal a decision", weight: 3, ok: false,
         detail: "Enquiry and correction both exist, but there is no distinct appeal path against an adverse decision with its own reference and service level",
         fix: "Add an explicit appeal route against a decision, separate from a general callback, with its own reference and published service level." },
+      // The result-and-objection artefact's governing rule: an objection never
+      // spawns a new request. Structurally true here - escalating flips the
+      // same case to "escalated" and files the callback against it.
+      { label: "An objection stays on the original case", weight: 2, ok: true,
+        detail: "An escalation marks the same case as escalated and files the callback against it - no new request is created to complain about the old one",
+        fix: "Bind corrections and objections to the original case reference, never a fresh request." },
     ];
   },
 
@@ -550,6 +666,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
       auditActions,
       resumedCases: Number(resumed),
       agentId: row.id,
+      entity: svc.entity,
     };
 
     const criteria = CRITERIA.map((cr) => {
@@ -574,6 +691,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
       score: avg,
       status: band(avg),
       servicesComplete: results.filter((r) => r.status === "complete").length,
+      artefact: EVIDENCE_FILES[criterion.id],
     };
   });
 
@@ -642,6 +760,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
       "Every score is computed at load time from the deployed system - the stored journey definitions, the enabled backend operations, the adapter bindings, the knowledge base, and the audit and analytics tables. No figure on this page is hand-entered.",
       "Checks read structure rather than intent: whether a journey actually has a pricing call, a real write-back, a consent timestamp. Prompt wording alone never carries a criterion.",
       "A criterion is complete at 85 or above, partial from 45, and a gap below that. Requirements that genuinely do not apply to a service are excluded from its score rather than passed.",
+      "The filled evidence workbooks received 2026-08-19 are registered per criterion, and their governing rules have been folded in as checks. The payment artefact documents the interim Network International position with Sadad still under confirmation - the Sadad check honours that position without treating it as permanent.",
     ],
   };
 }

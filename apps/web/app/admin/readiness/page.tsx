@@ -13,19 +13,23 @@
  * evidence for a row rendered underneath it, so clicking row 12 put its own
  * evidence off-screen. The criteria list now carries a six-segment bar (one
  * segment per service) so the list itself is the matrix, and the evidence panel
- * sticks alongside it.
+ * sticks alongside it. The header carries the inverse cut: one segment per
+ * requirement, so the whole gate is readable before any scrolling.
  *
  * Design decisions held constant across the page:
  *   radius  panels 16px, controls and cells 8px, pills full. No mixing.
  *   accent  brand blue for selection and links only. Green, amber and red are
  *           data encodings for complete/partial/gap, never decoration.
- *   motion  entry easing on the ring, nothing looping, everything collapsing to
- *           static under prefers-reduced-motion.
+ *   motion  everything animated communicates a state change and nothing loops:
+ *           the ring settles once, delta chips mark what the last run moved,
+ *           counters flash when their figure changed, the countdown ring shows
+ *           the next re-run approaching. All of it collapses to static under
+ *           prefers-reduced-motion.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowUpRight, CheckCircle2, CircleDashed, ExternalLink,
-  RefreshCw, ShieldCheck, XCircle,
+  AlertTriangle, ArrowUpRight, CheckCircle2, CircleDashed, Download,
+  ExternalLink, FileSpreadsheet, RefreshCw, ShieldCheck, XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -42,10 +46,18 @@ interface Suggestion { criterionId: string; domain: string; services: string[]; 
 interface Report {
   generatedAt: string; overall: number; band: string;
   services: ServiceResult[];
-  byCriterion: { criterion: Criterion; score: number; status: Status; servicesComplete: number }[];
+  byCriterion: { criterion: Criterion; score: number; status: Status; servicesComplete: number; artefact?: { file: string; received: string } }[];
   suggestions: Suggestion[];
   signals: Record<string, number | string>;
   notes: string[];
+}
+
+/** What the previous run scored, so a re-run shows what it moved. */
+interface Deltas {
+  overall: number;
+  criterion: Record<string, number>;
+  service: Record<string, number>;
+  signals: Record<string, boolean>;
 }
 
 // ── Visual language ──────────────────────────────────────────────────────────
@@ -81,12 +93,62 @@ function useReducedMotion() {
   return reduce;
 }
 
+/**
+ * One-shot ease from the previous figure to the new one. Runs only when the
+ * target actually changes, so the sixty-second refresh does not re-animate a
+ * score that stayed put.
+ */
+function useCountUp(target: number, duration = 1000) {
+  const reduce = useReducedMotion();
+  const [shown, setShown] = useState(0);
+  const fromRef = useRef(0);
+  useEffect(() => {
+    if (reduce) { fromRef.current = target; setShown(target); return; }
+    const from = fromRef.current;
+    if (from === target) { setShown(target); return; }
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShown(Math.round(from + (target - from) * eased));
+      if (p < 1) raf = requestAnimationFrame(step);
+      else fromRef.current = target;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration, reduce]);
+  return shown;
+}
+
+/** Marks what the last run moved. Absent when nothing changed, so silence
+    means stability rather than a stream of zeros. */
+function DeltaChip({ d, onDark = false }: { d?: number; onDark?: boolean }) {
+  if (!d) return null;
+  const up = d > 0;
+  return (
+    <span
+      data-delta
+      title="Change since the previous run"
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums",
+        onDark
+          ? cn("bg-white/10", up ? "text-[#75e0a7]" : "text-[#fda29b]")
+          : up ? "bg-[#ecfdf3] text-[#067647]" : "bg-[#fef3f2] text-[#b42318]"
+      )}
+    >
+      {up ? "+" : ""}{d}
+    </span>
+  );
+}
+
 function ScoreRing({ value, size = 132 }: { value: number; size?: number }) {
   const stroke = 9;
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const reduce = useReducedMotion();
   const [shown, setShown] = useState(0);
+  const figure = useCountUp(value);
   // Ease the arc up once on load so the figure reads as a measurement settling.
   useEffect(() => {
     if (reduce) { setShown(value); return; }
@@ -105,21 +167,68 @@ function ScoreRing({ value, size = 132 }: { value: number; size?: number }) {
       </svg>
       <div className="absolute inset-0 grid place-content-center text-center">
         <div className="text-[36px] font-semibold leading-none tracking-tight tabular-nums text-white">
-          {value}<span className="text-[17px] font-medium text-white/45">%</span>
+          {figure}<span className="text-[17px] font-medium text-white/45">%</span>
         </div>
       </div>
     </div>
   );
 }
 
-/** One segment per service, in service order, so a list row carries the matrix. */
-function ServiceBars({ scores }: { scores: number[] }) {
+/** Time until the next automatic re-run, drawn rather than only written. */
+function CountdownRing({ remaining, total }: { remaining: number; total: number }) {
+  const reduce = useReducedMotion();
+  const size = 16, stroke = 2;
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const frac = Math.max(0, Math.min(1, remaining / total));
   return (
-    <div className="flex gap-[3px]" aria-hidden>
+    <svg width={size} height={size} className="-rotate-90" aria-hidden>
+      <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} stroke="rgba(255,255,255,0.15)" fill="none" />
+      <circle
+        cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} fill="none" strokeLinecap="round"
+        stroke="rgba(255,255,255,0.55)" strokeDasharray={circ} strokeDashoffset={circ * (1 - frac)}
+        style={reduce ? undefined : { transition: "stroke-dashoffset 1s linear" }}
+      />
+    </svg>
+  );
+}
+
+/**
+ * The federal checklist (Agentic AI Checklist.xlsx) with its empty Status
+ * column filled from the live scores - the same three columns, in Arabic, so
+ * what we export is the document the reviewers actually submit. UTF-8 BOM so
+ * Excel renders the Arabic instead of mojibake.
+ */
+const STATUS_AR: Record<Status, string> = { complete: "مكتمل", partial: "مكتمل جزئياً", gap: "غير مكتمل" };
+function exportChecklist(data: Report) {
+  const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  const rows = [
+    ["المجال والمتطلب", "الدليل المطلوب", "الحالة"],
+    ...data.byCriterion.map((r) => [
+      `${r.criterion.domainAr}\n${r.criterion.requirementAr}`,
+      r.criterion.evidenceArtefact,
+      `${STATUS_AR[r.status]} (${r.score}%)`,
+    ]),
+  ];
+  const csv = "\uFEFF" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `agentic-ai-checklist-status-${data.generatedAt.slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** One segment per service, in service order, so a list row carries the matrix.
+    Hovering a segment names the service it stands for. */
+function ServiceBars({ scores, services }: { scores: number[]; services: ServiceRef[] }) {
+  return (
+    <div className="flex gap-[3px]">
       {scores.map((s, i) => (
         <span
           key={i}
-          className="h-3 w-1.5 rounded-[2px]"
+          title={`${services[i]?.entity ?? ""} ${services[i]?.name ?? ""}: ${s}%`.trim()}
+          className="h-3 w-[7px] rounded-[2px]"
           style={{ background: hue(s), opacity: 0.28 + (s / 100) * 0.72 }}
         />
       ))}
@@ -134,14 +243,40 @@ export default function ReadinessPage() {
   const [selected, setSelected] = useState<string>("payment");
   const [tick, setTick] = useState(REFRESH_MS / 1000);
   const [running, setRunning] = useState(false);
+  const [delta, setDelta] = useState<Deltas | null>(null);
+  const prevRef = useRef<Report | null>(null);
+  const boardRef = useRef<HTMLElement | null>(null);
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  const reduce = useReducedMotion();
 
   const load = useCallback(async () => {
     setRunning(true);
     const started = Date.now();
     try {
       const r = await fetch("/api/admin/readiness", { cache: "no-store" });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.detail ?? j.error ?? `HTTP ${r.status}`);
+      const j: Report = await r.json();
+      if (!r.ok) throw new Error((j as any).detail ?? (j as any).error ?? `HTTP ${r.status}`);
+      // Diff against the previous run before replacing it, so the page can say
+      // what this run changed instead of silently repainting the same numbers.
+      const prev = prevRef.current;
+      if (prev) {
+        const criterion: Record<string, number> = {};
+        for (const c of j.byCriterion) {
+          const p = prev.byCriterion.find((x) => x.criterion.id === c.criterion.id);
+          if (p && p.score !== c.score) criterion[c.criterion.id] = c.score - p.score;
+        }
+        const service: Record<string, number> = {};
+        for (const s of j.services) {
+          const p = prev.services.find((x) => x.service.id === s.service.id);
+          if (p && p.score !== s.score) service[s.service.id] = s.score - p.score;
+        }
+        const signals: Record<string, boolean> = {};
+        for (const f of EVIDENCE_FIGURES) {
+          if (Number(prev.signals[f.key] ?? 0) !== Number(j.signals[f.key] ?? 0)) signals[f.key] = true;
+        }
+        setDelta({ overall: j.overall - prev.overall, criterion, service, signals });
+      }
+      prevRef.current = j;
       setData(j);
       setError(null);
     } catch (e) {
@@ -161,6 +296,22 @@ export default function ReadinessPage() {
     const i = setInterval(() => setTick((t) => (t <= 1 ? (void load(), REFRESH_MS / 1000) : t - 1)), 1000);
     return () => clearInterval(i);
   }, [load]);
+
+  /**
+   * Selection with an optional landing spot. "board" brings the master-detail
+   * into view (from the header strip or the actions list); "detail" brings the
+   * evidence panel up, which only matters below xl where it sits under the
+   * list rather than beside it.
+   */
+  const selectCriterion = useCallback((id: string, scroll?: "board" | "detail") => {
+    setSelected(id);
+    if (!scroll) return;
+    requestAnimationFrame(() => {
+      const behavior: ScrollBehavior = reduce ? "auto" : "smooth";
+      if (scroll === "board") boardRef.current?.scrollIntoView({ behavior, block: "start" });
+      else if (window.innerWidth < 1280) detailRef.current?.scrollIntoView({ behavior, block: "start" });
+    });
+  }, [reduce]);
 
   const sel = data?.byCriterion.find((c) => c.criterion.id === selected);
 
@@ -243,10 +394,45 @@ export default function ReadinessPage() {
   );
 
   if (loading && !data) {
+    // Skeleton in the shape of the finished page, so the load reads as the
+    // board assembling rather than a generic wait.
     return (
-      <div className="grid min-h-[70vh] place-content-center gap-3 text-center">
-        <RefreshCw className="mx-auto size-5 animate-spin text-brand" />
-        <p className="text-sm text-muted">Reading the deployed system…</p>
+      <div className="pb-16" role="status" aria-label="Reading the deployed system">
+        <div className="rounded-2xl bg-ink px-6 py-7 sm:px-8">
+          <div className="animate-pulse motion-reduce:animate-none">
+            <div className="flex flex-wrap items-center justify-between gap-6">
+              <div>
+                <div className="h-3 w-44 rounded bg-white/10" />
+                <div className="mt-4 h-8 w-72 rounded bg-white/10" />
+              </div>
+              <div className="hidden h-[132px] w-[132px] rounded-full border-8 border-white/10 sm:block" />
+            </div>
+            <div className="mt-7 flex gap-1 border-t border-white/10 pt-6">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div key={i} className="h-1.5 flex-1 rounded-full bg-white/10" />
+              ))}
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i}>
+                  <div className="h-2.5 w-20 rounded bg-white/10" />
+                  <div className="mt-2.5 h-4 w-12 rounded bg-white/10" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="mt-6 grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-[106px] animate-pulse rounded-lg border border-line bg-surface motion-reduce:animate-none" />
+          ))}
+        </div>
+        <div className="mt-5 h-[120px] animate-pulse rounded-2xl border border-line bg-surface motion-reduce:animate-none" />
+        <div className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(340px,400px)_1fr]">
+          <div className="h-[540px] animate-pulse rounded-2xl border border-line bg-surface motion-reduce:animate-none" />
+          <div className="h-[540px] animate-pulse rounded-2xl border border-line bg-surface motion-reduce:animate-none" />
+        </div>
+        <p className="mt-6 text-center text-sm text-muted">Reading the deployed system…</p>
       </div>
     );
   }
@@ -271,6 +457,7 @@ export default function ReadinessPage() {
   const assessed = new Date(data.generatedAt);
   const met = data.byCriterion.filter((c) => c.status === "complete").length;
   const gaps = data.byCriterion.filter((c) => c.status === "gap").length;
+  const partial = data.byCriterion.length - met - gaps;
   const headline = [
     { k: "Requirements met", v: `${met}/${data.byCriterion.length}` },
     { k: "Open gaps", v: String(gaps) },
@@ -278,6 +465,7 @@ export default function ReadinessPage() {
     { k: "Backends", v: String(data.signals.backendEnvironment ?? "not set") },
     { k: "Gateway", v: String(data.signals.paymentGateway ?? "not set") },
   ];
+  const maxImpact = Math.max(...data.suggestions.map((s) => s.impact), 1);
 
   return (
     <div className="pb-16">
@@ -319,7 +507,8 @@ export default function ReadinessPage() {
                   <RefreshCw className={cn("size-3.5", running && "animate-spin")} />
                   {running ? "Reanalyzing…" : "Reanalyze"}
                 </button>
-                <p className="mt-3 text-[11px] text-white/45">
+                <p className="mt-3 flex items-center justify-end gap-1.5 text-[11px] text-white/45">
+                  {!running && <CountdownRing remaining={tick} total={REFRESH_MS / 1000} />}
                   {running ? "Reading the live system" : `Next run in ${tick}s`}
                 </p>
                 <p className="mt-1 text-[11px] tabular-nums text-white/30">
@@ -328,13 +517,44 @@ export default function ReadinessPage() {
               </div>
               <div className="hidden sm:block">
                 <ScoreRing value={data.overall} />
-                <p className="mt-2 text-center text-[12px] font-medium text-white/70">{data.band}</p>
+                <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[12px] font-medium text-white/70">
+                  {data.band}
+                  <DeltaChip d={delta?.overall} onDark />
+                </p>
               </div>
             </div>
           </div>
 
+          {/* The gate at a glance: one segment per requirement, in checklist
+              order. Clicking a segment opens that requirement's evidence. */}
+          <div className="mt-7 border-t border-white/10 pt-6">
+            <div className="mb-2 flex items-baseline justify-between gap-3 text-[11px] text-white/45">
+              <span>Requirement status</span>
+              <span className="tabular-nums">{met} complete, {partial} partial, {gaps} {gaps === 1 ? "gap" : "gaps"}</span>
+            </div>
+            <div className="flex gap-1">
+              {data.byCriterion.map((row) => (
+                <button
+                  key={row.criterion.id}
+                  onClick={() => selectCriterion(row.criterion.id, "board")}
+                  title={`${row.criterion.domain}: ${row.score}%`}
+                  aria-label={`${row.criterion.domain}, ${row.score} percent, ${TONE[row.status].label}. Open evidence.`}
+                  className="group min-w-0 flex-1 py-1"
+                >
+                  <span
+                    className={cn(
+                      "block h-1.5 rounded-full transition-transform group-hover:scale-y-150",
+                      row.criterion.id === selected && "shadow-[0_0_0_1.5px_rgba(255,255,255,0.65)]"
+                    )}
+                    style={{ background: TONE[row.status].solid }}
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Figures as one divided strip rather than five nested cards. */}
-          <dl className="mt-7 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-white/10 pt-6 sm:grid-cols-3 lg:grid-cols-5 lg:divide-x lg:divide-white/10">
+          <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 lg:grid-cols-5 lg:divide-x lg:divide-white/10">
             {headline.map((t, i) => (
               <div key={t.k} className={cn("min-w-0", i > 0 && "lg:pl-6")}>
                 <dt className="truncate text-[11px] text-white/45">{t.k}</dt>
@@ -365,7 +585,10 @@ export default function ReadinessPage() {
             <div key={s.service.id} className="min-w-0 rounded-lg border border-line bg-surface p-3.5">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-[10px] font-semibold tracking-wide text-muted">{s.service.entity}</span>
-                <span className="text-[15px] font-semibold tabular-nums" style={{ color: hue(s.score) }}>{s.score}%</span>
+                <span className="flex items-center gap-1.5">
+                  <DeltaChip d={delta?.service[s.service.id]} />
+                  <span className="text-[15px] font-semibold tabular-nums" style={{ color: hue(s.score) }}>{s.score}%</span>
+                </span>
               </div>
               <p className="mt-1.5 truncate text-[12px] leading-snug text-ink-2" title={s.service.name}>{s.service.name}</p>
               <p className="mt-1 truncate text-[10px] text-muted" dir="rtl" lang="ar">{s.service.nameAr}</p>
@@ -391,26 +614,46 @@ export default function ReadinessPage() {
           </p>
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4 lg:grid-cols-7 lg:divide-x lg:divide-line">
-          {EVIDENCE_FIGURES.map((f, i) => (
-            <div key={f.key} className={cn("min-w-0", i > 0 && "lg:pl-6")}>
-              <dt className="truncate text-[11px] text-muted" title={f.label}>{f.label}</dt>
-              <dd className="mt-1.5 text-[18px] font-semibold leading-none tabular-nums text-ink">
-                {Number(data.signals[f.key] ?? 0).toLocaleString()}
-              </dd>
-            </div>
-          ))}
+          {EVIDENCE_FIGURES.map((f, i) => {
+            const v = Number(data.signals[f.key] ?? 0);
+            return (
+              <div key={f.key} className={cn("min-w-0", i > 0 && "lg:pl-6")}>
+                <dt className="truncate text-[11px] text-muted" title={f.label}>{f.label}</dt>
+                {/* Keyed by value: a counter that moved between runs remounts
+                    and settles from brand blue back to ink. */}
+                <dd
+                  key={v}
+                  data-flash={delta?.signals[f.key] ? "" : undefined}
+                  className="mt-1.5 text-[18px] font-semibold leading-none tabular-nums text-ink"
+                >
+                  {v.toLocaleString()}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       </section>
 
       {/* ── Master and detail ─────────────────────────────────────────────── */}
-      <section className="mt-5 grid items-start gap-5 xl:grid-cols-[minmax(340px,400px)_1fr]">
+      <section ref={boardRef} className="mt-5 grid scroll-mt-6 items-start gap-5 xl:grid-cols-[minmax(340px,400px)_1fr]">
         <div className="min-w-0 overflow-hidden rounded-2xl border border-line bg-surface">
-          <div className="flex items-baseline justify-between border-b border-line px-4 py-3.5">
-            <h2 className="text-[14px] font-semibold text-ink">Pre-launch checklist</h2>
-            <span className="text-[11px] text-muted" dir="rtl" lang="ar">قائمة التحقق من الجاهزية</span>
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="text-[14px] font-semibold text-ink">Pre-launch checklist</h2>
+              <span className="text-[11px] text-muted" dir="rtl" lang="ar">قائمة التحقق من الجاهزية</span>
+            </div>
+            {/* The reviewers' own workbook with its Status column filled in. */}
+            <button
+              onClick={() => exportChecklist(data)}
+              title="Download the federal checklist (Agentic AI Checklist) with the Status column filled from these live scores"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted ring-1 ring-inset ring-line transition-colors hover:bg-canvas hover:text-ink active:translate-y-px"
+            >
+              <Download className="size-3.5" />
+              Export
+            </button>
           </div>
           <ul>
-            {data.byCriterion.map((row) => {
+            {data.byCriterion.map((row, idx) => {
               const active = row.criterion.id === selected;
               const unmet = unmetByCriterion.get(row.criterion.id) ?? 0;
               const scores = data.services.map(
@@ -419,7 +662,18 @@ export default function ReadinessPage() {
               return (
                 <li key={row.criterion.id}>
                   <button
-                    onClick={() => setSelected(row.criterion.id)}
+                    onClick={() => selectCriterion(row.criterion.id, "detail")}
+                    onKeyDown={(e) => {
+                      // Arrow keys walk the checklist without leaving the list.
+                      const dir = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+                      if (!dir) return;
+                      const next = data.byCriterion[idx + dir];
+                      if (!next) return;
+                      e.preventDefault();
+                      selectCriterion(next.criterion.id);
+                      e.currentTarget.closest("ul")
+                        ?.querySelectorAll<HTMLButtonElement>("button")[idx + dir]?.focus();
+                    }}
                     aria-current={active}
                     className={cn(
                       "relative flex w-full items-center gap-3 border-b border-line-soft px-4 py-3 text-left transition-colors last:border-0",
@@ -439,14 +693,17 @@ export default function ReadinessPage() {
                         )}
                       </div>
                       <div className="mt-1.5 flex items-center gap-2">
-                        <ServiceBars scores={scores} />
+                        <ServiceBars scores={scores} services={data.services.map((s) => s.service)} />
                         <span className="text-[10px] tabular-nums text-muted">
                           {row.servicesComplete}/{data.services.length} met
                         </span>
                       </div>
                     </div>
-                    <span className="shrink-0 text-[14px] font-semibold tabular-nums" style={{ color: hue(row.score) }}>
-                      {row.score}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <DeltaChip d={delta?.criterion[row.criterion.id]} />
+                      <span className="text-[14px] font-semibold tabular-nums" style={{ color: hue(row.score) }}>
+                        {row.score}
+                      </span>
                     </span>
                   </button>
                 </li>
@@ -456,7 +713,10 @@ export default function ReadinessPage() {
         </div>
 
         {sel && (
-          <div className="min-w-0 rounded-2xl border border-line bg-surface xl:sticky xl:top-6">
+          <div ref={detailRef} className="min-w-0 scroll-mt-6 rounded-2xl border border-line bg-surface xl:sticky xl:top-6">
+            {/* Keyed by criterion so switching rows re-enters the panel: the
+                rise marks that the evidence now describes a different row. */}
+            <div key={sel.criterion.id} data-rise>
             <div className="border-b border-line px-6 py-5">
               {/* Score sits on the title line. In a right-hand column it wrapped
                   under the requirement text on narrower panels, where text-right
@@ -498,6 +758,20 @@ export default function ReadinessPage() {
                   <bdi lang="ar" className="font-medium text-ink-2">{sel.criterion.evidenceArtefact}</bdi>
                 </span>
                 <span className="text-line">|</span>
+                {/* Whether the reviewer-facing workbook for this criterion has
+                    actually been prepared - the one thing scores cannot show. */}
+                {sel.artefact ? (
+                  <span className="inline-flex items-center gap-1.5" title={sel.artefact.file}>
+                    <FileSpreadsheet className="size-3.5 text-[#067647]" />
+                    Artefact on file, received {sel.artefact.received}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <FileSpreadsheet className="size-3.5 text-[#b42318]" />
+                    No artefact prepared yet
+                  </span>
+                )}
+                <span className="text-line">|</span>
                 <span>
                   {selChecks.length} requirements checked ·{" "}
                   <span className="font-medium text-[#b42318]">
@@ -508,15 +782,20 @@ export default function ReadinessPage() {
                 <span>Met in {sel.servicesComplete} of {data.services.length} services</span>
               </div>
 
-              {/* Per-service scores for this requirement, in the strip's order. */}
+              {/* Per-service scores for this requirement, in the strip's order.
+                  Each cell is tinted by its status, so the split between
+                  passing and failing services reads before the numbers do. */}
               <div className="mt-5 grid grid-cols-3 gap-2 lg:grid-cols-6">
                 {data.services.map((s) => {
                   const c = s.criteria.find((x) => x.criterionId === sel.criterion.id)!;
                   return (
-                    <div key={s.service.id} className="min-w-0 rounded-lg bg-canvas px-2.5 py-2">
+                    <div key={s.service.id} className={cn("min-w-0 rounded-lg px-2.5 py-2", TONE[c.status].bg)}>
                       {/* Keep the New/Renew prefix: dropping it makes the two
                           journeys of the same product read identically. */}
-                      <div className="truncate text-[10px] text-muted" title={`${s.service.entity} ${s.service.name}`}>
+                      <div
+                        className={cn("truncate text-[10px] opacity-75", TONE[c.status].fg)}
+                        title={`${s.service.entity} ${s.service.name}`}
+                      >
                         {s.service.name}
                       </div>
                       <div className="mt-1 text-[14px] font-semibold tabular-nums" style={{ color: hue(c.score) }}>
@@ -590,6 +869,7 @@ export default function ReadinessPage() {
                 );
               })}
             </ul>
+            </div>
           </div>
         )}
       </section>
@@ -626,7 +906,7 @@ export default function ReadinessPage() {
             return (
               <li key={`${s.criterionId}-${i}`}>
                 <button
-                  onClick={() => { setSelected(s.criterionId); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                  onClick={() => selectCriterion(s.criterionId, "board")}
                   className="flex w-full items-start gap-4 border-b border-line-soft px-5 py-4 text-left transition-colors last:border-0 hover:bg-canvas"
                 >
                   <span className="mt-0.5 w-5 shrink-0 text-[13px] font-semibold tabular-nums text-muted">{i + 1}</span>
@@ -648,6 +928,13 @@ export default function ReadinessPage() {
                   <span className="shrink-0 text-right">
                     <span className="block text-[14px] font-semibold tabular-nums text-ink">+{s.impact}</span>
                     <span className="block text-[10px] text-muted">pts</span>
+                    {/* Length against the biggest action on the list, so relative
+                        payoff scans without reading the numbers. */}
+                    <span
+                      className="ml-auto mt-1.5 block h-[3px] rounded-full bg-ink/20"
+                      style={{ width: `${Math.max(10, Math.round((s.impact / maxImpact) * 44))}px` }}
+                      aria-hidden
+                    />
                   </span>
                 </button>
               </li>

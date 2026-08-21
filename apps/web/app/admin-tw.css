@@ -49,6 +49,10 @@
 
 @keyframes sheen { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
 @keyframes dlg-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+/* A value that just changed settles from brand blue back to its own color. */
+@keyframes dlg-flash { from { color: var(--color-brand); } }
 @media (prefers-reduced-motion: no-preference) {
   .tw [data-rise] { animation: dlg-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .tw [data-flash] { animation: dlg-flash 2s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .tw [data-delta] { animation: dlg-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
 }
