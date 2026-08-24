@@ -237,8 +237,10 @@ export function Editor({ slug }: { slug: string }) {
               Signing in on a <strong>different subdomain</strong> (say the assistant on{" "}
               <code className="rounded bg-surface px-1 py-0.5 font-mono">www</code>, the portal on{" "}
               <code className="rounded bg-surface px-1 py-0.5 font-mono">box</code>)? Storage never crosses an
-              origin, so add this second tag <strong>on the sign-in page</strong>. It copies the token into a
-              cookie scoped to the whole domain, which the tag above then reads.
+              origin, so add this second tag <strong>on the sign-in page</strong>. It hands the token back two
+              ways: straight to the assistant window that opened the sign-in popup, and &mdash; for someone who
+              was already signed in before opening the chat &mdash; through a cookie scoped to the whole domain,
+              which the tag above then reads.
             </p>
             <div className="mt-2.5 flex items-center justify-between gap-2">
               <span className="text-[12.5px] font-semibold">Relay snippet &mdash; sign-in page only</span>
@@ -250,8 +252,15 @@ export function Editor({ slug }: { slug: string }) {
             <ul className="mt-2.5 list-disc space-y-1 pl-5 text-[12.5px] text-muted">
               <li>
                 Confirm <code className="rounded bg-surface px-1 py-0.5 font-mono">data-domain</code> is the
-                domain both subdomains sit under &mdash; it is guessed from the allowed origins above. The
-                relay refuses to install without it rather than guess for itself.
+                domain both subdomains sit under &mdash; it is guessed from the allowed origins above, never by
+                the relay itself.
+              </li>
+              <li>
+                Sign-in served from an <strong>unrelated domain</strong> (a Salesforce{" "}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono">*.my.site.com</code> sandbox, say)?
+                Install it anyway. No cookie can span two domains, so the relay says so in the console and
+                falls back to the popup handoff, which does not care what the sites are called. Only the
+                already-signed-in case is lost.
               </li>
               <li>
                 Token under a different key? Add{" "}
