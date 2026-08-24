@@ -5,6 +5,7 @@ import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
 import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
+import { audit } from "./conversation";
 
 export type EnvKey = "staging" | "production";
 
@@ -199,6 +200,8 @@ export async function buildApiTools(
      * case's payment status is anything other than "paid".
      */
     blockUnpaidSaves?: { toolSuffixes: string[]; paid: boolean };
+    /** Ties a failed backend call to the conversation it broke, for the audit log. */
+    conversationId?: string;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -417,6 +420,29 @@ export async function buildApiTools(
     }
     rememberExpiry(toolName, res);
     if (cacheKey && !res.isError) writeCache(cacheKey, res);
+    // Keep the backend's own words. Until now a failed call existed only in the
+    // model's context for that turn: the customer was told, correctly, that the
+    // backend refused -- and afterwards nobody could find out what it actually said,
+    // which makes "do the logs show anything?" unanswerable for the one failure mode
+    // this system has most of. Errors only; a success is already visible as a case.
+    if (res.isError) {
+      void audit({
+        agentId,
+        conversationId: opts.conversationId,
+        actor: "system",
+        action: "integration_call_failed",
+        payload: {
+          tool: toolName,
+          method: entry.op.method,
+          path: entry.op.path,
+          // Already PII-redacted for an unidentified customer, and truncated again
+          // here: this is for diagnosing a backend, not for keeping their payload.
+          response: res.result.slice(0, 600),
+        },
+      }).catch(() => {
+        /* diagnostics must never take down the call they are describing */
+      });
+    }
     return res;
   };
 

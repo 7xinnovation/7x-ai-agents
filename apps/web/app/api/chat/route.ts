@@ -247,6 +247,8 @@ export async function POST(req: NextRequest) {
         .map((j) => j.submission!.apiFlow!.saveTool as string);
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
     blockUnpaidSaves: unpaidSaveTools.length ? { toolSuffixes: unpaidSaveTools, paid: paidAlready } : undefined,
+    // So a backend refusal is recoverable afterwards, not only in this turn's context.
+    conversationId: session.conversationId,
     uaePassToken: hostToken ?? uaePassIdentityToken,
     sessionToken: backendSessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
