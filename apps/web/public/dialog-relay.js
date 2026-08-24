@@ -64,6 +64,23 @@
   }
   if (!isFinite(MAX_AGE) || MAX_AGE <= 0) MAX_AGE = 1800;
 
+  // A cookie may only be scoped to a domain the current page sits under. Set
+  // data-domain to anything else and the browser drops the write without a word --
+  // which is exactly what happens when a Salesforce site is served from
+  // *.my.site.com in the sandbox and from the custom domain in production, and the
+  // same tag is used for both. Say so instead of relaying into a void.
+  var HOST = String(location.hostname || "").toLowerCase();
+  var SCOPE = DOMAIN.toLowerCase().replace(/^\./, "");
+  if (HOST !== SCOPE && HOST.lastIndexOf("." + SCOPE) !== HOST.length - SCOPE.length - 1) {
+    if (window.console && console.error) {
+      console.error(
+        "[dialog-relay] data-domain \"" + DOMAIN + "\" is not a domain of this page (" +
+          HOST + "). The browser would discard the cookie -- not installed."
+      );
+    }
+    return;
+  }
+
   function readToken() {
     try {
       var v = window.localStorage.getItem(TOKEN_KEY);
@@ -103,12 +120,29 @@
     document.cookie = COOKIE + "=;Domain=" + DOMAIN + ";Path=/;Max-Age=0;SameSite=Lax" + secure;
   }
 
+  // One diagnostic, once. A cookie can still be refused for reasons this script
+  // cannot see from here -- a blocking policy, a privacy mode, a header stripping it
+  // in transit. Without this the page looks correctly wired and the assistant simply
+  // never sees anyone as signed in.
+  var warned = false;
+  function verify() {
+    if (warned || readCookie()) return;
+    warned = true;
+    if (window.console && console.error) {
+      console.error(
+        "[dialog-relay] wrote the " + COOKIE + " cookie for " + DOMAIN +
+          " but cannot read it back. It is being refused by the browser -- the assistant will not see this customer as signed in."
+      );
+    }
+  }
+
   function sync() {
     var token = readToken();
     if (token) {
       // Rewritten even when unchanged: that is what pushes the idle expiry forward
       // for a customer who is still active.
       write(token);
+      verify();
     } else if (readCookie()) {
       // Signed out, or the token was revoked. Leaving the cookie would let the
       // assistant keep acting as a signed-in customer after they signed out.
