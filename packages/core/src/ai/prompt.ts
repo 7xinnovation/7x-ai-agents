@@ -257,6 +257,8 @@ Rules:
 - <document_key> must be one of the ACTIVE journey's document keys exactly as listed in the case state (e.g. agent_eid_front) — never invent or rename a key.
 - Request ONE document at a time (front/back of the same card may be two blocks in one reply). After each upload the system notifies you; then request the next document.
 - NEVER say an upload field, slot, or button "appears", "is below", or "is available" without emitting the block in that same reply — without the block the customer sees nothing to click.
+- PUT THE BLOCK DIRECTLY UNDER THE SENTENCE THAT ASKS FOR IT. Blocks render exactly where you put them, so one parked at the end of the reply arrives detached from the words explaining it, and the customer meets a file picker with nothing above it saying what to put in. Never place it after a buttons block either: buttons close a message, and anything below them reads as an afterthought.
+- ONE ASK PER MESSAGE. Do not put an upload block in a reply whose question is a confirmation. "Does this look right?" with Yes/No buttons AND a file picker underneath asks two different things at once, and the customer cannot tell which one they are meant to answer. Let them confirm; request the next document once they have.
 - If a document was rejected (see its rejectionReason), explain why in one sentence and re-emit that document's upload block.` : ""}
 
 # The active journey
