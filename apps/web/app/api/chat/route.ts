@@ -746,6 +746,25 @@ export async function POST(req: NextRequest) {
           } else if (ev.type === "lookup") {
             await emitEvent({ type: "shipment.lookup", ...std, outcome: ev.kind, attributes: { kind: ev.kind } });
           } else if (ev.type === "payment_initiated") {
+            // Every charge records the state of the reservation gate that let it
+            // through. Three customers have now been charged for boxes that were
+            // never recorded, and each post-mortem stalled on not knowing whether
+            // the gate ran and allowed it or never ran at all.
+            await audit({
+              ...a,
+              actor: "system",
+              action: "payment_gate",
+              payload: {
+                amount: ev.amount,
+                journeyKey: finalState.journeyKey,
+                saveTool:
+                  (agent.definition.journeys ?? []).find((j) => j.key === finalState.journeyKey)?.submission?.apiFlow
+                    ?.saveTool ?? null,
+                holdBackedSaveTools,
+                holdPresent: holdPresent(),
+                hold: apiTools.getLastHold(),
+              },
+            });
             await getDb()
               .insert(payments)
               .values({
