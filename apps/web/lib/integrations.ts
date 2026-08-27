@@ -208,6 +208,8 @@ export async function buildApiTools(
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
+  /** The Emirates Post hold from the last successful Rental/Select, if any. */
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -236,6 +238,8 @@ export async function buildApiTools(
   // persisted from a previous turn. The UAE PASS identity token is deliberately NOT
   // part of this chain — it is offered separately and only honoured by uaepass_live.
   let captured: string | null = null;
+  /** The live Emirates Post hold from the most recent successful Rental/Select. */
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null } | null = null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
   // Remember the emirate + bundle of the most recent branch-locations lookup so
@@ -324,6 +328,22 @@ export async function buildApiTools(
     // up to 2026-08-18 and zero times after. The apiFlow notes already said "after
     // the payment settles", but a note is guidance and this is an ordering
     // invariant, so it is enforced here rather than asked for.
+    // Rental/Save: use the hold we were actually issued, whatever the model wrote.
+    if (/rental_save$/i.test(toolName)) {
+      if (!lastHold) {
+        return {
+          result:
+            "No hold exists for this rental. Emirates Post records a rental against a reservation created by Rental/Select, and that call has not succeeded in this conversation — so this save would fail with ERROR_GETTING_HOLD_DETAILS whatever is sent. Call Rental/Select first with the box's uniqueBoxId, then save. Do NOT invent a reference and do NOT take payment until the hold is confirmed.",
+          isError: true,
+        };
+      }
+      const body = (input?.body ?? {}) as Record<string, unknown>;
+      if (body.subscriptionReferenceNumber !== lastHold.reference) {
+        body.subscriptionReferenceNumber = lastHold.reference;
+        input = { ...input, body };
+      }
+    }
+
     const gate = opts.blockUnpaidSaves;
     if (gate && !gate.paid && gate.toolSuffixes.some((sfx) => toolName.endsWith(sfx))) {
       return {
@@ -378,6 +398,31 @@ export async function buildApiTools(
       // again" (FB-1485) — their identity is fine, that backend session is not.
       customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
     });
+    // The hold Emirates Post issued, kept out of the model's hands.
+    //
+    // Rental/Save looks its reservation up by subscriptionReferenceNumber, and the
+    // only place that value exists is the Rental/Select response. Asked to carry it
+    // across, the model instead sent "SUB-378785-2026" — a number shaped like a
+    // reference and belonging to nothing — after telling the customer "the hold is
+    // confirmed". The customer was charged and the box was never booked. So the
+    // value is captured here and written into the save below; a reference is not
+    // something to be recalled, it is something to be held onto.
+    if (!res.isError && /rental_select$/i.test(toolName)) {
+      try {
+        const body = JSON.parse(res.result.slice(res.result.indexOf("\n") + 1));
+        const p = body?.payload ?? body;
+        const ref = p?.subscriptionReferenceNumber;
+        if (ref) {
+          lastHold = {
+            reference: String(ref),
+            amount: typeof p?.minimumAmount === "number" ? p.minimumAmount : null,
+            expiresAt: p?.subcsriptionReferenceNumberExpiryDate ?? p?.subscriptionReferenceNumberExpiryDate ?? null,
+          };
+        }
+      } catch {
+        /* a Select we cannot read leaves lastHold alone; the save below refuses */
+      }
+    }
     // Capture a freshly-minted session token from a login/token op for reuse.
     if (!res.isError && isAuthOperation(entry.op)) {
       const body = res.result.slice(res.result.indexOf("\n") + 1);
@@ -462,7 +507,13 @@ export async function buildApiTools(
     return res;
   };
 
-  return { tools, exec, getCapturedToken: () => captured, getLastBranchQuery: () => lastBranchQuery };
+  return {
+    tools,
+    exec,
+    getCapturedToken: () => captured,
+    getLastBranchQuery: () => lastBranchQuery,
+    getLastHold: () => lastHold,
+  };
 }
 
 /**

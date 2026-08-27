@@ -62,6 +62,12 @@ export interface RunTurnInput {
   // Dynamic tools from the agent's API integrations (imported from OpenAPI).
   extraTools?: Anthropic.Tool[];
   runExtraTool?: (name: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
+  /**
+   * A total the backend has committed to, read fresh each time it is needed —
+   * an integration tool may establish it partway through the turn (an Emirates
+   * Post hold quotes the real price), so this is a getter, not a value.
+   */
+  authoritativeAmount?: () => number | null;
 }
 
 export type OrchestratorEvent =
@@ -300,6 +306,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           userRef: input.userRef,
           locale,
           intent,
+          authoritativeAmount: input.authoritativeAmount?.() ?? null,
         });
         state = res.state;
         for (const e of res.events) {

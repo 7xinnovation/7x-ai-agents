@@ -137,6 +137,13 @@ export interface DispatchInput {
   caseId: string;
   // Pre-turn intent classification, for confidence gating (PRD AI-governance).
   intent?: { intent: string; confidence: number };
+  /**
+   * A total the BACKEND has committed to for this transaction — the minimumAmount
+   * on an Emirates Post hold. It outranks both the definition's price and the
+   * model's, because it is the figure the backend will reconcile the payment
+   * against, and it is read from a response rather than remembered.
+   */
+  authoritativeAmount?: number | null;
 }
 
 export interface DispatchResult {
@@ -425,7 +432,15 @@ export async function dispatchTool(
       if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
       const currency = sub.currency ?? "AED";
-      const amount = chargeableAmount(sub, state.data, overrideAmount);
+      // A price the backend has quoted wins outright. The definition's figure is
+      // the advertised annual rental (300 for MyBox) and misses the mandatory
+      // registration fee, so the customer was charged 300 against a 370 hold —
+      // the summary said 370, the card said 300, and the two never met.
+      const backendAmount =
+        typeof ctx.authoritativeAmount === "number" && ctx.authoritativeAmount > 0
+          ? ctx.authoritativeAmount
+          : undefined;
+      const amount = backendAmount ?? chargeableAmount(sub, state.data, overrideAmount);
       const applicable = applicableSurcharges(sub, state.data);
       const actx = adapterContext(agent, agent.integrations.payment);
       const res = await adapters.payment.initiate(actx, {

@@ -260,6 +260,9 @@ export async function POST(req: NextRequest) {
     mockSimulate: uaePassMockAllowed() && (session.userRef === MOCK_PERSONA_SUB || body.mock === true),
   });
   const { tools: baseExtraTools, exec: execIntegration } = apiTools;
+  // Emirates Post quotes the real total when it issues the hold; that figure
+  // outranks the advertised bundle price when the customer is charged.
+  const authoritativeAmount = () => apiTools.getLastHold()?.amount ?? null;
   // The company/Form 9 reads are EPGL's Salesforce org; offering them to another
   // tenant's agent would be meaningless (and lib/epglRead would throw).
   const hasEpglSalesforce = agent.definition.tenantSlug === "epgl";
@@ -698,6 +701,7 @@ export async function POST(req: NextRequest) {
           businessOpen,
           customerContext,
           extraTools,
+          authoritativeAmount,
           runExtraTool,
         })) {
           // runTurn yields its own error event, which would otherwise reach the
