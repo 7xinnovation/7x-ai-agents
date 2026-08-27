@@ -145,12 +145,15 @@ export interface DispatchInput {
    */
   authoritativeAmount?: number | null;
   /**
-   * Why payment must not be taken yet, or null when it may proceed. Checked before
-   * anything is charged, because the alternative is the order this system kept
-   * falling into: charge, then discover the reservation the charge was for does
-   * not exist, then apologise.
+   * Save tools that record against a reservation the backend issued earlier, and
+   * whether such a reservation currently exists. Kept as data rather than a
+   * prepared message because the decision needs the journey as it is AT THE MOMENT
+   * OF THE CALL: computing it from the turn's opening state saw journeyKey null
+   * whenever the journey was started in the same turn, so the check silently did
+   * not apply on exactly the run it was written for.
    */
-  paymentBlockedReason?: string | null;
+  holdBackedSaveTools?: string[];
+  holdPresent?: boolean;
 }
 
 export interface DispatchResult {
@@ -436,8 +439,18 @@ export async function dispatchTool(
         events.push({ type: "auth_required", reason: "Payment requires sign-in." });
         return { result: "User must authenticate before payment.", state, events };
       }
-      if (ctx.paymentBlockedReason) {
-        return { result: `PAYMENT BLOCKED: ${ctx.paymentBlockedReason}`, state, events, isError: true };
+      // Charging before the thing being paid for exists is the wrong order, and it
+      // is the order this journey kept falling into: pay, then discover there is no
+      // reservation to attach the payment to, then apologise.
+      const saveTool = sub.apiFlow?.saveTool;
+      if (saveTool && (ctx.holdBackedSaveTools ?? []).includes(saveTool) && !ctx.holdPresent) {
+        return {
+          result:
+            "PAYMENT BLOCKED: the box has not been reserved yet. Emirates Post records this rental against a hold, so a payment taken now could not be attached to anything. Call the reservation tool for the chosen box FIRST — using its uniqueBoxId, not the box number shown to the customer — and request payment once it succeeds. NOTHING has been charged: do not tell the customer a payment failed, and do not offer a callback.",
+          state,
+          events,
+          isError: true,
+        };
       }
       if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;

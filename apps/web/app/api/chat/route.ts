@@ -265,17 +265,12 @@ export async function POST(req: NextRequest) {
   // Emirates Post quotes the real total when it issues the hold; that figure
   // outranks the advertised bundle price when the customer is charged.
   const authoritativeAmount = () => apiTools.getLastHold()?.amount ?? null;
-  // Emirates Post records a rental against a reservation, so charging before one
-  // exists guarantees the failure that follows. Checked here rather than at the
-  // save, which is a turn too late to matter.
-  const holdBackedSaveTools = new Set(["post_api_Rental_Save"]);
-  const paymentBlockedReason = () => {
-    const j = (agent.definition.journeys ?? []).find((x) => x.key === session.state.journeyKey);
-    const saveTool = j?.submission?.apiFlow?.saveTool;
-    if (!saveTool || !holdBackedSaveTools.has(saveTool)) return null;
-    if (apiTools.getLastHold()) return null;
-    return "the box has not been reserved yet. Emirates Post records a rental against a hold, so a payment taken now cannot be attached to anything. Call Rental/Select for the chosen box (uniqueBoxId, not the box number) FIRST, then request payment. Do not tell the customer anything failed — nothing has been charged.";
-  };
+  // Emirates Post records a rental against a reservation, so a payment taken
+  // before one exists cannot be attached to anything. The journey is read live
+  // inside the tool — deciding here would use the turn's opening state, which is
+  // blank on the very turn the journey starts.
+  const holdBackedSaveTools = ["post_api_Rental_Save"];
+  const holdPresent = () => Boolean(apiTools.getLastHold());
   // The company/Form 9 reads are EPGL's Salesforce org; offering them to another
   // tenant's agent would be meaningless (and lib/epglRead would throw).
   const hasEpglSalesforce = agent.definition.tenantSlug === "epgl";
@@ -715,7 +710,8 @@ export async function POST(req: NextRequest) {
           customerContext,
           extraTools,
           authoritativeAmount,
-          paymentBlockedReason,
+          holdBackedSaveTools,
+          holdPresent,
           runExtraTool,
         })) {
           // runTurn yields its own error event, which would otherwise reach the

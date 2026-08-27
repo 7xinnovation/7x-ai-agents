@@ -68,8 +68,9 @@ export interface RunTurnInput {
    * Post hold quotes the real price), so this is a getter, not a value.
    */
   authoritativeAmount?: () => number | null;
-  /** Why payment must not proceed yet, evaluated at the moment of the call. */
-  paymentBlockedReason?: () => string | null;
+  /** Save tools that need a backend reservation, and whether one exists right now. */
+  holdBackedSaveTools?: string[];
+  holdPresent?: () => boolean;
 }
 
 export type OrchestratorEvent =
@@ -309,7 +310,8 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           locale,
           intent,
           authoritativeAmount: input.authoritativeAmount?.() ?? null,
-          paymentBlockedReason: input.paymentBlockedReason?.() ?? null,
+          holdBackedSaveTools: input.holdBackedSaveTools,
+          holdPresent: input.holdPresent?.() ?? false,
         });
         state = res.state;
         for (const e of res.events) {
