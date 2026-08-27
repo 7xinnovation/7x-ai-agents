@@ -144,6 +144,13 @@ export interface DispatchInput {
    * against, and it is read from a response rather than remembered.
    */
   authoritativeAmount?: number | null;
+  /**
+   * Why payment must not be taken yet, or null when it may proceed. Checked before
+   * anything is charged, because the alternative is the order this system kept
+   * falling into: charge, then discover the reservation the charge was for does
+   * not exist, then apologise.
+   */
+  paymentBlockedReason?: string | null;
 }
 
 export interface DispatchResult {
@@ -428,6 +435,9 @@ export async function dispatchTool(
       if (journey?.requiresAuth && !ctx.authenticated) {
         events.push({ type: "auth_required", reason: "Payment requires sign-in." });
         return { result: "User must authenticate before payment.", state, events };
+      }
+      if (ctx.paymentBlockedReason) {
+        return { result: `PAYMENT BLOCKED: ${ctx.paymentBlockedReason}`, state, events, isError: true };
       }
       if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;

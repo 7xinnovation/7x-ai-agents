@@ -228,6 +228,8 @@ export async function POST(req: NextRequest) {
       log.warn("host_token_rejected", {
         agentId: agent.id,
         conversationId: session.conversationId,
+    // Select and Save are different turns; the hold has to survive between them.
+    initialHold: session.state.hold ?? null,
         reason,
         // Distinguishes "NXN sent us something bad" from "we are not set up yet",
         // which look identical from the customer's side and need opposite fixes.
@@ -263,6 +265,17 @@ export async function POST(req: NextRequest) {
   // Emirates Post quotes the real total when it issues the hold; that figure
   // outranks the advertised bundle price when the customer is charged.
   const authoritativeAmount = () => apiTools.getLastHold()?.amount ?? null;
+  // Emirates Post records a rental against a reservation, so charging before one
+  // exists guarantees the failure that follows. Checked here rather than at the
+  // save, which is a turn too late to matter.
+  const holdBackedSaveTools = new Set(["post_api_Rental_Save"]);
+  const paymentBlockedReason = () => {
+    const j = (agent.definition.journeys ?? []).find((x) => x.key === session.state.journeyKey);
+    const saveTool = j?.submission?.apiFlow?.saveTool;
+    if (!saveTool || !holdBackedSaveTools.has(saveTool)) return null;
+    if (apiTools.getLastHold()) return null;
+    return "the box has not been reserved yet. Emirates Post records a rental against a hold, so a payment taken now cannot be attached to anything. Call Rental/Select for the chosen box (uniqueBoxId, not the box number) FIRST, then request payment. Do not tell the customer anything failed — nothing has been charged.";
+  };
   // The company/Form 9 reads are EPGL's Salesforce org; offering them to another
   // tenant's agent would be meaningless (and lib/epglRead would throw).
   const hasEpglSalesforce = agent.definition.tenantSlug === "epgl";
@@ -702,6 +715,7 @@ export async function POST(req: NextRequest) {
           customerContext,
           extraTools,
           authoritativeAmount,
+          paymentBlockedReason,
           runExtraTool,
         })) {
           // runTurn yields its own error event, which would otherwise reach the
@@ -901,6 +915,11 @@ export async function POST(req: NextRequest) {
         }
 
         await appendMessage(session.conversationId, "assistant", finalText);
+        // A hold issued this turn belongs to the case, not to this request.
+        const heldNow = apiTools.getLastHold();
+        if (heldNow && heldNow.reference !== finalState.hold?.reference) {
+          finalState = { ...finalState, hold: heldNow };
+        }
         await saveCase(session.caseId, finalState);
         // Persist a BACKEND session token minted this turn (e.g. OTP login) for later
         // turns. Never overwrite a stored UAE PASS identity token with it: the two

@@ -202,6 +202,8 @@ export async function buildApiTools(
     blockUnpaidSaves?: { toolSuffixes: string[]; paid: boolean };
     /** Ties a failed backend call to the conversation it broke, for the audit log. */
     conversationId?: string;
+    /** A hold carried over from an earlier turn; Select and Save are turns apart. */
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -239,7 +241,8 @@ export async function buildApiTools(
   // part of this chain — it is offered separately and only honoured by uaepass_live.
   let captured: string | null = null;
   /** The live Emirates Post hold from the most recent successful Rental/Select. */
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null } | null = null;
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null } | null =
+    opts.initialHold ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
   // Remember the emirate + bundle of the most recent branch-locations lookup so
@@ -331,6 +334,13 @@ export async function buildApiTools(
     // Rental/Save: use the hold we were actually issued, whatever the model wrote.
     if (/rental_save$/i.test(toolName)) {
       if (!lastHold) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "integration_call_failed",
+          payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: input ?? {}, response: "REFUSED LOCALLY: no hold on this case" },
+        }).catch(() => {});
         return {
           result:
             "No hold exists for this rental. Emirates Post records a rental against a reservation created by Rental/Select, and that call has not succeeded in this conversation — so this save would fail with ERROR_GETTING_HOLD_DETAILS whatever is sent. Call Rental/Select first with the box's uniqueBoxId, then save. Do NOT invent a reference and do NOT take payment until the hold is confirmed.",

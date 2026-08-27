@@ -50,6 +50,23 @@ export const CaseState = z.object({
    * refusal message already describes.
    */
   confirmedJourneys: z.array(z.string()).default([]),
+  /**
+   * A reservation the backend is holding for this case.
+   *
+   * It has to live in the case, not in the turn. Emirates Post issues it on
+   * Rental/Select during the turn that takes payment, and Rental/Save runs in a
+   * LATER turn once the payment settles — by which point a per-request closure
+   * has been rebuilt and knows nothing. That is exactly how a customer came to be
+   * charged 370 for a box that was genuinely held and then never recorded.
+   */
+  hold: z
+    .object({
+      reference: z.string(),
+      amount: z.number().nullable().default(null),
+      expiresAt: z.string().nullable().default(null),
+    })
+    .nullable()
+    .default(null),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   status: z.enum(["draft", "ready", "submitted", "escalated"]),
@@ -63,6 +80,7 @@ export function emptyCase(): CaseState {
     data: {},
     documents: [],
     confirmedJourneys: [],
+    hold: null,
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },
     reference: null,
