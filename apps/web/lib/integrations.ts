@@ -432,16 +432,25 @@ export async function buildApiTools(
     // backend refused -- and afterwards nobody could find out what it actually said,
     // which makes "do the logs show anything?" unanswerable for the one failure mode
     // this system has most of. Errors only; a success is already visible as a case.
-    if (res.isError) {
+    // A lookup that answers 200 with an empty list is not an error, and used to
+    // leave no trace at all — so "the branch has no boxes" and "we asked for the
+    // wrong branch" were indistinguishable afterwards. They are very different:
+    // Naif holds boxes under officeId 214 and none under its mainOfficeId 209.
+    const emptyLookup =
+      !res.isError && /freeboxes|boxlocations|bundle/i.test(toolName) && !hasBoxNumbers(res.result);
+    if (res.isError || emptyLookup) {
       void audit({
         agentId,
         conversationId: opts.conversationId,
         actor: "system",
-        action: "integration_call_failed",
+        action: res.isError ? "integration_call_failed" : "integration_empty_result",
         payload: {
           tool: toolName,
           method: entry.op.method,
           path: entry.op.path,
+          // What we ASKED for. Without it a wrong parameter is invisible: the
+          // response says "nothing here" and never says which "here".
+          input: input ?? {},
           // Already PII-redacted for an unidentified customer, and truncated again
           // here: this is for diagnosing a backend, not for keeping their payload.
           response: res.result.slice(0, 600),
