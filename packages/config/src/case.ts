@@ -37,6 +37,19 @@ export const CaseState = z.object({
       link: z.string().nullable().default(null),
     })
     .default({ status: "none", reference: null, amount: null, currency: "AED", link: null }),
+  /**
+   * Journeys the customer has already been asked to confirm, once.
+   *
+   * The goal-confidence gate scores each turn in isolation, and the turn where
+   * the customer answers the confirmation is a bare "Yes, rent a new PO Box" —
+   * an affirmation carrying no intent signal, which scores LOWER than the message
+   * that triggered the gate. So the gate fired again, the agent asked again, and
+   * the customer confirmed the same rental four times before being handed a
+   * callback for a journey it could have started at the first yes. Recording the
+   * ask makes the second call the one that proceeds, which is the protocol the
+   * refusal message already describes.
+   */
+  confirmedJourneys: z.array(z.string()).default([]),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   status: z.enum(["draft", "ready", "submitted", "escalated"]),
@@ -49,6 +62,7 @@ export function emptyCase(): CaseState {
     currentStep: null,
     data: {},
     documents: [],
+    confirmedJourneys: [],
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },
     reference: null,

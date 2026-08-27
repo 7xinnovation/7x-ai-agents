@@ -236,20 +236,33 @@ export async function dispatchTool(
       // must not initiate. This is deterministic, not left to model discretion.
       const transactional = journey.requiresAuth || Boolean(journey.submission);
       const conf = ctx.intent?.confidence;
-      if (transactional && conf !== undefined) {
+      // The gate asks ONCE. It scores each turn on its own, and the turn where the
+      // customer answers is "Yes, rent a new PO Box" — an affirmation with no
+      // intent signal in it, which scores lower than the message that raised the
+      // gate in the first place. Re-running the same test on that turn refuses
+      // again, and the customer confirms forever. So a journey already asked about
+      // proceeds on the next call, which is exactly what the refusal below tells
+      // the model to do.
+      const alreadyAsked = state.confirmedJourneys?.includes(key) ?? false;
+      if (transactional && conf !== undefined && !alreadyAsked) {
         const g = agent.guardrails.goalThresholds;
+        const remember = { ...state, confirmedJourneys: [...(state.confirmedJourneys ?? []), key] };
+        // Emitted as a case event, not just returned: the route rebuilds the state
+        // it persists from these events, so a marker that is only returned is lost
+        // at the end of the turn and the gate asks all over again.
+        if (conf < g.proceed) events.push({ type: "case", state: remember });
         if (conf < g.clarify) {
           return {
-            result: `Goal confidence ${conf.toFixed(2)} is below ${g.clarify}. Do NOT initiate this transactional journey. Ask the customer a clarifying question to confirm what they want before proceeding.`,
-            state,
+            result: `Goal confidence ${conf.toFixed(2)} is below ${g.clarify}. Do NOT initiate this transactional journey yet. Ask the customer ONE clarifying question to confirm what they want, then call set_journey("${key}") again — that call will proceed. Do NOT ask twice, and do NOT offer a callback over this: it is a confirmation step, not a failure.`,
+            state: remember,
             events,
             isError: true,
           };
         }
         if (conf < g.proceed) {
           return {
-            result: `Goal confidence ${conf.toFixed(2)} is between ${g.clarify} and ${g.proceed}. Briefly confirm the customer's intent with one clarifying question before starting "${key}", then call set_journey again once confirmed.`,
-            state,
+            result: `Goal confidence ${conf.toFixed(2)} is between ${g.clarify} and ${g.proceed}. Briefly confirm the customer's intent with ONE question before starting "${key}", then call set_journey("${key}") again — that call will proceed. Do NOT ask twice, and do NOT offer a callback over this.`,
+            state: remember,
             events,
             isError: true,
           };
