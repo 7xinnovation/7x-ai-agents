@@ -43,6 +43,101 @@ function mapType(schema: any): string {
   return "string";
 }
 
+/**
+ * Resolve a request-body schema into something the model can actually follow.
+ *
+ * This used to collapse EVERY body to `{ type: "object" }` with the description
+ * "JSON request body" — the model was told an object goes here and nothing about
+ * what belongs in it, so it guessed. On Emirates Post that produced
+ * `POST /api/Rental/Save -> 400 {"TotalAmount":["Total Amount is required"],
+ * "UserProfile":[...],"PaymentProperties":[...],"SubscriptionReferenceNumber":[...]}`
+ * AFTER the customer had paid, and the agent reported it as a fault on their side.
+ *
+ * So dereference it. $refs are followed against components.schemas (OA3) and
+ * definitions (Swagger 2), with a depth cap and a seen-set, because these specs
+ * are full of cycles (an Address that contains an Address) and a naive walk never
+ * returns. Past the cap the branch degrades to a bare type rather than vanishing.
+ */
+const BODY_MAX_DEPTH = 4;
+const BODY_MAX_CHARS = 12000;
+
+function resolveRef(ref: string, doc: any): any {
+  if (typeof ref !== "string" || !ref.startsWith("#/")) return null;
+  let node = doc;
+  for (const part of ref.slice(2).split("/")) {
+    node = node?.[part.replace(/~1/g, "/").replace(/~0/g, "~")];
+    if (node === undefined) return null;
+  }
+  return node;
+}
+
+function deref(schema: any, doc: any, depth = 0, seen: Set<string> = new Set()): any {
+  if (!schema || typeof schema !== "object") return schema;
+  if (schema.$ref) {
+    const ref: string = schema.$ref;
+    // A type that contains itself: keep the name, drop the recursion.
+    if (seen.has(ref) || depth >= BODY_MAX_DEPTH) return { type: "object", description: ref.split("/").pop() };
+    const target = resolveRef(ref, doc);
+    if (!target) return { type: "object" };
+    return deref(target, doc, depth, new Set([...seen, ref]));
+  }
+  if (depth >= BODY_MAX_DEPTH) return { type: mapType(schema) };
+
+  const out: Record<string, unknown> = {};
+  if (schema.type) out.type = schema.type;
+  if (schema.format) out.format = schema.format;
+  if (schema.enum) out.enum = schema.enum;
+  if (schema.description) out.description = schema.description;
+  // required is the whole point of this: it is what the backend rejects on.
+  if (Array.isArray(schema.required) && schema.required.length) out.required = schema.required;
+  if (schema.items) out.items = deref(schema.items, doc, depth + 1, seen);
+  if (schema.properties) {
+    const props: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(schema.properties)) props[k] = deref(v, doc, depth + 1, seen);
+    out.properties = props;
+    if (!out.type) out.type = "object";
+  }
+  // allOf is how these specs express inheritance; merge the members.
+  for (const key of ["allOf", "oneOf", "anyOf"] as const) {
+    if (Array.isArray(schema[key])) {
+      const parts = schema[key].map((x: any) => deref(x, doc, depth, seen));
+      if (key === "allOf") {
+        const merged: Record<string, unknown> = { type: "object", properties: {}, required: [] as string[] };
+        for (const part of parts) {
+          Object.assign(merged.properties as object, part?.properties ?? {});
+          if (Array.isArray(part?.required)) (merged.required as string[]).push(...part.required);
+        }
+        if (!(merged.required as string[]).length) delete merged.required;
+        return merged;
+      }
+      out[key] = parts;
+    }
+  }
+  return Object.keys(out).length ? out : { type: mapType(schema) };
+}
+
+/** Dereferenced body schema, or a plain object if it resolves to nothing useful. */
+function bodySchema(raw: any, doc: any): Record<string, unknown> {
+  const fallback = { type: "object", description: "JSON request body" };
+  try {
+    const resolved = deref(raw, doc);
+    if (!resolved?.properties || !Object.keys(resolved.properties).length) return fallback;
+    // A body schema that dwarfs the prompt helps nobody; every operation carries
+    // one and they all ride in the tool definitions on every single turn.
+    if (JSON.stringify(resolved).length > BODY_MAX_CHARS) {
+      return {
+        type: "object",
+        description: "JSON request body",
+        properties: resolved.properties,
+        ...(resolved.required ? { required: resolved.required } : {}),
+      };
+    }
+    return { description: "JSON request body", ...resolved };
+  } catch {
+    return fallback;
+  }
+}
+
 function sanitize(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 60) || "op";
 }
@@ -216,7 +311,7 @@ export async function parseSpec(specUrl: string, baseUrlOverride?: string): Prom
       const sw2Body = (op.parameters ?? []).find((p: any) => p.in === "body");
       if (oa3Body || sw2Body) {
         hasBody = true;
-        properties["body"] = { type: "object", description: "JSON request body" };
+        properties["body"] = bodySchema(oa3Body ?? sw2Body?.schema, spec);
         if (op.requestBody?.required || sw2Body?.required) required.push("body");
       }
 
