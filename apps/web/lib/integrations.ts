@@ -392,7 +392,14 @@ export async function buildApiTools(
     // back to a deterministic reserved set so the journey can be tested end to end.
     // Gated on the agent's activeEnvironment, so it disappears on its own the moment
     // an agent is switched to production.
-    if (activeEnv === "staging" && /freeboxes/i.test(toolName) && !hasBoxNumbers(res.result)) {
+    // ...and only while nothing tries to RESERVE what it hands out. Rental/Select
+    // is the authority on availability, and it answers a made-up number with
+    // "BOX_NOT_FREE" (108) — so with the hold step live these numbers send the
+    // customer round a loop of boxes that were never real, four in a row, each
+    // one looking like someone beat them to it. When something can check, stop
+    // inventing: say availability is not published here and let the truth stand.
+    const holdEnabled = [...map.keys()].some((t) => /rental_select$/i.test(t));
+    if (activeEnv === "staging" && !holdEnabled && /freeboxes/i.test(toolName) && !hasBoxNumbers(res.result)) {
       const inp = (input ?? {}) as Record<string, unknown>;
       const bundleId = asStr(inp.BundleId ?? inp.bundleId ?? inp.bundle_Id);
       const locationId = asStr(inp.LocationId ?? inp.locationId ?? inp.OfficeId ?? inp.officeId);
