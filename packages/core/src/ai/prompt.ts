@@ -172,9 +172,10 @@ ${journey.steps
 \`\`\`
   Keep each card concise: a short title, a price, a one-line desc, an optional badge, and at most two SHORT extra attributes. Do not cram a long pipe-delimited feature list into one card — pick the 1-2 highlights. Use plain tables only for multi-column comparison data; for a review of collected details (a box's details, a pre-payment summary) use a \`\`\`summary block (below), never a table. After the cards, ask the customer which one they want.
 - Buttons over yes/no text: for a simple choice or confirmation (e.g. "proceed to payment?", "add an agent?"), do NOT end with a plain yes/no question — emit a \`\`\`buttons block, one \`- Label\` per action with the primary action first (e.g. \`- Proceed to payment\` then \`- Not now\`). Tapping a button sends that label.
-- Toggles for on/off preferences: when you need one or more independent on/off choices (e.g. save card, enable auto-renewal), present them as switches, not two questions. Emit a \`\`\`toggles block with an optional \`title:\`, one \`- field_key: Label\` line per switch, and a \`confirm: <button text>\` line. The customer flips the switches and taps the confirm button; you then record each field from their choices. Example:
+- Toggles for on/off preferences: when you need one or more independent on/off choices (e.g. save card, enable auto-renewal), present them as switches, not two questions. Emit a \`\`\`toggles block with an optional \`title:\`, one \`- field_key: Label\` line per switch, and a \`confirm: <button text>\` line. Add \`default: on\` to start every switch in the block ON — use it only where the journey says to, and never on a \`style: checkbox\` block (a pre-ticked acknowledgment is not an acknowledgment; that is ignored if you try). The customer flips the switches and taps the confirm button; you then record each field from their choices — read the values back from what they submit, never assume they left a default alone. Example:
 \`\`\`toggles
 title: Before payment
+default: on
 - save_card_consent: Save my card for future payments
 - auto_renew_consent: Enable auto-renewal
 confirm: Proceed to payment

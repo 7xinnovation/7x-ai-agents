@@ -151,17 +151,24 @@ function ChatButtons({ labels, onSelect }: { labels: string[]; onSelect: (text: 
  * confirm button stays disabled until every box is ticked.
  */
 function ChatToggles({
-  items, title, confirmLabel, variant, onSelect,
+  items, title, confirmLabel, variant, defaultOn, onSelect,
 }: {
   items: { key: string; label: string }[];
   title?: string;
   confirmLabel: string;
   variant?: "switch" | "checkbox";
+  defaultOn?: boolean;
   onSelect: (text: string) => void;
 }) {
-  const [on, setOn] = React.useState<Record<string, boolean>>({});
-  if (!items.length) return null;
   const checkbox = variant === "checkbox";
+  // Switches may start on when the journey opts in (a preference the customer is
+  // expected to want, which they can still turn off before confirming).
+  // CHECKBOXES NEVER DO: that variant is the terms-and-conditions acknowledgment,
+  // and a pre-ticked acknowledgment is not an acknowledgment.
+  const [on, setOn] = React.useState<Record<string, boolean>>(() =>
+    defaultOn && !checkbox ? Object.fromEntries(items.map((it) => [it.key, true])) : {}
+  );
+  if (!items.length) return null;
   const allOn = items.every((it) => on[it.key]);
   const submit = () => {
     // Strip markdown links from labels (e.g. the T&C link) so the sent reply
@@ -472,18 +479,20 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         let tTitle: string | undefined;
         let tConfirm = "Confirm";
         let tVariant: "switch" | "checkbox" = "switch";
+        let tDefaultOn = false;
         const tItems: { key: string; label: string }[] = [];
         for (const l of body) {
           const item = l.match(/^\s*-\s+([\w.-]+)\s*:\s*(.+?)\s*$/);
-          const meta = l.match(/^\s*(title|confirm|style)\s*:\s*(.+?)\s*$/i);
+          const meta = l.match(/^\s*(title|confirm|style|default)\s*:\s*(.+?)\s*$/i);
           if (item) tItems.push({ key: item[1]!.trim(), label: item[2]!.trim() });
           else if (meta) {
             if (/^title$/i.test(meta[1]!)) tTitle = meta[2]!.trim();
             else if (/^style$/i.test(meta[1]!)) tVariant = /checkbox/i.test(meta[2]!) ? "checkbox" : "switch";
+            else if (/^default$/i.test(meta[1]!)) tDefaultOn = /^(on|yes|true)$/i.test(meta[2]!.trim());
             else tConfirm = meta[2]!.trim();
           }
         }
-        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} variant={tVariant} onSelect={onSelect} />);
+        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} variant={tVariant} defaultOn={tDefaultOn} onSelect={onSelect} />);
         continue;
       }
       if (isSummary) {

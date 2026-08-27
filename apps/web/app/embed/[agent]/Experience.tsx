@@ -1550,7 +1550,13 @@ export function Experience({
                           <Circle size={18} weight={iconWeight} />
                         )}
                         {labelMap.get(m.key) ?? m.key}
-                        <span className="kind">{t.missingKind[m.kind] ?? m.kind}</span>
+                        {/* Only documents get a kind badge. "field" repeated down
+                            every row of a form says nothing — everything on this
+                            list is a field unless it is a document, and THAT is
+                            worth flagging because it means something to upload. */}
+                        {m.kind === "document" ? (
+                          <span className="kind">{t.missingKind[m.kind] ?? m.kind}</span>
+                        ) : null}
                       </div>
                     ))
                   ) : !caseState!.readiness.complete ? (
