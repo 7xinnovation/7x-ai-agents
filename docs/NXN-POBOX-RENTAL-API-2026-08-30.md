@@ -1,9 +1,11 @@
 # PO Box Rental API — two open questions
 
-**To:** Emirates Post PO Box API team
-**From:** 7X (NXN conversational assistant)
-**Environment:** `https://box-stg.emiratespost.ae/services/pobox` (staging)
-**Date:** 30 August 2026
+| | |
+|---|---|
+| **To** | Emirates Post PO Box API team |
+| **From** | 7X — NXN conversational assistant |
+| **Environment** | `https://box-stg.emiratespost.ae/services/pobox` (staging) |
+| **Date** | 30 August 2026 |
 
 We have the rental flow working end to end against staging, with one exception and
 one design question. Everything below is from live calls on staging, with the
