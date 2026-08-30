@@ -21,10 +21,10 @@ outlet:
 ```jsonc
 200 OK
 { "payload": {
-    "orderNo": "260961741",
+    "orderNo": "260961742",
     "paymentGateWayResponse": {
       "paymentUrl": "https://paypage.sandbox.ngenius-payments.com/v2?code=…",
-      "referenceNumber": "79cee614-4797-4f99-b471-4ed58d6582a2",
+      "referenceNumber": "8ce8f91b-c278-4068-b15b-b6a2da48e0ec",
       "niOrderResult": { "outletId": "b78ef8c7-ce2a-41d6-84c9-e6219557a991",
                          "state": "STARTED" }
     }
@@ -34,10 +34,13 @@ outlet:
 We take payment on **our own** N-Genius outlet, so yours is never settled:
 
 ```jsonc
-POST /api/v1/Rental/UpdatePayment/79cee614-4797-4f99-b471-4ed58d6582a2
+POST /api/v1/Rental/UpdatePayment/8ce8f91b-c278-4068-b15b-b6a2da48e0ec
 200 OK
-{ "payload": { "isPaymentSuccess": false,
-               "paymentDetails": { "amountPaid": 0.0 } } }
+{ "payload": { "orderNumber": "260961742",
+               "isPaymentSuccess": false,
+               "paymentStatus": 2,
+               "paymentDetails": { "amountPaid": 0.0, "paymentRefNo": null },
+               "transactionDetails": { "poBox": "450358" } } }
 ```
 
 The rental record exists and the box is reserved, but **it does not appear in the
@@ -95,9 +98,9 @@ Please release if they don't expire on their own — all Dubai:
 
 - **Held, no order:** 378781, 378785, 378790 (Naif) · 449691, 449949, 449989,
   450000 (Al Barsha)
-- **Order created, unpaid:** 449922, 449997, 450063, 450152, 450364, 378797
+- **Order created, unpaid:** 449922, 449997, 450063, 450152, 450358, 450364, 378797
   (Al Barsha) — orders 260961732, 260961735, 260961736, 260961739, 260961740,
-  260961741
+  260961741, 260961742
 
 ---
 
