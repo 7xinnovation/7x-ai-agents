@@ -8,51 +8,25 @@
 | **Date** | 30 August 2026 |
 
 The rental flow works end to end against staging — availability, hold, order
-creation. One design question remains, and there are a few behaviours we found
-only by trial that we would like confirmed.
-
-Everything below is from live calls on staging, with the customer's own UAE PASS
-session token as the bearer.
+creation. One question remains, plus a few behaviours we'd like confirmed. All of
+it is from live calls, using the customer's own UAE PASS session token.
 
 ---
 
-## The sequence works
+## The question: `Save` opens its own payment
 
-For completeness, since we raised `157 ERROR_GETTING_HOLD_DETAILS` with you
-earlier: that was ours, not yours. Every occurrence traced back to something wrong
-on our side — an invented reference, a hold belonging to a different box, and an
-incomplete `billingDetail`. With a correct payload the sequence is reliable:
-
-```jsonc
-POST /api/v1/Rental/Select   { "bundleId": "IN", "uniqueBoxID": "2450063",
-                               "poBoxExpiryDate": "2027-08-29T00:00:00+00:00" }
-200 OK   subscriptionReferenceNumber: 260611703, minimumAmount: 370.0
-
-POST /api/v1/Rental/Save     { "subscriptionReferenceNumber": "260611703",
-                               "totalAmount": 370, "userProfile": {…},
-                               "paymentProperties": { "billingDetail": {…all six fields…} } }
-200 OK   orderNo: 260961740
-```
-
-No changes needed from you for this. It is recorded here only because we asked
-about it before we understood it.
-
----
-
-## The open question: `Save` opens its own payment
-
-On success, `Save` returns a hosted payment page and an N-Genius order on **your**
+`Rental/Save` succeeds and returns a hosted payment page on **your** N-Genius
 outlet:
 
 ```jsonc
 200 OK
 { "payload": {
-    "orderNo": "260961739",
-    "custProfID": "6542907",
+    "orderNo": "260961741",
     "paymentGateWayResponse": {
       "paymentUrl": "https://paypage.sandbox.ngenius-payments.com/v2?code=…",
-      "referenceNumber": "4d1e9cc3-670c-45ca-9084-6496100afdf0",
-      "niOrderResult": { "outletId": "b78ef8c7-ce2a-41d6-84c9-e6219557a991", "…": "…" }
+      "referenceNumber": "79cee614-4797-4f99-b471-4ed58d6582a2",
+      "niOrderResult": { "outletId": "b78ef8c7-ce2a-41d6-84c9-e6219557a991",
+                         "state": "STARTED" }
     }
 } }
 ```
@@ -60,83 +34,71 @@ outlet:
 We take payment on **our own** N-Genius outlet, so yours is never settled:
 
 ```jsonc
-POST /api/v1/Rental/UpdatePayment/4d1e9cc3-670c-45ca-9084-6496100afdf0
+POST /api/v1/Rental/UpdatePayment/79cee614-4797-4f99-b471-4ed58d6582a2
 200 OK
-{ "payload": { "orderNumber": "260961735",
-               "isPaymentSuccess": false,
+{ "payload": { "isPaymentSuccess": false,
                "paymentDetails": { "amountPaid": 0.0 } } }
 ```
 
-The N-Genius order stays at state `STARTED`, and **the box does not appear in the
-customer's portal** even though the rental record exists.
+The rental record exists and the box is reserved, but **it does not appear in the
+customer's portal** — presumably because your order is unpaid.
 
-### What we'd like to know
+**What we need to know:**
 
-1. Is there a way to record a rental as **already paid** — a flag, a different
-   endpoint, or a payment reference we can pass in?
-2. If not, is the intended flow for the customer to pay on the `paymentUrl` you
-   return, and for us to poll `UpdatePayment/{referenceNumber}` until
-   `isPaymentSuccess` is `true`?
-3. Roughly how long after payment does `isPaymentSuccess` flip? We need to know how
-   long to wait before telling a customer anything.
-
----
-
-## Three things we found by trial — please confirm they're intended
-
-| # | Finding | Why it matters |
-|---|---------|----------------|
-| 1 | `Select` needs **`uniqueBoxId`** from `FreeBoxes` (e.g. `2450364`), **not** `boxId` (`450364`). Sending `boxId` returns `108 BOX_NOT_FREE`. | `BOX_NOT_FREE` reads as "someone else took it". We were telling customers boxes were unavailable when they were free and we'd sent the wrong identifier. |
-| 2 | `paymentProperties.billingDetail` is **optional in the spec but required in practice**, and all six fields are needed. Omitting the block returns `400 {"Error":"Error from payment gateway"}`; sending it with only `firstName`, `lastName`, `emailAddress` returns `400 … 157 ERROR_GETTING_HOLD_DETAILS`. | Neither error names the missing field, and the second one points at the hold, which is not the problem. This cost us most of a day. |
-| 3 | `UpdatePayment` takes **`paymentGateWayResponse.referenceNumber`**. Passing `niOrderResult.reference` — also a UUID, in the same response — returns `500 Internal system error`. | Two UUIDs side by side with nothing to distinguish them. |
+1. Can a rental be recorded as **already paid** — a flag, another endpoint, or a
+   payment reference we can pass in?
+2. If not: should the customer pay on the `paymentUrl` you return, and should we
+   poll `UpdatePayment/{referenceNumber}` until `isPaymentSuccess` is `true`?
+3. How long after payment does `isPaymentSuccess` flip? We need to know how long
+   to wait before telling a customer anything.
 
 ---
 
-## Other observations
+## Three behaviours we found by trial — please confirm they're intended
 
-- **`Rental/Save` takes ~17 seconds** (measured: 16.95s). `Select` returns in under
-  a second. Is that expected? We've raised our client timeout to 60s.
-- **`Rental/Bundle`** takes `request=P` (personal) / `request=C` (corporate), not
-  `EmirateCode`. With `EmirateCode` it returns 400.
-- **`FreeBoxes` needs a customer session** — 401 with the API key alone.
-- **`LocationId` must be the branch's own `officeId`**, not `mainOfficeId`. Naif is
-  `officeId 214` / `mainOfficeId 209`; `209` returns an empty list rather than an
-  error, which reads as "no boxes available".
-- **Availability varies sharply by branch** (Dubai, bundle `IN`, 30 Aug):
-  Dubai Central `201` → 0 · Naif `214` → 5 · Al Badaa `233` → 81 ·
-  Umm Suqeim `241` → 38 · Al Barsha `244` → 318 · Al Warqa `283` → 9
+| Finding | Why it matters |
+|---------|----------------|
+| `Select` needs **`uniqueBoxId`** from `FreeBoxes` (`2450063`), not `boxId` (`450063`). `boxId` returns `108 BOX_NOT_FREE`. | Reads as "someone took it", so we told customers boxes were unavailable when they were free. |
+| `paymentProperties.billingDetail` is **optional in the spec, required in practice — all six fields**. Omitted → `400 {"Error":"Error from payment gateway"}`. Partial (name + email only) → `400 … 157 ERROR_GETTING_HOLD_DETAILS`. | Neither error names the missing field, and the second points at the hold, which isn't the problem. This cost us a day. |
+| `UpdatePayment` takes **`paymentGateWayResponse.referenceNumber`**. `niOrderResult.reference` — also a UUID, same response — returns `500`. | Two UUIDs side by side with nothing to tell them apart. |
 
 ---
 
-## Reservations we've left stranded
-
-Testing created holds and orders that were never completed. If they don't expire
-on their own, could they be released?
-
-| Box | Branch | State |
-|-----|--------|-------|
-| 378781, 378785, 378790 | Naif (214) | held, no order |
-| 449691, 449949, 449989, 450000 | Al Barsha (244) | held, no order |
-| 450152 | Al Barsha (244) | order `260961736`, unpaid |
-| 449922, 449997 | Al Barsha (244) | orders `260961732`, `260961735`, unpaid |
-| 450364 | Al Barsha (244) | order `260961739`, unpaid |
-
----
-
-## The call sequence we're using
+## Working sequence, for reference
 
 ```
-Rental/Bundle          request=P
-Rental/BoxLocations    BundleId=IN, EmirateCode=DXB          → officeId per branch
-Rental/FreeBoxes       BundleId=IN, LocationId=<officeId>    → { uniqueBoxId, boxId }
-Rental/ExpiryDates     BundleId=IN                           → exact date strings
-Rental/Select          bundleId, uniqueBoxID, poBoxExpiryDate → subscriptionReferenceNumber
-Rental/Save            subscriptionReferenceNumber, totalAmount,
-                       userProfile, paymentProperties.billingDetail
+Rental/Bundle        request=P                              (not EmirateCode)
+Rental/BoxLocations  BundleId=IN, EmirateCode=DXB           → officeId per branch
+Rental/FreeBoxes     BundleId=IN, LocationId=<officeId>     → { uniqueBoxId, boxId }
+Rental/ExpiryDates   BundleId=IN                            → exact date strings
+Rental/Select        bundleId, uniqueBoxID, poBoxExpiryDate → subscriptionReferenceNumber
+Rental/Save          subscriptionReferenceNumber, totalAmount,
+                     userProfile, paymentProperties.billingDetail
 ```
 
-`poBoxExpiryDate` is copied verbatim from `ExpiryDates`, offset included
-(`2027-08-29T00:00:00+00:00`). Recomputing it or dropping the offset returns
-`400 "Invalid date value."`
+- `poBoxExpiryDate` must be copied **verbatim** from `ExpiryDates`, offset included
+  (`2027-08-29T00:00:00+00:00`). Recomputing it returns `400 "Invalid date value."`
+- `LocationId` is the branch's own `officeId`, not `mainOfficeId` — Naif is
+  `214` / `209`, and `209` returns an empty list rather than an error.
+- `Rental/Save` takes **~17s**; `Select` under 1s. Expected?
+- `FreeBoxes` returns 401 with the API key alone — it needs a customer session.
 
-Happy to jump on a call and walk through it live.
+*We previously raised `157 ERROR_GETTING_HOLD_DETAILS` with you. That was ours — an
+invented reference, a stale hold, and the partial `billingDetail` above. No action
+needed.*
+
+---
+
+## Reservations left stranded by testing
+
+Please release if they don't expire on their own — all Dubai:
+
+- **Held, no order:** 378781, 378785, 378790 (Naif) · 449691, 449949, 449989,
+  450000 (Al Barsha)
+- **Order created, unpaid:** 449922, 449997, 450063, 450152, 450364, 378797
+  (Al Barsha) — orders 260961732, 260961735, 260961736, 260961739, 260961740,
+  260961741
+
+---
+
+Happy to walk through it on a call.
