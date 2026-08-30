@@ -838,7 +838,13 @@ export async function executeOperation(
 
     const doFetch = async () => {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 15000);
+      // 15s is right for a lookup and far too short for a write. Rental/Save
+      // creates the order AND opens a payment on Emirates Post's gateway, which
+      // takes longer than that — so the whole chain would come good and then be
+      // cut off at the last call, after the customer had paid. A read that hangs
+      // should still fail fast; a write gets the time it needs.
+      const isWrite = op.method !== "GET" && op.method !== "HEAD";
+      const timer = setTimeout(() => ctrl.abort(), isWrite ? 60000 : 15000);
       try {
         return await fetch(url, { method: op.method, headers, body, signal: ctrl.signal });
       } finally {
@@ -898,6 +904,18 @@ export async function executeOperation(
     const trimmed = text.length > 4000 ? text.slice(0, 4000) + "…(truncated)" : text;
     return { result: `HTTP ${res.status} ${res.statusText}\n${trimmed}`, isError: !res.ok };
   } catch (e) {
+    // A write that timed out is not a write that failed. The request reached them
+    // and may well have been carried out; we simply stopped listening. Saying it
+    // failed sends the customer to support for something that may already be done,
+    // and a retry could book it twice.
+    const aborted = e instanceof Error && /abort/i.test(e.message);
+    if (aborted && op.method !== "GET" && op.method !== "HEAD") {
+      return {
+        result:
+          "TIMED OUT WITH THE OUTCOME UNKNOWN. The request was sent and no reply came back in time, so it may have succeeded on their side. Do NOT say it failed, do NOT say the booking was not recorded, and do NOT send it again — a retry could create a second one. Tell the customer it is taking longer than usual to confirm, that their payment is safe, and that you are checking; then check the status with a READ operation if one exists, and offer a callback only if that cannot confirm it either.",
+        isError: true,
+      };
+    }
     return { result: `Integration call failed: ${e instanceof Error ? e.message : "error"}`, isError: true };
   }
 }
