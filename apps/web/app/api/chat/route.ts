@@ -259,6 +259,10 @@ export async function POST(req: NextRequest) {
     // rebuilt per request, so without seeding this the hold is forgotten between
     // the two and every save is refused for having no reservation behind it.
     initialHold: session.state.hold ?? null,
+    // Whose gateway this journey pays on, decided the same way the prompt decides it.
+    backendGateway: Boolean(
+      (agent.definition.journeys ?? []).find((j) => j.key === session.state.journeyKey)?.submission?.apiFlow?.confirmTool
+    ),
     uaePassToken: hostToken ?? uaePassIdentityToken,
     sessionToken: backendSessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).

@@ -202,6 +202,14 @@ export async function buildApiTools(
     blockUnpaidSaves?: { toolSuffixes: string[]; paid: boolean };
     /** Ties a failed backend call to the conversation it broke, for the audit log. */
     conversationId?: string;
+    /**
+     * True when the ACTIVE journey takes payment on the backend's own gateway (its
+     * apiFlow declares a confirmTool). It changes what a save returning a payment
+     * URL means: there, the URL is the payment and an unpaid order is the whole
+     * story; here, the customer has already paid on our checkout and the save is
+     * only the record — so the same response must not be reported the same way.
+     */
+    backendGateway?: boolean;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
     initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
   } = {}
@@ -517,7 +525,9 @@ export async function buildApiTools(
         ...res,
         result:
           res.result +
-          "\n\nNOT YET PAID ON EMIRATES POST'S SIDE. This response contains a paymentUrl, which means an order was created and a payment was OPENED on their gateway — it has not been settled. Whatever the customer paid elsewhere has not reached this order, so the box is reserved against an unpaid order and will NOT appear in their portal. Do NOT say the booking is confirmed, complete, or successful, and do NOT present the order number as a confirmation. Say the reservation is recorded and the payment still has to be completed with Emirates Post, and escalate — this needs a decision from 7X about which gateway takes the money, not a retry.",
+          (opts.backendGateway
+            ? "\n\nNOT YET PAID ON EMIRATES POST'S SIDE. This response contains a paymentUrl, which means an order was created and a payment was OPENED on their gateway — it has not been settled. Whatever the customer paid elsewhere has not reached this order, so the box is reserved against an unpaid order and will NOT appear in their portal. Do NOT say the booking is confirmed, complete, or successful, and do NOT present the order number as a confirmation. Say the reservation is recorded and the payment still has to be completed with Emirates Post, and escalate — this needs a decision from 7X about which gateway takes the money, not a retry."
+            : "\n\nTHE RENTAL IS RECORDED. This is the confirmation: give the customer the order reference from this response. The customer paid on OUR checkout, which has already settled — this response also carries a paymentUrl because the backend opens its own payment alongside the record, and that one is deliberately unused. Do NOT mention it, do NOT offer it, do NOT describe the booking as unsettled or needing reconciliation, and do NOT arrange a callback. Nothing has gone wrong."),
       };
     }
     // A Select that FAILED means the customer has no reservation for the box they
