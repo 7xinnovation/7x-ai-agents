@@ -159,18 +159,56 @@ function ChatButtons({ labels, onSelect }: { labels: string[]; onSelect: (text: 
  * — but the customer should still get a button that opens a popup over the chat,
  * not a bare link that throws them into a new tab and loses the conversation.
  */
-function ChatPay({ url, amount, label }: { url: string; amount?: string; label?: string }) {
+function ChatPay({
+  url,
+  amount,
+  label,
+  onSelect,
+}: {
+  url: string;
+  amount?: string;
+  label?: string;
+  onSelect?: (text: string) => void;
+}) {
   const [opened, setOpened] = React.useState(false);
+  const [returned, setReturned] = React.useState(false);
+  const win = React.useRef<Window | null>(null);
+
+  // The return page tells us the customer came back; it does NOT tell us they
+  // paid, because only the backend can say that. So close the window and let the
+  // conversation ask — rather than leaving them on a page wondering, or making
+  // them type "I paid" to a chat that already knows they returned.
+  React.useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      const m = e.data as { source?: string; action?: string };
+      if (m?.source !== "dialog-extpay" || m.action !== "returned" || returned) return;
+      setReturned(true);
+      try {
+        win.current?.close();
+      } catch {
+        /* already gone */
+      }
+      win.current = null;
+      onSelect?.("I have completed the payment on the Emirates Post page. Please verify it and confirm my booking.");
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [onSelect, returned]);
+
   const open = () => {
     const w = 480;
     const h = 720;
     const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
     const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
-    const win = window.open(url, "dlg-extpay", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+    const opened = window.open(url, "dlg-extpay", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
     // Popup blocked: a same-tab navigation still gets them there, which beats a
     // button that silently does nothing.
-    if (!win) window.location.href = url;
-    else setOpened(true);
+    if (!opened) window.location.href = url;
+    else {
+      win.current = opened;
+      setOpened(true);
+    }
   };
   return (
     <div className="dlg-paycard ready">
@@ -182,13 +220,11 @@ function ChatPay({ url, amount, label }: { url: string; amount?: string; label?:
         {amount ? <span className="dlg-paycard-amount">{amount}</span> : null}
       </div>
       <div className="dlg-paycard-body">
-        <button className="dlg-paybtn" onClick={open}>
-          {opened ? "Reopen payment page" : "Pay now"}
+        <button className="dlg-paybtn" onClick={open} disabled={returned}>
+          {returned ? "Checking your payment…" : opened ? "Reopen payment page" : "Pay now"}
         </button>
-        {opened ? (
-          <div className="dlg-paycard-note">
-            Finish in the payment window, then come back here and tell me — I will confirm it.
-          </div>
+        {opened && !returned ? (
+          <div className="dlg-paycard-note">Finish in the payment window — I will pick it up from there.</div>
         ) : null}
       </div>
     </div>
@@ -503,7 +539,8 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         // `url:` (required), optional `amount:` and `label:`.
         const get = (k: string) => body.map((l) => l.match(new RegExp(`^\\s*${k}\\s*:\\s*(.+?)\\s*$`, "i"))).find(Boolean)?.[1];
         const purl = get("url");
-        if (purl && /^https:\/\//i.test(purl)) nodes.push(<ChatPay key={k++} url={purl} amount={get("amount")} label={get("label")} />);
+        if (purl && /^https:\/\//i.test(purl))
+          nodes.push(<ChatPay key={k++} url={purl} amount={get("amount")} label={get("label")} onSelect={onSelect} />);
         continue;
       }
       if (isLocate) {
