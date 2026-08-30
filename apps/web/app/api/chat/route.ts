@@ -243,7 +243,12 @@ export async function POST(req: NextRequest) {
   const unpaidSaveTools = paidAlready
     ? []
     : (agent.definition.journeys ?? [])
-        .filter((j) => j.submission?.requiresPayment && j.submission?.apiFlow?.saveTool)
+        // A journey with a confirmTool takes its payment on the BACKEND's gateway:
+        // the save is what creates the order and opens the payment, so it has to run
+        // before any money moves. Blocking it until paid would deadlock the journey
+        // it was written to protect. The gate stays on for internal-checkout
+        // journeys, where a save before payment really is a record written too soon.
+        .filter((j) => j.submission?.requiresPayment && j.submission?.apiFlow?.saveTool && !j.submission?.apiFlow?.confirmTool)
         .map((j) => j.submission!.apiFlow!.saveTool as string);
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
     blockUnpaidSaves: unpaidSaveTools.length ? { toolSuffixes: unpaidSaveTools, paid: paidAlready } : undefined,
