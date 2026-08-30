@@ -1,5 +1,5 @@
 import React from "react";
-import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning } from "@phosphor-icons/react";
+import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning, LockSimple } from "@phosphor-icons/react";
 import { tr, type LocalizedString, type Locale } from "@dialog/config";
 import { ChatMap } from "./ChatMap";
 import { ChatLocate } from "./ChatLocate";
@@ -150,6 +150,51 @@ function ChatButtons({ labels, onSelect }: { labels: string[]; onSelect: (text: 
  * acknowledgment checkboxes (e.g. EPGL Declaration & Undertaking) and the
  * confirm button stays disabled until every box is ticked.
  */
+/**
+ * A payment that happens on the BACKEND's own hosted page.
+ *
+ * The internal checkout renders a PaymentCard driven by a payment_initiated
+ * event, and polls our own gateway for the result. A rental is paid on Emirates
+ * Post's N-Genius page instead, so there is no event and nothing of ours to poll
+ * — but the customer should still get a button that opens a popup over the chat,
+ * not a bare link that throws them into a new tab and loses the conversation.
+ */
+function ChatPay({ url, amount, label }: { url: string; amount?: string; label?: string }) {
+  const [opened, setOpened] = React.useState(false);
+  const open = () => {
+    const w = 480;
+    const h = 720;
+    const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
+    const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
+    const win = window.open(url, "dlg-extpay", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+    // Popup blocked: a same-tab navigation still gets them there, which beats a
+    // button that silently does nothing.
+    if (!win) window.location.href = url;
+    else setOpened(true);
+  };
+  return (
+    <div className="dlg-paycard ready">
+      <div className="dlg-paycard-head">
+        <span className="dlg-paycard-icon">
+          <LockSimple size={15} weight="fill" />
+        </span>
+        <span className="dlg-paycard-title">{label || "Secure payment"}</span>
+        {amount ? <span className="dlg-paycard-amount">{amount}</span> : null}
+      </div>
+      <div className="dlg-paycard-body">
+        <button className="dlg-paybtn" onClick={open}>
+          {opened ? "Reopen payment page" : "Pay now"}
+        </button>
+        {opened ? (
+          <div className="dlg-paycard-note">
+            Finish in the payment window, then come back here and tell me — I will confirm it.
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function ChatToggles({
   items, title, confirmLabel, variant, defaultOn, onSelect,
 }: {
@@ -423,7 +468,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
-    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary|map|locate)?\s*$/);
+    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary|map|locate|pay)?\s*$/);
     if (fence) {
       const isCards = fence[1] === "cards";
       const isUpload = fence[1] === "upload";
@@ -432,6 +477,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
       const isSummary = fence[1] === "summary";
       const isMap = fence[1] === "map";
       const isLocate = fence[1] === "locate";
+      const isPay = fence[1] === "pay";
       i++;
       const body: string[] = [];
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
@@ -451,6 +497,13 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
           }
         }
         // No ctx (still streaming) → render nothing for the block yet.
+        continue;
+      }
+      if (isPay) {
+        // `url:` (required), optional `amount:` and `label:`.
+        const get = (k: string) => body.map((l) => l.match(new RegExp(`^\\s*${k}\\s*:\\s*(.+?)\\s*$`, "i"))).find(Boolean)?.[1];
+        const purl = get("url");
+        if (purl && /^https:\/\//i.test(purl)) nodes.push(<ChatPay key={k++} url={purl} amount={get("amount")} label={get("label")} />);
         continue;
       }
       if (isLocate) {

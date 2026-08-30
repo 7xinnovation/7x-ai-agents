@@ -66,6 +66,15 @@ export const CaseState = z.object({
       expiresAt: z.string().nullable().default(null),
       /** The box this reservation is for. A hold for a different box is not a hold. */
       uniqueBoxId: z.string().nullable().default(null),
+      /**
+       * Set once the order exists. paymentRef is the BACKEND's payment reference
+       * (paymentGateWayResponse.referenceNumber) — not the gateway's own order
+       * reference, which sits beside it in the same response, is also a UUID, and
+       * makes the confirm call answer 500.
+       */
+      orderNo: z.string().nullable().default(null),
+      paymentRef: z.string().nullable().default(null),
+      paymentUrl: z.string().nullable().default(null),
     })
     .nullable()
     .default(null),

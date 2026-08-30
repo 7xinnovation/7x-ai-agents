@@ -203,7 +203,7 @@ export async function buildApiTools(
     /** Ties a failed backend call to the conversation it broke, for the audit log. */
     conversationId?: string;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -211,7 +211,7 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -249,14 +249,14 @@ export async function buildApiTools(
    * had not chosen — ERROR_GETTING_HOLD_DETAILS, after taking the money.
    */
   const freshHold = (
-    h: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null | undefined
+    h: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null | undefined
   ) => {
     if (!h?.reference) return null;
     if (!h.expiresAt) return h;
     const t = Date.parse(h.expiresAt);
     return Number.isFinite(t) && t <= Date.now() ? null : h;
   };
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null =
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
@@ -393,6 +393,20 @@ export async function buildApiTools(
       if (patched) input = { ...input, body };
     }
 
+    // UpdatePayment takes the reference in the PATH; send the one we were given.
+    if (/updatepayment/i.test(toolName)) {
+      if (!lastHold?.paymentRef) {
+        return {
+          result:
+            "There is no order to confirm yet. A payment reference only exists once the save has created the order, and that has not happened in this conversation — so this call would fail whatever is sent. Create the order first, give the customer its payment link, and confirm only after they say they have paid.",
+          isError: true,
+        };
+      }
+      if (input?.paymentReferenceNo !== lastHold.paymentRef) {
+        input = { ...input, paymentReferenceNo: lastHold.paymentRef };
+      }
+    }
+
     const gate = opts.blockUnpaidSaves;
     if (gate && !gate.paid && gate.toolSuffixes.some((sfx) => toolName.endsWith(sfx))) {
       return {
@@ -480,6 +494,25 @@ export async function buildApiTools(
     // unpaid order, which is why it never appears in the customer's portal. The
     // agent, seeing an orderNo come back, told the customer it was confirmed.
     if (!res.isError && /rental_save$/i.test(toolName) && /paymentUrl/i.test(res.result)) {
+      // Keep the reference the confirm call actually wants. The save response
+      // carries two UUIDs: paymentGateWayResponse.referenceNumber, which
+      // UpdatePayment answers 200 for, and niOrderResult.reference, which it
+      // answers 500 for. Nothing about either says which is which.
+      try {
+        const b = JSON.parse(res.result.slice(res.result.indexOf("\n") + 1));
+        const p = b?.payload ?? b;
+        const g = p?.paymentGateWayResponse ?? {};
+        if (lastHold && g.referenceNumber) {
+          lastHold = {
+            ...lastHold,
+            orderNo: p?.orderNo ? String(p.orderNo) : null,
+            paymentRef: String(g.referenceNumber),
+            paymentUrl: g.paymentUrl ? String(g.paymentUrl) : null,
+          };
+        }
+      } catch {
+        /* an unreadable save leaves the confirm call to fail loudly rather than quietly */
+      }
       res = {
         ...res,
         result:
