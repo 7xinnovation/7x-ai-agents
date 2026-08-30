@@ -936,7 +936,7 @@ export async function POST(req: NextRequest) {
         // A hold issued this turn belongs to the case, not to this request.
         const heldNow = apiTools.getLastHold();
         if (heldNow && heldNow.reference !== finalState.hold?.reference) {
-          finalState = { ...finalState, hold: heldNow };
+          finalState = { ...finalState, hold: { ...heldNow, uniqueBoxId: heldNow.uniqueBoxId ?? null } };
         }
         await saveCase(session.caseId, finalState);
         // Persist a BACKEND session token minted this turn (e.g. OTP login) for later

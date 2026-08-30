@@ -64,6 +64,8 @@ export const CaseState = z.object({
       reference: z.string(),
       amount: z.number().nullable().default(null),
       expiresAt: z.string().nullable().default(null),
+      /** The box this reservation is for. A hold for a different box is not a hold. */
+      uniqueBoxId: z.string().nullable().default(null),
     })
     .nullable()
     .default(null),

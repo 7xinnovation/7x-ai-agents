@@ -203,7 +203,7 @@ export async function buildApiTools(
     /** Ties a failed backend call to the conversation it broke, for the audit log. */
     conversationId?: string;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -211,7 +211,7 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -241,8 +241,23 @@ export async function buildApiTools(
   // part of this chain — it is offered separately and only honoured by uaepass_live.
   let captured: string | null = null;
   /** The live Emirates Post hold from the most recent successful Rental/Select. */
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null } | null =
-    opts.initialHold ?? null;
+  /**
+   * A reservation is only a reservation while it is CURRENT. Seeding the last one
+   * from the case carried it across attempts: a Select that came back BOX_NOT_FREE
+   * left the previous hold in place, the payment gate saw one and allowed the
+   * charge, and the save then quoted a reference belonging to a box the customer
+   * had not chosen — ERROR_GETTING_HOLD_DETAILS, after taking the money.
+   */
+  const freshHold = (
+    h: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null | undefined
+  ) => {
+    if (!h?.reference) return null;
+    if (!h.expiresAt) return h;
+    const t = Date.parse(h.expiresAt);
+    return Number.isFinite(t) && t <= Date.now() ? null : h;
+  };
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null } | null =
+    freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
   // Remember the emirate + bundle of the most recent branch-locations lookup so
@@ -451,11 +466,20 @@ export async function buildApiTools(
             reference: String(ref),
             amount: typeof p?.minimumAmount === "number" ? p.minimumAmount : null,
             expiresAt: p?.subcsriptionReferenceNumberExpiryDate ?? p?.subscriptionReferenceNumberExpiryDate ?? null,
+            uniqueBoxId: String(((input?.body ?? {}) as Record<string, unknown>).uniqueBoxID ?? "") || null,
           };
         }
       } catch {
         /* a Select we cannot read leaves lastHold alone; the save below refuses */
       }
+    }
+    // A Select that FAILED means the customer has no reservation for the box they
+    // just chose. Whatever was held before is for a different box, so it must not
+    // stand in for this one — that is what let a charge through on a box the
+    // backend had already refused.
+    if (res.isError && /rental_select$/i.test(toolName)) {
+      const asked = String(((input?.body ?? {}) as Record<string, unknown>).uniqueBoxID ?? "");
+      if (asked && lastHold && lastHold.uniqueBoxId !== asked) lastHold = null;
     }
     // Capture a freshly-minted session token from a login/token op for reuse.
     if (!res.isError && isAuthOperation(entry.op)) {
