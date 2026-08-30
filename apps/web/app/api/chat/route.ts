@@ -9,7 +9,7 @@ import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
-import { sendEmail } from "@/lib/email";
+import { sendEmail, textToHtml } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
@@ -608,7 +608,10 @@ export async function POST(req: NextRequest) {
     if (name !== EMAIL_TOOL_NAME) return execIntegration(name, input);
     const to = String(input.to ?? "").trim();
     const subject = String(input.subject ?? "").slice(0, 180) || `${agent.definition.name} confirmation`;
-    const res = await sendEmail({ to, subject, text: String(input.body ?? "") });
+    const bodyText = String(input.body ?? "");
+    // Sent as both: the text part unchanged, plus an HTML rendering so the details
+    // read as details rather than as one undifferentiated block.
+    const res = await sendEmail({ to, subject, text: bodyText, html: textToHtml(bodyText, subject) });
     await audit({ ...a, actor: "agent", action: res.ok ? "email_sent" : "email_send_failed", payload: { to, subject, reason: res.reason } });
     if (res.ok) {
       return {

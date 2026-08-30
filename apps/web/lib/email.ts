@@ -94,3 +94,58 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
 
   return { ok: false, reason: "email_not_configured" };
 }
+
+/**
+ * Render an agent-written plain-text email as HTML.
+ *
+ * The confirmation went out as text only, so a mail client showed a wall of
+ * unformatted lines with the details — order reference, box number, expiry, price
+ * — indistinguishable from the prose around them. The model writes plain text and
+ * should keep writing plain text; this reads its shape instead of asking it for
+ * markup, which it would get wrong at some point and which no one could review.
+ *
+ * A run of "Label: value" lines becomes a table; everything else stays a
+ * paragraph. The text part is still sent unchanged, so a client that prefers it,
+ * or strips HTML, loses nothing.
+ */
+export function textToHtml(text: string, heading?: string): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const row = /^\s*([A-Za-z][^:]{0,44}):\s*(.+?)\s*$/;
+
+  const blocks = text.replace(/\r\n/g, "\n").split(/\n\s*\n/).map((b) => b.split("\n").filter((l) => l.trim()));
+  const parts: string[] = [];
+  for (const lines of blocks) {
+    if (!lines.length) continue;
+    const matched = lines.map((l) => l.match(row));
+    // Two or more label/value lines read as a detail block, not as prose.
+    if (matched.filter(Boolean).length >= 2 && matched.every(Boolean)) {
+      const cells = matched
+        .map(
+          (m) =>
+            `<tr><td style="padding:8px 16px 8px 0;color:#5b6472;white-space:nowrap;border-bottom:1px solid #edf0f4">${esc(
+              m![1]!
+            )}</td><td style="padding:8px 0;font-weight:600;color:#111827;text-align:right;border-bottom:1px solid #edf0f4">${esc(
+              m![2]!
+            )}</td></tr>`
+        )
+        .join("");
+      parts.push(`<table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px">${cells}</table>`);
+      continue;
+    }
+    parts.push(
+      `<p style="margin:14px 0;line-height:1.55;color:#111827;font-size:14px">${lines.map(esc).join("<br>")}</p>`
+    );
+  }
+
+  return [
+    `<div style="margin:0;padding:24px;background:#f6f7f9">`,
+    `<div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e8ee;border-radius:14px;padding:28px;`,
+    `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">`,
+    heading
+      ? `<h1 style="margin:0 0 4px;font-size:17px;font-weight:700;color:#111827">${esc(heading)}</h1>`
+      : "",
+    parts.join(""),
+    `</div></div>`,
+  ].join("");
+}

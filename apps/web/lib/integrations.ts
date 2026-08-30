@@ -440,7 +440,7 @@ export async function buildApiTools(
     // the model sees them — a guest proving knowledge of a box number must not
     // learn the holder's name, email, phone, or ID.
     const identified = Boolean(opts.authenticated) || Boolean(runtimeToken()) || Boolean(opts.uaePassToken);
-    const res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), {
+    let res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), {
       redactPII: !identified,
       identityToken: opts.uaePassToken,
       // Already-verified customer: a backend 401 must never be reported as "sign in
@@ -472,6 +472,20 @@ export async function buildApiTools(
       } catch {
         /* a Select we cannot read leaves lastHold alone; the save below refuses */
       }
+    }
+    // Rental/Save creates the order and OPENS a payment on Emirates Post's own
+    // gateway — it does not record one already taken. Proved against staging: after
+    // a 200 the N-Genius order sits at state STARTED, and UpdatePayment answers
+    // {"isPaymentSuccess": false, "amountPaid": 0.0}. The box is reserved against an
+    // unpaid order, which is why it never appears in the customer's portal. The
+    // agent, seeing an orderNo come back, told the customer it was confirmed.
+    if (!res.isError && /rental_save$/i.test(toolName) && /paymentUrl/i.test(res.result)) {
+      res = {
+        ...res,
+        result:
+          res.result +
+          "\n\nNOT YET PAID ON EMIRATES POST'S SIDE. This response contains a paymentUrl, which means an order was created and a payment was OPENED on their gateway — it has not been settled. Whatever the customer paid elsewhere has not reached this order, so the box is reserved against an unpaid order and will NOT appear in their portal. Do NOT say the booking is confirmed, complete, or successful, and do NOT present the order number as a confirmation. Say the reservation is recorded and the payment still has to be completed with Emirates Post, and escalate — this needs a decision from 7X about which gateway takes the money, not a retry.",
+      };
     }
     // A Select that FAILED means the customer has no reservation for the box they
     // just chose. Whatever was held before is for a different box, so it must not
