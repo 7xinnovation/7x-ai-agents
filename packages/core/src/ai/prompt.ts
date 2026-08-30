@@ -30,8 +30,17 @@ export interface SystemPrompt {
 function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journey["submission"]>["apiFlow"]>): string {
   const sys = f.service ? `the ${f.service} system` : "the connected backend";
 
+  // Which gateway takes the money is decided by whether we can VERIFY a payment on
+  // the backend's own one. A saveTool that returns a hosted payment URL is only
+  // usable if a confirmTool can then say whether the money arrived — without that,
+  // sharing the URL means asking the customer to pay somewhere we cannot check,
+  // and the booking could only ever be confirmed on trust. So a saveTool WITHOUT a
+  // confirmTool means: take payment through the internal checkout, then use the
+  // save to record the transaction.
+  const backendGateway = Boolean(f.saveTool && f.confirmTool);
+
   // Pricing-only mode: real details + real price, then internal checkout.
-  if (!f.saveTool) {
+  if (!backendGateway) {
     const lines: string[] = [
       `- Complete this journey using REAL data from ${sys} for everything, then take payment through the internal checkout. Never quote a price you did not get from a tool.`,
     ];
@@ -40,7 +49,9 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
     if (f.pricingTool)
       lines.push(`  2. Get the AUTHORITATIVE amount for the chosen option from ${f.pricingTool}. If you have ALREADY fetched and shown that exact price (e.g. on the option/duration card the customer just picked), REUSE it — do NOT call ${f.pricingTool} again for the same option. Quote exactly that figure and ask the customer to confirm.`);
     lines.push(`  3. After the customer confirms, call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"} and share the secure link. WAIT for confirmation.`);
-    lines.push(`  4. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. submit_case IS the finalisation for this journey — NEVER tell the customer it is complete, confirmed, or that a receipt link is available until submit_case has returned a reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
+    if (f.saveTool)
+      lines.push(`  4. Once payment is confirmed (payment status "paid"), call ${f.saveTool} ONCE to record the transaction with ${sys} and give the customer the reference from its response. Do NOT call it before the payment is "paid", and do NOT share any payment URL it returns — the customer has already paid on the internal checkout, and sending them to a second payment page would charge them twice.`);
+    lines.push(`  ${f.saveTool ? 5 : 4}. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. submit_case IS the finalisation for this journey — NEVER tell the customer it is complete, confirmed, or that a receipt link is available until submit_case has returned a reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
     lines.push(`  Keep the case panel live: as soon as you learn each of this journey's fields, call collect_field for it (e.g. the box number, the chosen period) — including values you read from a tool — so the customer's side panel fills in step by step, not all at the end.`);
     if (f.notes) lines.push(`  Field-mapping notes: ${f.notes}`);
     return lines.join("\n");
