@@ -486,7 +486,7 @@ export async function buildApiTools(
     // something to be recalled, it is something to be held onto.
     if (!res.isError && /rental_select$/i.test(toolName)) {
       try {
-        const body = JSON.parse(res.result.slice(res.result.indexOf("\n") + 1));
+        const body = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const p = body?.payload ?? body;
         const ref = p?.subscriptionReferenceNumber;
         if (ref) {
@@ -513,7 +513,7 @@ export async function buildApiTools(
       // UpdatePayment answers 200 for, and niOrderResult.reference, which it
       // answers 500 for. Nothing about either says which is which.
       try {
-        const b = JSON.parse(res.result.slice(res.result.indexOf("\n") + 1));
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const p = b?.payload ?? b;
         const g = p?.paymentGateWayResponse ?? {};
         if (lastHold && g.referenceNumber) {
@@ -806,7 +806,7 @@ export async function executeOperation(
   input: Record<string, unknown>,
   runtimeToken?: string,
   opts: { redactPII?: boolean; identityToken?: string; customerAuthenticated?: boolean } = {}
-): Promise<{ result: string; isError?: boolean }> {
+): Promise<{ result: string; isError?: boolean; raw?: string }> {
   try {
     const tokenAuth = spec.authType === "bearer" || spec.authType === "uaepass_test" || spec.authType === "uaepass_live";
     // Effective bearer, in strict precedence (FB-1485):
@@ -965,7 +965,11 @@ export async function executeOperation(
     // Redact BEFORE truncation so a long payload can't smuggle PII past the cut.
     if (opts.redactPII) text = redactGuestPII(text);
     const trimmed = text.length > 4000 ? text.slice(0, 4000) + "…(truncated)" : text;
-    return { result: `HTTP ${res.status} ${res.statusText}\n${trimmed}`, isError: !res.ok };
+    // `raw` is for US, never for the model: the cut above lands mid-JSON on a long
+    // response, and anything parsing the trimmed copy gets nothing. The rental save
+    // is 4.3KB, so the order number and payment reference were being dropped on the
+    // floor by a limit that exists to protect the prompt, not the code.
+    return { result: `HTTP ${res.status} ${res.statusText}\n${trimmed}`, isError: !res.ok, raw: text };
   } catch (e) {
     // A write that timed out is not a write that failed. The request reached them
     // and may well have been carried out; we simply stopped listening. Saying it
