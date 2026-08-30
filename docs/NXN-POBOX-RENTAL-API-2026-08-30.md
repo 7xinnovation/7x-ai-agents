@@ -1,4 +1,4 @@
-# PO Box Rental API — two open questions
+# PO Box Rental API — one open question
 
 | | |
 |---|---|
@@ -7,84 +7,39 @@
 | **Environment** | `https://box-stg.emiratespost.ae/services/pobox` (staging) |
 | **Date** | 30 August 2026 |
 
-We have the rental flow working end to end against staging, with one exception and
-one design question. Everything below is from live calls on staging, with the
-customer's own UAE PASS session token as the bearer.
+The rental flow works end to end against staging — availability, hold, order
+creation. One design question remains, and there are a few behaviours we found
+only by trial that we would like confirmed.
+
+Everything below is from live calls on staging, with the customer's own UAE PASS
+session token as the bearer.
 
 ---
 
-## 1. `Rental/Save` cannot find a hold that `Rental/Select` just created
+## The sequence works
 
-This is the blocker. `Select` succeeds and returns a reference; `Save` rejects that
-same reference seconds later, in the same session.
+For completeness, since we raised `157 ERROR_GETTING_HOLD_DETAILS` with you
+earlier: that was ours, not yours. Every occurrence traced back to something wrong
+on our side — an invented reference, a hold belonging to a different box, and an
+incomplete `billingDetail`. With a correct payload the sequence is reliable:
 
-**The hold — succeeds**
-
-```http
-POST /api/v1/Rental/Select
-{
-  "bundleId": "IN",
-  "uniqueBoxID": "2450364",
-  "poBoxExpiryDate": "2027-08-29T00:00:00+00:00"
-}
-```
 ```jsonc
-200 OK
-{ "payload": {
-    "subscriptionReferenceNumber": "260611701",
-    "minimumAmount": 370.0,
-    "subcsriptionReferenceNumberExpiryDate": "2026-08-30T15:07:10+00:00"
-} }
+POST /api/v1/Rental/Select   { "bundleId": "IN", "uniqueBoxID": "2450063",
+                               "poBoxExpiryDate": "2027-08-29T00:00:00+00:00" }
+200 OK   subscriptionReferenceNumber: 260611703, minimumAmount: 370.0
+
+POST /api/v1/Rental/Save     { "subscriptionReferenceNumber": "260611703",
+                               "totalAmount": 370, "userProfile": {…},
+                               "paymentProperties": { "billingDetail": {…all six fields…} } }
+200 OK   orderNo: 260961740
 ```
 
-**The save — rejects it**
-
-```http
-POST /api/v1/Rental/Save
-{
-  "subscriptionReferenceNumber": "260611701",
-  "totalAmount": 370,
-  "requestSource": "PoBoxAIBot",
-  "userProfile": {
-    "customerNameEN": "…", "mobileNumber": "…",
-    "email": "…", "idNumber": "784…", "idType": "EmiratesID"
-  },
-  "paymentProperties": {
-    "paymentReturnUrl": "https://…",
-    "saveCreditCard": true,
-    "isAutomaticSubscriptionEnabled": true,
-    "billingDetail": { "firstName": "…", "lastName": "…", "emailAddress": "…",
-                       "address": "Dubai", "cityName": "Dubai",
-                       "countryName": "United Arab Emirates" }
-  }
-}
-```
-```jsonc
-400 Bad Request
-{ "errorDetails": {
-    "RESPONSE_CODE": "157",
-    "ERROR_CODE": "157",
-    "ERROR_MESSAGE": "ERROR_GETTING_HOLD_DETAILS",
-    "RESPONSE_MESSAGE": "SYSTEM SYSTEM ERROR: PLEASE CONTACT SUPPORT TEAM"
-} }
-```
-
-The same payload **sometimes succeeds** — we have created real orders this way
-(`260961735`, `260961739`) — and sometimes returns 157. We cannot see what
-distinguishes the two.
-
-### What we'd like to know
-
-1. Is `subscriptionReferenceNumber` from `Select` the value `Save` expects, or is a
-   different identifier intended?
-2. Is any call required **between** `Select` and `Save`?
-3. Does the hold need anything we are not sending — `holdReferenceNumber`,
-   `physicalBoxRequired`, `orderNumber`?
-4. Is there a timing or session constraint that would explain intermittent 157s?
+No changes needed from you for this. It is recorded here only because we asked
+about it before we understood it.
 
 ---
 
-## 2. `Save` opens its own payment — can a rental paid elsewhere be recorded?
+## The open question: `Save` opens its own payment
 
 On success, `Save` returns a hosted payment page and an N-Genius order on **your**
 outlet:
@@ -132,7 +87,7 @@ customer's portal** even though the rental record exists.
 | # | Finding | Why it matters |
 |---|---------|----------------|
 | 1 | `Select` needs **`uniqueBoxId`** from `FreeBoxes` (e.g. `2450364`), **not** `boxId` (`450364`). Sending `boxId` returns `108 BOX_NOT_FREE`. | `BOX_NOT_FREE` reads as "someone else took it". We were telling customers boxes were unavailable when they were free and we'd sent the wrong identifier. |
-| 2 | `paymentProperties.billingDetail` is **optional in the spec but required in practice**. Omitting it returns `400 {"Error":"Error from payment gateway"}`. | The error names the gateway, not the missing field, so it reads as an outage on your side. |
+| 2 | `paymentProperties.billingDetail` is **optional in the spec but required in practice**, and all six fields are needed. Omitting the block returns `400 {"Error":"Error from payment gateway"}`; sending it with only `firstName`, `lastName`, `emailAddress` returns `400 … 157 ERROR_GETTING_HOLD_DETAILS`. | Neither error names the missing field, and the second one points at the hold, which is not the problem. This cost us most of a day. |
 | 3 | `UpdatePayment` takes **`paymentGateWayResponse.referenceNumber`**. Passing `niOrderResult.reference` — also a UUID, in the same response — returns `500 Internal system error`. | Two UUIDs side by side with nothing to distinguish them. |
 
 ---
@@ -155,8 +110,8 @@ customer's portal** even though the rental record exists.
 
 ## Reservations we've left stranded
 
-Testing created holds and orders that were never completed, because of the two
-issues above. If they don't expire on their own, could they be released?
+Testing created holds and orders that were never completed. If they don't expire
+on their own, could they be released?
 
 | Box | Branch | State |
 |-----|--------|-------|
@@ -184,5 +139,4 @@ Rental/Save            subscriptionReferenceNumber, totalAmount,
 (`2027-08-29T00:00:00+00:00`). Recomputing it or dropping the offset returns
 `400 "Invalid date value."`
 
-Happy to jump on a call and walk through it live — we can reproduce both issues on
-demand.
+Happy to jump on a call and walk through it live.

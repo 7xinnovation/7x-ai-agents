@@ -381,20 +381,26 @@ export async function buildApiTools(
       // that names the gateway and says nothing about the field it is missing, and
       // which the agent duly relayed as a fault on Emirates Post's side. Verified
       // against staging: identical payload, billingDetail added, HTTP 200.
+      // COMPLETE it, do not merely supply it when absent. Skipping whenever the
+      // model had written something left a billingDetail of firstName, lastName and
+      // emailAddress only — no address, city or country — and that save came back
+      // 157. Every save that carried all six fields has succeeded.
       const pay = (body.paymentProperties ?? {}) as Record<string, unknown>;
-      if (!pay.billingDetail) {
-        const u = (body.userProfile ?? {}) as Record<string, unknown>;
-        const full = String(u.customerNameEN ?? u.customerNameAr ?? "").trim();
-        const cut = full.lastIndexOf(" ");
-        const emirate = String((input as Record<string, unknown>)?.emirateCode ?? body.emirateCode ?? "").trim();
-        pay.billingDetail = {
-          firstName: cut > 0 ? full.slice(0, cut) : full,
-          lastName: cut > 0 ? full.slice(cut + 1) : "",
-          emailAddress: String(u.email ?? ""),
-          address: emirate || "United Arab Emirates",
-          cityName: emirate || "United Arab Emirates",
-          countryName: "United Arab Emirates",
-        };
+      const u = (body.userProfile ?? {}) as Record<string, unknown>;
+      const full = String(u.customerNameEN ?? u.customerNameAr ?? "").trim();
+      const cut = full.lastIndexOf(" ");
+      const emirate = String((input as Record<string, unknown>)?.emirateCode ?? body.emirateCode ?? "").trim();
+      const given = (pay.billingDetail ?? {}) as Record<string, unknown>;
+      const filled = {
+        firstName: String(given.firstName ?? "") || (cut > 0 ? full.slice(0, cut) : full),
+        lastName: String(given.lastName ?? "") || (cut > 0 ? full.slice(cut + 1) : ""),
+        emailAddress: String(given.emailAddress ?? "") || String(u.email ?? ""),
+        address: String(given.address ?? "") || emirate || "United Arab Emirates",
+        cityName: String(given.cityName ?? "") || emirate || "United Arab Emirates",
+        countryName: String(given.countryName ?? "") || "United Arab Emirates",
+      };
+      if (JSON.stringify(given) !== JSON.stringify(filled)) {
+        pay.billingDetail = filled;
         body.paymentProperties = pay;
         patched = true;
       }
