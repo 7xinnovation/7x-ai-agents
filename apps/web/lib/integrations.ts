@@ -348,10 +348,34 @@ export async function buildApiTools(
         };
       }
       const body = (input?.body ?? {}) as Record<string, unknown>;
+      let patched = false;
       if (body.subscriptionReferenceNumber !== lastHold.reference) {
         body.subscriptionReferenceNumber = lastHold.reference;
-        input = { ...input, body };
+        patched = true;
       }
+      // billingDetail is optional in the spec and mandatory in practice. Without it
+      // the call comes back 400 {"Error":"Error from payment gateway"} — a message
+      // that names the gateway and says nothing about the field it is missing, and
+      // which the agent duly relayed as a fault on Emirates Post's side. Verified
+      // against staging: identical payload, billingDetail added, HTTP 200.
+      const pay = (body.paymentProperties ?? {}) as Record<string, unknown>;
+      if (!pay.billingDetail) {
+        const u = (body.userProfile ?? {}) as Record<string, unknown>;
+        const full = String(u.customerNameEN ?? u.customerNameAr ?? "").trim();
+        const cut = full.lastIndexOf(" ");
+        const emirate = String((input as Record<string, unknown>)?.emirateCode ?? body.emirateCode ?? "").trim();
+        pay.billingDetail = {
+          firstName: cut > 0 ? full.slice(0, cut) : full,
+          lastName: cut > 0 ? full.slice(cut + 1) : "",
+          emailAddress: String(u.email ?? ""),
+          address: emirate || "United Arab Emirates",
+          cityName: emirate || "United Arab Emirates",
+          countryName: "United Arab Emirates",
+        };
+        body.paymentProperties = pay;
+        patched = true;
+      }
+      if (patched) input = { ...input, body };
     }
 
     const gate = opts.blockUnpaidSaves;
