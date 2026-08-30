@@ -228,8 +228,6 @@ export async function POST(req: NextRequest) {
       log.warn("host_token_rejected", {
         agentId: agent.id,
         conversationId: session.conversationId,
-    // Select and Save are different turns; the hold has to survive between them.
-    initialHold: session.state.hold ?? null,
         reason,
         // Distinguishes "NXN sent us something bad" from "we are not set up yet",
         // which look identical from the customer's side and need opposite fixes.
@@ -251,6 +249,11 @@ export async function POST(req: NextRequest) {
     blockUnpaidSaves: unpaidSaveTools.length ? { toolSuffixes: unpaidSaveTools, paid: paidAlready } : undefined,
     // So a backend refusal is recoverable afterwards, not only in this turn's context.
     conversationId: session.conversationId,
+    // Select and Save land in DIFFERENT TURNS — the reservation is made when the
+    // payment is taken, the save happens once the payment settles. buildApiTools is
+    // rebuilt per request, so without seeding this the hold is forgotten between
+    // the two and every save is refused for having no reservation behind it.
+    initialHold: session.state.hold ?? null,
     uaePassToken: hostToken ?? uaePassIdentityToken,
     sessionToken: backendSessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
