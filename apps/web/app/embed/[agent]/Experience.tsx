@@ -34,6 +34,7 @@ import { Microphone } from "@phosphor-icons/react";
 import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
+import { showSurvey } from "./customerPulse";
 
 interface PaymentInfo {
   reference: string;
@@ -989,6 +990,11 @@ export function Experience({
             };
             return next;
           });
+        } else if (ev.type === "survey") {
+          // Customer Pulse, after a completed purchase. Fire and forget: the
+          // server decided the purchase is real, and nothing in the chat waits
+          // on whether the survey opens.
+          void showSurvey(ev.token, ev.locale ?? locale, Boolean(ev.sandbox));
         } else if (ev.type === "case") {
           setCaseState(ev.state);
         } else if (ev.type === "citation") {

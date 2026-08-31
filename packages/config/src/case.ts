@@ -94,6 +94,8 @@ export const CaseState = z.object({
       orderNo: z.string().nullable().default(null),
       paymentRef: z.string().nullable().default(null),
       paymentUrl: z.string().nullable().default(null),
+      /** When Emirates Post confirmed the money arrived. */
+      paidAt: z.string().nullable().default(null),
     })
     .nullable()
     .default(null),
@@ -103,6 +105,12 @@ export const CaseState = z.object({
    * report a completed sign-in and the Emirates Post flow fires two of them.
    */
   pulsedAt: z.string().nullable().default(null),
+  /**
+   * When the Customer Pulse survey was offered for this case. One completed
+   * purchase, one survey: the token is minted against the transaction, so
+   * issuing a second would attach another response to the same order.
+   */
+  surveyIssuedAt: z.string().nullable().default(null),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   status: z.enum(["draft", "ready", "submitted", "escalated"]),
@@ -119,6 +127,7 @@ export function emptyCase(): CaseState {
     offeredBoxIds: [],
     hold: null,
     pulsedAt: null,
+    surveyIssuedAt: null,
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },
     reference: null,

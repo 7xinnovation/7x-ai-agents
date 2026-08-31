@@ -7,6 +7,7 @@ import { redactGuestPII } from "./pii";
 import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
+import { parseHours, openNow } from "./branchHours";
 
 export type EnvKey = "staging" | "production";
 
@@ -221,7 +222,7 @@ export async function buildApiTools(
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -229,7 +230,7 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
 }> {
@@ -278,7 +279,7 @@ export async function buildApiTools(
   };
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null =
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
@@ -740,6 +741,21 @@ export async function buildApiTools(
         /* an unreadable list leaves the previous ids in place */
       }
     }
+    // The registration fee, named on the bundle card.
+    //
+    // Emirates Post asked for it to sit under the price, and the price on this
+    // response is the annual rental alone: MyBox reads 300 and the customer pays
+    // 370. The amount is nowhere in this payload and there is no endpoint for it,
+    // so the card says a fee applies and the figure comes from the hold, where it
+    // is itemised. Naming a number we cannot source is how AED 25 happened.
+    if (!res.isError && /rental_bundle$/i.test(toolName)) {
+      res = {
+        ...res,
+        result:
+          res.result +
+          "\n\nbundle_Price is the ANNUAL RENTAL ONLY. Every new rental also carries a one-time registration fee that is not in this response and cannot be looked up before the box is reserved. On each bundle card, put the rental as the price and add a line beneath it saying a one-time registration fee applies and is shown in full before payment (e.g. `desc: Plus a one-time registration fee, shown before you pay`). Do NOT state an amount for it, do NOT add one to the price, and do NOT leave it unmentioned — the customer sees the real total for the first time at the payment summary, and it is higher than the card.",
+      };
+    }
     // Tell the customer which branches actually have boxes.
     //
     // BoxLocations lists every branch in the emirate whether or not one is free,
@@ -788,16 +804,28 @@ export async function buildApiTools(
           let annotated = false;
           for (const r of rows) {
             const n = pooled ? byLoc.get(emirate) : byLoc.get(asStr(r.officeId));
-            if (n === null || n === undefined) continue;
-            r.freeBoxCount = n;
-            annotated = true;
+            if (n !== null && n !== undefined) {
+              r.freeBoxCount = n;
+              annotated = true;
+            }
+            // Whether the doors are open, worked out from the two strings already
+            // in this row. The model has no clock in Dubai and reads "20:00 PM"
+            // as ambiguous, so it is not asked to.
+            const h = parseHours(asStr(r.workingDays), asStr(r.workingTime));
+            if (h) {
+              const state = openNow(h);
+              r.openNow = state.open;
+              if (!state.open) r.opensAt = state.opensAt;
+              annotated = true;
+            }
           }
           if (annotated) {
             res = {
               ...res,
               result:
                 `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(b)}` +
-                "\n\nfreeBoxCount is how many boxes are FREE at that branch right now, counted live. A branch with 0 has none: show it, but show it as unavailable — a fenced cards block line `disabled: yes` greys it out and stops the customer choosing it — and never present it as an option or let them pick it. Branches with no freeBoxCount were not counted; leave those alone.",
+                "\n\nfreeBoxCount is how many boxes are FREE at that branch right now, counted live. A branch with 0 has none: show it, but show it as unavailable — a fenced cards block line `disabled: yes` greys it out and stops the customer choosing it — and never present it as an option or let them pick it. Branches with no freeBoxCount were not counted; leave those alone." +
+                "\n\nopenNow says whether the branch is open at this moment, in UAE time; when it is false, opensAt is when it next opens. A CLOSED branch can still be rented — say so — but the customer must be told before they pick it, not after: put `badge: Closed now` on its card and give the opening time in the line beneath (e.g. `desc: Closed now, opens 08:00`). If the branch they choose is closed, tell them plainly, say when it opens, and in the same reply name a branch from this list that is open now and has boxes, as an alternative they can take instead. Never let a customer walk to a closed counter because we did not mention it.",
               raw: JSON.stringify(b),
             };
           }
@@ -840,6 +868,21 @@ export async function buildApiTools(
             ? "\n\nNOT YET PAID ON EMIRATES POST'S SIDE. This response contains a paymentUrl, which means an order was created and a payment was OPENED on their gateway — it has not been settled. Whatever the customer paid elsewhere has not reached this order, so the box is reserved against an unpaid order and will NOT appear in their portal. Do NOT say the booking is confirmed, complete, or successful, and do NOT present the order number as a confirmation. Say the reservation is recorded and the payment still has to be completed with Emirates Post, and escalate — this needs a decision from 7X about which gateway takes the money, not a retry."
             : "\n\nTHE RENTAL IS RECORDED. This is the confirmation: give the customer the order reference from this response. The customer paid on OUR checkout, which has already settled — this response also carries a paymentUrl because the backend opens its own payment alongside the record, and that one is deliberately unused. Do NOT mention it, do NOT offer it, do NOT describe the booking as unsettled or needing reconciliation, and do NOT arrange a callback. Nothing has gone wrong."),
       };
+    }
+    // The moment the money is confirmed. It is not a fact the model can be asked
+    // for -- it says "payment confirmed" whenever it reads well -- and the survey
+    // Emirates Post asked us to show is owed to a completed purchase, not to a
+    // hopeful one.
+    if (!res.isError && /updatepayment/i.test(toolName)) {
+      try {
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const p = b?.payload ?? b;
+        if (lastHold && p?.isPaymentSuccess === true) {
+          lastHold = { ...lastHold, paidAt: lastHold.paidAt ?? new Date().toISOString() };
+        }
+      } catch {
+        /* an unreadable confirm leaves the purchase unconfirmed, which is the safe way round */
+      }
     }
     // A Select that FAILED means the customer has no reservation for the box they
     // just chose. Whatever was held before is for a different box, so it must not

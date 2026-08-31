@@ -21,6 +21,7 @@ import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch
 import { regionsFor, searchRegions } from "@/lib/epRegions";
 import { payFenceGuard } from "@/lib/payFence";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
+import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -194,6 +195,8 @@ export async function POST(req: NextRequest) {
    */
   let hostToken: string | undefined;
   let verifiedEmiratesId: string | undefined;
+  /** Name and mobile from the same verified introspection, for the survey. */
+  let verifiedIdentity: { name?: string; mobile?: string } | undefined;
   if (body.uaePassToken) {
     // Two shapes, decided by what the token IS rather than by configuration:
     // a signed JWS is verified against a key; Emirates Post's identity-service
@@ -215,6 +218,7 @@ export async function POST(req: NextRequest) {
         if (v.ok) {
           sub = v.identity.sub;
           verifiedEmiratesId = v.identity.emiratesId;
+          verifiedIdentity = { name: v.identity.name, mobile: v.identity.mobileNumber };
         } else reason = v.reason;
       }
     }
@@ -578,18 +582,43 @@ export async function POST(req: NextRequest) {
           };
         }
         if (name === MYCOMPANIES_TOOL) {
-          const companies = await companiesByEmiratesId(agent.id, env, String(input.emiratesId ?? ""), caller);
+          // Two different questions wear the same words. The licensing registry
+          // knows what is registered to the customer's Emirates ID; the box list
+          // knows which companies they already hold PO Boxes for. Asked "what
+          // companies do I have", we answered from the registry alone and left out
+          // the two they had rented boxes for that same afternoon.
+          const eid = String(input.emiratesId ?? "");
+          const [registry, boxes] = await Promise.all([
+            companiesByEmiratesId(agent.id, env, eid, caller).catch(() => []),
+            poBoxesByEmiratesId(agent.id, env, eid, caller).catch(() => []),
+          ]);
+          const onBoxes = boxes.filter((b) => b.rentType === "Corporate" && b.holderName);
+          const known = new Set(registry.map((c) => (c.nameEn ?? "").trim().toLowerCase()).filter(Boolean));
+          const extra = onBoxes
+            .filter((b) => !known.has(String(b.holderName).trim().toLowerCase()))
+            .map((b) => ({ nameEn: b.holderName, poBox: b.boxNumber, emirate: b.emirate, bundleId: b.bundleId, boxStatus: b.status }));
+          if (!registry.length && !extra.length) {
+            return {
+              result:
+                "NO COMPANIES are registered against this Emirates ID and they hold no corporate PO Boxes. That is a normal answer, not an error — say so plainly and ask for the issuing authority and trade licence number instead.",
+            };
+          }
           return {
-            result: companies.length
-              ? JSON.stringify(companies)
-              : "NO COMPANIES are registered against this Emirates ID. That is a normal answer, not an error — say so plainly and ask for the issuing authority and trade licence number instead.",
+            result:
+              (registry.length
+                ? `REGISTERED TO THEIR EMIRATES ID at the licensing authority (${registry.length}):\n${JSON.stringify(registry)}\n`
+                : "NOTHING is registered to their Emirates ID at the licensing authority.\n") +
+              (extra.length
+                ? `\nCOMPANIES THEY ALREADY HOLD A PO BOX FOR, which the registry above does not list (${extra.length}). These are just as real — the box exists — so include them when the customer asks what companies they have, and say which box each one is for and what state it is in ("Pending approval" means Emirates Post is still reviewing the trade licence, not that anything failed):\n${JSON.stringify(extra)}`
+                : "\nThey hold no corporate PO Boxes beyond what is listed above."),
           };
         }
         if (name === MYBOXES_TOOL) {
           const boxes = await poBoxesByEmiratesId(agent.id, env, String(input.emiratesId ?? ""), caller);
           return {
             result: boxes.length
-              ? JSON.stringify(boxes)
+              ? JSON.stringify(boxes) +
+                "\n\nrentType says whether a box is Personal or Corporate, and on a Corporate box holderName is the COMPANY it belongs to — name it when you list that box, and treat it as one of the customer's companies. status is already in words: \"Pending approval\" means Emirates Post is still reviewing the trade licence, which is a normal stage of a corporate rental and NOT a failure or a payment problem."
               : "NO PO BOXES are held under this Emirates ID. Say so plainly and continue — it is a normal answer for a first-time customer, not an error.",
           };
         }
@@ -1118,7 +1147,8 @@ export async function POST(req: NextRequest) {
         const holdChanged =
           heldNow &&
           (heldNow.reference !== finalState.hold?.reference ||
-            (heldNow.paymentRef ?? null) !== (finalState.hold?.paymentRef ?? null));
+            (heldNow.paymentRef ?? null) !== (finalState.hold?.paymentRef ?? null) ||
+            (heldNow.paidAt ?? null) !== (finalState.hold?.paidAt ?? null));
         if (heldNow && holdChanged) {
           finalState = {
             ...finalState,
@@ -1127,6 +1157,7 @@ export async function POST(req: NextRequest) {
               uniqueBoxId: heldNow.uniqueBoxId ?? null,
               bundleId: heldNow.bundleId ?? null,
               services: heldNow.services ?? [],
+              paidAt: heldNow.paidAt ?? null,
               orderNo: heldNow.orderNo ?? null,
               paymentRef: heldNow.paymentRef ?? null,
               paymentUrl: heldNow.paymentUrl ?? null,
@@ -1137,6 +1168,41 @@ export async function POST(req: NextRequest) {
         // wholesale, so a mark set before the turn would be gone by the end of it.
         if (isPulse && !finalState.pulsedAt) {
           finalState = { ...finalState, pulsedAt: new Date().toISOString() };
+        }
+
+        // Customer Pulse: the UAE government satisfaction survey, shown where
+        // Emirates Post's own portal shows it — straight after a purchase
+        // completes and the customer has their confirmation in front of them.
+        //
+        // "Completed" has to mean the money arrived, not that the reply sounded
+        // final: on their gateway that is Emirates Post confirming the payment,
+        // and on ours it is a settled payment plus a submitted case. Everything
+        // about this is best-effort — the box is rented either way, so a survey
+        // that cannot be minted is never mentioned to the customer.
+        const pulseService = pulseServiceFor(finalState.journeyKey);
+        const purchase =
+          finalState.hold?.paidAt
+            ? { reference: finalState.hold.orderNo ?? finalState.hold.reference, amount: finalState.hold.amount }
+            : submittedRef && finalState.payment.status === "paid"
+              ? { reference: finalState.payment.reference ?? submittedRef, amount: finalState.payment.amount }
+              : null;
+        if (pulseService && purchase?.reference && !finalState.surveyIssuedAt) {
+          const token = await pulseSurveyToken({
+            service: pulseService,
+            transactionId: String(purchase.reference),
+            feesAed: typeof purchase.amount === "number" ? purchase.amount : null,
+            customer: {
+              emiratesId: verifiedEmiratesId,
+              name: verifiedIdentity?.name,
+              mobile: verifiedIdentity?.mobile ?? (finalState.data.contact_phone as string | undefined),
+              email: (finalState.data.contact_email as string | undefined) ?? undefined,
+            },
+          }).catch(() => null);
+          if (token) {
+            finalState = { ...finalState, surveyIssuedAt: new Date().toISOString() };
+            send({ type: "survey", token, locale: body.locale, sandbox: pulseIsSandbox() });
+            await audit({ ...a, actor: "system", action: "survey_offered", payload: { service: pulseService, transactionId: String(purchase.reference) } });
+          }
         }
         await saveCase(session.caseId, finalState);
         // Persist a BACKEND session token minted this turn (e.g. OTP login) for later

@@ -325,7 +325,30 @@ export interface CustomerPoBox {
   expiryDate?: string;
   status?: string;
   isOwner?: boolean;
+  /**
+   * Whose name the box is in. For a CORPORATE box this is the COMPANY, and it is
+   * the only place the API says which companies a customer holds boxes for --
+   * asked "what companies do I have", we were answering from the licensing
+   * registry alone and leaving out the two they had just rented boxes for.
+   */
+  holderName?: string;
+  /** "Personal" or "Corporate". */
+  rentType?: string;
 }
+
+/**
+ * Box status codes, as the portal's own filter endpoint groups them
+ * (GetAgencyBoxStatusFilter, read 31 Aug 2026). A corporate box sits at 14 while
+ * Emirates Post reviews the trade licence, which is neither active nor a failure
+ * -- and a bare "14" told the customer nothing.
+ */
+const BOX_STATUS: Record<string, string> = {
+  "0": "Free", "5": "Free",
+  "1": "Active", "10": "Active", "12": "Active", "13": "Active",
+  "9": "On hold",
+  "14": "Pending approval",
+  "15": "Rejected",
+};
 
 /**
  * The PO Boxes already held under a customer's Emirates ID.
@@ -373,7 +396,9 @@ export async function poBoxesByEmiratesId(
     branch: r.officeName ?? r.branchName ?? undefined,
     bundleId: r.bundleId ?? r.bundle_Id ?? undefined,
     expiryDate: r.expiryDate ?? r.currentExpiryDate ?? undefined,
-    status: r.status ?? r.boxStatus ?? undefined,
+    status: BOX_STATUS[String(r.status ?? r.boxStatus ?? "")] ?? (r.status ?? r.boxStatus ?? undefined),
     isOwner: typeof r.isOwner === "boolean" ? r.isOwner : undefined,
+    holderName: r.ownerName ?? r.holderName ?? undefined,
+    rentType: r.rentType === "C" ? "Corporate" : r.rentType === "P" ? "Personal" : (r.rentType ?? undefined),
   }));
 }
