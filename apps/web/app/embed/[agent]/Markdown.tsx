@@ -190,7 +190,9 @@ function ChatPay({
   }, [opened]);
 
   // The chat asks the backend whether the money arrived; that answer lands in the
-  // conversation below. Here we only wait long enough not to look ignored.
+  // conversation below, so this card stops speaking for it after a moment. What it
+  // must NOT do is go back to "Pay now" — a customer who has just paid reads that
+  // as the payment not having happened.
   React.useEffect(() => {
     if (!returned) return;
     const t = setTimeout(() => setReturned(false), 20000);
@@ -246,13 +248,22 @@ function ChatPay({
       </div>
       <div className="dlg-paycard-body">
         <button className="dlg-paybtn" onClick={open} disabled={returned}>
-          {returned ? "Checking your payment…" : opened ? "Reopen payment page" : "Pay now"}
+          {returned
+            ? "Checking your payment…"
+            : opened
+              ? "Reopen payment page"
+              : everOpened
+                ? "Open the payment page again"
+                : "Pay now"}
         </button>
         {opened && !returned ? (
           <div className="dlg-paycard-note">Finish in the payment window — I will pick it up from there.</div>
         ) : null}
         {!opened && !returned && everOpened ? (
-          <div className="dlg-paycard-note">The payment window closed. If you did not finish, open it again.</div>
+          <div className="dlg-paycard-note">
+            The payment window closed. If your payment went through, I confirm it in the chat below — reopen this only
+            if you did not finish.
+          </div>
         ) : null}
       </div>
     </div>

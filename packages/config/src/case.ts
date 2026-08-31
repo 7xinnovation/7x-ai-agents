@@ -97,6 +97,12 @@ export const CaseState = z.object({
     })
     .nullable()
     .default(null),
+  /**
+   * When the post-sign-in account pulse ran for this case. It is a proactive turn
+   * the customer never asked for, so it happens once: three different signals can
+   * report a completed sign-in and the Emirates Post flow fires two of them.
+   */
+  pulsedAt: z.string().nullable().default(null),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   status: z.enum(["draft", "ready", "submitted", "escalated"]),
@@ -112,6 +118,7 @@ export function emptyCase(): CaseState {
     confirmedJourneys: [],
     offeredBoxIds: [],
     hold: null,
+    pulsedAt: null,
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },
     reference: null,

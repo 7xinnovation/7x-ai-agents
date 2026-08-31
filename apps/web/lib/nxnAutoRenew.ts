@@ -57,7 +57,10 @@ export async function boxConfig(
   const res = await fetch(url, { headers: headers(s.apiKey, token) });
   if (!res.ok) return null;
   const body = (await res.json()) as { payload?: Record<string, any> };
-  const p = body?.payload;
+  // The record sits one level further down than the field names suggest:
+  // payload.poBoxRenewalDetails.poBoxDetails, not payload.poBoxDetails. Reading
+  // the shallower shape found nothing and reported the box as having no profile.
+  const p = body?.payload?.poBoxRenewalDetails ?? body?.payload;
   if (!p) return null;
   return {
     uniqueBoxId: p.poBoxDetails?.uniqueBoxId ? String(p.poBoxDetails.uniqueBoxId) : undefined,

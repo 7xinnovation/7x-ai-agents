@@ -302,7 +302,28 @@ export async function POST(req: NextRequest) {
   const userRef = session.userRef ?? body.userRef;
 
   // Account pulse runs only for a signed-in customer; otherwise treat as normal.
-  const isPulse = Boolean(body.pulse) && authenticated;
+  // The pulse runs once per case. The client latches it too, but three separate
+  // signals report a completed sign-in and a reload re-arms all of them — and a
+  // customer having their whole account read back to them twice is worse than
+  // missing the second read.
+  const alreadyPulsed = Boolean(session.state.pulsedAt);
+  const isPulse = Boolean(body.pulse) && authenticated && !alreadyPulsed;
+  // A pulse that has already run is not a turn at all: run as an ordinary message
+  // it would put the internal directive in the transcript as something the
+  // customer said. Answer the stream with nothing and let the client carry on.
+  if (Boolean(body.pulse) && authenticated && alreadyPulsed) {
+    const enc = new TextEncoder();
+    return new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(enc.encode(sse({ type: "session", conversationId: session.conversationId })));
+          c.enqueue(enc.encode(sse({ type: "done", state: session.state, message: "" })));
+          c.close();
+        },
+      }),
+      { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } }
+    );
+  }
   const isPaymentSettled = Boolean(body.paymentSettled) && !isPulse;
   const isDocumentUploaded = Boolean(body.documentUploaded) && !isPulse && !isPaymentSettled;
 
@@ -1111,6 +1132,11 @@ export async function POST(req: NextRequest) {
               paymentUrl: heldNow.paymentUrl ?? null,
             },
           };
+        }
+        // Stamped here, not at the top: a `case` event replaces finalState
+        // wholesale, so a mark set before the turn would be gone by the end of it.
+        if (isPulse && !finalState.pulsedAt) {
+          finalState = { ...finalState, pulsedAt: new Date().toISOString() };
         }
         await saveCase(session.caseId, finalState);
         // Persist a BACKEND session token minted this turn (e.g. OTP login) for later

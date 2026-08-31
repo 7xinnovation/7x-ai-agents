@@ -395,6 +395,8 @@ export function Experience({
   // Resume completion + a one-shot flag to fire the account pulse after sign-in.
   const [resumed, setResumed] = useState(false);
   const [signedInPulse, setSignedInPulse] = useState(false);
+  /** Latches the post-sign-in pulse to one per conversation. */
+  const pulsed = useRef(false);
   // One-shot flag: the in-chat payment card saw the webhook settle → have the
   // assistant confirm + continue as soon as no turn is streaming.
   const [paymentPulse, setPaymentPulse] = useState(false);
@@ -797,6 +799,7 @@ export function Experience({
     if (streaming) return;
     try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
     convId.current = null;
+    pulsed.current = false;
     setMessages([]);
     setCaseState(null);
     setInput("");
@@ -1086,9 +1089,17 @@ export function Experience({
 
   // After sign-in, once the session has resumed, proactively run the account
   // pulse exactly once (no user bubble — just the assistant's summary).
+  //
+  // "Once" needs a latch, not just the flag. Three different things signal a
+  // completed sign-in — the popup's postMessage, the redirect return, and the
+  // host handing us a token — and the Emirates Post flow fires two of them. Each
+  // set the flag again after the previous pulse had finished streaming, so the
+  // customer got their account read out to them twice, twenty seconds apart.
   useEffect(() => {
     if (signedInPulse && resumed && authenticated && !streaming) {
       setSignedInPulse(false);
+      if (pulsed.current) return;
+      pulsed.current = true;
       void send(undefined, { proactive: true });
     }
   }, [signedInPulse, resumed, authenticated, streaming, send]);

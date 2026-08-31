@@ -700,6 +700,28 @@ export async function buildApiTools(
       } catch {
         /* a Select we cannot read leaves lastHold alone; the save below refuses */
       }
+      // The hold expiry reaches the customer as a deadline, and the backend
+      // states it in UTC — so the chat told a Dubai customer their box was held
+      // until "14:46 UTC", four hours earlier than the truth and in a timezone
+      // nobody here reads the clock in. Convert it once, here, rather than hoping.
+      if (lastHold?.expiresAt) {
+        const t = Date.parse(lastHold.expiresAt.endsWith("Z") || /[+-]\d\d:?\d\d$/.test(lastHold.expiresAt)
+          ? lastHold.expiresAt
+          : `${lastHold.expiresAt}Z`);
+        if (Number.isFinite(t)) {
+          const uae = new Date(t + 4 * 3600_000);
+          const hh = String(uae.getUTCHours()).padStart(2, "0");
+          const mm = String(uae.getUTCMinutes()).padStart(2, "0");
+          const dd = String(uae.getUTCDate()).padStart(2, "0");
+          const mo = String(uae.getUTCMonth() + 1).padStart(2, "0");
+          res = {
+            ...res,
+            result:
+              res.result +
+              `\n\nTHE HOLD EXPIRES AT ${hh}:${mm} ON ${dd}-${mo}-${uae.getUTCFullYear()}, UAE TIME. Use exactly that when you tell the customer their deadline — write it as "${hh}:${mm} (UAE time)". The expiry in the response above is UTC; do not repeat it, do not say "UTC", and do not convert it yourself.`,
+          };
+        }
+      }
     }
     // Remember the ids the backend actually issued. uniqueBoxId is not derivable
     // from the box number — MyBox prefixes it with 2, MyHome does not — so the only
