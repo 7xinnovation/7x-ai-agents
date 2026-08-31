@@ -75,6 +75,12 @@ export const CaseState = z.object({
       /** The box this reservation is for. A hold for a different box is not a hold. */
       uniqueBoxId: z.string().nullable().default(null),
       /**
+       * The bundle it was reserved under. Nothing in the Save payload says whether
+       * a rental is MyHome, and MyHome is the one that needs a home address the
+       * backend recognises — so the answer has to be carried from the Select.
+       */
+      bundleId: z.string().nullable().default(null),
+      /**
        * Set once the order exists. paymentRef is the BACKEND's payment reference
        * (paymentGateWayResponse.referenceNumber) — not the gateway's own order
        * reference, which sits beside it in the same response, is also a UUID, and

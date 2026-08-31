@@ -18,6 +18,7 @@ import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
+import { regionsFor, searchRegions } from "@/lib/epRegions";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -446,6 +447,7 @@ export async function POST(req: NextRequest) {
   const LICENCE_TOOL = "nxn_company_by_licence";
   const MYBOXES_TOOL = "nxn_boxes_for_customer";
   const MYCOMPANIES_TOOL = "nxn_companies_for_customer";
+  const AREAS_TOOL = "nxn_delivery_areas";
   const gsbTools: Anthropic.Tool[] = isNxn
     ? [
         {
@@ -484,6 +486,19 @@ export async function POST(req: NextRequest) {
             type: "object",
             properties: { emiratesId: { type: "string", description: "The customer's verified Emirates ID" } },
             required: ["emiratesId"],
+          },
+        },
+        {
+          name: AREAS_TOOL,
+          description:
+            "THE ONLY valid source for the areas Emirates Post delivers to. A MyHome or MyHome Instant box goes to the customer's home, and the backend accepts an address only when its area is one of these — a typed-in community or building name is rejected with MYHOME_ADDDRESSNOT_FOUND. Call this as soon as a MyHome customer gives you an address, pass what they said as query, show what comes back as CARDS and let them pick. Then send myHomeProfile.myHomeAddress.regionName as the CODE this returns (e.g. \"DXB-84\"), never the area's name. If nothing matches, ask which district they are in — never choose one for them, because the post is delivered to whatever area is recorded.",
+          input_schema: {
+            type: "object",
+            properties: {
+              emirateCode: { type: "string", description: "Three-letter emirate code, e.g. DXB" },
+              query: { type: "string", description: "The area or address the customer gave, to narrow the list" },
+            },
+            required: ["emirateCode"],
           },
         },
         {
@@ -580,6 +595,30 @@ export async function POST(req: NextRequest) {
           isError: true,
         };
       }
+    }
+    if (name === AREAS_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const emirate = String(input.emirateCode ?? "").trim().toUpperCase();
+      const rows = await regionsFor(env, emirate);
+      if (!rows.length) {
+        return {
+          result:
+            "THE AREA LIST COULD NOT BE LOADED for that emirate. Do not substitute areas of your own — the code is what the address is matched on, and an invented one sends the box to the wrong place. Ask the customer for their area in words, and say you will confirm it before the box is set up.",
+        };
+      }
+      const q = String(input.query ?? "").trim();
+      const hits = searchRegions(rows, q, 12).filter((r) => r.deliverable);
+      if (!hits.length) {
+        return {
+          result:
+            `NO DELIVERY AREA MATCHES "${q}" in ${emirate}. This usually means the customer named a building or community rather than a district. Ask which district it sits in and search again. There are ${rows.length} areas in ${emirate}; do NOT list them all and do NOT pick one yourself.`,
+        };
+      }
+      return {
+        result:
+          `Delivery areas in ${emirate} matching "${q}". Show these to the customer as CARDS and let them choose; send the CODE as myHomeProfile.myHomeAddress.regionName.\n` +
+          JSON.stringify(hits.map((r) => ({ code: r.code, nameEn: r.nameEn, nameAr: r.nameAr }))),
+      };
     }
     if (name === COMPANY_TOOL || name === FORM9_TOOL || name === COMPANY_BY_EID_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
@@ -982,6 +1021,7 @@ export async function POST(req: NextRequest) {
             hold: {
               ...heldNow,
               uniqueBoxId: heldNow.uniqueBoxId ?? null,
+              bundleId: heldNow.bundleId ?? null,
               orderNo: heldNow.orderNo ?? null,
               paymentRef: heldNow.paymentRef ?? null,
               paymentUrl: heldNow.paymentUrl ?? null,

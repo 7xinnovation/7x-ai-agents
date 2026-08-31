@@ -6,6 +6,7 @@ import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
 import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 import { audit } from "./conversation";
+import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 
 export type EnvKey = "staging" | "production";
 
@@ -213,7 +214,7 @@ export async function buildApiTools(
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -221,7 +222,7 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
 }> {
@@ -270,7 +271,7 @@ export async function buildApiTools(
   };
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null =
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
@@ -278,6 +279,10 @@ export async function buildApiTools(
   // the route can deterministically render the "browse nearby branches" map even
   // when the model forgets to emit the ```map block (which it does often).
   let lastBranchQuery: { emirate: string; bundle: string } | null = null;
+  // The branch a MyHome customer picked. Their boxes are listed by emirate, so the
+  // officeId is dropped from that lookup -- but Rental/Save still wants it as
+  // myHomeProfile.deliveryOfficeID, and nothing later in the flow carries it.
+  let lastMyHomeOfficeId: string | null = null;
   const asStr = (v: unknown) => (v === undefined || v === null ? "" : String(v).trim());
   // How many times each branch's box list has been asked for this turn, so a
   // "Refresh" pages further into the staging test set instead of repeating.
@@ -427,6 +432,89 @@ export async function buildApiTools(
         body.paymentProperties = pay;
         patched = true;
       }
+
+      // MyHome is delivered to the customer's door, and Emirates Post will only
+      // accept an address whose AREA it recognises -- as a code from its masters
+      // service ("DXB-84"), which is what the portal puts in regionName. A typed
+      // address goes in as "Sobha Hartland" and comes back 173
+      // MYHOME_ADDDRESSNOT_FOUND, an error that names no field and reads like an
+      // outage. Resolve the code here, and refuse rather than guess: delivering a
+      // year of someone's post to the wrong area is worse than asking again.
+      const bundleId = String(lastHold.bundleId ?? "").toUpperCase();
+      if (/^MYHOME/.test(bundleId) || body.myHomeProfile) {
+        const mh = { ...((body.myHomeProfile ?? {}) as Record<string, unknown>) };
+        const addr = { ...((mh.myHomeAddress ?? {}) as Record<string, unknown>) };
+        const emirate =
+          asStr(addr.emirateCode).toUpperCase() ||
+          lastBranchQuery?.emirate ||
+          "";
+        const env = /-stg\.|-stg\/|box-stg/.test(entry.spec.baseUrl) ? "staging" : "production";
+        const rows = emirate ? await regionsFor(env, emirate) : [];
+        if (rows.length) {
+          // The area may arrive under any of these: the model has no way to know
+          // which field Emirates Post reads, and the answer (regionName) is the
+          // counter-intuitive one.
+          const typed =
+            asStr(addr.regionName) || asStr(addr.regionCode) || asStr(addr.detailedAddress) || asStr(addr.streetOrLandmark);
+          const hit = exactRegion(rows, typed);
+          if (!hit || !hit.deliverable) {
+            const near = searchRegions(rows, typed, 12);
+            const list = near.length
+              ? near.filter((r) => r.deliverable).map((r) => `${r.code} = ${r.nameEn}`).join("\n")
+              : "";
+            void audit({
+              agentId,
+              conversationId: opts.conversationId,
+              actor: "system",
+              action: "integration_call_failed",
+              payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: input ?? {}, response: `REFUSED LOCALLY: area "${typed}" is not an Emirates Post delivery area in ${emirate}` },
+            }).catch(() => {});
+            return {
+              result:
+                (hit && !hit.deliverable
+                  ? `Emirates Post does not deliver to ${hit.nameEn}, so a MyHome box cannot be set up at that address.`
+                  : `"${typed}" is not an area Emirates Post recognises in ${emirate}, so this save would fail with MYHOME_ADDDRESSNOT_FOUND. Nothing has gone wrong and the customer has NOT been charged -- their hold is still valid.`) +
+                (list
+                  ? `\n\nAsk the customer which of these areas theirs is in, as CARDS, then call this tool again with myHomeProfile.myHomeAddress.regionName set to the CODE (the part before the "="), not the name:\n${list}`
+                  : `\n\nAsk the customer for the AREA their address is in (the district name Emirates Post would recognise, not the building or community name) and try again.`) +
+                `\n\nAlso send streetOrLandmark, buildingName and villaOrApartmentNo from what they have already told you, and keep the full address in detailedAddress.`,
+              isError: true,
+            };
+          }
+          if (asStr(addr.regionName) !== hit.code) {
+            addr.regionName = hit.code;
+            mh.myHomeAddress = addr;
+            body.myHomeProfile = mh;
+            patched = true;
+          }
+        }
+        // deliveryOfficeID is the branch the customer chose. The portal always
+        // sends it; we only know it because the MyHome box lookup is asked for by
+        // officeId before we rewrite it to an emirate.
+        if (!asStr(mh.deliveryOfficeID) && lastMyHomeOfficeId) {
+          mh.deliveryOfficeID = lastMyHomeOfficeId;
+          body.myHomeProfile = mh;
+          patched = true;
+        }
+        if (!asStr(mh.emailID) && asStr(u.email)) { mh.emailID = u.email; body.myHomeProfile = mh; patched = true; }
+        if (!asStr(mh.mobileNo) && asStr(u.mobileNumber)) { mh.mobileNo = u.mobileNumber; body.myHomeProfile = mh; patched = true; }
+      }
+
+      // The priced extras have to be declared, not just added to the total. The
+      // portal sends a line per extra and we sent none -- so a customer charged
+      // AED 25 for key courier had no courier line on their order.
+      const extras = Array.isArray(body.additionalServiceDetailList)
+        ? [...(body.additionalServiceDetailList as Record<string, unknown>[])]
+        : [];
+      const hasLine = (t: string) => extras.some((e) => String(e?.serviceType ?? "").toUpperCase() === t);
+      const agents = Array.isArray(body.listBoxAgentDetail) ? (body.listBoxAgentDetail as unknown[]).length : 0;
+      if (agents > 0 && !hasLine("AGENT")) extras.push({ quantity: agents, serviceType: "AGENT" });
+      if (body.keyDeliveryAddress && !hasLine("KEY-DELIVERY")) extras.push({ quantity: 1, serviceType: "KEY-DELIVERY" });
+      if (extras.length !== (Array.isArray(body.additionalServiceDetailList) ? body.additionalServiceDetailList.length : 0)) {
+        body.additionalServiceDetailList = extras;
+        patched = true;
+      }
+
       if (patched) input = { ...input, body };
     }
 
@@ -499,6 +587,7 @@ export async function buildApiTools(
           lastBranchQuery?.emirate ||
           byOfficeId[loc[0] ?? ""] ||
           "";
+        lastMyHomeOfficeId = loc;
         if (emirate) {
           inp.LocationId = emirate;
           delete inp.locationId;
@@ -551,6 +640,7 @@ export async function buildApiTools(
             amount: typeof p?.minimumAmount === "number" ? p.minimumAmount : null,
             expiresAt: p?.subcsriptionReferenceNumberExpiryDate ?? p?.subscriptionReferenceNumberExpiryDate ?? null,
             uniqueBoxId: String(((input?.body ?? {}) as Record<string, unknown>).uniqueBoxID ?? "") || null,
+            bundleId: String(((input?.body ?? {}) as Record<string, unknown>).bundleId ?? "") || null,
           };
         }
       } catch {
