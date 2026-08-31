@@ -463,8 +463,19 @@ export async function buildApiTools(
       const bundle = asStr(inp.BundleId ?? inp.bundleId).toUpperCase();
       const loc = asStr(inp.LocationId ?? inp.locationId);
       if (/^MYHOME/.test(bundle) && /^\d+$/.test(loc)) {
+        // lastBranchQuery only holds within a turn, and the branch is usually chosen
+        // in an earlier one — which is why the first version of this silently did
+        // nothing. The officeId itself carries the emirate: every branch Emirates
+        // Post lists is numbered by it (checked against all 75 on 31 Aug).
+        const byOfficeId: Record<string, string> = {
+          "1": "AUH", "2": "DXB", "3": "SHJ", "4": "AJM", "5": "UAQ", "6": "RAK", "7": "FUJ",
+          "9": "DXB", // 999 DIRECT DELIVERY, listed under Dubai
+        };
         const emirate =
-          asStr(inp.EmirateCode ?? inp.emirateCode).toUpperCase() || lastBranchQuery?.emirate || "";
+          asStr(inp.EmirateCode ?? inp.emirateCode).toUpperCase() ||
+          lastBranchQuery?.emirate ||
+          byOfficeId[loc[0] ?? ""] ||
+          "";
         if (emirate) {
           inp.LocationId = emirate;
           delete inp.locationId;
