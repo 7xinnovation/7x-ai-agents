@@ -450,6 +450,28 @@ export async function buildApiTools(
       const sim = simulateNxnMockOp(toolName, input ?? {});
       if (sim) return sim;
     }
+    // MyHome availability is EMIRATE-wide, not branch-by-branch.
+    //
+    // LocationId means two different things depending on the bundle: an officeId
+    // for MyBox, an emirate code for MyHome and MyHome Instant. Sending an officeId
+    // for MyHome returns an empty list rather than an error — which reads as "no
+    // boxes here" and had every one of the 75 branches looking sold out while the
+    // portal was showing hundreds. Confirmed with Emirates Post 31 Aug; DXB returns
+    // 471 boxes by emirate and 0 by officeId.
+    if (/freeboxes/i.test(toolName)) {
+      const inp = { ...((input ?? {}) as Record<string, unknown>) };
+      const bundle = asStr(inp.BundleId ?? inp.bundleId).toUpperCase();
+      const loc = asStr(inp.LocationId ?? inp.locationId);
+      if (/^MYHOME/.test(bundle) && /^\d+$/.test(loc)) {
+        const emirate =
+          asStr(inp.EmirateCode ?? inp.emirateCode).toUpperCase() || lastBranchQuery?.emirate || "";
+        if (emirate) {
+          inp.LocationId = emirate;
+          delete inp.locationId;
+          input = inp;
+        }
+      }
+    }
     // Capture branch-locations queries (BundleId + EmirateCode) for the map widget.
     if (/boxlocations/i.test(toolName)) {
       const inp = (input ?? {}) as Record<string, unknown>;
