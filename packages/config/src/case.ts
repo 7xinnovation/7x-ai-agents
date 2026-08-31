@@ -81,6 +81,11 @@ export const CaseState = z.object({
        */
       bundleId: z.string().nullable().default(null),
       /**
+       * The services Emirates Post priced for this box. An extra it did not price
+       * is refused with 223 INVALID_ADDITIONAL_SERVICE, taking the rental with it.
+       */
+      services: z.array(z.string()).default([]),
+      /**
        * Set once the order exists. paymentRef is the BACKEND's payment reference
        * (paymentGateWayResponse.referenceNumber) — not the gateway's own order
        * reference, which sits beside it in the same response, is also a UUID, and

@@ -670,6 +670,16 @@ body {
     0 8px 20px -14px color-mix(in srgb, var(--c-primary) 30%, rgba(16, 24, 40, 0.2));
 }
 /* Cards ease in with a light, short stagger when a reply presents choices. */
+.dlg-card-opt.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--dlg-surface-muted, #f5f6f8);
+}
+.dlg-card-opt.is-disabled .dlg-card-opt-badge {
+  background: transparent;
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}
 .dlg-cards .dlg-card-opt {
   animation: dlg-card-in 0.36s var(--ease) both;
 }

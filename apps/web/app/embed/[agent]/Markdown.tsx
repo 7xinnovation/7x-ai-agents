@@ -173,6 +173,29 @@ function ChatPay({
   const [opened, setOpened] = React.useState(false);
   const [returned, setReturned] = React.useState(false);
   const win = React.useRef<Window | null>(null);
+  const [everOpened, setEverOpened] = React.useState(false);
+
+  // A closed window is not a completed payment. Whether the customer paid or gave
+  // up, the button has to come back — it sat on "Checking your payment…" for good,
+  // with no way to reopen the page.
+  React.useEffect(() => {
+    if (!opened) return;
+    const t = setInterval(() => {
+      if (win.current && win.current.closed) {
+        win.current = null;
+        setOpened(false);
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [opened]);
+
+  // The chat asks the backend whether the money arrived; that answer lands in the
+  // conversation below. Here we only wait long enough not to look ignored.
+  React.useEffect(() => {
+    if (!returned) return;
+    const t = setTimeout(() => setReturned(false), 20000);
+    return () => clearTimeout(t);
+  }, [returned]);
 
   // The return page tells us the customer came back; it does NOT tell us they
   // paid, because only the backend can say that. So close the window and let the
@@ -190,6 +213,7 @@ function ChatPay({
         /* already gone */
       }
       win.current = null;
+      setOpened(false);
       onSelect?.("I have completed the payment on the Emirates Post page. Please verify it and confirm my booking.");
     };
     window.addEventListener("message", onMsg);
@@ -208,6 +232,7 @@ function ChatPay({
     else {
       win.current = opened;
       setOpened(true);
+      setEverOpened(true);
     }
   };
   return (
@@ -225,6 +250,9 @@ function ChatPay({
         </button>
         {opened && !returned ? (
           <div className="dlg-paycard-note">Finish in the payment window — I will pick it up from there.</div>
+        ) : null}
+        {!opened && !returned && everOpened ? (
+          <div className="dlg-paycard-note">The payment window closed. If you did not finish, open it again.</div>
         ) : null}
       </div>
     </div>
@@ -404,6 +432,8 @@ interface OptionCard {
   price?: string;
   desc?: string;
   badge?: string;
+  /** Shown, but not choosable — a branch with no boxes left, say. */
+  disabled?: boolean;
   attrs: { label: string; value: string }[];
 }
 function parseCards(body: string[]): OptionCard[] {
@@ -432,6 +462,7 @@ function applyCardKey(card: OptionCard, key: string, value: string) {
   else if (k === "price" || k === "cost" || k === "fee") card.price = v;
   else if (k === "desc" || k === "description" || k === "subtitle") card.desc = v;
   else if (k === "badge" || k === "tag") card.badge = v;
+  else if (k === "disabled" || k === "unavailable") card.disabled = !/^(no|false|0)$/i.test(v);
   else if (!card.title) card.title = v;
   else card.attrs.push({ label: key.trim(), value: v });
 }
@@ -632,8 +663,10 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
                 // A tappable card sends its title as the customer's choice, so the
                 // user can pick by tapping instead of typing. The already-selected
                 // card and any card rendered without a handler stay inert.
-                const tappable = !!onSelect && !selected;
-                const cls = `dlg-card-opt${selected ? " is-selected" : ""}${tappable ? " is-tappable" : ""}`;
+                const tappable = !!onSelect && !selected && !c.disabled;
+                const cls =
+                  `dlg-card-opt${selected ? " is-selected" : ""}${tappable ? " is-tappable" : ""}` +
+                  (c.disabled ? " is-disabled" : "");
                 const inner = (
                   <>
                     <div className="dlg-card-opt-head">

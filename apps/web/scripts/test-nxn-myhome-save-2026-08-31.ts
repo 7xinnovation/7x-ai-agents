@@ -69,6 +69,9 @@ async function main() {
     expiresAt: new Date(Date.now() + 3600_000).toISOString(),
     uniqueBoxId: "987022",
     bundleId: "MYHOME3",
+    // What Emirates Post priced for this box. MyHome has no KEY-DELIVERY line:
+    // the key comes with the box, and asking for courier returns 223.
+    services: ["RENT", "REGISTRATION"],
   };
 
   // 1. An area Emirates Post does not deliver to never reaches the network.
@@ -125,8 +128,32 @@ async function main() {
     check("the area goes out as its code", mh?.myHomeAddress?.regionName === "DXB-84", mh?.myHomeAddress);
     check("the address in the customer's words is kept", mh?.myHomeAddress?.detailedAddress === "Sobha Hartland");
     check("the branch survives the emirate rewrite", mh?.deliveryOfficeID === "201", mh?.deliveryOfficeID);
+    const extras = (sent as Record<string, any> | null)?.additionalServiceDetailList;
+    check("an extra this bundle was never priced for is not sent", extras === undefined, extras);
+    check("and the address for it goes with it", (sent as Record<string, any> | null)?.keyDeliveryAddress === undefined);
+    check("the branch id the model invented is overwritten", mh?.deliveryOfficeID === "201");
+  }
+
+  // 2b. A bundle that DOES price key delivery gets the line the portal sends.
+  {
+    const real = globalThis.fetch;
+    let sent: Record<string, unknown> | null = null;
+    globalThis.fetch = (async (...a: Parameters<typeof fetch>) => {
+      const url = String(a[0]);
+      if (url.includes("Rental/Save")) {
+        sent = JSON.parse(String((a[1] as RequestInit)?.body ?? "{}"));
+        return new Response(JSON.stringify({ payload: {} }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return real(...a);
+    }) as typeof fetch;
+    const t = await buildApiTools(row.id, "staging", {
+      initialHold: { ...hold, bundleId: "IN", services: ["RENT", "KEY-DELIVERY"] },
+      sessionToken: "test-session",
+    });
+    await t.exec(SAVE, { body: { ...saveBody("DXB-161").body, myHomeProfile: undefined } });
+    globalThis.fetch = real;
     const extras = (sent as Record<string, any> | null)?.additionalServiceDetailList ?? [];
-    check("the key courier is declared, not just charged for",
+    check("a priced extra IS declared, not just charged for",
       extras.some((e: any) => e.serviceType === "KEY-DELIVERY" && e.quantity === 1), extras);
   }
 

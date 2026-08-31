@@ -221,7 +221,7 @@ export async function buildApiTools(
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -229,7 +229,7 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
 }> {
@@ -278,7 +278,7 @@ export async function buildApiTools(
   };
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null =
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
@@ -524,7 +524,7 @@ export async function buildApiTools(
         // deliveryOfficeID is the branch the customer chose. The portal always
         // sends it; we only know it because the MyHome box lookup is asked for by
         // officeId before we rewrite it to an emirate.
-        if (!asStr(mh.deliveryOfficeID) && lastMyHomeOfficeId) {
+        if (lastMyHomeOfficeId && asStr(mh.deliveryOfficeID) !== lastMyHomeOfficeId) {
           mh.deliveryOfficeID = lastMyHomeOfficeId;
           body.myHomeProfile = mh;
           patched = true;
@@ -539,12 +539,26 @@ export async function buildApiTools(
       const extras = Array.isArray(body.additionalServiceDetailList)
         ? [...(body.additionalServiceDetailList as Record<string, unknown>[])]
         : [];
+      const priced = new Set((lastHold.services ?? []).map((x) => x.toUpperCase()));
       const hasLine = (t: string) => extras.some((e) => String(e?.serviceType ?? "").toUpperCase() === t);
       const agents = Array.isArray(body.listBoxAgentDetail) ? (body.listBoxAgentDetail as unknown[]).length : 0;
-      if (agents > 0 && !hasLine("AGENT")) extras.push({ quantity: agents, serviceType: "AGENT" });
-      if (body.keyDeliveryAddress && !hasLine("KEY-DELIVERY")) extras.push({ quantity: 1, serviceType: "KEY-DELIVERY" });
-      if (extras.length !== (Array.isArray(body.additionalServiceDetailList) ? body.additionalServiceDetailList.length : 0)) {
-        body.additionalServiceDetailList = extras;
+      if (agents > 0 && !hasLine("AGENT") && priced.has("AGENT")) extras.push({ quantity: agents, serviceType: "AGENT" });
+      if (body.keyDeliveryAddress && !hasLine("KEY-DELIVERY") && priced.has("KEY-DELIVERY")) {
+        extras.push({ quantity: 1, serviceType: "KEY-DELIVERY" });
+      }
+      // A line for something this box was never priced for is refused outright, so
+      // drop it rather than let it take the rental down. MyHome is the case that
+      // found this: the box is delivered to the door, key courier is not on offer,
+      // and the model kept adding a fee for it.
+      const kept = extras.filter((e) => priced.has(String(e?.serviceType ?? "").toUpperCase()));
+      if (!kept.length && body.keyDeliveryAddress && !priced.has("KEY-DELIVERY")) {
+        delete body.keyDeliveryAddress;
+        patched = true;
+      }
+      const before = Array.isArray(body.additionalServiceDetailList) ? body.additionalServiceDetailList : [];
+      if (JSON.stringify(kept) !== JSON.stringify(before)) {
+        if (kept.length) body.additionalServiceDetailList = kept;
+        else delete body.additionalServiceDetailList;
         patched = true;
       }
 
@@ -674,6 +688,13 @@ export async function buildApiTools(
             expiresAt: p?.subcsriptionReferenceNumberExpiryDate ?? p?.subscriptionReferenceNumberExpiryDate ?? null,
             uniqueBoxId: String(((input?.body ?? {}) as Record<string, unknown>).uniqueBoxID ?? "") || null,
             bundleId: String(((input?.body ?? {}) as Record<string, unknown>).bundleId ?? "") || null,
+            // Which extras this box can actually carry. The portal reads the same
+            // list to decide whether to OFFER key delivery at all; sending a line
+            // for a service Emirates Post did not price returns 223
+            // INVALID_ADDITIONAL_SERVICE and the whole rental stops.
+            services: Array.isArray(p?.priceDetails)
+              ? p.priceDetails.map((d: Record<string, unknown>) => String(d?.serviceType ?? "")).filter(Boolean)
+              : [],
           };
         }
       } catch {
@@ -695,6 +716,72 @@ export async function buildApiTools(
         }
       } catch {
         /* an unreadable list leaves the previous ids in place */
+      }
+    }
+    // Tell the customer which branches actually have boxes.
+    //
+    // BoxLocations lists every branch in the emirate whether or not one is free,
+    // so the agent offered Dubai Central — 0 boxes on 31 Aug — as the customer's
+    // "usual branch", and the dead end only showed up two steps later. The count
+    // is not in the response and there is no endpoint for it, so it is the
+    // availability lookup itself, once per branch, run together and bounded: a
+    // slow answer here is worse than an unannotated card.
+    if (!res.isError && /boxlocations/i.test(toolName)) {
+      try {
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const rows = (b?.payload ?? b) as Record<string, unknown>[];
+        const inp = (input ?? {}) as Record<string, unknown>;
+        const bundle = asStr(inp.BundleId ?? inp.bundleId);
+        const emirate = asStr(inp.EmirateCode ?? inp.emirateCode).toUpperCase();
+        if (Array.isArray(rows) && rows.length && bundle) {
+          // MyHome boxes are pooled across the emirate, not held at a branch, so
+          // one lookup answers for all of them.
+          const pooled = /^MYHOME/i.test(bundle);
+          const targets = pooled ? [emirate] : rows.slice(0, 15).map((r) => asStr(r.officeId)).filter(Boolean);
+          const counts = await Promise.all(
+            targets.map(async (loc) => {
+              const ctl = new AbortController();
+              const timer = setTimeout(() => ctl.abort(), 8000);
+              try {
+                const u = new URL(`${String(liveSpec.baseUrl).replace(/\/$/, "")}/api/Rental/FreeBoxes`);
+                u.searchParams.set("BundleId", bundle);
+                u.searchParams.set("LocationId", loc);
+                const h: Record<string, string> = { Accept: "application/json" };
+                if (liveSpec.apiKey) h[liveSpec.apiKeyHeader || "X-API-KEY"] = String(liveSpec.apiKey);
+                const tok = runtimeToken();
+                if (tok) h.Authorization = `Bearer ${tok}`;
+                const r = await fetch(u, { headers: h, signal: ctl.signal });
+                if (!r.ok) return [loc, null] as const;
+                const parsed = (await r.json()) as { payload?: unknown };
+                const list = parsed?.payload ?? parsed;
+                return [loc, Array.isArray(list) ? list.length : null] as const;
+              } catch {
+                return [loc, null] as const;
+              } finally {
+                clearTimeout(timer);
+              }
+            })
+          );
+          const byLoc = new Map(counts);
+          let annotated = false;
+          for (const r of rows) {
+            const n = pooled ? byLoc.get(emirate) : byLoc.get(asStr(r.officeId));
+            if (n === null || n === undefined) continue;
+            r.freeBoxCount = n;
+            annotated = true;
+          }
+          if (annotated) {
+            res = {
+              ...res,
+              result:
+                `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(b)}` +
+                "\n\nfreeBoxCount is how many boxes are FREE at that branch right now, counted live. A branch with 0 has none: show it, but show it as unavailable — a fenced cards block line `disabled: yes` greys it out and stops the customer choosing it — and never present it as an option or let them pick it. Branches with no freeBoxCount were not counted; leave those alone.",
+              raw: JSON.stringify(b),
+            };
+          }
+        }
+      } catch {
+        /* an unreadable list is shown as it came; the cards still work */
       }
     }
     // Rental/Save creates the order and OPENS a payment on Emirates Post's own
