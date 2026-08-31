@@ -19,6 +19,8 @@ import { buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions } from "@/lib/epRegions";
+import { payFenceGuard } from "@/lib/payFence";
+import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -262,6 +264,11 @@ export async function POST(req: NextRequest) {
     initialHold: session.state.hold ?? null,
     // The list is shown in one turn and picked from in the next.
     initialOfferedBoxIds: session.state.offeredBoxIds ?? [],
+    // Set on the save payload rather than handed to the model, which pasted it
+    // into a pay block and sent the customer to our own return page.
+    paymentReturnUrl: (agent.definition.journeys ?? [])
+      .map((j) => j.submission?.apiFlow?.paymentReturnUrl)
+      .find(Boolean),
     // Whose gateway this journey pays on, decided the same way the prompt decides it.
     backendGateway: Boolean(
       (agent.definition.journeys ?? []).find((j) => j.key === session.state.journeyKey)?.submission?.apiFlow?.confirmTool
@@ -448,6 +455,7 @@ export async function POST(req: NextRequest) {
   const MYBOXES_TOOL = "nxn_boxes_for_customer";
   const MYCOMPANIES_TOOL = "nxn_companies_for_customer";
   const AREAS_TOOL = "nxn_delivery_areas";
+  const AUTORENEW_TOOL = "nxn_set_auto_renew";
   const gsbTools: Anthropic.Tool[] = isNxn
     ? [
         {
@@ -499,6 +507,20 @@ export async function POST(req: NextRequest) {
               query: { type: "string", description: "The area or address the customer gave, to narrow the list" },
             },
             required: ["emirateCode"],
+          },
+        },
+        {
+          name: AUTORENEW_TOOL,
+          description:
+            "Set auto-renewal ON or OFF for a box that already exists. This is the ONLY thing that moves it: the consent toggle sent with the rental does not, and a box rented with auto-renewal switched on still shows it off in the customer's portal until this is called. Call it once the rental is confirmed and paid, with the choice the customer actually made — including when they chose NO, since the default is not reliably off. It reads the box's own record first, so a box already in the requested state costs nothing.",
+          input_schema: {
+            type: "object",
+            properties: {
+              boxNumber: { type: "string", description: "The box number, e.g. 450294" },
+              emirateCode: { type: "string", description: "Three-letter emirate code, e.g. DXB" },
+              enabled: { type: "boolean", description: "True to enable auto-renewal, false to disable it" },
+            },
+            required: ["boxNumber", "emirateCode", "enabled"],
           },
         },
         {
@@ -593,6 +615,41 @@ export async function POST(req: NextRequest) {
         return {
           result: `LOOKUP UNAVAILABLE: ${msg}. Ask the customer for the authority name and licence number instead, and never substitute a list of your own.`,
           isError: true,
+        };
+      }
+    }
+    if (name === AUTORENEW_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
+      if (!caller) {
+        return {
+          result:
+            "AUTO-RENEWAL CANNOT BE SET without the customer's signed-in session. Do not describe this as a failure of the rental — the box is rented. Tell them auto-renewal can be switched on from their PO Box page in the portal.",
+        };
+      }
+      try {
+        const r = await setAutoRenew(
+          agent.id, env,
+          String(input.boxNumber ?? ""), String(input.emirateCode ?? ""),
+          input.enabled === true, caller
+        );
+        if (r.ok) {
+          return {
+            result: r.changed
+              ? `AUTO-RENEWAL IS NOW ${r.enabled ? "ON" : "OFF"} for this box.`
+              : `AUTO-RENEWAL WAS ALREADY ${r.enabled ? "ON" : "OFF"} for this box. Nothing needed changing — do not report this as a problem.`,
+          };
+        }
+        log.warn("nxn_auto_renew_failed", { ...a, reason: r.reason, detail: r.detail });
+        return {
+          result:
+            `AUTO-RENEWAL COULD NOT BE SET (${r.reason}). The rental itself is unaffected — say so plainly, tell the customer auto-renewal is not switched on yet and that they can set it from their PO Box page, and do NOT retry this call. Detail for the log: ${r.detail}`,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "unknown error";
+        log.error("nxn_auto_renew_error", err, { ...a });
+        return {
+          result: `AUTO-RENEWAL COULD NOT BE SET: ${msg}. The rental is unaffected — tell the customer they can switch it on from their PO Box page. Do not retry.`,
         };
       }
     }
@@ -766,6 +823,16 @@ export async function POST(req: NextRequest) {
 
         let finalState = session.state;
         let finalText = "";
+        // The pay button is only ever as good as the URL behind it, and the model
+        // writes that URL from memory. Anything it emits is checked against the
+        // order the backend actually created before the customer can click it.
+        // Scoped to agents that take payment on a backend gateway, which is the
+        // only mode that produces a pay block at all.
+        const payGuard = (agent.definition.journeys ?? []).some(
+          (j) => j.submission?.apiFlow?.saveTool && j.submission?.apiFlow?.confirmTool
+        )
+          ? payFenceGuard(() => apiTools.getLastHold()?.paymentUrl ?? null)
+          : null;
         let citedThisTurn = false;
         let submittedRef: string | null = null;
 
@@ -797,7 +864,19 @@ export async function POST(req: NextRequest) {
             send({ type: "error", message: customerFacingError(ev.message, body.locale) });
             continue;
           }
-          send(ev);
+          if (payGuard && ev.type === "text") {
+            const out = payGuard.push(ev.delta);
+            if (out) { send({ type: "text", delta: out }); finalText += out; }
+          } else {
+            // Anything that is not text ends the run the fence could be inside, so
+            // whatever is still held goes out before it -- held bytes must never
+            // be dropped on the floor.
+            if (payGuard) {
+              const rest = payGuard.flush();
+              if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
+            }
+            send(ev);
+          }
           // Standard analytics attributes shared by every event this turn.
           const std = {
             ...a,
@@ -809,7 +888,7 @@ export async function POST(req: NextRequest) {
             // Accumulate the full streamed reply (including text from rounds
             // before tool calls + the inserted separators) so the persisted
             // message matches what the user saw, not just the final round.
-            finalText += ev.delta;
+            if (!payGuard) finalText += ev.delta;
           } else if (ev.type === "case") finalState = ev.state;
           else if (ev.type === "done") {
             finalState = ev.state;
@@ -864,6 +943,10 @@ export async function POST(req: NextRequest) {
             await audit({ ...a, actor: "agent", action: "escalation_created", payload: { reference: ev.reference } });
             await emitEvent({ type: "callback.requested", ...std, referenceId: ev.reference, attributes: { reference: ev.reference, businessOpen } });
           }
+        }
+        if (payGuard) {
+          const rest = payGuard.flush();
+          if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 
         // Deterministic "browse nearby branches" map: the model reliably shows the

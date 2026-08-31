@@ -211,6 +211,13 @@ export async function buildApiTools(
      * only the record — so the same response must not be reported the same way.
      */
     backendGateway?: boolean;
+    /**
+     * Where the backend's gateway sends the customer back to. It is set here and
+     * never shown to the model: handed the URL in its prompt, the model put it in
+     * a pay block, and the popup opened our own return page, announced the
+     * customer was back, and closed -- for a payment that had never been offered.
+     */
+    paymentReturnUrl?: string;
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
@@ -433,6 +440,14 @@ export async function buildApiTools(
         patched = true;
       }
 
+      // The return URL is ours to set, not the model's to remember.
+      const ret = opts.paymentReturnUrl;
+      if (ret && pay.paymentReturnUrl !== ret) {
+        pay.paymentReturnUrl = ret;
+        body.paymentProperties = pay;
+        patched = true;
+      }
+
       // MyHome is delivered to the customer's door, and Emirates Post will only
       // accept an address whose AREA it recognises -- as a code from its masters
       // service ("DXB-84"), which is what the portal puts in regionName. A typed
@@ -485,6 +500,24 @@ export async function buildApiTools(
             addr.regionName = hit.code;
             mh.myHomeAddress = addr;
             body.myHomeProfile = mh;
+            patched = true;
+          }
+          // The customer's own address record, which is what the portal's
+          // "Delivery Address details" panel reads. Rented through us it reads
+          // "- UAE, , No:" -- the components were never sent, and the one
+          // structured address we have is the one just resolved above.
+          if (!u.customersAddress) {
+            u.customersAddress = {
+              emirateCode: emirate,
+              regionCode: hit.code,
+              regionName: hit.nameEn,
+              streetOrLandmark: asStr(addr.streetOrLandmark),
+              buildingName: asStr(addr.buildingName),
+              villaOrApartmentNo: asStr(addr.villaOrApartmentNo),
+              detailedAddress: asStr(addr.detailedAddress),
+              countryName: "United Arab Emirates",
+            };
+            body.userProfile = u;
             patched = true;
           }
         }

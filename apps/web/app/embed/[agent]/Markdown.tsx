@@ -539,7 +539,13 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         // `url:` (required), optional `amount:` and `label:`.
         const get = (k: string) => body.map((l) => l.match(new RegExp(`^\\s*${k}\\s*:\\s*(.+?)\\s*$`, "i"))).find(Boolean)?.[1];
         const purl = get("url");
-        if (purl && /^https:\/\//i.test(purl))
+        // A payment page is somewhere else by definition. Our own origin here means
+        // the return URL -- the page the gateway sends the customer BACK to -- which
+        // opens, reports them returned, and closes before they can pay.
+        const external = (u: string) => {
+          try { return new URL(u).origin !== window.location.origin; } catch { return false; }
+        };
+        if (purl && /^https:\/\//i.test(purl) && external(purl))
           nodes.push(<ChatPay key={k++} url={purl} amount={get("amount")} label={get("label")} onSelect={onSelect} />);
         continue;
       }
