@@ -1,68 +1,54 @@
-# PO Box Rental API — one open question
+# PO Box Rental API — payment resolved, one question left
 
 | | |
 |---|---|
 | **To** | Emirates Post PO Box API team |
 | **From** | 7X — NXN conversational assistant |
 | **Environment** | `https://box-stg.emiratespost.ae/services/pobox` (staging) |
-| **Date** | 30 August 2026 |
+| **Date** | 31 August 2026 |
 
-The rental flow works end to end against staging — availability, hold, order
-creation. One question remains, plus a few behaviours we'd like confirmed. All of
-it is from live calls, using the customer's own UAE PASS session token.
+A rental now completes end to end against staging and the box reaches the
+customer's portal. One question remains — the delivery address — plus a few
+behaviours we'd like confirmed and some test reservations to release. All of it
+is from live calls, using the customer's own UAE PASS session token.
 
 ---
 
-## The question: two orders on the same outlet
+## Payment: resolved, with two follow-ups
 
-We use **your** N-Genius credentials — outlet `b78ef8c7-ce2a-41d6-84c9-e6219557a991`
-on staging, `6171b4ce-fed3-4fe1-8390-5b4428403bfc` on production. So the money
-does reach Emirates Post. The problem is which **order** it lands on.
+Your last reply was right and the flow now works. We stopped creating our own
+N-Genius order, send the customer to the `paymentUrl` that `Rental/Save` returns,
+and call `UpdatePayment/{paymentGateWayResponse.referenceNumber}` afterwards. A
+rental completes end to end and the box appears in the customer's portal.
 
-`Rental/Save` creates its own order and returns a hosted payment page for it:
+**Live example on staging: PO Box 902020 (MyHome, Dubai), order 260961760.**
+Rented through our assistant on 31 August. Please leave it in place — the two
+questions below are both about that box.
 
-```jsonc
-200 OK
-{ "payload": {
-    "orderNo": "260961742",
-    "paymentGateWayResponse": {
-      "paymentUrl": "https://paypage.sandbox.ngenius-payments.com/v2?code=…",
-      "referenceNumber": "8ce8f91b-c278-4068-b15b-b6a2da48e0ec",
-      "niOrderResult": { "outletId": "b78ef8c7-ce2a-41d6-84c9-e6219557a991",
-                         "state": "STARTED" }
-    }
-} }
-```
-
-Our checkout creates a **separate order on that same outlet** and the customer pays
-that one. So the rental's order is never settled:
-
-```jsonc
-POST /api/v1/Rental/UpdatePayment/8ce8f91b-c278-4068-b15b-b6a2da48e0ec
-200 OK
-{ "payload": { "orderNumber": "260961742",
-               "isPaymentSuccess": false,
-               "paymentStatus": 2,
-               "paymentDetails": { "amountPaid": 0.0, "paymentRefNo": null },
-               "transactionDetails": { "poBox": "450358" } } }
-```
-
-The rental record exists and the box is reserved, but the order is unpaid, so **the
-box does not appear in the customer's portal**. The payment itself succeeded — it
-is simply attached to a different order on your outlet.
-
-**What we need to know:**
-
-1. Should we stop creating our own order, send the customer to the `paymentUrl`
-   that `Rental/Save` returns, and then call
-   `UpdatePayment/{paymentGateWayResponse.referenceNumber}` to complete it? That
-   is our reading of your last reply and it is what we plan to do unless you say
-   otherwise.
-2. How long after payment does `isPaymentSuccess` flip? We need to know how long
-   to wait before telling a customer their box is confirmed.
-3. Is there any way to attach an existing N-Genius payment to a rental order —
-   useful for reconciling the test payments already made against the orders
+1. How long after payment does `isPaymentSuccess` flip? We currently confirm as
+   soon as it returns true, but we do not know the worst case, so we do not know
+   how long to wait before telling a customer something is wrong.
+2. Is there any way to attach an existing N-Genius payment to a rental order —
+   for reconciling the test payments already made against the unpaid orders
    listed below.
+
+---
+
+## The open question: the delivery address
+
+On 902020 the portal's **Delivery Address details** panel reads
+`DXB-12Dubai UAEMerkadh road, Waves, No: 221` — the components run together with
+no separators. On 450294, rented before we sent an address at all, it reads
+`- UAE, , No:`.
+
+We now send `userProfile.customersAddress` (region code, street, building,
+villa/apartment) and `myHomeProfile.myHomeAddress` on `Rental/Save`.
+
+**Can `Rental/Save` populate that panel properly, and which field feeds it?** Or
+is `ChangeAddress/Save` the only way in — in which case a customer cannot set
+their delivery address at the point of renting, only pay to change it afterwards.
+Your own rent flow does not send `customersAddress`, which may be why 450294 is
+blank.
 
 ---
 
@@ -110,10 +96,15 @@ needed.*
 Please release if they don't expire on their own — all Dubai:
 
 - **Held, no order:** 378781, 378785, 378790, 378795, 378796, 378797, 379115,
-  449691, 449949, 449989, 449993, 450000, 450052, 450348 · **987022** (MyHome)
-- **Order created, unpaid:** 449922 · 449997 · 450063 · 450152 · 450358 · 450364 ·
-  450294 · 417377 · 417676 — orders 260961732, 260961735, 260961736, 260961739,
+  449691, 449949, 449989, 449993, 450000, 450052, 450152, 450348, 450364 ·
+  **902017**, **987022** (MyHome)
+- **Order created, unpaid:** 449922 · 449997 · 450063 · 450294 · 450358 ·
+  417377 · 417676 — orders 260961732, 260961735, 260961736, 260961739,
   260961740, 260961741, 260961742, 260961754, 260961756, 260961757
+
+**Do NOT release these three — they are paid and live**, and are our evidence for
+the questions above: **902020** (MyHome, order 260961760), **901961** (MyHome,
+260961758), **450293** (MyBox, 260961759).
 
 ---
 
