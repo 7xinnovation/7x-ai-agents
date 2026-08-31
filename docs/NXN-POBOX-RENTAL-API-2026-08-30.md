@@ -13,10 +13,13 @@ it is from live calls, using the customer's own UAE PASS session token.
 
 ---
 
-## The question: `Save` opens its own payment
+## The question: two orders on the same outlet
 
-`Rental/Save` succeeds and returns a hosted payment page on **your** N-Genius
-outlet:
+We use **your** N-Genius credentials — outlet `b78ef8c7-ce2a-41d6-84c9-e6219557a991`
+on staging, `6171b4ce-fed3-4fe1-8390-5b4428403bfc` on production. So the money
+does reach Emirates Post. The problem is which **order** it lands on.
+
+`Rental/Save` creates its own order and returns a hosted payment page for it:
 
 ```jsonc
 200 OK
@@ -31,7 +34,8 @@ outlet:
 } }
 ```
 
-We take payment on **our own** N-Genius outlet, so yours is never settled:
+Our checkout creates a **separate order on that same outlet** and the customer pays
+that one. So the rental's order is never settled:
 
 ```jsonc
 POST /api/v1/Rental/UpdatePayment/8ce8f91b-c278-4068-b15b-b6a2da48e0ec
@@ -43,17 +47,22 @@ POST /api/v1/Rental/UpdatePayment/8ce8f91b-c278-4068-b15b-b6a2da48e0ec
                "transactionDetails": { "poBox": "450358" } } }
 ```
 
-The rental record exists and the box is reserved, but **it does not appear in the
-customer's portal** — presumably because your order is unpaid.
+The rental record exists and the box is reserved, but the order is unpaid, so **the
+box does not appear in the customer's portal**. The payment itself succeeded — it
+is simply attached to a different order on your outlet.
 
 **What we need to know:**
 
-1. Can a rental be recorded as **already paid** — a flag, another endpoint, or a
-   payment reference we can pass in?
-2. If not: should the customer pay on the `paymentUrl` you return, and should we
-   poll `UpdatePayment/{referenceNumber}` until `isPaymentSuccess` is `true`?
-3. How long after payment does `isPaymentSuccess` flip? We need to know how long
-   to wait before telling a customer anything.
+1. Should we stop creating our own order, send the customer to the `paymentUrl`
+   that `Rental/Save` returns, and then call
+   `UpdatePayment/{paymentGateWayResponse.referenceNumber}` to complete it? That
+   is our reading of your last reply and it is what we plan to do unless you say
+   otherwise.
+2. How long after payment does `isPaymentSuccess` flip? We need to know how long
+   to wait before telling a customer their box is confirmed.
+3. Is there any way to attach an existing N-Genius payment to a rental order —
+   useful for reconciling the test payments already made against the orders
+   listed below.
 
 ---
 
