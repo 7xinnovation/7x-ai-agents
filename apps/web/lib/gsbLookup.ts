@@ -264,6 +264,30 @@ export async function companiesByAuthority(
 }
 
 /**
+ * Every company registered against a customer's Emirates ID.
+ *
+ * Same endpoint as companiesByAuthority — Emirates Post extended entityCode to
+ * accept an Emirates ID as well as an issuing-authority code (confirmed on
+ * staging 31 Aug: 784199983926421 returns three licences). It is the same
+ * parameter carrying two different kinds of identifier, so this exists as its own
+ * function to keep the two callers honest about which they are passing.
+ *
+ * Note it is GetEntitiesById only. GetEntitiesByLicenseNo still wants a real
+ * authority code and answers 500 for an Emirates ID.
+ */
+export async function companiesByEmiratesId(
+  agentId: string,
+  env: EnvKey,
+  emiratesId: string,
+  callerToken?: string
+): Promise<GsbCompany[]> {
+  const eid = normaliseEmiratesId(emiratesId);
+  if (!eid) return [];
+  const rows = await get<Record<string, any>>(agentId, env, "/api/MOE/GetEntitiesById", { entityCode: eid }, callerToken);
+  return rows.map(toCompany);
+}
+
+/**
  * One company by trade licence number, with its owners.
  *
  * This is the only call that returns Emirates IDs, and so the only one that can

@@ -17,7 +17,7 @@ import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
-import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId } from "@/lib/gsbLookup";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -443,6 +443,7 @@ export async function POST(req: NextRequest) {
   const COMPANIES_TOOL = "nxn_companies_by_authority";
   const LICENCE_TOOL = "nxn_company_by_licence";
   const MYBOXES_TOOL = "nxn_boxes_for_customer";
+  const MYCOMPANIES_TOOL = "nxn_companies_for_customer";
   const gsbTools: Anthropic.Tool[] = isNxn
     ? [
         {
@@ -474,6 +475,16 @@ export async function POST(req: NextRequest) {
           },
         },
         {
+          name: MYCOMPANIES_TOOL,
+          description:
+            `List the companies registered against a signed-in customer's Emirates ID — trade licence number, name in English and Arabic, emirate, and licence expiry. Call this FIRST for a corporate journey once the customer is signed in: it saves asking them for the issuing authority and licence number at all. Present what comes back and let them pick. An empty list is a normal answer — it means no company is registered to that ID — so fall back to asking for the issuing authority and licence number. This list is for the customer to CHOOSE from; it is not proof they own the licence. Ownership is still established by ${LICENCE_TOOL}, which is the only call that returns the owners' Emirates IDs.`,
+          input_schema: {
+            type: "object",
+            properties: { emiratesId: { type: "string", description: "The customer's verified Emirates ID" } },
+            required: ["emiratesId"],
+          },
+        },
+        {
           name: LICENCE_TOOL,
           description:
             "Look up one company by its trade licence number and check who owns it. Pass emiratesId as well to have the ownership check done for you: it compares the customer's Emirates ID against the licence's registered owners. This is the only lookup that can confirm the licence is really theirs.",
@@ -492,7 +503,7 @@ export async function POST(req: NextRequest) {
 
   const extraTools = [...baseExtraTools, emailTool, ...epglReadTools, ...gsbTools];
   const runExtraTool = async (name: string, input: Record<string, unknown>) => {
-    if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL || name === MYBOXES_TOOL) {
+    if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL || name === MYBOXES_TOOL || name === MYCOMPANIES_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       // The customer's own session is what the MOE endpoints mean by "requires
       // UAE PASS"; a GSB service credential, once configured, takes precedence.
@@ -504,6 +515,14 @@ export async function POST(req: NextRequest) {
             result: list.length
               ? JSON.stringify(list)
               : "NO AUTHORITIES RETURNED. Do not substitute a list of your own — tell the customer you cannot pull the list and ask for the authority name printed on their licence, or the trade licence number.",
+          };
+        }
+        if (name === MYCOMPANIES_TOOL) {
+          const companies = await companiesByEmiratesId(agent.id, env, String(input.emiratesId ?? ""), caller);
+          return {
+            result: companies.length
+              ? JSON.stringify(companies)
+              : "NO COMPANIES are registered against this Emirates ID. That is a normal answer, not an error — say so plainly and ask for the issuing authority and trade licence number instead.",
           };
         }
         if (name === MYBOXES_TOOL) {
