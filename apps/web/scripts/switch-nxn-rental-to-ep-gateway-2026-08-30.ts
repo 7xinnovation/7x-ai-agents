@@ -48,7 +48,11 @@ import { getAgentBySlug } from "../lib/agents";
 
 const SLUG = "nxn-dialog";
 const CONFIRM = "post_api_Rental_UpdatePayment_paymentReferenceNo";
-const RETURN_URL = "https://www-stg.emiratespost.ae";
+// Their gateway must return to a page of OURS, which closes the popup and tells
+// the chat the customer is back. Returning to the host site leaves the window
+// open on a homepage with the conversation none the wiser.
+const HOST = process.env.PUBLIC_APP_URL ?? "https://7xagents.7x-lab.com";
+const RETURN_URL = `${HOST.replace(/\/$/, "")}/api/payments/ext-return`;
 
 const OLD_NOTE =
   "REAL SUBMISSION (2026-08-14): RECORDING THE RENTAL. After the payment settles, call post_api_Rental_Save ONCE to create the PO Box rental with Emirates Post, then give the customer the reference from its response.";
