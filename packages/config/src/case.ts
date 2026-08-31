@@ -51,6 +51,14 @@ export const CaseState = z.object({
    */
   confirmedJourneys: z.array(z.string()).default([]),
   /**
+   * uniqueBoxIds from the last availability lookup, so the reservation can send
+   * one the backend actually issued. They are not derivable: MyBox returns
+   * uniqueBoxId "2450063" for box 450063, MyHome returns "958009" for box 958009.
+   * Told to use "the 2-prefixed one", the model built 2958009 for a MyHome box and
+   * got BOX_NOT_FREE — which reads as someone else having taken it.
+   */
+  offeredBoxIds: z.array(z.string()).default([]),
+  /**
    * A reservation the backend is holding for this case.
    *
    * It has to live in the case, not in the turn. Emirates Post issues it on
@@ -91,6 +99,7 @@ export function emptyCase(): CaseState {
     data: {},
     documents: [],
     confirmedJourneys: [],
+    offeredBoxIds: [],
     hold: null,
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },

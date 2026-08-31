@@ -210,6 +210,8 @@ export async function buildApiTools(
      * only the record — so the same response must not be reported the same way.
      */
     backendGateway?: boolean;
+    /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
+    initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
     initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
   } = {}
@@ -220,6 +222,8 @@ export async function buildApiTools(
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null;
+  /** uniqueBoxIds from the most recent availability lookup. */
+  getOfferedBoxIds: () => string[];
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -264,6 +268,8 @@ export async function buildApiTools(
     const t = Date.parse(h.expiresAt);
     return Number.isFinite(t) && t <= Date.now() ? null : h;
   };
+  /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
+  let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
   let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
@@ -354,6 +360,23 @@ export async function buildApiTools(
     // up to 2026-08-18 and zero times after. The apiFlow notes already said "after
     // the payment settles", but a note is guidance and this is an ordering
     // invariant, so it is enforced here rather than asked for.
+    // Reserve the box the customer actually chose, with the id the backend issued.
+    if (/rental_select$/i.test(toolName) && offeredBoxIds.length) {
+      const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      const sent = String(body.uniqueBoxID ?? body.uniqueBoxId ?? "");
+      if (sent && !offeredBoxIds.includes(sent)) {
+        // The model builds this id rather than copying it, so it arrives with a
+        // prefix added or dropped. Match on the digits that are actually a box.
+        const match =
+          offeredBoxIds.find((id) => id.endsWith(sent) || sent.endsWith(id)) ?? null;
+        if (match) {
+          body.uniqueBoxID = match;
+          delete body.uniqueBoxId;
+          input = { ...input, body };
+        }
+      }
+    }
+
     // Rental/Save: use the hold we were actually issued, whatever the model wrote.
     if (/rental_save$/i.test(toolName)) {
       if (!lastHold) {
@@ -534,6 +557,23 @@ export async function buildApiTools(
         /* a Select we cannot read leaves lastHold alone; the save below refuses */
       }
     }
+    // Remember the ids the backend actually issued. uniqueBoxId is not derivable
+    // from the box number — MyBox prefixes it with 2, MyHome does not — so the only
+    // safe source is this response.
+    if (!res.isError && /freeboxes/i.test(toolName)) {
+      try {
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const rows = b?.payload ?? b;
+        if (Array.isArray(rows) && rows.length) {
+          offeredBoxIds = rows
+            .map((x: Record<string, unknown>) => String(x?.uniqueBoxId ?? ""))
+            .filter(Boolean)
+            .slice(0, 400);
+        }
+      } catch {
+        /* an unreadable list leaves the previous ids in place */
+      }
+    }
     // Rental/Save creates the order and OPENS a payment on Emirates Post's own
     // gateway — it does not record one already taken. Proved against staging: after
     // a 200 the N-Genius order sits at state STARTED, and UpdatePayment answers
@@ -667,6 +707,7 @@ export async function buildApiTools(
     getCapturedToken: () => captured,
     getLastBranchQuery: () => lastBranchQuery,
     getLastHold: () => lastHold,
+    getOfferedBoxIds: () => offeredBoxIds,
   };
 }
 

@@ -259,6 +259,8 @@ export async function POST(req: NextRequest) {
     // rebuilt per request, so without seeding this the hold is forgotten between
     // the two and every save is refused for having no reservation behind it.
     initialHold: session.state.hold ?? null,
+    // The list is shown in one turn and picked from in the next.
+    initialOfferedBoxIds: session.state.offeredBoxIds ?? [],
     // Whose gateway this journey pays on, decided the same way the prompt decides it.
     backendGateway: Boolean(
       (agent.definition.journeys ?? []).find((j) => j.key === session.state.journeyKey)?.submission?.apiFlow?.confirmTool
@@ -965,6 +967,10 @@ export async function POST(req: NextRequest) {
 
         await appendMessage(session.conversationId, "assistant", finalText);
         // A hold issued this turn belongs to the case, not to this request.
+        const offeredNow = apiTools.getOfferedBoxIds();
+        if (offeredNow.length && offeredNow.join(",") !== (finalState.offeredBoxIds ?? []).join(",")) {
+          finalState = { ...finalState, offeredBoxIds: offeredNow };
+        }
         const heldNow = apiTools.getLastHold();
         const holdChanged =
           heldNow &&
