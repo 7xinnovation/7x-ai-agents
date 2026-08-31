@@ -66,12 +66,13 @@ is simply attached to a different order on your outlet.
 
 ---
 
-## Three behaviours we found by trial — please confirm they're intended
+## Four behaviours we found by trial — please confirm they're intended
 
 | Finding | Why it matters |
 |---------|----------------|
-| `Select` needs **`uniqueBoxId`** from `FreeBoxes` (`2450063`), not `boxId` (`450063`). `boxId` returns `108 BOX_NOT_FREE`. | Reads as "someone took it", so we told customers boxes were unavailable when they were free. |
+| `Select` needs **`uniqueBoxId`** from `FreeBoxes`, not `boxId`. MyBox prefixes it (`2450063` for box `450063`), MyHome does not (`958009` for both), so it cannot be derived. `boxId` returns `108 BOX_NOT_FREE`. | Reads as "someone took it", so we told customers boxes were unavailable when they were free. |
 | `paymentProperties.billingDetail` is **optional in the spec, required in practice — all six fields**. Omitted → `400 {"Error":"Error from payment gateway"}`. Partial (name + email only) → `400 … 157 ERROR_GETTING_HOLD_DETAILS`. | Neither error names the missing field, and the second points at the hold, which isn't the problem. This cost us a day. |
+| A MyHome address is rejected — `173 MYHOME_ADDDRESSNOT_FOUND` — unless **`myHomeAddress.regionName`** carries an area **code** (`DXB-84`) from `masters/locations/api/Regions`. `regionCode` is ignored, and a typed area name never matches. | The area list is on a different service, and the field that takes the code is the one named for the name. Nothing in the spec or the error says so. |
 | `UpdatePayment` takes **`paymentGateWayResponse.referenceNumber`**. `niOrderResult.reference` — also a UUID, same response — returns `500`. | Two UUIDs side by side with nothing to tell them apart. |
 
 ---
@@ -90,6 +91,9 @@ Rental/Save          subscriptionReferenceNumber, totalAmount,
 
 - `poBoxExpiryDate` must be copied **verbatim** from `ExpiryDates`, offset included
   (`2027-08-29T00:00:00+00:00`). Recomputing it returns `400 "Invalid date value."`
+- `LocationId` means two different things: the branch's `officeId` for MyBox, the
+  **emirate code** for MyHome and MyHome Instant. The wrong one returns an empty
+  list, not an error, so every branch looked sold out.
 - `LocationId` is the branch's own `officeId`, not `mainOfficeId` — Naif is
   `214` / `209`, and `209` returns an empty list rather than an error.
 - `Rental/Save` takes **~17s**; `Select` under 1s. Expected?
@@ -105,11 +109,11 @@ needed.*
 
 Please release if they don't expire on their own — all Dubai:
 
-- **Held, no order:** 378781, 378785, 378790 (Naif) · 449691, 449949, 449989,
-  450000 (Al Barsha)
-- **Order created, unpaid:** 449922, 449997, 450063, 450152, 450358, 450364, 378797
-  (Al Barsha) — orders 260961732, 260961735, 260961736, 260961739, 260961740,
-  260961741, 260961742
+- **Held, no order:** 378781, 378785, 378790, 378795, 378796, 378797, 379115,
+  449691, 449949, 449989, 449993, 450000, 450052, 450348 · **987022** (MyHome)
+- **Order created, unpaid:** 449922 · 449997 · 450063 · 450152 · 450358 · 450364 ·
+  450294 · 417377 · 417676 — orders 260961732, 260961735, 260961736, 260961739,
+  260961740, 260961741, 260961742, 260961754, 260961756, 260961757
 
 ---
 
