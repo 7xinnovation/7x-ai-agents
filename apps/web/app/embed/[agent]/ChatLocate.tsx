@@ -73,7 +73,10 @@ export function ChatLocate({
   /** The pin has been placed deliberately — located, searched, dragged or tapped. */
   const [placed, setPlaced] = React.useState(false);
   const [query, setQuery] = React.useState("");
-  const [results, setResults] = React.useState<{ name: string; lat: number; lng: number }[] | null>(null);
+  // A suggestion has no coordinates until it is retrieved, so it carries an id.
+  const [results, setResults] = React.useState<{ name: string; id?: string; lat?: number; lng?: number }[] | null>(null);
+  // One search session per picker, which is how Mapbox groups and bills these.
+  const sessionRef = React.useRef<string>("");
   const [searching, setSearching] = React.useState(false);
 
   const reverseGeocode = React.useCallback(async (p: { lat: number; lng: number }) => {
@@ -108,17 +111,40 @@ export function ChatLocate({
   const runSearch = React.useCallback(async (q: string) => {
     const token = tokenRef.current;
     if (!token || q.trim().length < 3) { setResults(null); return; }
+    if (!sessionRef.current) {
+      sessionRef.current = globalThis.crypto?.randomUUID?.() ?? String(Date.now());
+    }
     setSearching(true);
+    const { lat, lng } = posRef.current;
+    const lang = locale === "ar" ? "ar" : "en";
     try {
-      const { lat, lng } = posRef.current;
+      // Search Box, not the older /geocoding/v5 places index: v5 has no entry for
+      // "Sobha Hartland" or most of Dubai's communities, so a customer searching
+      // for the name on their own building was told nothing was found.
       const r = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
-          `?access_token=${encodeURIComponent(token)}&country=ae&limit=5&proximity=${lng},${lat}` +
-          `&language=${locale === "ar" ? "ar" : "en"}`
+        `https://api.mapbox.com/search/searchbox/v1/suggest?q=${encodeURIComponent(q)}` +
+          `&access_token=${encodeURIComponent(token)}&session_token=${encodeURIComponent(sessionRef.current)}` +
+          `&country=ae&limit=5&proximity=${lng},${lat}&language=${lang}`
       );
-      const j = (await r.json()) as { features?: { place_name?: string; center?: [number, number] }[] };
+      const j = (await r.json()) as {
+        suggestions?: { name?: string; place_formatted?: string; full_address?: string; mapbox_id?: string }[];
+      };
+      const list = (j.suggestions ?? [])
+        .filter((f) => f.mapbox_id)
+        .map((f) => ({
+          name: [f.name, f.full_address ?? f.place_formatted].filter(Boolean).join(" — "),
+          id: f.mapbox_id!,
+        }));
+      if (list.length) { setResults(list); return; }
+      // Streets and plain area names still answer better on the old index, so it
+      // stays as the fallback rather than the first choice.
+      const r2 = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
+          `?access_token=${encodeURIComponent(token)}&country=ae&limit=5&proximity=${lng},${lat}&language=${lang}`
+      );
+      const j2 = (await r2.json()) as { features?: { place_name?: string; center?: [number, number] }[] };
       setResults(
-        (j.features ?? [])
+        (j2.features ?? [])
           .filter((f) => Array.isArray(f.center))
           .map((f) => ({ name: f.place_name ?? "", lat: f.center![1], lng: f.center![0] }))
       );
@@ -128,6 +154,28 @@ export function ChatLocate({
       setSearching(false);
     }
   }, [locale]);
+
+  /** A suggestion becomes a point only when asked for; that is the second call. */
+  const choose = React.useCallback(async (r: { name: string; id?: string; lat?: number; lng?: number }) => {
+    setResults(null);
+    setQuery("");
+    if (typeof r.lat === "number" && typeof r.lng === "number") { moveTo({ lat: r.lat, lng: r.lng }); return; }
+    if (!r.id || !tokenRef.current) return;
+    setSearching(true);
+    try {
+      const res = await fetch(
+        `https://api.mapbox.com/search/searchbox/v1/retrieve/${encodeURIComponent(r.id)}` +
+          `?access_token=${encodeURIComponent(tokenRef.current)}&session_token=${encodeURIComponent(sessionRef.current)}`
+      );
+      const j = (await res.json()) as { features?: { geometry?: { coordinates?: [number, number] } }[] };
+      const c = j.features?.[0]?.geometry?.coordinates;
+      if (Array.isArray(c)) moveTo({ lat: c[1], lng: c[0] });
+    } catch {
+      /* the pin stays where it is; they can drag it */
+    } finally {
+      setSearching(false);
+    }
+  }, [moveTo]);
 
   // Typing searches, but not on every keystroke.
   React.useEffect(() => {
@@ -313,7 +361,7 @@ export function ChatLocate({
                 key={i}
                 type="button"
                 className="dlg-locate-result"
-                onClick={() => { moveTo({ lat: r.lat, lng: r.lng }); setResults(null); setQuery(""); }}
+                onClick={() => void choose(r)}
               >
                 <MapPin size={14} weight="fill" />
                 <span>{r.name}</span>
