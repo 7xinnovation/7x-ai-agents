@@ -284,6 +284,8 @@ surprise.
 
 | Service | Endpoint | Used for |
 |---|---|---|
+| **Shipping** (yours) | `GET /shipping/api/MasterLocation/ReverseByProvider?Longitude=&Latitude=&Provider=1` **session** | Turning a pinned map location into an address — returns `emirate`, `emirateCode`, `area`, `street`, `building`. The customer drops a pin instead of naming a district. |
+| **Shipping** (yours) | `GET /shipping/api/MasterLocation/Territories/Reversegeo?Take=1&Skip=0&Lng=&Lat=` **session** | Whether Emirates Post delivers to that point at all, before a MyHome rental gets any further. |
 | **Masters** `masters-stg.epservices.ae` / `masters.epservices.ae` | `GET /locations/api/Regions?EmirateCode=DXB` | The delivery areas a MyHome address must sit in. Returns `{ code: "DXB-84", nameEn: "Nad Al Sheeba 1", isDeliveryAllowed }`. The customer picks one and its **code** goes into `myHomeAddress.regionName`. Same service your rent flow uses. |
 | **Customer Pulse** `sandboxapi.customerpulse.gov.ae` | `POST /api/v2/transaction/create/` then `POST /api/v2/survey/token/` | The satisfaction survey, shown as a modal once `UpdatePayment` confirms the payment. Same two-step and the same 2-second delay as your payment success page. |
 

@@ -18,7 +18,8 @@ import { emitEvent } from "@/lib/analytics";
 import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
-import { regionsFor, searchRegions } from "@/lib/epRegions";
+import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
+import { addressFromPin } from "@/lib/epGeocode";
 import { payFenceGuard } from "@/lib/payFence";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -483,6 +484,7 @@ export async function POST(req: NextRequest) {
   const MYBOXES_TOOL = "nxn_boxes_for_customer";
   const MYCOMPANIES_TOOL = "nxn_companies_for_customer";
   const AREAS_TOOL = "nxn_delivery_areas";
+  const PIN_TOOL = "nxn_address_from_pin";
   const AUTORENEW_TOOL = "nxn_set_auto_renew";
   const gsbTools: Anthropic.Tool[] = isNxn
     ? [
@@ -535,6 +537,19 @@ export async function POST(req: NextRequest) {
               query: { type: "string", description: "The area or address the customer gave, to narrow the list" },
             },
             required: ["emirateCode"],
+          },
+        },
+        {
+          name: PIN_TOOL,
+          description:
+            "Turn a location the customer pinned on the map into an Emirates Post address. Pass the latitude and longitude from their pinned-location message. This is the BEST way to capture a MyHome delivery address and should be offered FIRST — it returns the emirate, the area, the street and the building as Emirates Post itself records them, so the customer never has to know which district they live in or how it is spelled. It also says whether Emirates Post delivers to that point at all. If it returns a region code, use it directly as myHomeProfile.myHomeAddress.regionName.",
+          input_schema: {
+            type: "object",
+            properties: {
+              latitude: { type: "number", description: "Latitude from the pinned location" },
+              longitude: { type: "number", description: "Longitude from the pinned location" },
+            },
+            required: ["latitude", "longitude"],
           },
         },
         {
@@ -724,6 +739,53 @@ export async function POST(req: NextRequest) {
         };
       }
     }
+    if (name === PIN_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
+      if (!caller) {
+        return {
+          result:
+            "THE PIN COULD NOT BE LOOKED UP because the customer is not signed in with Emirates Post. Ask them for the area in words instead and use " + AREAS_TOOL + ".",
+        };
+      }
+      const found = await addressFromPin(
+        agent.id, env, Number(input.latitude), Number(input.longitude), caller, body.locale
+      ).catch(() => null);
+      if (!found) {
+        return {
+          result:
+            `THAT LOCATION COULD NOT BE RESOLVED. Do not guess at the area from the coordinates. Ask the customer for the area in words and use ${AREAS_TOOL}, or offer the map again.`,
+        };
+      }
+      if (found.outOfService) {
+        return {
+          result:
+            `EMIRATES POST DOES NOT DELIVER to that location${found.area ? ` (${found.area}${found.emirate ? `, ${found.emirate}` : ""})` : ""}. Say so plainly, and offer either a different address or a branch-collected box instead of MyHome. Do not proceed with a MyHome rental for this address.`,
+        };
+      }
+      const detail = [found.building, found.street, found.area, found.emirate].filter(Boolean).join(", ");
+      if (found.region) {
+        return {
+          result:
+            `THE PIN RESOLVES TO: ${detail}\n` +
+            JSON.stringify({
+              regionName: found.region.code,
+              areaName: found.region.nameEn,
+              emirateCode: found.emirateCode,
+              streetOrLandmark: found.street ?? "",
+              buildingName: found.building ?? "",
+              detailedAddress: detail,
+            }) +
+            `\n\nSHOW the customer this address and ask them to confirm it, and to add their villa or apartment number — the pin cannot know it. Send regionName EXACTLY as given. The pin also decides the EMIRATE: if ${found.emirateCode} is not the emirate they picked for the box, tell them, because the box has to be in the emirate they live in.`,
+        };
+      }
+      const near = (found.candidates ?? []).map((r) => `${r.code} = ${r.nameEn}`).join("\n");
+      return {
+        result:
+          `THE PIN RESOLVES TO: ${detail || "an unnamed location"}${found.emirateCode ? ` (${found.emirateCode})` : ""}, but Emirates Post's area name for it does not match a delivery area outright.` +
+          (near ? `\n\nAsk the customer which of these their address is in, as CARDS, and send the CODE as regionName:\n${near}` : `\n\nAsk them for the district in words and use ${AREAS_TOOL}.`),
+      };
+    }
     if (name === AREAS_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       const emirate = String(input.emirateCode ?? "").trim().toUpperCase();
@@ -737,9 +799,22 @@ export async function POST(req: NextRequest) {
       const q = String(input.query ?? "").trim();
       const hits = searchRegions(rows, q, 12).filter((r) => r.deliverable);
       if (!hits.length) {
+        // The customer may be naming a real place in the wrong emirate. Told
+        // only "not a district in Ajman", they typed a second Dubai place and
+        // got the same answer again.
+        const elsewhere = await searchOtherEmirates(env, emirate, q).catch(() => []);
+        const emirateName = EMIRATES.find((e) => e.code === emirate)?.name ?? emirate;
+        if (elsewhere.length) {
+          const where = elsewhere.map((x) => `${x.region.nameEn} is in ${x.emirateName}`).join("; ");
+          return {
+            result:
+              `"${q}" IS NOT IN ${emirateName.toUpperCase()} — it is in another emirate: ${where}. Say that plainly, because the customer almost certainly has the emirate wrong rather than the area. Ask whether they want the box in that emirate instead (if so, the emirate has to change and the box must be chosen again there), or, if the address really is in ${emirateName}, ask which ${emirateName} district it is in. Do NOT repeat that it is not a delivery area.`,
+          };
+        }
+        const samples = rows.filter((r) => r.deliverable).slice(0, 8).map((r) => r.nameEn).join(", ");
         return {
           result:
-            `NO DELIVERY AREA MATCHES "${q}" in ${emirate}. This usually means the customer named a building or community rather than a district. Ask which district it sits in and search again. There are ${rows.length} areas in ${emirate}; do NOT list them all and do NOT pick one yourself.`,
+            `NO DELIVERY AREA MATCHES "${q}" in ${emirateName}, and it is not a known area in another emirate either. It is probably a building, tower or community name rather than a district. Ask which district it sits in, and offer these REAL ${emirateName} districts as examples — never districts of your own: ${samples}. There are ${rows.length} in total; do not list them all and do not pick one yourself.`,
         };
       }
       return {
