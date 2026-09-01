@@ -323,3 +323,9 @@ Tell us which of these you want the assistant to use and we will enable them.
 6. Whether `MOE/GetEntitiesById` is really keyed to the Emirates ID in production.
 7. Whether a corporate rental with `IsCorporateInfoAutoPopulated: true` should
    send **no** document attachments, as your portal does.
+8. A shared identifier between the geocoder's area names and the masters region
+   list — "Marsa Dubai" and "Dubai Marina" are the same place, and nothing joins
+   them.
+
+*A step-by-step version of this, showing each flow in call order with payloads,
+is in `NXN-API-FLOWS.pdf`.*
