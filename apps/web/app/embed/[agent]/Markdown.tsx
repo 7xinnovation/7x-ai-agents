@@ -1,5 +1,5 @@
 import React from "react";
-import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning, LockSimple } from "@phosphor-icons/react";
+import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning, LockSimple, CaretDown, MagnifyingGlass } from "@phosphor-icons/react";
 import { tr, type LocalizedString, type Locale } from "@dialog/config";
 import { ChatMap } from "./ChatMap";
 import { ChatLocate } from "./ChatLocate";
@@ -266,6 +266,109 @@ function ChatPay({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * A long list of cards, as a dropdown.
+ *
+ * Twenty-one Dubai branches rendered as cards filled several screens, and the
+ * customer had to scroll past all of them to reach the question. Below the
+ * threshold cards are better — three bundles, ten box numbers — so this only
+ * takes over when the list is genuinely long, and it keeps everything the card
+ * carried: the badge, the hours, and whether the option can be chosen at all.
+ */
+const SELECT_STR = {
+  en: { count: (n: number) => `${n} to choose from`, search: "Search", empty: "Nothing matches that." },
+  ar: { count: (n: number) => `${n} خيارات متاحة`, search: "بحث", empty: "لا توجد نتائج مطابقة." },
+} as const;
+
+function ChatCardSelect({
+  cards,
+  locale,
+  onSelect,
+}: {
+  cards: OptionCard[];
+  locale?: string;
+  onSelect: (text: string) => void;
+}) {
+  const t = SELECT_STR[locale === "ar" ? "ar" : "en"];
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
+  const boxRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    inputRef.current?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? cards.filter((c) =>
+        [c.title, c.desc, c.badge, ...c.attrs.map((a) => `${a.label} ${a.value}`)]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(needle)
+      )
+    : cards;
+  const available = cards.filter((c) => !c.disabled).length;
+
+  return (
+    <div className="dlg-cardselect" ref={boxRef}>
+      <button type="button" className="dlg-cardselect-trigger" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span>{t.count(available)}</span>
+        <CaretDown size={14} weight="bold" className={open ? "is-open" : ""} />
+      </button>
+      {open ? (
+        <div className="dlg-cardselect-panel">
+          <div className="dlg-cardselect-search">
+            <MagnifyingGlass size={14} weight="bold" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={q}
+              placeholder={t.search}
+              aria-label={t.search}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div className="dlg-cardselect-list">
+            {shown.length ? (
+              shown.map((c, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={`dlg-cardselect-row${c.disabled ? " is-disabled" : ""}`}
+                  disabled={c.disabled}
+                  onClick={() => { if (!c.disabled) { setOpen(false); onSelect(c.title); } }}
+                >
+                  <span className="dlg-cardselect-name">
+                    {c.title}
+                    {c.badge ? <span className="dlg-cardselect-badge">{c.badge}</span> : null}
+                  </span>
+                  {c.desc ? <span className="dlg-cardselect-desc">{c.desc}</span> : null}
+                  {c.price ? <span className="dlg-cardselect-price">{c.price}</span> : null}
+                </button>
+              ))
+            ) : (
+              <div className="dlg-cardselect-row is-empty">{t.empty}</div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -666,6 +769,13 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
       }
       if (isCards) {
         const cards = parseCards(body);
+        // Above this many, cards stop being a way to compare options and start
+        // being a wall to scroll past. Ten box numbers still read well as cards;
+        // twenty-one branches do not.
+        if (cards.length > 12 && onSelect) {
+          nodes.push(<ChatCardSelect key={k++} cards={cards} locale={uploadCtx?.locale} onSelect={onSelect} />);
+          continue;
+        }
         if (cards.length) {
           nodes.push(
             <div className="dlg-cards" key={k++}>

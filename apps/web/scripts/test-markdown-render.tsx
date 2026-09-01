@@ -39,6 +39,22 @@ const cases: [string, string, string[]][] = [
   ["toggles checkbox with markdown link label", "```toggles\nstyle: checkbox\n- terms_accepted: I agree to the [Terms](https://example.com/tc)\nconfirm: Agree\n```", ["dlg-toggles", "href=\"https://example.com/tc\"", "dlg-checkbox-box"]],
   ["cards block renders options", "```cards\n- title: MyHome\n  price: AED 695 / year\n```", ["dlg-card-opt", "MyHome", "AED 695 / year"]],
   ["map block renders browse CTA", "```map\nemirate: DXB\nbundle: MYHOME3\n```", ["dlg-map"]],
+  // Twenty-one branches as cards filled several screens before the question.
+  [
+    "a long card list collapses into a dropdown",
+    "```cards\n" + Array.from({ length: 13 }, (_, i) => `- title: Branch ${i + 1}\n  desc: Mon - Fri`).join("\n") + "\n```",
+    ["dlg-cardselect", "to choose from"],
+  ],
+  [
+    "a list at the threshold stays as cards",
+    "```cards\n" + Array.from({ length: 12 }, (_, i) => `- title: Branch ${i + 1}`).join("\n") + "\n```",
+    ["dlg-card-opt"],
+  ],
+  [
+    "a disabled option cannot be chosen",
+    "```cards\n- title: Dubai Central Post Office\n  disabled: yes\n- title: Al Barsha Post Office\n```",
+    ["is-disabled"],
+  ],
   // A fence directly after a line of text, with no blank line between — the model
   // writes numbered lists this way and the paragraph used to swallow the block,
   // rendering literal backticks instead of an upload widget.
