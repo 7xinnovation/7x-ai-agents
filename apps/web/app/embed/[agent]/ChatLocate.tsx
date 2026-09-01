@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { NavigationArrow, MapPin, ArrowClockwise, Warning, CheckCircle } from "@phosphor-icons/react";
+import { NavigationArrow, MapPin, ArrowClockwise, Warning, CheckCircle, MagnifyingGlass, Crosshair } from "@phosphor-icons/react";
 import type { Locale } from "@dialog/config";
 import { loadMapbox } from "./ChatMap";
 
@@ -31,6 +31,10 @@ const LOC_STR = {
     adjust: "Drag the pin or tap the map to adjust",
     use: "Use this location",
     prefix: "Location",
+    search: "Search for a building, street or area",
+    denied: "We could not get your location — search or drag the pin to your address.",
+    locateMe: "Use my current location",
+    noResults: "Nothing found. Try a building, street or area name.",
   },
   ar: {
     cta: "حدّد الموقع على الخريطة",
@@ -40,6 +44,10 @@ const LOC_STR = {
     adjust: "اسحب المؤشر أو اضغط على الخريطة لضبط الموقع",
     use: "استخدام هذا الموقع",
     prefix: "الموقع",
+    search: "ابحث عن مبنى أو شارع أو منطقة",
+    denied: "تعذّر تحديد موقعك — ابحث أو اسحب المؤشر إلى عنوانك.",
+    locateMe: "استخدام موقعي الحالي",
+    noResults: "لا توجد نتائج. جرّب اسم مبنى أو شارع أو منطقة.",
   },
 } as const;
 
@@ -58,6 +66,15 @@ export function ChatLocate({
   const tokenRef = React.useRef<string>("");
   const posRef = React.useRef<{ lat: number; lng: number }>(FALLBACK_CENTER);
   const markerRef = React.useRef<any>(null);
+  const mapRef = React.useRef<any>(null);
+  // Whether the browser actually gave us a position. Without this the map opens
+  // on Dubai's centre and looks like an answer rather than a starting guess.
+  const [located, setLocated] = React.useState(true);
+  /** The pin has been placed deliberately — located, searched, dragged or tapped. */
+  const [placed, setPlaced] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  const [results, setResults] = React.useState<{ name: string; lat: number; lng: number }[] | null>(null);
+  const [searching, setSearching] = React.useState(false);
 
   const reverseGeocode = React.useCallback(async (p: { lat: number; lng: number }) => {
     if (!tokenRef.current) return;
@@ -71,6 +88,67 @@ export function ChatLocate({
       /* address stays empty — coordinates still work */
     }
   }, [locale]);
+
+  /** Put the pin somewhere and tell the map about it. */
+  const moveTo = React.useCallback((p: { lat: number; lng: number }, zoom?: number) => {
+    posRef.current = p;
+    setPlaced(true);
+    try { markerRef.current?.setLngLat([p.lng, p.lat]); } catch { /* map not up yet */ }
+    try { mapRef.current?.flyTo({ center: [p.lng, p.lat], zoom: zoom ?? 16, duration: 700 }); } catch { /* ignore */ }
+    void reverseGeocode(p);
+  }, [reverseGeocode]);
+
+  /**
+   * Search, so the customer is not left dragging across the city.
+   *
+   * Restricted to the UAE and biased towards wherever the pin already is. What
+   * this finds only moves the map — the address that counts is still whatever
+   * Emirates Post reads back from the final coordinates.
+   */
+  const runSearch = React.useCallback(async (q: string) => {
+    const token = tokenRef.current;
+    if (!token || q.trim().length < 3) { setResults(null); return; }
+    setSearching(true);
+    try {
+      const { lat, lng } = posRef.current;
+      const r = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
+          `?access_token=${encodeURIComponent(token)}&country=ae&limit=5&proximity=${lng},${lat}` +
+          `&language=${locale === "ar" ? "ar" : "en"}`
+      );
+      const j = (await r.json()) as { features?: { place_name?: string; center?: [number, number] }[] };
+      setResults(
+        (j.features ?? [])
+          .filter((f) => Array.isArray(f.center))
+          .map((f) => ({ name: f.place_name ?? "", lat: f.center![1], lng: f.center![0] }))
+      );
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }, [locale]);
+
+  // Typing searches, but not on every keystroke.
+  React.useEffect(() => {
+    if (phase !== "ready") return;
+    if (query.trim().length < 3) { setResults(null); return; }
+    const t = setTimeout(() => void runSearch(query), 350);
+    return () => clearTimeout(t);
+  }, [query, phase, runSearch]);
+
+  /** Ask the browser again — a customer who said no can change their mind. */
+  const locateMe = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        setLocated(true);
+        moveTo({ lat: p.coords.latitude, lng: p.coords.longitude }, 16);
+      },
+      () => setLocated(false),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  };
 
   const begin = async () => {
     if (phase !== "idle") return;
@@ -90,6 +168,7 @@ export function ChatLocate({
     const [token, loc] = await Promise.all([tokenP, geoP]);
     tokenRef.current = token;
     posRef.current = loc ?? FALLBACK_CENTER;
+    setLocated(Boolean(loc));
     if (token) {
       try {
         const mapboxgl = await loadMapbox();
@@ -103,7 +182,14 @@ export function ChatLocate({
       setPhase("error");
       return;
     }
-    void reverseGeocode(posRef.current);
+    // With no position of their own the map opens on Dubai's centre. Reading that
+    // back as an address would put "Financial Center Street" in front of someone
+    // who lives in Ajman and looks like an answer, so it stays blank until they
+    // put the pin somewhere themselves.
+    if (loc) {
+      setPlaced(true);
+      void reverseGeocode(posRef.current);
+    }
     setPhase("ready");
   };
 
@@ -123,6 +209,7 @@ export function ChatLocate({
     } catch {
       return;
     }
+    mapRef.current = map;
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
     const marker = new mapboxgl.Marker({ color: "#3d33d1", draggable: true })
       .setLngLat([posRef.current.lng, posRef.current.lat])
@@ -131,14 +218,17 @@ export function ChatLocate({
     marker.on("dragend", () => {
       const p = marker.getLngLat();
       posRef.current = { lat: p.lat, lng: p.lng };
+      setPlaced(true);
       void reverseGeocode(posRef.current);
     });
     map.on("click", (e: any) => {
       marker.setLngLat(e.lngLat);
       posRef.current = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+      setPlaced(true);
       void reverseGeocode(posRef.current);
     });
     return () => {
+      mapRef.current = null;
       try { map.remove(); } catch { /* ignore */ }
     };
   }, [phase, reverseGeocode]);
@@ -199,11 +289,47 @@ export function ChatLocate({
   }
   return (
     <div className="dlg-map is-ready">
+      <div className="dlg-locate-search">
+        <span className="dlg-locate-searchicon"><MagnifyingGlass size={15} weight="bold" /></span>
+        <input
+          className="dlg-locate-input"
+          type="text"
+          value={query}
+          placeholder={s.search}
+          aria-label={s.search}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runSearch(query); } }}
+        />
+        {searching ? <ArrowClockwise size={14} weight="bold" className="spin" /> : null}
+        <button type="button" className="dlg-locate-me" onClick={locateMe} aria-label={s.locateMe} title={s.locateMe}>
+          <Crosshair size={16} weight="bold" />
+        </button>
+      </div>
+      {results ? (
+        <div className="dlg-locate-results">
+          {results.length ? (
+            results.map((r, i) => (
+              <button
+                key={i}
+                type="button"
+                className="dlg-locate-result"
+                onClick={() => { moveTo({ lat: r.lat, lng: r.lng }); setResults(null); setQuery(""); }}
+              >
+                <MapPin size={14} weight="fill" />
+                <span>{r.name}</span>
+              </button>
+            ))
+          ) : (
+            <div className="dlg-locate-result is-empty">{s.noResults}</div>
+          )}
+        </div>
+      ) : null}
       {mapboxRef.current ? <div ref={mapEl} className="dlg-map-canvas locate" /> : null}
+      {!located && !placed ? <div className="dlg-locate-hint">{s.denied}</div> : null}
       <div className="dlg-locate-row">
         <span className="dlg-map-pinicon"><MapPin size={15} weight="fill" /></span>
         <span className="dlg-locate-addr">{address || s.adjust}</span>
-        <button type="button" className="dlg-locate-confirm" onClick={confirm}>
+        <button type="button" className="dlg-locate-confirm" onClick={confirm} disabled={!placed}>
           {s.use}
         </button>
       </div>
