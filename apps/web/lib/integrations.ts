@@ -187,6 +187,18 @@ export function extractSessionToken(body: string): string | null {
  *                      every Emirates Post call 401 and the agent then asked an
  *                      already-signed-in customer to sign in again.
  */
+/**
+ * One key for a company, whichever way it is named.
+ *
+ * The model rewrites a licence number ("CN-1234567" / "CN 1234567") and a company
+ * name ("PRINCIPLE EXPRESS CARGO L.L.C" / "Principle Express Cargo LLC") on the
+ * way through, so the two sides of this comparison are flattened to letters and
+ * digits before they meet.
+ */
+export function normaliseCompanyKey(v: unknown): string {
+  return String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 export async function buildApiTools(
   agentId: string,
   activeEnv: EnvKey,
@@ -219,6 +231,13 @@ export async function buildApiTools(
      * customer was back, and closed -- for a payment that had never been offered.
      */
     paymentReturnUrl?: string;
+    /**
+     * Trade licence numbers and company names GSB returned in this case, already
+     * normalised. A corporate save whose company is one of these is flagged to
+     * Emirates Post as auto-populated — their own portal makes the same
+     * distinction, and skips the document upload when it holds.
+     */
+    gsbCompanies?: string[];
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
@@ -233,6 +252,8 @@ export async function buildApiTools(
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
+  /** Normalised company keys GSB has returned in this case. */
+  getGsbCompanies: () => string[];
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -277,6 +298,8 @@ export async function buildApiTools(
     const t = Date.parse(h.expiresAt);
     return Number.isFinite(t) && t <= Date.now() ? null : h;
   };
+  /** Companies GSB has named in this case, so a save can say where they came from. */
+  const gsbCompanies = new Set(opts.gsbCompanies ?? []);
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
   let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
@@ -439,6 +462,27 @@ export async function buildApiTools(
         pay.billingDetail = filled;
         body.paymentProperties = pay;
         patched = true;
+      }
+
+      // Did these company details come from Emirates Post, or from the customer?
+      //
+      // A corporate rental carries IsCorporateInfoAutoPopulated. It is true when
+      // the company was picked from the GSB licence registry — Emirates Post
+      // already holds those details and its own portal then sends no trade
+      // licence scan at all — and false when the customer typed the licence
+      // number and uploaded the documents. We were never setting it, so every
+      // corporate rental looked like the manual kind.
+      const corp = (body.mainCorporateProfile ?? {}) as Record<string, unknown>;
+      if (Object.keys(corp).length) {
+        const known = gsbCompanies;
+        const fromGsb =
+          known.has(normaliseCompanyKey(corp.tradeLicenseNo)) ||
+          known.has(normaliseCompanyKey(corp.companyNameEn)) ||
+          known.has(normaliseCompanyKey(corp.companyNameAr));
+        if (body.IsCorporateInfoAutoPopulated !== fromGsb) {
+          body.IsCorporateInfoAutoPopulated = fromGsb;
+          patched = true;
+        }
       }
 
       // The return URL is ours to set, not the model's to remember.
@@ -983,6 +1027,7 @@ export async function buildApiTools(
     getLastBranchQuery: () => lastBranchQuery,
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
+    getGsbCompanies: () => [...gsbCompanies],
   };
 }
 

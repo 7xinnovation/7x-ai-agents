@@ -111,6 +111,14 @@ export const CaseState = z.object({
    * issuing a second would attach another response to the same order.
    */
   surveyIssuedAt: z.string().nullable().default(null),
+  /**
+   * Companies this case saw come back from the GSB licence lookups — trade
+   * licence numbers and names, normalised. Emirates Post distinguishes a
+   * corporate rental whose company details it supplied from one the customer
+   * typed and scanned, and only this list can tell the two apart later: the
+   * lookup happens turns before the save.
+   */
+  gsbCompanies: z.array(z.string()).default([]),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   status: z.enum(["draft", "ready", "submitted", "escalated"]),
@@ -128,6 +136,7 @@ export function emptyCase(): CaseState {
     hold: null,
     pulsedAt: null,
     surveyIssuedAt: null,
+    gsbCompanies: [],
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },
     reference: null,

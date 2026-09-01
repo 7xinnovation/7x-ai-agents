@@ -176,7 +176,73 @@ async function main() {
       (sent as Record<string, any> | null)?.myHomeProfile?.myHomeAddress?.regionName === "DXB-161");
   }
 
-  console.log(`\n${pass} passed, ${fail} failed`);
+    // 4. A corporate rental says where the company details came from.
+  {
+    const corpHold = { ...hold, bundleId: "BR", services: ["RENT"], uniqueBoxId: "2417676" };
+    const profile2 = { ...profile };
+    const corpBody = (autoPopulated: boolean) => ({
+      body: {
+        totalAmount: 1000,
+        subscriptionReferenceNumber: corpHold.reference,
+        userProfile: profile2,
+        requestSource: "PoBoxAIBot",
+        paymentProperties: { paymentReturnUrl: "https://example.invalid/return" },
+        mainCorporateProfile: {
+          companyNameEn: autoPopulated ? "Principle Express Cargo LLC" : "Some Company The Registry Never Named",
+          companyNameAr: "شركة",
+          tradeLicenseNo: autoPopulated ? "CN 1234567" : "ZZ-9999999",
+          emirateCode: "DXB",
+        },
+      },
+    });
+    const run = async (autoPopulated: boolean) => {
+      const real = globalThis.fetch;
+      let sent: Record<string, any> | null = null;
+      globalThis.fetch = (async (...a: Parameters<typeof fetch>) => {
+        if (String(a[0]).includes("Rental/Save")) {
+          sent = JSON.parse(String((a[1] as RequestInit)?.body ?? "{}"));
+          return new Response(JSON.stringify({ payload: {} }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return real(...a);
+      }) as typeof fetch;
+      const t = await buildApiTools(row.id, "staging", {
+        initialHold: corpHold,
+        sessionToken: "test-session",
+        // As the registry returned them: a spaced licence number and the company's
+        // own punctuation, neither of which survives the model verbatim.
+        gsbCompanies: ["CN1234567", "PRINCIPLEEXPRESSCARGOLLC"],
+      });
+      await t.exec(SAVE, corpBody(autoPopulated));
+      globalThis.fetch = real;
+      return sent as Record<string, any> | null;
+    };
+    const fromRegistry = await run(true);
+    const typedIn = await run(false);
+    check("a company GSB named is flagged auto-populated",
+      fromRegistry?.IsCorporateInfoAutoPopulated === true, fromRegistry?.mainCorporateProfile);
+    check("a company the customer typed is not",
+      typedIn?.IsCorporateInfoAutoPopulated === false, typedIn?.mainCorporateProfile);
+  }
+
+  // 5. A personal rental carries no corporate flag at all.
+  {
+    const real = globalThis.fetch;
+    let sent: Record<string, any> | null = null;
+    globalThis.fetch = (async (...a: Parameters<typeof fetch>) => {
+      if (String(a[0]).includes("Rental/Save")) {
+        sent = JSON.parse(String((a[1] as RequestInit)?.body ?? "{}"));
+        return new Response(JSON.stringify({ payload: {} }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return real(...a);
+    }) as typeof fetch;
+    const t = await buildApiTools(row.id, "staging", { initialHold: hold, sessionToken: "test-session", gsbCompanies: ["CN1234567"] });
+    await t.exec(SAVE, saveBody("DXB-161"));
+    globalThis.fetch = real;
+    const body = sent as Record<string, any> | null;
+    check("a personal rental is left alone", body?.IsCorporateInfoAutoPopulated === undefined, body?.IsCorporateInfoAutoPopulated);
+  }
+
+console.log(`\n${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 }
 

@@ -129,6 +129,10 @@ POST /api/Rental/Save                                       (session, ~17s)
   "myHomeProfile": {                              ← MyHome / MyHome Instant only
       emailID, mobileNo, deliveryOfficeID: "201",
       myHomeAddress: { emirateCode: "DXB", regionName: "DXB-12", … } },
+  "mainCorporateProfile": {                       ← corporate rentals only
+      companyNameEn, companyNameAr, tradeLicenseNo, emirateCode,
+      issuingEntity, issuingDate, tradeLicenseExpiryDate, attachments },
+  "IsCorporateInfoAutoPopulated": true,           ← see below
   "keyDeliveryAddress": { name, mobileNo, emirateCode, deliveryAddress },
   "additionalServiceDetailList": [ { quantity: 1, serviceType: "KEY-DELIVERY" } ],
   "paymentProperties": {
@@ -151,6 +155,14 @@ Three things that are not in the spec and cost us time:
   `173 MYHOME_ADDDRESSNOT_FOUND`.
 - `additionalServiceDetailList` may only name services that appeared in
   `priceDetails`.
+
+**`IsCorporateInfoAutoPopulated`** is `true` when the company came from the GSB
+licence registry (§5) — details Emirates Post already holds — and `false` when the
+customer typed the licence number and uploaded the documents. We set it from what
+the registry actually returned during the conversation, not from anything the
+assistant asserts. *Your portal also skips the trade licence, owner ID front and
+owner ID back attachments entirely when the flag is true — should we do the same,
+and stop asking those customers to upload anything?*
 
 The customer pays at `paymentUrl`. We keep `referenceNumber` for step 7.
 
@@ -307,3 +319,5 @@ Tell us which of these you want the assistant to use and we will enable them.
 5. Whether `Rental/Save` can populate the **delivery address** panel, or only
    `ChangeAddress/Save`.
 6. Whether `MOE/GetEntitiesById` is really keyed to the Emirates ID in production.
+7. Whether a corporate rental with `IsCorporateInfoAutoPopulated: true` should
+   send **no** document attachments, as your portal does.

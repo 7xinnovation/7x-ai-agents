@@ -15,7 +15,7 @@ import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
-import { buildApiTools } from "@/lib/integrations";
+import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions } from "@/lib/epRegions";
@@ -268,6 +268,9 @@ export async function POST(req: NextRequest) {
     initialHold: session.state.hold ?? null,
     // The list is shown in one turn and picked from in the next.
     initialOfferedBoxIds: session.state.offeredBoxIds ?? [],
+    // The company is looked up turns before the save that has to declare where
+    // its details came from.
+    gsbCompanies: session.state.gsbCompanies ?? [],
     // Set on the save payload rather than handed to the model, which pasted it
     // into a pay block and sent the customer to our own return page.
     paymentReturnUrl: (agent.definition.journeys ?? [])
@@ -566,6 +569,21 @@ export async function POST(req: NextRequest) {
     : [];
 
   const extraTools = [...baseExtraTools, emailTool, ...epglReadTools, ...gsbTools];
+  /**
+   * Companies GSB has named this turn. Emirates Post is told whether a corporate
+   * rental's details came from its own registry or from the customer, and by the
+   * time the save runs the lookup is several turns in the past — so every company
+   * the registry hands over is remembered as it arrives.
+   */
+  const gsbSeen = new Set(session.state.gsbCompanies ?? []);
+  const rememberGsb = (rows: { tradeLicenseNo?: string; nameEn?: string; nameAr?: string }[]) => {
+    for (const r of rows) {
+      for (const v of [r.tradeLicenseNo, r.nameEn, r.nameAr]) {
+        const k = normaliseCompanyKey(v);
+        if (k) gsbSeen.add(k);
+      }
+    }
+  };
   const runExtraTool = async (name: string, input: Record<string, unknown>) => {
     if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL || name === MYBOXES_TOOL || name === MYCOMPANIES_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
@@ -592,6 +610,7 @@ export async function POST(req: NextRequest) {
             companiesByEmiratesId(agent.id, env, eid, caller).catch(() => []),
             poBoxesByEmiratesId(agent.id, env, eid, caller).catch(() => []),
           ]);
+          rememberGsb(registry);
           const onBoxes = boxes.filter((b) => b.rentType === "Corporate" && b.holderName);
           const known = new Set(registry.map((c) => (c.nameEn ?? "").trim().toLowerCase()).filter(Boolean));
           const extra = onBoxes
@@ -624,6 +643,7 @@ export async function POST(req: NextRequest) {
         }
         if (name === COMPANIES_TOOL) {
           const rows = await companiesByAuthority(agent.id, env, String(input.entityCode ?? ""), caller);
+          rememberGsb(rows);
           return {
             result: rows.length
               ? JSON.stringify(rows)
@@ -633,6 +653,7 @@ export async function POST(req: NextRequest) {
         const found = await companyByLicence(
           agent.id, env, String(input.entityCode ?? ""), String(input.licenceNo ?? ""), caller
         );
+        if (found) rememberGsb([found.company]);
         if (!found) {
           return {
             result:
@@ -1168,6 +1189,9 @@ export async function POST(req: NextRequest) {
         // wholesale, so a mark set before the turn would be gone by the end of it.
         if (isPulse && !finalState.pulsedAt) {
           finalState = { ...finalState, pulsedAt: new Date().toISOString() };
+        }
+        if (gsbSeen.size !== (finalState.gsbCompanies ?? []).length) {
+          finalState = { ...finalState, gsbCompanies: [...gsbSeen] };
         }
 
         // Customer Pulse: the UAE government satisfaction survey, shown where
