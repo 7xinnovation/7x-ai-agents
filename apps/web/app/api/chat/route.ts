@@ -764,6 +764,9 @@ export async function POST(req: NextRequest) {
         };
       }
       const detail = [found.building, found.street, found.area, found.emirate].filter(Boolean).join(", ");
+      const remote = found.remote
+        ? " Emirates Post marks this location as OUTSIDE ITS NORMAL DELIVERY AREA — tell the customer deliveries there may be slower or limited, and let them decide before continuing."
+        : "";
       if (found.region) {
         return {
           result:
@@ -776,13 +779,14 @@ export async function POST(req: NextRequest) {
               buildingName: found.building ?? "",
               detailedAddress: detail,
             }) +
+            remote +
             `\n\nSHOW the customer this address and ask them to confirm it, and to add their villa or apartment number — the pin cannot know it. Send regionName EXACTLY as given. The pin also decides the EMIRATE: if ${found.emirateCode} is not the emirate they picked for the box, tell them, because the box has to be in the emirate they live in.`,
         };
       }
       const near = (found.candidates ?? []).map((r) => `${r.code} = ${r.nameEn}`).join("\n");
       return {
         result:
-          `THE PIN RESOLVES TO: ${detail || "an unnamed location"}${found.emirateCode ? ` (${found.emirateCode})` : ""}, but Emirates Post's area name for it does not match a delivery area outright.` +
+          `THE PIN RESOLVES TO: ${detail || "an unnamed location"}${found.emirateCode ? ` (${found.emirateCode})` : ""}, but Emirates Post's area name for it does not match a delivery area outright. The two systems spell places differently, so the list below is what it is CLOSEST to — the first is usually right, but the customer confirms it, never you.` + remote +
           (near ? `\n\nAsk the customer which of these their address is in, as CARDS, and send the CODE as regionName:\n${near}` : `\n\nAsk them for the district in words and use ${AREAS_TOOL}.`),
       };
     }

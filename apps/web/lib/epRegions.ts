@@ -87,8 +87,14 @@ function editDistance(a: string, b: string, max: number): number {
   return prev[b.length]!;
 }
 
-/** How wrong a word may be and still be the same word. */
-const slack = (len: number) => (len >= 8 ? 2 : len >= 5 ? 1 : 0);
+/**
+ * How wrong a word may be and still be the same word.
+ *
+ * Four letters gets one, because the mismatches are not all the customer's:
+ * Emirates Post's own geocoder answers "Nadd Al Shiba 1" where its masters list
+ * says "Nad Al Sheeba 1", and both spellings have to reach the same area.
+ */
+const slack = (len: number) => (len >= 8 ? 2 : len >= 4 ? 1 : 0);
 
 /** The one area this text can only mean, or null when it is ambiguous. */
 export function exactRegion(rows: EpRegion[], value: string): EpRegion | null {
@@ -112,7 +118,11 @@ export function exactRegion(rows: EpRegion[], value: string): EpRegion | null {
 export function searchRegions(rows: EpRegion[], query: string, limit = 12): EpRegion[] {
   const q = norm(query);
   if (!q) return rows.slice(0, limit);
-  const words = q.split(" ").filter((w) => w.length > 2 && !STOP.has(w));
+  // Digits count as words. "Nadd Al Shiba 1" against a list holding Nad Al
+  // Sheeba 1 through 4 is otherwise a four-way tie, and the number is the only
+  // thing that separates them.
+  const keep = (w: string) => (w.length > 2 || /^\d+$/.test(w)) && !STOP.has(w);
+  const words = q.split(" ").filter(keep);
   const scored = rows
     .map((r) => {
       const n = norm(r.nameEn);
@@ -124,7 +134,7 @@ export function searchRegions(rows: EpRegion[], query: string, limit = 12): EpRe
       else {
         // "Sobha Hartland" matches nothing; "Nad Al Sheeba villa" should still
         // reach Nad Al Sheeba, and "al bursha" should reach Al Barsha.
-        const rWords = [...n.split(" "), ...a.split(" ")].filter((w) => w.length > 2 && !STOP.has(w));
+        const rWords = [...n.split(" "), ...a.split(" ")].filter(keep);
         // A shared prefix only means something when the shorter word is most of
         // the longer one. Without that, "bursha" counted as a hit on "Bur Dubai"
         // and outranked Al Barsha, which is what the customer had mistyped.
