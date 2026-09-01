@@ -45,6 +45,8 @@ interface BootConfig {
    * Not needed when the script and the token share an origin.
    */
   bridgeUrl?: string;
+  /** The host set data-position explicitly, so the agent's theme must not move it. */
+  positionPinned: boolean;
 }
 
 const STYLE_ID = "dialog-embed-style";
@@ -68,6 +70,7 @@ function readConfig(): BootConfig {
     tokenKey: d.tokenKey || DEFAULT_TOKEN_KEY,
     tokenCookie: d.tokenCookie || DEFAULT_TOKEN_COOKIE,
     bridgeUrl: d.bridgeUrl || undefined,
+    positionPinned: d.position === "bottom-left" || d.position === "bottom-right",
   };
 }
 
@@ -123,10 +126,16 @@ function readStoredToken(key?: string): string | null {
 
 function injectStyles(cfg: BootConfig) {
   if (document.getElementById(STYLE_ID)) return;
-  const side = cfg.position === "bottom-left" ? "left: 24px;" : "right: 24px;";
+  // Placement lives in custom properties, not in the rule, because the agent's
+  // theme arrives after these styles are injected -- and because a host page can
+  // already have an accessibility button and another chat bubble in the corner
+  // we would otherwise land on.
+  const left = cfg.position === "bottom-left";
   const css = `
-  :root{--dlg-accent:#2626a1;--dlg-accent-2:#1c1c7d;--dlg-accent-fg:#fff}
-  .dlg-launcher{position:fixed;bottom:24px;${side}z-index:2147483000;width:56px;height:56px;border-radius:9999px;border:none;cursor:pointer;padding:0;
+  :root{--dlg-accent:#2626a1;--dlg-accent-2:#1c1c7d;--dlg-accent-fg:#fff;
+    --dlg-bottom:24px;--dlg-side:24px;
+    --dlg-left:${left ? "var(--dlg-side)" : "auto"};--dlg-right:${left ? "auto" : "var(--dlg-side)"}}
+  .dlg-launcher{position:fixed;bottom:var(--dlg-bottom);left:var(--dlg-left);right:var(--dlg-right);z-index:2147483000;width:56px;height:56px;border-radius:9999px;border:none;cursor:pointer;padding:0;
     background:var(--dlg-accent);
     background:linear-gradient(180deg,color-mix(in srgb,var(--dlg-accent) 88%,#fff),var(--dlg-accent-2));
     color:var(--dlg-accent-fg);
@@ -146,9 +155,9 @@ function injectStyles(cfg: BootConfig) {
   .dlg-launcher.open .ic-x{opacity:1;transform:none}
   .dlg-frame{position:fixed;border:none;z-index:2147483001;background:transparent;border-radius:22px;
     box-shadow:0 0 0 1px rgba(16,24,40,.07),0 30px 80px rgba(16,24,40,.28),0 8px 24px rgba(16,24,40,.16);
-    opacity:0;visibility:hidden;transform:translateY(14px) scale(.98);transform-origin:bottom ${cfg.position === "bottom-left" ? "left" : "right"};
+    opacity:0;visibility:hidden;transform:translateY(14px) scale(.98);transform-origin:bottom ${left ? "left" : "right"};
     transition:opacity .3s cubic-bezier(.16,1,.3,1),transform .3s cubic-bezier(.16,1,.3,1),visibility .3s,width .3s ease,height .3s ease,border-radius .3s ease}
-  .dlg-frame.widget{bottom:96px;${side}width:404px;height:640px;max-height:calc(100vh - 120px)}
+  .dlg-frame.widget{bottom:calc(var(--dlg-bottom) + 72px);left:var(--dlg-left);right:var(--dlg-right);width:404px;height:640px;max-height:calc(100vh - 120px)}
   .dlg-frame.full{inset:0;width:100vw;height:100vh;border-radius:0;transform-origin:center}
   .dlg-frame.open{opacity:1;visibility:visible;transform:none}
   @media (max-width:640px){.dlg-frame.widget{inset:0;width:100vw;height:100vh;border-radius:0}}
@@ -176,6 +185,23 @@ async function applyTheme(cfg: BootConfig) {
       document.documentElement.style.setProperty("--dlg-accent-2", `color-mix(in srgb, ${primary} 86%, black)`);
     }
     if (fg) document.documentElement.style.setProperty("--dlg-accent-fg", fg);
+
+    // Placement, unless the host pinned it on the script tag. Hosts should not
+    // have to edit their page for us to move out of the way of something else in
+    // the corner.
+    const l = data?.theme?.launcher ?? {};
+    const root = document.documentElement.style;
+    if (!cfg.positionPinned && (l.position === "bottom-left" || l.position === "bottom-right")) {
+      const isLeft = l.position === "bottom-left";
+      root.setProperty("--dlg-left", isLeft ? "var(--dlg-side)" : "auto");
+      root.setProperty("--dlg-right", isLeft ? "auto" : "var(--dlg-side)");
+    }
+    const px = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 400 ? `${Math.round(v)}px` : null);
+    const bottom = px(l.offsetBottom);
+    const side = px(l.offsetSide);
+    // Both edges read --dlg-side, so whichever one is live picks this up.
+    if (bottom) root.setProperty("--dlg-bottom", bottom);
+    if (side) root.setProperty("--dlg-side", side);
   } catch {
     /* keep defaults */
   }

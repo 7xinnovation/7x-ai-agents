@@ -34,6 +34,15 @@ export const Theme = z.object({
   // Floating launcher placement on the host site.
   launcher: z.object({
     position: z.enum(["bottom-right", "bottom-left"]).default("bottom-right"),
+    /**
+     * Distance from the bottom and from the side, in pixels.
+     *
+     * Host pages already have things in that corner — emiratespost.ae has an
+     * accessibility button and another chat bubble stacked above ours — and
+     * moving out of their way should not require the host to edit their page.
+     */
+    offsetBottom: z.number().min(0).max(400).optional(),
+    offsetSide: z.number().min(0).max(400).optional(),
     label: z.string().optional(),
   }),
 });
