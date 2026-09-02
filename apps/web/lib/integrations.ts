@@ -218,6 +218,63 @@ function auditableInput(input: unknown): unknown {
   return walk(input ?? {});
 }
 
+export interface EpglDocumentRow {
+  key: string;
+  fileName: string;
+  fileType: string;
+  sizeBytes: number;
+  fileId: string;
+}
+
+/**
+ * Add a placeholder record to the EPGL composite for every uploaded file.
+ *
+ * Salesforce tracks an application's documents as EPG_Document__c rows -- one
+ * per file -- and the Documents panel on the licence request lists THOSE, not
+ * the files. Upload a file with no placeholder and it lands on the record while
+ * the panel stays empty, which is exactly what LR-37176 and LR-37177 looked
+ * like: both uploads returned 201, and both applications appeared to have no
+ * documents. Their own spec shows the shape; the model was told to send it and
+ * omitted it twice, so it is built here where it cannot be forgotten.
+ */
+export function withEpglDocumentPlaceholders(
+  input: Record<string, unknown> | undefined,
+  docs: EpglDocumentRow[]
+): Record<string, unknown> | undefined {
+  if (!docs.length) return input;
+  const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+  const items = Array.isArray(body.compositeRequest)
+    ? [...(body.compositeRequest as Record<string, unknown>[])]
+    : [];
+  if (!items.length) return input;
+  // A composite that already carries documents is the model's to own.
+  if (items.some((i) => /EPG_Document__c/i.test(String(i?.url ?? "")))) return input;
+  const accountItem = items.find((i) => /sobjects\/Account$/i.test(String(i?.url ?? "")));
+  if (!accountItem) return input;
+
+  const accountRef = String(accountItem.referenceId ?? "NewAccount");
+  const docItem = {
+    method: "POST",
+    referenceId: "NewDocument",
+    url: "/services/data/v66.0/sobjects/EPG_Document__c",
+    body: docs.map((d) => ({
+      EPG_Company__c: `@{${accountRef}.id}`,
+      EPG_File_Name__c: d.fileName,
+      docType__c: d.fileType,
+      fileType__c: d.fileType,
+      EPG_File_Id__c: d.fileId,
+      fileSize__c: d.sizeBytes,
+    })),
+  };
+  // After the Account it references, and before the licence request, so the
+  // request stays the last thing that happens.
+  const lrAt = items.findIndex((i) => /EPG_License_Request__c$/i.test(String(i?.url ?? "")));
+  if (lrAt === -1) items.push(docItem);
+  else items.splice(lrAt, 0, docItem);
+  body.compositeRequest = items;
+  return { ...input, body };
+}
+
 export function normaliseCompanyKey(v: unknown): string {
   return String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -261,6 +318,17 @@ export async function buildApiTools(
      * distinction, and skips the document upload when it holds.
      */
     gsbCompanies?: string[];
+    /**
+     * The documents this case holds, for the EPGL composite's placeholder rows.
+     *
+     * Salesforce tracks an application's files as EPG_Document__c records — one
+     * per file — and the portal's Documents panel lists those, not the files
+     * themselves. Uploading a file without its placeholder puts it on the record
+     * but leaves the panel empty, which is exactly what LR-37176 and LR-37177
+     * looked like. The model was asked for these and left them out both times, so
+     * they are built here from what was actually uploaded.
+     */
+    epglDocuments?: EpglDocumentRow[];
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
@@ -631,6 +699,10 @@ export async function buildApiTools(
       }
 
       if (patched) input = { ...input, body };
+    }
+
+    if (/submitlicenserequest$/i.test(toolName) && (opts.epglDocuments ?? []).length) {
+      input = withEpglDocumentPlaceholders(input, opts.epglDocuments ?? []) ?? input;
     }
 
     // UpdatePayment takes the reference in the PATH; send the one we were given.

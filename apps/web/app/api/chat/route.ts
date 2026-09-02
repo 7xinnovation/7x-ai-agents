@@ -3,7 +3,8 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { Locale } from "@dialog/config";
 import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, adapterContext } from "@dialog/core";
-import { getDb, payments, documents as documentsTable } from "@dialog/db";
+import { randomUUID } from "node:crypto";
+import { getDb, payments, documents as documentsTable, documentBlobs } from "@dialog/db";
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
@@ -149,6 +150,58 @@ function formatEpglProfileContext(p: Record<string, string>): string | undefined
  * (server-authoritative); turns, submissions, payments, and escalations are
  * persisted, audited, and emitted as standardized analytics events.
  */
+/**
+ * One placeholder row per uploaded file, for the EPGL composite.
+ *
+ * Salesforce needs the name, the type and the SIZE, and the size only exists on
+ * the stored blob -- so it is read here rather than guessed. A file whose bytes
+ * have gone is left out: a placeholder with no file behind it is worse than no
+ * placeholder, because the panel would then promise a document that never
+ * arrives.
+ */
+async function epglDocumentRows(
+  caseId: string,
+  stateDocs: { key: string; status: string; fileName?: string }[]
+): Promise<{ key: string; fileName: string; fileType: string; sizeBytes: number; fileId: string }[]> {
+  const wanted = new Set(
+    stateDocs.filter((d) => d.status === "uploaded" || d.status === "accepted").map((d) => d.key)
+  );
+  if (!wanted.size) return [];
+  try {
+    const rows = await getDb()
+      .select({
+        key: documentsTable.key,
+        fileName: documentsTable.fileName,
+        storageKey: documentsTable.storageKey,
+        sizeBytes: documentBlobs.sizeBytes,
+      })
+      .from(documentsTable)
+      .leftJoin(documentBlobs, eq(documentBlobs.storageKey, documentsTable.storageKey))
+      .where(eq(documentsTable.caseId, caseId));
+    // Newest row per key -- a re-upload replaces the earlier one.
+    const byKey = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) if (wanted.has(r.key)) byKey.set(r.key, r);
+    return [...byKey.values()]
+      .filter((r) => r.storageKey && typeof r.sizeBytes === "number" && r.sizeBytes > 0)
+      .map((r) => {
+        const fileName = r.fileName || `${r.key}.pdf`;
+        return {
+          key: r.key,
+          fileName,
+          fileType: (fileName.split(".").pop() || "pdf").toLowerCase(),
+          sizeBytes: Number(r.sizeBytes),
+          // Their spec carries a UUID here; it is ours to mint, and it
+          // correlates the placeholder with the file uploaded afterwards.
+          fileId: randomUUID(),
+        };
+      });
+  } catch {
+    // A submission is worth more than its placeholders: never fail the save over
+    // this. The files still upload; only the panel stays empty.
+    return [];
+  }
+}
+
 export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) {
@@ -272,6 +325,10 @@ export async function POST(req: NextRequest) {
     // The company is looked up turns before the save that has to declare where
     // its details came from.
     gsbCompanies: session.state.gsbCompanies ?? [],
+    // The files this case holds, so the EPGL composite carries a placeholder row
+    // per document. Read here rather than left to the model, which was asked for
+    // them twice and sent none.
+    epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
     // Set on the save payload rather than handed to the model, which pasted it
     // into a pay block and sent the customer to our own return page.
     paymentReturnUrl: (agent.definition.journeys ?? [])
