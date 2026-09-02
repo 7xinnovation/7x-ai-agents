@@ -36,6 +36,7 @@ export function Editor({ slug }: { slug: string }) {
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedRelay, setCopiedRelay] = useState(false);
+  const [copiedNative, setCopiedNative] = useState(false);
   const [msg, setMsg] = useState<{ k: "ok" | "err"; t: string } | null>(null);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
 
@@ -58,6 +59,16 @@ export function Editor({ slug }: { slug: string }) {
   const patchColor = (k: string, v: string) => setDef((x) => ({ ...x, theme: { ...x.theme, colors: { ...x.theme.colors, [k]: v } } }));
   const toggleLocale = (l: string) => patch({ locales: def.locales.includes(l) ? def.locales.filter((x) => x !== l) : [...def.locales, l] });
 
+  const nativeSnippet = useMemo(
+    () =>
+      `<DialogChat
+  host="${origin}"
+  agent="${def.slug || "agent-slug"}"
+  locale="${def.locales[0] ?? "en"}"
+  accessToken={session.accessToken}
+/>`,
+    [origin, def.slug, def.locales]
+  );
   const snippet = useMemo(() => `<script src="${origin}/dialog.js"\n        data-agent="${def.slug || "agent-slug"}"\n        data-host="${origin}"\n        data-locale="${def.locales[0] ?? "en"}"></script>`, [origin, def.slug, def.locales]);
 
   /**
@@ -110,6 +121,18 @@ export function Editor({ slug }: { slug: string }) {
 
   const copy = async () => { try { await navigator.clipboard.writeText(snippet); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {} };
   const copyRelay = async () => { try { await navigator.clipboard.writeText(relaySnippet); setCopiedRelay(true); setTimeout(() => setCopiedRelay(false), 1600); } catch {} };
+  /**
+   * The mobile component is a FILE, not a snippet — it is fetched rather than
+   * pasted into this page so there is one copy of it, the one the app installs.
+   */
+  const copyNative = async () => {
+    try {
+      const res = await fetch(`${origin}/embed/DialogChat.tsx`);
+      await navigator.clipboard.writeText(await res.text());
+      setCopiedNative(true);
+      setTimeout(() => setCopiedNative(false), 1600);
+    } catch { /* the download link below still works */ }
+  };
 
   if (loading) return <div className="grid h-64 place-items-center text-muted">Loading…</div>;
   const c = def.theme.colors;
@@ -224,6 +247,43 @@ export function Editor({ slug }: { slug: string }) {
             * The relay snippet is shown here, copyable, because the host team is the
             * audience and "ask 7X for a file" is where an integration stalls.
             */}
+          {/*
+            * The mobile app, alongside the web tag rather than in a document
+            * somewhere: the audience for both is the same integrator, and an
+            * integration stalls on "ask 7X for the file".
+            */}
+          <div className="mt-4 rounded-xl border border-[var(--color-line)] bg-bg p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[12.5px] font-semibold">Mobile app (React Native)</p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={copyNative}>
+                  {copiedNative ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copiedNative ? "Copied" : "Copy component"}
+                </Button>
+                <a
+                  className="inline-flex items-center rounded-md border border-[var(--color-line)] px-2.5 py-1 text-[12px] hover:bg-surface"
+                  href={`${origin}/embed/DialogChat.tsx`}
+                  download="DialogChat.tsx"
+                >
+                  Download
+                </a>
+              </div>
+            </div>
+            <p className="mt-1.5 text-[12.5px] text-muted">
+              A WebView wrapper around this same widget &mdash; not a second chat, so it stays in step
+              automatically. Drop <code className="rounded bg-surface px-1 py-0.5 font-mono">DialogChat.tsx</code> into
+              the app and render it:
+            </p>
+            <pre className="mt-2 overflow-x-auto rounded-xl bg-[#0b1020] p-4 font-mono text-[12.5px] leading-relaxed text-slate-100">{nativeSnippet}</pre>
+            <p className="mt-2.5 text-[12.5px] text-muted">
+              Needs <code className="rounded bg-surface px-1 py-0.5 font-mono">react-native-webview</code> and{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">expo-web-browser</code>. Pass{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">accessToken</code> and the conversation starts
+              signed in; leave it out and the customer is a guest. Location, microphone and camera permissions are
+              optional &mdash; without them those steps degrade rather than fail.{" "}
+              <a className="underline" href={`${origin}/embed/README.md`} target="_blank" rel="noreferrer">Integration notes</a>.
+            </p>
+          </div>
+
           <div className="mt-4 rounded-xl border border-[var(--color-line)] bg-bg p-4">
             <p className="text-[12.5px] font-semibold">Signed-in customers</p>
             <p className="mt-1.5 text-[12.5px] text-muted">

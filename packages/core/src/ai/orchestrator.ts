@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { AgentDefinition, CaseState, Locale } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
-import { getAnthropic, resolveModel } from "./anthropic";
+import { getAnthropic, resolveModel, fastModel } from "./anthropic";
 import { buildSystemPrompt } from "./prompt";
 import { TOOL_DEFS, dispatchTool } from "./tools";
 import { findJourney } from "../case/engine";
@@ -160,6 +160,16 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * than a prompt "we're busy".
  */
 const RETRY_BUDGET_MS = 20_000;
+/**
+ * The longest a single wait may be.
+ *
+ * Azure answers a 429 with retry-after 60s. Honouring that spent the entire
+ * budget on one sleep and left room for exactly one retry; capping it turns the
+ * same budget into several attempts, which is what a passing spike needs.
+ */
+const MAX_SINGLE_WAIT_MS = 4_000;
+/** A little room to try the other deployment once. */
+const FALLBACK_BUDGET_MS = 4_000;
 
 /**
  * How long the provider asked us to wait, in ms, if it said so — either via the
@@ -220,7 +230,10 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
   ];
 
   const client = getAnthropic();
-  const model = resolveModel(agent.model);
+  // Not const: a turn that runs out of retries on the main deployment finishes
+  // on the other one rather than failing in front of the customer.
+  let model = resolveModel(agent.model);
+  let triedFallback = false;
   const builtin = new Set(TOOL_DEFS.map((t) => t.name));
   const tools = input.extraTools?.length ? [...TOOL_DEFS, ...input.extraTools] : TOOL_DEFS;
   // Mark the last tool definition cacheable so the (static) tool schema is reused
@@ -286,16 +299,30 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         } catch (err) {
           if (!textStarted && isTransient(err) && attempt < MAX_RETRIES && retryBudgetMs > 0) {
             attempt++;
-            // A throttled provider tells us how long to wait; honour it when it
-            // is short rather than guessing, but never spend more than the
-            // budget in total — beyond that it is a capacity shortfall, and
-            // waiting only turns a fast error into a long silence.
+            // A throttled provider tells us how long to wait. Honouring a long
+            // hint spends the WHOLE budget on one sleep and buys a single retry:
+            // Azure answers a 429 with retry-after 60s, we waited the full 20s
+            // budget, tried once, and gave up. Several short attempts inside the
+            // same budget survive a brief spike, which is what most of these are.
             const hinted = retryAfterMs(err);
             const backoff = RETRY_BASE_MS * 2 ** (attempt - 1) + Math.floor(Math.random() * 120);
-            const wait = Math.min(hinted ?? backoff, retryBudgetMs);
+            const wait = Math.min(hinted ?? backoff, MAX_SINGLE_WAIT_MS, retryBudgetMs);
             retryBudgetMs -= wait;
             await sleep(wait);
             continue;
+          }
+          // Out of retries on the main model, and the customer is mid-purchase.
+          // A second deployment has its own quota, so one attempt there beats
+          // handing back "the service is busy" and making them type it again.
+          if (!textStarted && isTransient(err) && !triedFallback) {
+            const alt = fastModel();
+            if (alt && alt !== model) {
+              triedFallback = true;
+              model = alt;
+              attempt = 0;
+              retryBudgetMs = Math.max(retryBudgetMs, FALLBACK_BUDGET_MS);
+              continue;
+            }
           }
           throw err;
         }

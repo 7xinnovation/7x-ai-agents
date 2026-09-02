@@ -29,6 +29,11 @@ const uuid = () => globalThis.crypto.randomUUID();
 check("rental maps to its survey", pulseServiceFor("personal_po_box_rental") === "rent_personal");
 check("corporate renewal maps to its survey", pulseServiceFor("corporate_po_box_renewal") === "renew_corporate");
 check("an unrelated journey gets no survey", pulseServiceFor("manage_po_box") === null);
+check("a new licence maps to its own survey", pulseServiceFor("new_license") === "license_new");
+check("a licence renewal maps to its own", pulseServiceFor("renewal") === "license_renewal");
+check("EPGL is not pointed at a PO Box survey",
+  pulseServiceFor("new_license") !== pulseServiceFor("rent_personal") &&
+    pulseServiceFor("renewal") !== pulseServiceFor("renew_personal"));
 
 // The shapes a UAE mobile actually arrives in. Customer Pulse rejects the whole
 // call on a bad one, so a number we cannot place is dropped instead.
@@ -41,6 +46,14 @@ check("a landline-shaped number is dropped", toE164("042951111") === "");
 check("words are dropped", toE164("call me") === "");
 check("empty is empty", toE164(undefined) === "");
 check("no journey gets no survey", pulseServiceFor(null) === null);
+
+// EPGL's linking ids are its own; without them the survey stays off rather than
+// running against a PO Box survey.
+console.log(
+  pulseConfigured("license_new")
+    ? "EPGL licensing survey is configured"
+    : "EPGL licensing survey is NOT configured — CUSTOMER_PULSE_ID_LICENSE_NEW / _RENEWAL are needed from Customer Pulse"
+);
 
 if (!pulseConfigured("rent_personal")) {
   console.log("\nCustomer Pulse is not configured in this environment — skipping the live calls.");

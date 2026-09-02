@@ -20,7 +20,13 @@
  */
 import { log } from "./logger";
 
-export type PulseService = "rent_personal" | "rent_corporate" | "renew_personal" | "renew_corporate";
+export type PulseService =
+  | "rent_personal"
+  | "rent_corporate"
+  | "renew_personal"
+  | "renew_corporate"
+  | "license_new"
+  | "license_renewal";
 
 export interface PulseCustomer {
   emiratesId?: string | null;
@@ -35,6 +41,11 @@ const SUB_SERVICE_ENV: Record<PulseService, string> = {
   rent_corporate: "CUSTOMER_PULSE_ID_RENT_CORPORATE",
   renew_personal: "CUSTOMER_PULSE_ID_RENEW_PERSONAL",
   renew_corporate: "CUSTOMER_PULSE_ID_RENEW_CORPORATE",
+  // EPGL. Its own linking ids, because it is a different service under the same
+  // entity -- and its own env vars, so the survey stays off until Customer Pulse
+  // has issued them rather than being pointed at a PO Box survey.
+  license_new: "CUSTOMER_PULSE_ID_LICENSE_NEW",
+  license_renewal: "CUSTOMER_PULSE_ID_LICENSE_RENEWAL",
 };
 
 /** Which survey a journey belongs to. Anything else gets no survey. */
@@ -44,6 +55,9 @@ export function pulseServiceFor(journeyKey: string | null | undefined): PulseSer
     case "corporate_po_box_rental": return "rent_corporate";
     case "personal_po_box_renewal": return "renew_personal";
     case "corporate_po_box_renewal": return "renew_corporate";
+    // EPGL licensing.
+    case "new_license": return "license_new";
+    case "renewal": return "license_renewal";
     default: return null;
   }
 }

@@ -1422,8 +1422,11 @@ export async function POST(req: NextRequest) {
         // The gateway payment outlives the turn that opened it: the customer pays,
         // comes back, and the confirm happens in a later turn.
         const payNow = apiTools.getGatewayPayment();
-        if (payNow && payNow.reference !== finalState.gatewayPayment?.reference) {
-          finalState = { ...finalState, gatewayPayment: { url: payNow.url, reference: payNow.reference, orderNo: payNow.orderNo } };
+        if (payNow && (payNow.reference !== finalState.gatewayPayment?.reference || (payNow.paidAt ?? null) !== (finalState.gatewayPayment?.paidAt ?? null))) {
+          finalState = {
+            ...finalState,
+            gatewayPayment: { url: payNow.url, reference: payNow.reference, orderNo: payNow.orderNo, paidAt: payNow.paidAt ?? null },
+          };
         }
         if (heldNow && holdChanged) {
           finalState = {
@@ -1461,12 +1464,19 @@ export async function POST(req: NextRequest) {
         // about this is best-effort — the box is rented either way, so a survey
         // that cannot be minted is never mentioned to the customer.
         const pulseService = pulseServiceFor(finalState.journeyKey);
+        // Three ways a purchase completes: a rental confirmed against its hold, a
+        // guest renewal confirmed against its gateway payment, and anything paid
+        // on our own checkout — EPGL's licence fee among them, which settles in a
+        // LATER turn than the one that submitted, so the submission is read from
+        // the case rather than from this turn.
         const purchase =
           finalState.hold?.paidAt
             ? { reference: finalState.hold.orderNo ?? finalState.hold.reference, amount: finalState.hold.amount }
-            : submittedRef && finalState.payment.status === "paid"
-              ? { reference: finalState.payment.reference ?? submittedRef, amount: finalState.payment.amount }
-              : null;
+            : finalState.gatewayPayment?.paidAt
+              ? { reference: finalState.gatewayPayment.orderNo ?? finalState.gatewayPayment.reference, amount: finalState.payment.amount }
+              : finalState.payment.status === "paid" && (submittedRef || finalState.reference)
+                ? { reference: finalState.payment.reference ?? submittedRef ?? finalState.reference, amount: finalState.payment.amount }
+                : null;
         if (pulseService && purchase?.reference && !finalState.surveyIssuedAt) {
           const token = await pulseSurveyToken({
             service: pulseService,

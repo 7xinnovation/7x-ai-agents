@@ -362,7 +362,7 @@ export async function buildApiTools(
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** The gateway payment opened in an earlier turn; the confirm comes later. */
-    initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null } | null;
+    initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null; paidAt?: string | null } | null;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
     initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   } = {}
@@ -378,7 +378,7 @@ export async function buildApiTools(
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
   /** The payment Emirates Post opened on their gateway, from either save. */
-  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null } | null;
+  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null; paidAt?: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -440,9 +440,9 @@ export async function buildApiTools(
    * A rental gets here through a hold; a guest renewal has no hold at all. Kept
    * apart from the hold so both can find it.
    */
-  let gatewayPayment: { url: string; reference: string; orderNo: string | null } | null =
+  let gatewayPayment: { url: string; reference: string; orderNo: string | null; paidAt?: string | null } | null =
     opts.initialGatewayPayment
-      ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null }
+      ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null, paidAt: opts.initialGatewayPayment.paidAt ?? null }
       : null;
   let lastBranchQuery: { emirate: string; bundle: string } | null = null;
   // The branch a MyHome customer picked. Their boxes are listed by emirate, so the
@@ -1330,12 +1330,15 @@ export async function buildApiTools(
     // for -- it says "payment confirmed" whenever it reads well -- and the survey
     // Emirates Post asked us to show is owed to a completed purchase, not to a
     // hopeful one.
-    if (!res.isError && /updatepayment/i.test(toolName)) {
+    if (!res.isError && /(updatepayment|guest_renewal_confirmpayment)$/i.test(toolName)) {
       try {
         const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const p = b?.payload ?? b;
-        if (lastHold && p?.isPaymentSuccess === true) {
-          lastHold = { ...lastHold, paidAt: lastHold.paidAt ?? new Date().toISOString() };
+        if (p?.isPaymentSuccess === true) {
+          // A rental records it on the hold; a guest renewal has none, so the
+          // gateway payment carries it instead.
+          if (lastHold) lastHold = { ...lastHold, paidAt: lastHold.paidAt ?? new Date().toISOString() };
+          if (gatewayPayment) gatewayPayment = { ...gatewayPayment, paidAt: gatewayPayment.paidAt ?? new Date().toISOString() };
         }
       } catch {
         /* an unreadable confirm leaves the purchase unconfirmed, which is the safe way round */

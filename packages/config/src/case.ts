@@ -73,6 +73,8 @@ export const CaseState = z.object({
       /** What the confirm call is keyed on. */
       reference: z.string(),
       orderNo: z.string().nullable().default(null),
+      /** When Emirates Post confirmed the money arrived. */
+      paidAt: z.string().nullable().default(null),
     })
     .nullable()
     .default(null),
