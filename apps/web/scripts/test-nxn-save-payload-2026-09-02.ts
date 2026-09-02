@@ -249,6 +249,9 @@ async function sent(tool: string, input: unknown, opts: Record<string, unknown> 
   const SAVE_URL = "https://paypage.sandbox.ngenius-payments.com/v2?code=d0eecf7ec6aeb786";
   const REF = "9c7a8bf3-5a22-4eab-b80f-b5bfbf4a68cd";
   const real = globalThis.fetch;
+  // Declared before the stub that fills it: assigned only inside a closure, its
+  // type would otherwise narrow to never and fail the build.
+  let confirmBody: Record<string, any> | null = null;
   globalThis.fetch = (async (...a: Parameters<typeof fetch>) => {
     const url = String(a[0]);
     if (url.includes("Guest/Renewal/Save")) {
@@ -263,7 +266,6 @@ async function sent(tool: string, input: unknown, opts: Record<string, unknown> 
     }
     return real(...a);
   }) as typeof fetch;
-  let confirmBody: Record<string, any> | null = null;
 
   const t = await buildApiTools(row!.id, "staging", { sessionToken: "test-session" });
   const saved = await t.exec(GUEST_SAVE, {
@@ -280,9 +282,11 @@ async function sent(tool: string, input: unknown, opts: Record<string, unknown> 
   // The confirm keys on the reference Emirates Post issued, in the body.
   await t.exec("nxnstaging__post_api_Guest_Renewal_ConfirmPayment", { body: { paymentReferenceNumber: "something-the-model-remembered" } });
   globalThis.fetch = real;
-  check("the confirm is keyed on their reference, not the model's",
-    confirmBody?.paymentReferenceNumber === REF, confirmBody);
-  check("and names us as the source", confirmBody?.requestSource === "PoBoxAIBot", confirmBody);
+  // Read through an alias: TypeScript does not track the closure's assignment,
+  // so the variable itself still looks like null here.
+  const cb = confirmBody as Record<string, any> | null;
+  check("the confirm is keyed on their reference, not the model's", cb?.paymentReferenceNumber === REF, cb);
+  check("and names us as the source", cb?.requestSource === "PoBoxAIBot", cb);
 }
 
 // 10. Confirming before anything was opened is refused, not sent.
