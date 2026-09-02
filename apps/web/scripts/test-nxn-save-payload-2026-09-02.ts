@@ -173,5 +173,45 @@ async function sent(tool: string, input: unknown, opts: Record<string, unknown> 
     body?.paymentProperties);
 }
 
+// 7. The total is Emirates Post's arithmetic, not the model's.
+//
+// minimumAmount 370 already covers rent, registration and the FIRST agent --
+// its AGENT line comes back marked Inclusive. One agent plus courier is 400,
+// not 450, and the backend refuses anything else with MISMATCH_IN_AMOUNT.
+{
+  const priced = { ...hold, amount: 370, services: ["AGENT", "RENT", "KEY-DELIVERY", "NEW-REG"], agentExtraPrice: 50, keyDeliveryPrice: 30 };
+  const base = {
+    subscriptionReferenceNumber: hold.reference,
+    userProfile: { customerNameEN: "A B", email: "e@x.ae" },
+    paymentProperties: {},
+  };
+
+  const one = await sent(SAVE, { body: { ...base, totalAmount: 450, listBoxAgentDetail: [{ emailId: "a@x.ae" }], keyDeliveryAddress: { deliveryAddress: "x" } } }, { initialHold: priced });
+  check("one agent plus courier is 370 + 30", one.body?.totalAmount === 400, one.body?.totalAmount);
+
+  const two = await sent(SAVE, { body: { ...base, totalAmount: 0, listBoxAgentDetail: [{ emailId: "a@x.ae" }, { emailId: "b@x.ae" }], keyDeliveryAddress: { deliveryAddress: "x" } } }, { initialHold: priced });
+  check("a second agent adds its own fee", two.body?.totalAmount === 450, two.body?.totalAmount);
+
+  const none = await sent(SAVE, { body: { ...base, totalAmount: 999 } }, { initialHold: priced });
+  check("no agent and no courier is the minimum", none.body?.totalAmount === 370, none.body?.totalAmount);
+
+  // serviceCriteria off priceDetails is "M"/"A"/"I"; the save's enum is
+  // Mandatory/Additional/Inclusive. Copying one into the other 400s.
+  const dirty = await sent(SAVE, {
+    body: {
+      ...base, totalAmount: 400, listBoxAgentDetail: [{ emailId: "a@x.ae" }], keyDeliveryAddress: { deliveryAddress: "x" },
+      additionalServiceDetailList: [
+        { serviceType: "AGENT", quantity: 1, serviceCriteria: "I", price: 50 },
+        { serviceType: "RENT", quantity: 1, serviceCriteria: "M" },
+      ],
+    },
+  }, { initialHold: priced });
+  const list = dirty.body?.additionalServiceDetailList ?? [];
+  check("the extras list is rebuilt, not corrected",
+    list.length === 2 && list.every((x: any) => Object.keys(x).sort().join() === "quantity,serviceType"), list);
+  check("and it names only what was chosen",
+    list.map((x: any) => x.serviceType).sort().join() === "AGENT,KEY-DELIVERY", list.map((x: any) => x.serviceType));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

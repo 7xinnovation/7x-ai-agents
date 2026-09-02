@@ -1412,6 +1412,8 @@ export async function POST(req: NextRequest) {
               uniqueBoxId: heldNow.uniqueBoxId ?? null,
               bundleId: heldNow.bundleId ?? null,
               services: heldNow.services ?? [],
+              agentExtraPrice: heldNow.agentExtraPrice ?? null,
+              keyDeliveryPrice: heldNow.keyDeliveryPrice ?? null,
               paidAt: heldNow.paidAt ?? null,
               orderNo: heldNow.orderNo ?? null,
               paymentRef: heldNow.paymentRef ?? null,

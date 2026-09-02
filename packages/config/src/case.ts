@@ -86,6 +86,13 @@ export const CaseState = z.object({
        */
       services: z.array(z.string()).default([]),
       /**
+       * What an EXTRA agent and a key courier add. The first agent is Inclusive
+       * and already inside the minimum amount; charging for it quoted a customer
+       * 450 for a 400 rental and the backend refused with MISMATCH_IN_AMOUNT.
+       */
+      agentExtraPrice: z.number().nullable().default(null),
+      keyDeliveryPrice: z.number().nullable().default(null),
+      /**
        * Set once the order exists. paymentRef is the BACKEND's payment reference
        * (paymentGateWayResponse.referenceNumber) — not the gateway's own order
        * reference, which sits beside it in the same response, is also a UUID, and

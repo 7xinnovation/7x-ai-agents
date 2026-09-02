@@ -218,6 +218,17 @@ function auditableInput(input: unknown): unknown {
   return walk(input ?? {});
 }
 
+/** A priced line from Rental/Select, by service and (optionally) criteria. */
+function priceOf(details: unknown, serviceType: string, criteria?: string): number | null {
+  if (!Array.isArray(details)) return null;
+  const row = details.find((d: Record<string, unknown>) => {
+    if (String(d?.serviceType ?? "").toUpperCase() !== serviceType.toUpperCase()) return false;
+    if (!criteria) return true;
+    return String(d?.serviceCriteria ?? "").toUpperCase() === criteria.toUpperCase();
+  }) as Record<string, unknown> | undefined;
+  return typeof row?.totalAmount === "number" ? row.totalAmount : null;
+}
+
 export interface EpglDocumentRow {
   key: string;
   fileName: string;
@@ -342,7 +353,7 @@ export async function buildApiTools(
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -350,7 +361,7 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
   /** Normalised company keys GSB has returned in this case. */
@@ -403,7 +414,7 @@ export async function buildApiTools(
   const gsbCompanies = new Set(opts.gsbCompanies ?? []);
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
@@ -711,33 +722,52 @@ export async function buildApiTools(
         if (!asStr(mh.mobileNo) && asStr(u.mobileNumber)) { mh.mobileNo = u.mobileNumber; body.myHomeProfile = mh; patched = true; }
       }
 
-      // The priced extras have to be declared, not just added to the total. The
-      // portal sends a line per extra and we sent none -- so a customer charged
-      // AED 25 for key courier had no courier line on their order.
-      const extras = Array.isArray(body.additionalServiceDetailList)
-        ? [...(body.additionalServiceDetailList as Record<string, unknown>[])]
-        : [];
+      // The priced extras have to be declared, not just added to the total: the
+      // portal sends a line per extra and we sent none, so a customer charged for
+      // key courier had no courier line on their order.
       const priced = new Set((lastHold.services ?? []).map((x) => x.toUpperCase()));
-      const hasLine = (t: string) => extras.some((e) => String(e?.serviceType ?? "").toUpperCase() === t);
-      const agents = Array.isArray(body.listBoxAgentDetail) ? (body.listBoxAgentDetail as unknown[]).length : 0;
-      if (agents > 0 && !hasLine("AGENT") && priced.has("AGENT")) extras.push({ quantity: agents, serviceType: "AGENT" });
-      if (body.keyDeliveryAddress && !hasLine("KEY-DELIVERY") && priced.has("KEY-DELIVERY")) {
-        extras.push({ quantity: 1, serviceType: "KEY-DELIVERY" });
+      const agentCount = Array.isArray(body.listBoxAgentDetail) ? (body.listBoxAgentDetail as unknown[]).length : 0;
+      const wantsCourier = Boolean(body.keyDeliveryAddress) && priced.has("KEY-DELIVERY");
+
+      // The extras list is OURS to build, not the model's to copy.
+      //
+      // It copied serviceCriteria straight off priceDetails -- "M", "A", "I" --
+      // into a field whose enum is Mandatory/Additional/Inclusive/Undefined, and
+      // the save came back with four conversion errors. The two vocabularies
+      // describe the same thing and are not interchangeable, so the list is
+      // rebuilt from what was actually chosen and nothing is carried across.
+      const extras: Record<string, unknown>[] = [];
+      if (agentCount > 0 && priced.has("AGENT")) extras.push({ quantity: agentCount, serviceType: "AGENT" });
+      if (wantsCourier) extras.push({ quantity: 1, serviceType: "KEY-DELIVERY" });
+      const before = Array.isArray(body.additionalServiceDetailList) ? body.additionalServiceDetailList : [];
+      if (JSON.stringify(extras) !== JSON.stringify(before)) {
+        if (extras.length) body.additionalServiceDetailList = extras;
+        else delete body.additionalServiceDetailList;
+        patched = true;
       }
-      // A line for something this box was never priced for is refused outright, so
-      // drop it rather than let it take the rental down. MyHome is the case that
-      // found this: the box is delivered to the door, key courier is not on offer,
-      // and the model kept adding a fee for it.
-      const kept = extras.filter((e) => priced.has(String(e?.serviceType ?? "").toUpperCase()));
-      if (!kept.length && body.keyDeliveryAddress && !priced.has("KEY-DELIVERY")) {
+      // An address for a courier this bundle does not offer goes with the line.
+      if (!wantsCourier && body.keyDeliveryAddress && !priced.has("KEY-DELIVERY")) {
         delete body.keyDeliveryAddress;
         patched = true;
       }
-      const before = Array.isArray(body.additionalServiceDetailList) ? body.additionalServiceDetailList : [];
-      if (JSON.stringify(kept) !== JSON.stringify(before)) {
-        if (kept.length) body.additionalServiceDetailList = kept;
-        else delete body.additionalServiceDetailList;
-        patched = true;
+
+      // The total, computed the way Emirates Post computes it.
+      //
+      // minimumAmount already contains the rent, the registration and the FIRST
+      // agent -- that agent's line is Inclusive. Only agents beyond the first are
+      // charged, plus the courier if it was chosen. The model added the first
+      // agent's 50 on top, showed the customer 450, and the backend answered
+      // "121 MISMATCH_IN_AMOUNT: TotalAmountShouldBe:400".
+      if (typeof lastHold.amount === "number") {
+        const extraAgents = Math.max(0, agentCount - 1);
+        const total =
+          lastHold.amount +
+          extraAgents * (lastHold.agentExtraPrice ?? 0) +
+          (wantsCourier ? lastHold.keyDeliveryPrice ?? 0 : 0);
+        if (body.totalAmount !== total) {
+          body.totalAmount = total;
+          patched = true;
+        }
       }
 
       if (patched) input = { ...input, body };
@@ -997,10 +1027,38 @@ export async function buildApiTools(
             services: Array.isArray(p?.priceDetails)
               ? p.priceDetails.map((d: Record<string, unknown>) => String(d?.serviceType ?? "")).filter(Boolean)
               : [],
+            // What an EXTRA agent and a key courier cost. serviceCriteria is the
+            // whole point: an AGENT line marked "I" is Inclusive -- the first
+            // agent, already inside minimumAmount -- and one marked "A" is what
+            // each further agent adds. Reading the wrong one is how a customer
+            // was quoted 450 for a 400 rental.
+            agentExtraPrice: priceOf(p?.priceDetails, "AGENT", "A"),
+            keyDeliveryPrice: priceOf(p?.priceDetails, "KEY-DELIVERY"),
           };
         }
       } catch {
         /* a Select we cannot read leaves lastHold alone; the save below refuses */
+      }
+      // Tell the model what the rental actually costs.
+      //
+      // minimumAmount already includes the rent, the registration and the FIRST
+      // agent -- whose line comes back marked Inclusive. Reading priceDetails as
+      // a list of things to add up produced a summary of 450 for a 400 rental:
+      // the customer saw an agent fee, then saw it disappear when the backend
+      // refused the amount. So the arithmetic is done here and the answer is
+      // handed over, rather than left to be inferred from five lines.
+      if (lastHold && typeof lastHold.amount === "number") {
+        const agentExtra = lastHold.agentExtraPrice;
+        const courier = lastHold.keyDeliveryPrice;
+        res = {
+          ...res,
+          result:
+            res.result +
+            `\n\nWHAT THIS RENTAL COSTS. The total for the box, with one authorised agent and no courier, is AED ${lastHold.amount.toFixed(2)} — minimumAmount above. It ALREADY includes the annual rental, the registration fee and the first agent (its AGENT line is marked Inclusive, which means free). Do NOT add the first agent's fee: a summary that did showed AED 450 for a 400 rental.` +
+            (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}.` : "") +
+            (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
+            ` Show the breakdown from priceDetails if you like, but the TOTAL is that sum and nothing else. You do not need to send it — totalAmount is set for you from these figures.`,
+        };
       }
       // The hold expiry reaches the customer as a deadline, and the backend
       // states it in UTC — so the chat told a Dubai customer their box was held
