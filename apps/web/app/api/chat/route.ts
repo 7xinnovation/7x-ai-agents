@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { Locale } from "@dialog/config";
+import { Locale, type AgentDefinition } from "@dialog/config";
 import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, adapterContext } from "@dialog/core";
 import { randomUUID } from "node:crypto";
 import { getDb, payments, documents as documentsTable, documentBlobs } from "@dialog/db";
@@ -21,6 +21,7 @@ import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
+import { savedCards, describeCard } from "@/lib/epSavedCards";
 import { payFenceGuard } from "@/lib/payFence";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -202,6 +203,53 @@ async function epglDocumentRows(
   }
 }
 
+/**
+ * The case's uploaded files as base64, for Emirates Post's rental save.
+ *
+ * Their portal puts the trade licence and the owner's ID inside
+ * mainCorporateProfile.attachments, and each agent's ID pages inside that
+ * agent's listBoxAgentDetail entry -- there is no separate upload call. We were
+ * asking customers for all of them and sending none.
+ *
+ * Called only when a save actually runs: a base64 document is hundreds of
+ * kilobytes and nothing else in the conversation needs the bytes.
+ */
+async function rentalAttachmentRows(
+  caseId: string,
+  stateDocs: { key: string; status: string; fileName?: string }[],
+  definition: AgentDefinition,
+  adapters: ReturnType<typeof resolveAdapters>
+): Promise<{ key: string; fileName: string; fileFormat: string; base64: string }[]> {
+  const get = adapters.storage?.get?.bind(adapters.storage);
+  if (!get) return [];
+  const wanted = stateDocs.filter((d) => d.status === "uploaded" || d.status === "accepted");
+  if (!wanted.length) return [];
+  const sctx = adapterContext(definition, definition.integrations.storage);
+  const out: { key: string; fileName: string; fileFormat: string; base64: string }[] = [];
+  for (const d of wanted) {
+    try {
+      const row = await getDb().query.documents.findFirst({
+        where: and(eq(documentsTable.caseId, caseId), eq(documentsTable.key, d.key)),
+        orderBy: [desc(documentsTable.createdAt)],
+      });
+      if (!row?.storageKey) continue;
+      const stored = await get(sctx, { storageKey: row.storageKey });
+      if (!stored) continue;
+      const fileName = row.fileName || d.fileName || `${d.key}.pdf`;
+      out.push({
+        key: d.key,
+        fileName,
+        // Their own rent flow sends the extension with a leading dot here.
+        fileFormat: `.${(fileName.split(".").pop() || "pdf").toLowerCase()}`,
+        base64: Buffer.from(stored.bytes).toString("base64"),
+      });
+    } catch {
+      // One unreadable file must not cost the customer the other two.
+    }
+  }
+  return out;
+}
+
 export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) {
@@ -329,6 +377,13 @@ export async function POST(req: NextRequest) {
     // per document. Read here rather than left to the model, which was asked for
     // them twice and sent none.
     epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
+    // The same files, base64, for Emirates Post's rental save -- the trade licence
+    // and the agent's ID pages travel inside that payload rather than in a
+    // separate upload call.
+    rentalAttachments:
+      agent.definition.tenantSlug === "nxn"
+        ? () => rentalAttachmentRows(session.caseId, session.state.documents, agent.definition, adapters)
+        : undefined,
     // Set on the save payload rather than handed to the model, which pasted it
     // into a pay block and sent the customer to our own return page.
     paymentReturnUrl: (agent.definition.journeys ?? [])
@@ -557,6 +612,7 @@ export async function POST(req: NextRequest) {
   const MYCOMPANIES_TOOL = "nxn_companies_for_customer";
   const AREAS_TOOL = "nxn_delivery_areas";
   const PIN_TOOL = "nxn_address_from_pin";
+  const CARDS_TOOL = "nxn_saved_cards";
   const AUTORENEW_TOOL = "nxn_set_auto_renew";
   const gsbTools: Anthropic.Tool[] = isNxn
     ? [
@@ -610,6 +666,12 @@ export async function POST(req: NextRequest) {
             },
             required: ["emirateCode"],
           },
+        },
+        {
+          name: CARDS_TOOL,
+          description:
+            "The payment cards the signed-in customer already has saved with Emirates Post. Call this BEFORE taking any payment for a signed-in customer: if they have one, offer to pay with it rather than sending them to the payment page again. It is also what auto-renewal charges — a customer with no saved card cannot have auto-renewal switched on, so do not offer it to them. Returns nothing for a guest, which is normal and not an error.",
+          input_schema: { type: "object", properties: {} },
         },
         {
           name: PIN_TOOL,
@@ -810,6 +872,29 @@ export async function POST(req: NextRequest) {
           result: `AUTO-RENEWAL COULD NOT BE SET: ${msg}. The rental is unaffected — tell the customer they can switch it on from their PO Box page. Do not retry.`,
         };
       }
+    }
+    if (name === CARDS_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
+      if (!caller) {
+        return {
+          result:
+            "NO SAVED CARDS — this customer is not signed in, so Emirates Post holds no card for them. Take the payment on the normal payment page, and do NOT offer to save a card or to enable auto-renewal: a guest has no account for either.",
+        };
+      }
+      const cards = (await savedCards(agent.id, env, caller).catch(() => [])).filter((c) => !c.isExpired);
+      if (!cards.length) {
+        return {
+          result:
+            "NO SAVED CARDS on this customer's account. Take the payment on the normal payment page. They CAN choose to save the card and to enable auto-renewal — auto-renewal needs a saved card, so offer the two together.",
+        };
+      }
+      return {
+        result:
+          `SAVED CARDS (${cards.length}). Offer these before sending them to the payment page — say which card and let them choose it or pay another way. Never show the token.\n` +
+          cards.map((c, i) => `${i + 1}. ${describeCard(c)}${c.isDefault ? " (default)" : ""}`).join("\n") +
+          "\n\nThey already have a card on file, so auto-renewal can be switched on without asking them to save anything.",
+      };
     }
     if (name === PIN_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";

@@ -329,6 +329,16 @@ export async function buildApiTools(
      * they are built here from what was actually uploaded.
      */
     epglDocuments?: EpglDocumentRow[];
+    /**
+     * The case's uploaded files, base64, for Emirates Post's rental save.
+     *
+     * A corporate rental carries the trade licence inside
+     * mainCorporateProfile.attachments and an agent's ID inside that agent's
+     * listBoxAgentDetail entry. We were collecting both from the customer and
+     * sending neither, so Emirates Post received an application with no documents
+     * on it.
+     */
+    rentalAttachments?: () => Promise<{ key: string; fileName: string; fileFormat: string; base64: string }[]>;
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
@@ -576,6 +586,38 @@ export async function buildApiTools(
         }
       }
 
+      // The key delivery address, in the shape their own flow writes it.
+      //
+      // keyDeliveryAddress.deliveryAddress is a single string, and their portal
+      // builds it from the parts: "<area>, <street>, No:<villa>, <extra>". We
+      // sent whatever the customer typed -- the same field, but not the same
+      // thing to read on a delivery run. Where the structured parts exist, and
+      // only where they say more than what is already there, compose it.
+      const kd = body.keyDeliveryAddress as Record<string, unknown> | undefined;
+      if (kd) {
+        const next = { ...kd };
+        const mh = (body.myHomeProfile ?? {}) as Record<string, unknown>;
+        const addr = (mh.myHomeAddress ?? {}) as Record<string, unknown>;
+        const custAddr = (u.customersAddress ?? {}) as Record<string, unknown>;
+        // regionName on myHomeAddress is the CODE; the readable name is the one
+        // written onto the customer's own address record when the pin resolved.
+        const area = asStr(custAddr.regionName);
+        const street = asStr(addr.streetOrLandmark) || asStr(custAddr.streetOrLandmark);
+        const villa = asStr(addr.villaOrApartmentNo) || asStr(custAddr.villaOrApartmentNo);
+        const building = asStr(addr.buildingName) || asStr(custAddr.buildingName);
+        const composed = [area, street, villa ? `No:${villa}` : "", building].filter(Boolean).join(", ");
+        if (composed && (street || villa) && composed.length > asStr(next.deliveryAddress).length) {
+          next.deliveryAddress = composed;
+        }
+        if (!asStr(next.emirateCode)) next.emirateCode = asStr(addr.emirateCode) || asStr(custAddr.emirateCode);
+        if (!asStr(next.name)) next.name = asStr(u.customerNameEN);
+        if (!asStr(next.mobileNo)) next.mobileNo = asStr(u.mobileNumber);
+        if (JSON.stringify(next) !== JSON.stringify(kd)) {
+          body.keyDeliveryAddress = next;
+          patched = true;
+        }
+      }
+
       // The return URL is ours to set, not the model's to remember.
       const ret = opts.paymentReturnUrl;
       if (ret && pay.paymentReturnUrl !== ret) {
@@ -703,6 +745,126 @@ export async function buildApiTools(
 
     if (/submitlicenserequest$/i.test(toolName) && (opts.epglDocuments ?? []).length) {
       input = withEpglDocumentPlaceholders(input, opts.epglDocuments ?? []) ?? input;
+    }
+
+    // The documents the customer uploaded, onto the rental they belong to.
+    //
+    // Their portal puts the trade licence and the owner's ID in
+    // mainCorporateProfile.attachments, and each agent's ID pages in that agent's
+    // own listBoxAgentDetail entry, with a numeric attachmentType per document.
+    // We asked customers for all of these and sent none of them.
+    if (/rental_save$/i.test(toolName) && opts.rentalAttachments) {
+      const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      // Read the bytes only now. A base64 document is hundreds of kilobytes and
+      // this is the one call in the conversation that needs them.
+      const files = await opts.rentalAttachments().catch(() => []);
+      const pick = (...keys: string[]) => files.find((f) => keys.includes(f.key));
+      const attach = (f: { fileName: string; fileFormat: string; base64: string } | undefined, type: number) =>
+        f ? [{ attachmentName: f.fileName, attachment: f.base64, fileFormat: f.fileFormat, attachmentType: type }] : [];
+      let patched = false;
+
+      // Corporate: trade licence 3, owner ID front 1, owner ID back 2 -- the
+      // numbering their own rent flow uses.
+      const corp = body.mainCorporateProfile as Record<string, unknown> | undefined;
+      if (corp && !Array.isArray(corp.attachments)) {
+        const list = [
+          ...attach(pick("trade_license", "trade_licence"), 3),
+          ...attach(pick("owner_id_front", "owner_eid_front"), 1),
+          ...attach(pick("owner_id_back", "owner_eid_back"), 2),
+        ];
+        if (list.length) {
+          body.mainCorporateProfile = { ...corp, attachments: list };
+          patched = true;
+        }
+      }
+
+      // Agents: ID front 1, back 2. A different numbering from the corporate
+      // block above, which is theirs, not a mistake here.
+      const agents = body.listBoxAgentDetail;
+      if (Array.isArray(agents) && agents.length) {
+        const front = pick("agent_eid_front", "agent_id_front");
+        const back = pick("agent_eid_back", "agent_id_back");
+        if (front || back) {
+          const next = agents.map((a, i) => {
+            const row = { ...(a as Record<string, unknown>) };
+            // Only the first agent's pages are on the case; a second agent's
+            // documents would be its own uploads, and inventing them is worse
+            // than leaving them off.
+            if (i > 0 || Array.isArray(row.attachments)) return row;
+            const list = [...attach(front, 1), ...attach(back, 2)];
+            if (list.length) row.attachments = list;
+            return row;
+          });
+          if (JSON.stringify(next) !== JSON.stringify(agents)) {
+            body.listBoxAgentDetail = next;
+            patched = true;
+          }
+        }
+      }
+      if (patched) input = { ...input, body };
+    }
+
+    // Guest renewal: the same two gaps that took a day on Rental/Save.
+    //
+    // Guest/Renewal/Save answered 500 "Internal system error" on 2 Sep with a body
+    // carrying only the box, the date and the amount. Their own guest flow asks
+    // for the subscriber and a billing address before it will take a payment
+    // (customerKYC and paymentProperties.billingDetail), and neither was there.
+    // A 500 says nothing about which field is missing, so the missing ones are
+    // filled where they can be and the call is refused where they cannot.
+    if (/guest_renewal_save$/i.test(toolName)) {
+      const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      const kyc = (body.customerKYC ?? {}) as Record<string, unknown>;
+      const first = asStr(kyc.firstName);
+      const last = asStr(kyc.lastName);
+      const email = asStr(kyc.email);
+      const mobile = asStr(kyc.mobileNumber);
+      if (!first || !last || !email || !mobile) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "integration_call_failed",
+          payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: auditableInput(input), response: "REFUSED LOCALLY: customerKYC incomplete" },
+        }).catch(() => {});
+        return {
+          result:
+            "This renewal cannot be saved yet: Emirates Post needs the subscriber's details before it will take a payment, and the request is missing some. Ask the customer for whichever of these you do not already have — first name, last name, mobile number, email address — and who is renewing the box (owner, family member, authorised agent, company employee or other, from the renewed-by options). Then send them as customerKYC { firstName, lastName, email, mobileNumber, renewalUserCapacity }. Do NOT retry this call until you have all four. Nothing has gone wrong and the customer has not been charged.",
+          isError: true,
+        };
+      }
+      // billingDetail, exactly as on the rental save: optional in the spec,
+      // required in practice, and all six fields or none.
+      const pay = { ...((body.paymentProperties ?? {}) as Record<string, unknown>) };
+      const em = asStr(body.emirateCode) || asStr(kyc.area);
+      const given = (pay.billingDetail ?? {}) as Record<string, unknown>;
+      const filled = {
+        firstName: asStr(given.firstName) || first,
+        lastName: asStr(given.lastName) || last,
+        emailAddress: asStr(given.emailAddress) || email,
+        address: asStr(given.address) || asStr(kyc.address1) || em || "United Arab Emirates",
+        cityName: asStr(given.cityName) || em || "United Arab Emirates",
+        countryName: asStr(given.countryName) || "United Arab Emirates",
+      };
+      let patched = false;
+      if (JSON.stringify(given) !== JSON.stringify(filled)) {
+        pay.billingDetail = filled;
+        patched = true;
+      }
+      if (opts.paymentReturnUrl && pay.paymentReturnUrl !== opts.paymentReturnUrl) {
+        pay.paymentReturnUrl = opts.paymentReturnUrl;
+        patched = true;
+      }
+      // A guest has no account to save a card to and nothing to auto-renew from.
+      if (pay.saveCreditCard === true || pay.isAutomaticSubscriptionEnabled === true) {
+        pay.saveCreditCard = false;
+        pay.isAutomaticSubscriptionEnabled = false;
+        patched = true;
+      }
+      if (patched) {
+        body.paymentProperties = pay;
+        input = { ...input, body };
+      }
     }
 
     // UpdatePayment takes the reference in the PATH; send the one we were given.
