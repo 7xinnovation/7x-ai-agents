@@ -4,6 +4,8 @@ import { getDb, kbChunks, kbDocuments, documentBlobs, cases, conversations } fro
 import { and, desc, eq, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { sendEmail } from "./email";
+import { raiseEpCase } from "./epCase";
+import { log } from "./logger";
 
 let initialised = false;
 
@@ -201,13 +203,36 @@ export function ensureAdapters() {
     },
 
     async createCallback(_ctx, input) {
+      // A callback belongs in the queue Emirates Post's team already works, not
+      // in a mailbox of ours: their contact form raises a case on /nextApi/case
+      // and hands the customer a case number they can quote. Try that first.
+      const [firstName, ...rest] = String(input.name ?? "").trim().split(/\s+/);
+      const epCase = await raiseEpCase({
+        firstName: firstName || "Customer",
+        lastName: rest.join(" ") || "-",
+        mobile: String(input.phone ?? ""),
+        email: input.email,
+        message: String(input.reason ?? ""),
+      }).catch((e) => ({ ok: false as const, reason: "unreachable" as const, detail: String(e) }));
+
+      if (epCase.ok) return { reference: epCase.caseNumber };
+
+      // Their endpoint is CAPTCHA-gated and a server cannot mint the token, so
+      // this is the expected path today. Losing the callback would be worse than
+      // routing it the old way, so it still goes to the ops mailbox -- with the
+      // reason recorded, because "the callback went somewhere else" should not be
+      // something anyone has to guess at later.
+      log.warn("ep_case_fallback_to_email", { reason: epCase.reason, detail: epCase.detail });
       const reference = `CB-${randomUUID().slice(0, 8).toUpperCase()}`;
       const to = process.env.NXN_BRANCH_OPS_EMAIL?.trim();
       if (!to) throw new Error("No ops mailbox configured (NXN_BRANCH_OPS_EMAIL) — cannot arrange a callback");
       const res = await sendEmail({
         to,
         subject: `[${reference}] Callback requested via the assistant`,
-        text: `Reference: ${reference}\nName: ${input.name}\nPhone: ${input.phone}\nEmail: ${input.email ?? "-"}\nCustomer: ${input.userRef ?? "guest"}\n\nReason:\n${input.reason}`,
+        text:
+          `Reference: ${reference}\nName: ${input.name}\nPhone: ${input.phone}\nEmail: ${input.email ?? "-"}\n` +
+          `Customer: ${input.userRef ?? "guest"}\n\nReason:\n${input.reason}\n\n` +
+          `(Not raised on emiratespost.ae: ${epCase.reason} — ${epCase.detail})`,
       });
       if (!res.ok) throw new Error(`Could not pass the callback to the team (${res.reason})`);
       return { reference };
