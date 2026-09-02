@@ -188,6 +188,57 @@ POST /services/apexrest/EPGL/LicenseRequest
 
 ---
 
+### B2b · Document placeholders — **unresolved**
+
+Per your team, an application's documents are tracked as `EPG_Document__c`
+records, one per file, and the Documents panel on the licence request lists
+those. We now send them in the composite exactly as your spec's issuance example
+shows — captured from LR-37195 on 2 September:
+
+```jsonc
+{ "method": "POST", "referenceId": "NewDocument",
+  "url": "/services/data/v66.0/sobjects/EPG_Document__c",
+  "body": [
+    { "EPG_Company__c": "@{NewAccount.id}", "EPG_File_Name__c": "Postal  GSI.pdf",
+      "docType__c": "pdf", "fileType__c": "pdf",
+      "EPG_File_Id__c": "64bd3864-50f4-4f59-afbe-e357b61777b9",
+      "fileSize__c": 478561 },
+    { …"MOA GSI.pdf", 148777 },
+    { …"Image (3).jpg", "jpg", 326795 } ] }
+```
+
+**Seven items go out; six come back.** The `NewDocument` item is absent from
+`compositeResponse` entirely — no id, no `success`, no error:
+
+```
+NewAccount         200  {"success":true,"id":"0015f00000ic9pLAAQ"}
+NewPartner         200  {"success":true,"id":"a16FW000BDkkzYOYYY"}
+NewContact         200  {"success":true,"id":"003FW00CMsxUkTgYMK"}
+NewUser            200  {"success":true,"id":"005FW002f7qVFbMYAW"}
+NewMember          200  {"success":true,"id":"a3jFW0001wj2Dg8YAE"}
+NewLicenseRequest  200  {"success":true,"id":"a11FW000V4a3nF2YII"}
+                        ← NewDocument: nothing
+```
+
+The files themselves attach fine — LR-37195 shows all three under **Files** — but
+the Documents panel still lists only the system-generated "Lease Contract".
+
+**What we need to know:**
+
+1. Are the `EPG_Document__c` records being created at all? If so, they hang off
+   `EPG_Company__c`, so would they appear on the **Company** rather than on the
+   licence request?
+2. Should the placeholder also carry a licence-request lookup? Your example has
+   only `EPG_Company__c`, and we will not invent a field name.
+3. What is `EPG_File_Id__c` meant to be? We mint a UUID per file. If it is meant
+   to correlate with the uploaded file, the upload returns `contentVersionId` and
+   `contentDocumentId` — Salesforce ids, not UUIDs — which would mean uploading
+   first and submitting second.
+4. Should the item be echoed in `compositeResponse` either way? Silence is
+   indistinguishable from being ignored.
+
+---
+
 ### B3 · Attach the documents
 
 ```
@@ -349,3 +400,7 @@ Paid with the summed transaction amount, and approves the Payment Items.
 6. **Field-level access.** Confirmation of exactly which Account fields the
    portal integration user may write. We work from six; more would remove some
    re-asking.
+7. **Document placeholders — see B2b.** Seven composite items go out and six come
+   back: the `EPG_Document__c` item is dropped from `compositeResponse` without an
+   id, a success or an error, and the licence request's Documents panel stays
+   empty while the files attach correctly. This is the one blocking item.
