@@ -195,6 +195,29 @@ export function extractSessionToken(body: string): string | null {
  * way through, so the two sides of this comparison are flattened to letters and
  * digits before they meet.
  */
+/**
+ * A request body fit to keep.
+ *
+ * An upload carries a base64 file -- megabytes of it -- and there is nothing to
+ * learn from the bytes, only from the fact and the name. Anything long enough to
+ * be a document is replaced by its size.
+ */
+function auditableInput(input: unknown): unknown {
+  const MAX = 400;
+  const walk = (v: unknown, depth = 0): unknown => {
+    if (depth > 6) return "…";
+    if (typeof v === "string") return v.length > MAX ? `<${v.length} chars omitted>` : v;
+    if (Array.isArray(v)) return v.slice(0, 40).map((x) => walk(x, depth + 1));
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = walk(val, depth + 1);
+      return out;
+    }
+    return v;
+  };
+  return walk(input ?? {});
+}
+
 export function normaliseCompanyKey(v: unknown): string {
   return String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -996,22 +1019,37 @@ export async function buildApiTools(
     // Naif holds boxes under officeId 214 and none under its mainOfficeId 209.
     const emptyLookup =
       !res.isError && /freeboxes|boxlocations|bundle/i.test(toolName) && !hasBoxNumbers(res.result);
-    if (res.isError || emptyLookup) {
+    // A WRITE is audited whether it succeeded or not.
+    //
+    // "A success is already visible as a case" held until a submission succeeded
+    // and created the wrong thing. EPGL's composite answered 200, the case
+    // recorded a reference, and the licence request in Salesforce was a different
+    // record from the one we had recorded -- with no trace of what was sent or
+    // what came back, that took a chain of inference to find rather than a query.
+    // A write changes someone else's system; it is worth the row.
+    const isWriteCall = entry.op.method !== "GET";
+    if (res.isError || emptyLookup || isWriteCall) {
       void audit({
         agentId,
         conversationId: opts.conversationId,
         actor: "system",
-        action: res.isError ? "integration_call_failed" : "integration_empty_result",
+        action: res.isError
+          ? "integration_call_failed"
+          : isWriteCall
+            ? "integration_write"
+            : "integration_empty_result",
         payload: {
           tool: toolName,
           method: entry.op.method,
           path: entry.op.path,
           // What we ASKED for. Without it a wrong parameter is invisible: the
           // response says "nothing here" and never says which "here".
-          input: input ?? {},
+          input: auditableInput(input),
           // Already PII-redacted for an unidentified customer, and truncated again
           // here: this is for diagnosing a backend, not for keeping their payload.
-          response: res.result.slice(0, 600),
+          // A write gets more room -- a composite response names an item per
+          // record and the interesting one is rarely first.
+          response: res.result.slice(0, isWriteCall ? 4000 : 600),
         },
       }).catch(() => {
         /* diagnostics must never take down the call they are describing */

@@ -15,21 +15,78 @@ import { findJourney } from "../case/engine";
 export function submissionReference(result: string): string | null {
   if (!/"success"\s*:\s*true/i.test(result)) return null;
   if (/"success"\s*:\s*false/i.test(result) || /rolled back/i.test(result)) return null;
-  // Prefer the LICENSE REQUEST record's id over incidental ids (Account,
-  // Contact…) — feedback FB-1444: the confirmation must reference the actual
-  // application, not another record. Composite items look like
-  // {"body":{"id":"…","success":true},…,"referenceId":"NewLicenseRequest"}, so
-  // find the LicenseRequest item and take the nearest preceding id.
-  const refMatches = [...result.matchAll(/"referenceId"\s*:\s*"([^"]*LicenseRequest[^"]*)"/gi)];
-  for (const m of refMatches) {
-    const windowStart = Math.max(0, (m.index ?? 0) - 600);
-    const before = result.slice(windowStart, m.index);
-    const ids = [...before.matchAll(/"id"\s*:\s*"([a-zA-Z0-9]{15,18})"/g)];
-    const nearest = ids[ids.length - 1]?.[1];
-    if (nearest) return nearest;
+
+  // Take the LICENCE REQUEST's own id, not an incidental one (Account, Contact,
+  // a document…). Everything downstream hangs off this: the reference shown to
+  // the customer, and the parent every uploaded file is attached to.
+  //
+  // This used to scan the text for a referenceId mentioning LicenseRequest and
+  // take the nearest id BEFORE it — which assumes the item serialises as
+  // {"body":{"id":…},"referenceId":…}. It is a custom Apex resource, so the
+  // field order is theirs to choose, and when referenceId comes first the
+  // "nearest preceding id" belongs to the PREVIOUS item. On 2 Sep that is
+  // exactly what happened: LR-37176 was created as a11FW000Uygg8hsYIA and we
+  // recorded a3jFW0001wOjRySYAV, so both of the customer's documents were
+  // attached to some other record and the application looked empty.
+  //
+  // So the response is parsed, and each item's id is read from that item.
+  const idOf = (item: unknown): string | null => {
+    if (!item || typeof item !== "object") return null;
+    const o = item as Record<string, unknown>;
+    const body = (o.body ?? o) as Record<string, unknown>;
+    for (const v of [body?.id, body?.Id, o.id, o.Id]) {
+      if (typeof v === "string" && /^[a-zA-Z0-9]{15,18}$/.test(v)) return v;
+    }
+    return null;
+  };
+  const refOf = (item: unknown): string =>
+    typeof (item as Record<string, unknown>)?.referenceId === "string"
+      ? String((item as Record<string, unknown>).referenceId)
+      : "";
+
+  // The tool result is a status line followed by the body.
+  const brace = result.indexOf("{");
+  const bracket = result.indexOf("[");
+  const start = brace === -1 ? bracket : bracket === -1 ? brace : Math.min(brace, bracket);
+  if (start !== -1) {
+    try {
+      const parsed = JSON.parse(result.slice(start)) as Record<string, unknown> | unknown[];
+      const items = Array.isArray(parsed)
+        ? parsed
+        : ((parsed as Record<string, unknown>).compositeResponse ??
+           (parsed as Record<string, unknown>).results ??
+           (parsed as Record<string, unknown>).compositeRequest ??
+           []);
+      if (Array.isArray(items) && items.length) {
+        // Named exactly, then anything mentioning it (the fan-out suffixes an
+        // array-bodied item as NewLicenseRequest_0).
+        const wanted = items.filter((i) => /licenserequest/i.test(refOf(i)));
+        for (const i of wanted) {
+          const id = idOf(i);
+          if (id) return id;
+        }
+      }
+      // A single-object response with an id and no composite wrapper.
+      const flat = idOf(parsed);
+      if (flat) return flat;
+    } catch {
+      /* fall through to the text scan below */
+    }
   }
-  const id = result.match(/"id"\s*:\s*"([a-zA-Z0-9]{15,18})"/)?.[1];
-  return id ?? "submitted";
+
+  // Unparseable body: pair each referenceId with the id in the SAME item by
+  // splitting on item boundaries rather than guessing at a distance.
+  for (const chunk of result.split(/\}\s*,\s*\{/)) {
+    if (!/"referenceId"\s*:\s*"[^"]*licenserequest/i.test(chunk)) continue;
+    const id = chunk.match(/"id"\s*:\s*"([a-zA-Z0-9]{15,18})"/i)?.[1];
+    if (id) return id;
+  }
+  // Nothing identifiable. The submission still happened, so it is still
+  // reported — but with a marker rather than some other record's id. The
+  // document upload requires a Salesforce-shaped id, so it skips rather than
+  // attaching the customer's files to a stranger. Returning a plausible-looking
+  // wrong id is the failure mode this whole function exists to avoid.
+  return "submitted";
 }
 
 export interface TurnMessage {
