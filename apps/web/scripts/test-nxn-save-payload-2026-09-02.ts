@@ -213,5 +213,31 @@ async function sent(tool: string, input: unknown, opts: Record<string, unknown> 
     list.map((x: any) => x.serviceType).sort().join() === "AGENT,KEY-DELIVERY", list.map((x: any) => x.serviceType));
 }
 
+// 8. A card Emirates Post already holds is sent with the order.
+{
+  const priced = { ...hold, amount: 370, services: ["RENT"], agentExtraPrice: 50, keyDeliveryPrice: 30 };
+  const card = { cardToken: "dG9rZW4=", maskedPan: "*****1111", expiry: "2030-12", scheme: "VISA", cardholderName: "Test Card" };
+  // A fresh body each time: the save patches paymentProperties in place, so a
+  // shared literal would carry the first test's card into the next.
+  const base = () => ({ subscriptionReferenceNumber: hold.reference, userProfile: { customerNameEN: "A B", email: "e@x.ae" }, paymentProperties: {} });
+
+  const withCard = await sent(SAVE, { body: { ...base(), totalAmount: 370 } }, { initialHold: priced, savedCard: async () => card });
+  const sc = withCard.body?.paymentProperties?.savedCard;
+  check("the saved card rides along with the order", sc?.cardToken === card.cardToken, sc);
+  check("with what the payment page needs to show it",
+    sc?.maskedPan === "*****1111" && sc?.scheme === "VISA" && sc?.expiry === "2030-12", sc);
+
+  const noCard = await sent(SAVE, { body: { ...base(), totalAmount: 370 } }, { initialHold: priced, savedCard: async () => null });
+  check("no card on file means none is sent", noCard.body?.paymentProperties?.savedCard === undefined, noCard.body?.paymentProperties);
+
+  const guest = await sent(SAVE, { body: { ...base(), totalAmount: 370 } }, { initialHold: priced });
+  check("a guest never has one attached", guest.body?.paymentProperties?.savedCard === undefined, guest.body?.paymentProperties);
+
+  const chosen = { ...card, cardToken: "theirs" };
+  const already = await sent(SAVE, { body: { ...base(), totalAmount: 370, paymentProperties: { savedCard: chosen } } }, { initialHold: priced, savedCard: async () => card });
+  check("a card already on the payload is not replaced",
+    already.body?.paymentProperties?.savedCard?.cardToken === "theirs", already.body?.paymentProperties?.savedCard);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

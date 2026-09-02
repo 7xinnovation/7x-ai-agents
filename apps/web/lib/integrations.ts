@@ -350,6 +350,15 @@ export async function buildApiTools(
      * on it.
      */
     rentalAttachments?: () => Promise<{ key: string; fileName: string; fileFormat: string; base64: string }[]>;
+    /**
+     * The card Emirates Post already holds for this signed-in customer.
+     *
+     * Their own rent flow puts it on paymentProperties.savedCard and still sends
+     * the customer to the payment page, so this pre-selects their card there
+     * rather than charging anything on its own. Resolved lazily: it is one more
+     * call and only the save needs it.
+     */
+    savedCard?: () => Promise<{ cardToken?: string; maskedPan?: string; expiry?: string; scheme?: string; cardholderName?: string } | null>;
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
@@ -625,6 +634,29 @@ export async function buildApiTools(
         if (!asStr(next.mobileNo)) next.mobileNo = asStr(u.mobileNumber);
         if (JSON.stringify(next) !== JSON.stringify(kd)) {
           body.keyDeliveryAddress = next;
+          patched = true;
+        }
+      }
+
+      // The card they already have with Emirates Post.
+      //
+      // A signed-in customer with a card on file was being sent to the payment
+      // page to type it again -- the journey said "if a saved card is on file,
+      // use it directly" and nothing behind that sentence did anything. Their own
+      // rent flow puts the card on paymentProperties.savedCard and still opens
+      // the payment page, so this pre-selects it there. It charges nothing by
+      // itself; the customer still completes the payment and can change the card.
+      if (opts.savedCard && !pay.savedCard) {
+        const card = await opts.savedCard().catch(() => null);
+        if (card?.cardToken) {
+          pay.savedCard = {
+            cardToken: card.cardToken,
+            maskedPan: card.maskedPan ?? "",
+            expiry: card.expiry ?? "",
+            scheme: card.scheme ?? "",
+            cardholderName: card.cardholderName ?? "",
+          };
+          body.paymentProperties = pay;
           patched = true;
         }
       }
@@ -1057,6 +1089,7 @@ export async function buildApiTools(
             `\n\nWHAT THIS RENTAL COSTS. The total for the box, with one authorised agent and no courier, is AED ${lastHold.amount.toFixed(2)} — minimumAmount above. It ALREADY includes the annual rental, the registration fee and the first agent (its AGENT line is marked Inclusive, which means free). Do NOT add the first agent's fee: a summary that did showed AED 450 for a 400 rental.` +
             (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}.` : "") +
             (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
+            (opts.savedCard ? " If Emirates Post already holds a card for this customer it is sent with the order, so the payment page opens on that card — tell them which card it is and that they can change it there. Never say they have been charged, and never ask them for card details yourself." : "") +
             ` Show the breakdown from priceDetails if you like, but the TOTAL is that sum and nothing else. You do not need to send it — totalAmount is set for you from these figures.`,
         };
       }

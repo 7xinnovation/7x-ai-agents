@@ -384,6 +384,18 @@ export async function POST(req: NextRequest) {
       agent.definition.tenantSlug === "nxn"
         ? () => rentalAttachmentRows(session.caseId, session.state.documents, agent.definition, adapters)
         : undefined,
+    // The card Emirates Post already holds for them, so the payment page opens
+    // on it instead of asking for the number again.
+    savedCard:
+      agent.definition.tenantSlug === "nxn"
+        ? async () => {
+            const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
+            if (!caller) return null;
+            const cards = await savedCards(agent.id, agent.definition.activeEnvironment ?? "production", caller).catch(() => []);
+            const usable = cards.filter((c) => !c.isExpired && c.cardToken);
+            return usable.find((c) => c.isDefault) ?? usable[0] ?? null;
+          }
+        : undefined,
     // Set on the save payload rather than handed to the model, which pasted it
     // into a pay block and sent the customer to our own return page.
     paymentReturnUrl: (agent.definition.journeys ?? [])
