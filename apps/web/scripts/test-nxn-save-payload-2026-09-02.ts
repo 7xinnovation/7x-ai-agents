@@ -239,5 +239,58 @@ async function sent(tool: string, input: unknown, opts: Record<string, unknown> 
     already.body?.paymentProperties?.savedCard?.cardToken === "theirs", already.body?.paymentProperties?.savedCard);
 }
 
+// 9. A guest renewal has no hold, and its payment link must still be found.
+//
+// The pay-block guard read the payment URL off the HOLD. A rental has one; a
+// guest renewal does not -- Guest/Renewal/Save opens the payment directly. So a
+// real order came back with a real link and the customer was told, in the next
+// line, that the payment link was not ready.
+{
+  const SAVE_URL = "https://paypage.sandbox.ngenius-payments.com/v2?code=d0eecf7ec6aeb786";
+  const REF = "9c7a8bf3-5a22-4eab-b80f-b5bfbf4a68cd";
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (...a: Parameters<typeof fetch>) => {
+    const url = String(a[0]);
+    if (url.includes("Guest/Renewal/Save")) {
+      return new Response(JSON.stringify({
+        payload: { orderNumber: "260962562", uniqueBoxId: "21234",
+          paymentGateWayResponse: { paymentUrl: SAVE_URL, referenceNumber: REF } },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("Guest/Renewal/ConfirmPayment")) {
+      confirmBody = JSON.parse(String((a[1] as RequestInit)?.body ?? "{}"));
+      return new Response(JSON.stringify({ payload: { isPaymentSuccess: true } }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return real(...a);
+  }) as typeof fetch;
+  let confirmBody: Record<string, any> | null = null;
+
+  const t = await buildApiTools(row!.id, "staging", { sessionToken: "test-session" });
+  const saved = await t.exec(GUEST_SAVE, {
+    body: {
+      boxNumber: 1234, emirateCode: "DXB", expiryDate: "2032-12-20T00:00:00", totalAmount: 995, renewedBy: "19147",
+      customerKYC: { firstName: "Emre", lastName: "Karayalcin", email: "e@x.ae", mobileNumber: "0553708434" },
+    },
+  });
+  check("the payment link is found without a hold", t.getGatewayPayment()?.url === SAVE_URL, t.getGatewayPayment());
+  check("the confirm reference comes with it", t.getGatewayPayment()?.reference === REF);
+  check("and the order number", t.getGatewayPayment()?.orderNo === "260962562", t.getGatewayPayment());
+  check("the save says the order is NOT yet paid", /NOT PAID/i.test(saved.result), saved.result?.slice(0, 120));
+
+  // The confirm keys on the reference Emirates Post issued, in the body.
+  await t.exec("nxnstaging__post_api_Guest_Renewal_ConfirmPayment", { body: { paymentReferenceNumber: "something-the-model-remembered" } });
+  globalThis.fetch = real;
+  check("the confirm is keyed on their reference, not the model's",
+    confirmBody?.paymentReferenceNumber === REF, confirmBody);
+  check("and names us as the source", confirmBody?.requestSource === "PoBoxAIBot", confirmBody);
+}
+
+// 10. Confirming before anything was opened is refused, not sent.
+{
+  const t = await buildApiTools(row!.id, "staging", { sessionToken: "test-session" });
+  const r = await t.exec("nxnstaging__post_api_Guest_Renewal_ConfirmPayment", { body: {} });
+  check("nothing to confirm is refused locally", r.isError === true, r.result?.slice(0, 80));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

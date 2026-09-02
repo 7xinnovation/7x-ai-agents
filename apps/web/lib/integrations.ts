@@ -361,6 +361,8 @@ export async function buildApiTools(
     savedCard?: () => Promise<{ cardToken?: string; maskedPan?: string; expiry?: string; scheme?: string; cardholderName?: string } | null>;
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
+    /** The gateway payment opened in an earlier turn; the confirm comes later. */
+    initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null } | null;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
     initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   } = {}
@@ -375,6 +377,8 @@ export async function buildApiTools(
   getOfferedBoxIds: () => string[];
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
+  /** The payment Emirates Post opened on their gateway, from either save. */
+  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -430,6 +434,16 @@ export async function buildApiTools(
   // Remember the emirate + bundle of the most recent branch-locations lookup so
   // the route can deterministically render the "browse nearby branches" map even
   // when the model forgets to emit the ```map block (which it does often).
+  /**
+   * The payment Emirates Post opened, whichever save opened it.
+   *
+   * A rental gets here through a hold; a guest renewal has no hold at all. Kept
+   * apart from the hold so both can find it.
+   */
+  let gatewayPayment: { url: string; reference: string; orderNo: string | null } | null =
+    opts.initialGatewayPayment
+      ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null }
+      : null;
   let lastBranchQuery: { emirate: string; bundle: string } | null = null;
   // The branch a MyHome customer picked. Their boxes are listed by emirate, so the
   // officeId is dropped from that lookup -- but Rental/Save still wants it as
@@ -929,6 +943,25 @@ export async function buildApiTools(
       }
     }
 
+    // The guest renewal's confirm takes the reference in the BODY. Same rule as
+    // the rental's: the reference is the one Emirates Post issued, not one the
+    // model remembered.
+    if (/guest_renewal_confirmpayment$/i.test(toolName)) {
+      if (!gatewayPayment) {
+        return {
+          result:
+            "There is no payment to confirm yet. A payment reference only exists once the renewal has been saved and Emirates Post has opened the payment, and that has not happened in this conversation — so this call would fail whatever is sent. Save the renewal first, give the customer its payment link, and confirm only after they say they have paid.",
+          isError: true,
+        };
+      }
+      const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      if (body.paymentReferenceNumber !== gatewayPayment.reference) {
+        body.paymentReferenceNumber = gatewayPayment.reference;
+      }
+      if (!asStr(body.requestSource)) body.requestSource = "PoBoxAIBot";
+      input = { ...input, body };
+    }
+
     // UpdatePayment takes the reference in the PATH; send the one we were given.
     if (/updatepayment/i.test(toolName)) {
       if (!lastHold?.paymentRef) {
@@ -1232,6 +1265,38 @@ export async function buildApiTools(
     // {"isPaymentSuccess": false, "amountPaid": 0.0}. The box is reserved against an
     // unpaid order, which is why it never appears in the customer's portal. The
     // agent, seeing an orderNo come back, told the customer it was confirmed.
+    // The payment Emirates Post opened, from whichever save opened it.
+    //
+    // A rental reaches it through a hold; a guest renewal has none, and reading
+    // the hold there found nothing — so the customer was told their order was
+    // created and, in the next line, that the payment link was not ready. The
+    // order was real, and unpaid.
+    if (!res.isError && /(rental_save|guest_renewal_save)$/i.test(toolName) && /paymentUrl/i.test(res.result)) {
+      try {
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const p = b?.payload ?? b;
+        const g = p?.paymentGateWayResponse ?? {};
+        if (g.paymentUrl && g.referenceNumber) {
+          gatewayPayment = {
+            url: String(g.paymentUrl),
+            reference: String(g.referenceNumber),
+            orderNo: p?.orderNo ? String(p.orderNo) : p?.orderNumber ? String(p.orderNumber) : null,
+          };
+        }
+      } catch {
+        /* an unreadable save leaves the confirm to fail loudly rather than quietly */
+      }
+    }
+    // A guest renewal opens the payment the same way a rental does, so it gets
+    // the same warning about what an order without a settled payment means.
+    if (!res.isError && /guest_renewal_save$/i.test(toolName) && gatewayPayment) {
+      res = {
+        ...res,
+        result:
+          res.result +
+          `\n\nTHE ORDER EXISTS AND IS NOT PAID. Emirates Post has opened a payment for it on their own gateway. Present the payment URL from this response as a PAY BLOCK — three backticks, then pay, then \`url: <the paymentUrl>\`, then \`amount: AED <total>\`, then three backticks — and say the renewal completes once they pay. Do NOT call it renewed, confirmed or complete on the strength of an order number. When they say they have paid, confirm it with the confirm tool and only then tell them the renewal is done.`,
+      };
+    }
     if (!res.isError && /rental_save$/i.test(toolName) && /paymentUrl/i.test(res.result)) {
       // Keep the reference the confirm call actually wants. The save response
       // carries two UUIDs: paymentGateWayResponse.referenceNumber, which
@@ -1390,6 +1455,7 @@ export async function buildApiTools(
     getLastBranchQuery: () => lastBranchQuery,
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
+    getGatewayPayment: () => gatewayPayment,
     getGsbCompanies: () => [...gsbCompanies],
   };
 }

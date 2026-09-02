@@ -59,6 +59,24 @@ export const CaseState = z.object({
    */
   offeredBoxIds: z.array(z.string()).default([]),
   /**
+   * The payment Emirates Post opened for this case, on their own gateway.
+   *
+   * A RENTAL reaches it through a hold, so it used to be read off the hold. A
+   * guest RENEWAL has no hold — Guest/Renewal/Save opens the payment directly —
+   * and reading the hold there found nothing, so the customer was told in the
+   * same breath that their order was created and that the payment link was not
+   * ready. It lives here instead, where both kinds of save can put it.
+   */
+  gatewayPayment: z
+    .object({
+      url: z.string(),
+      /** What the confirm call is keyed on. */
+      reference: z.string(),
+      orderNo: z.string().nullable().default(null),
+    })
+    .nullable()
+    .default(null),
+  /**
    * A reservation the backend is holding for this case.
    *
    * It has to live in the case, not in the turn. Emirates Post issues it on
@@ -141,6 +159,7 @@ export function emptyCase(): CaseState {
     confirmedJourneys: [],
     offeredBoxIds: [],
     hold: null,
+    gatewayPayment: null,
     pulsedAt: null,
     surveyIssuedAt: null,
     gsbCompanies: [],

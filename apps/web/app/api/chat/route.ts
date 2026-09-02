@@ -368,6 +368,9 @@ export async function POST(req: NextRequest) {
     // rebuilt per request, so without seeding this the hold is forgotten between
     // the two and every save is refused for having no reservation behind it.
     initialHold: session.state.hold ?? null,
+    // The payment is opened in one turn and confirmed in a later one, and a guest
+    // renewal has no hold to carry it.
+    initialGatewayPayment: session.state.gatewayPayment ?? null,
     // The list is shown in one turn and picked from in the next.
     initialOfferedBoxIds: session.state.offeredBoxIds ?? [],
     // The company is looked up turns before the save that has to declare where
@@ -1150,7 +1153,7 @@ export async function POST(req: NextRequest) {
         const payGuard = (agent.definition.journeys ?? []).some(
           (j) => j.submission?.apiFlow?.saveTool && j.submission?.apiFlow?.confirmTool
         )
-          ? payFenceGuard(() => apiTools.getLastHold()?.paymentUrl ?? null)
+          ? payFenceGuard(() => apiTools.getGatewayPayment()?.url ?? apiTools.getLastHold()?.paymentUrl ?? null)
           : null;
         let citedThisTurn = false;
         let submittedRef: string | null = null;
@@ -1416,6 +1419,12 @@ export async function POST(req: NextRequest) {
           (heldNow.reference !== finalState.hold?.reference ||
             (heldNow.paymentRef ?? null) !== (finalState.hold?.paymentRef ?? null) ||
             (heldNow.paidAt ?? null) !== (finalState.hold?.paidAt ?? null));
+        // The gateway payment outlives the turn that opened it: the customer pays,
+        // comes back, and the confirm happens in a later turn.
+        const payNow = apiTools.getGatewayPayment();
+        if (payNow && payNow.reference !== finalState.gatewayPayment?.reference) {
+          finalState = { ...finalState, gatewayPayment: { url: payNow.url, reference: payNow.reference, orderNo: payNow.orderNo } };
+        }
         if (heldNow && holdChanged) {
           finalState = {
             ...finalState,
