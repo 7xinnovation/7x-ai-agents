@@ -291,7 +291,22 @@ export async function POST(req: NextRequest) {
     // (Guest/Renewal Details+Pricing), so guest AND signed-in demos complete.
     mockSimulate: uaePassMockAllowed() && (session.userRef === MOCK_PERSONA_SUB || body.mock === true),
   });
-  const { tools: baseExtraTools, exec: execIntegration } = apiTools;
+  const { tools: allApiTools, exec: execIntegration } = apiTools;
+  /**
+   * Attaching a file is the server's job, not the model's.
+   *
+   * The document upload takes the file's BYTES, which the model has never seen —
+   * it only knows a name and a key. Offered the tool, it calls it anyway: on 2
+   * Sep it tried twice, once with an invented `documents: [...]` array and once
+   * with a bare key and filename, and Salesforce answered 400 both times. The
+   * real uploads run after the submission, from the stored file, and they
+   * succeeded in the same conversation. So the tool stays callable and stops
+   * being offered.
+   */
+  const serverOnlyDocTool = allApiTools.find((t) => /uploaddocument/i.test(t.name))?.name;
+  const baseExtraTools = serverOnlyDocTool
+    ? allApiTools.filter((t) => t.name !== serverOnlyDocTool)
+    : allApiTools;
   // Emirates Post quotes the real total when it issues the hold; that figure
   // outranks the advertised bundle price when the customer is charged.
   const authoritativeAmount = () => apiTools.getLastHold()?.amount ?? null;
@@ -1187,9 +1202,7 @@ export async function POST(req: NextRequest) {
         // multi-document submission held the chat open for seconds after the
         // customer had already read the confirmation.
         const submitJourney = findJourney(agent.definition, finalState.journeyKey);
-        const uploadDocTool = submitJourney?.submission?.apiFlow?.saveTool
-          ? baseExtraTools.find((t) => /uploaddocument/i.test(t.name))?.name
-          : undefined;
+        const uploadDocTool = submitJourney?.submission?.apiFlow?.saveTool ? serverOnlyDocTool : undefined;
         const storageGet = adapters.storage?.get?.bind(adapters.storage);
         if (submittedRef && uploadDocTool && storageGet && /^[a-zA-Z0-9]{15,18}$/.test(submittedRef)) {
           const ref = submittedRef;
