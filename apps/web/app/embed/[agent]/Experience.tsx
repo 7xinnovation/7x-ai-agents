@@ -35,6 +35,7 @@ import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
+import { openExternal, isNative, type ExternalWindow } from "./nativeBridge";
 
 interface PaymentInfo {
   reference: string;
@@ -247,7 +248,7 @@ function PaymentCard({
 }) {
   const [phase, setPhase] = useState<"ready" | "waiting" | "paid" | "failed">("ready");
   const [note, setNote] = useState<string | null>(null);
-  const popupRef = useRef<Window | null>(null);
+  const popupRef = useRef<ExternalWindow | null>(null);
   const paidRef = useRef(false);
 
   const amountFmt = useMemo(() => {
@@ -263,13 +264,9 @@ function PaymentCard({
 
   const openPopup = useCallback(() => {
     if (!payment.link) return;
-    const w = 480;
-    const h = 720;
-    const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
-    const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
-    const win = window.open(payment.link, "dlg-pay", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
-    // Popup blocked → new tab; polling picks the result up either way.
-    popupRef.current = win ?? window.open(payment.link, "_blank");
+    // In a WebView the native host opens it; polling picks the result up either
+    // way, so nothing here waits on the window itself.
+    popupRef.current = openExternal(payment.link, { name: "dlg-pay", kind: "payment" });
     setNote(null);
     setPhase("waiting");
   }, [payment.link]);
@@ -389,7 +386,7 @@ export function Experience({
   const [streaming, setStreaming] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   /** Host sign-in popup, so a window closed without a token can be reported. */
-  const hostLoginWin = useRef<Window | null>(null);
+  const hostLoginWin = useRef<ExternalWindow | null>(null);
   const [authReason, setAuthReason] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
   const [toolStatus, setToolStatus] = useState<string | null>(null);
@@ -818,11 +815,7 @@ export function Experience({
     // conversation alive; the token then arrives from the embed loader, which sees
     // the host's localStorage write because it runs first-party on that page.
     if (agent.hostLoginUrl && typeof window !== "undefined") {
-      const w = 480;
-      const h = 720;
-      const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
-      const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
-      const win = window.open(agent.hostLoginUrl, "dlg-host-login", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
+      const win = openExternal(agent.hostLoginUrl, { name: "dlg-host-login", kind: "signin" });
       if (!win) {
         setAuthReason(
           locale === "ar"
@@ -847,14 +840,10 @@ export function Experience({
         `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
         `&returnTo=${encodeURIComponent(returnTo)}${mock}`;
-      const w = 480;
-      const h = 720;
-      const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
-      const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
-      const win = window.open(`${base}&popup=1`, "dlg-uaepass", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
-      if (!win) {
-        window.location.href = base;
-      }
+      const win = openExternal(`${base}&popup=1`, { name: "dlg-uaepass", kind: "signin" });
+      // Nothing opened, and only a browser can fall back by navigating itself:
+      // in a WebView that would replace the conversation with a login page.
+      if (!win && !isNative()) window.location.href = base;
     } else {
       setAuthenticated(true);
       setAuthReason(null);

@@ -3,6 +3,7 @@ import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileTe
 import { tr, type LocalizedString, type Locale } from "@dialog/config";
 import { ChatMap } from "./ChatMap";
 import { ChatLocate } from "./ChatLocate";
+import { openExternal, onNativeEvent, type ExternalWindow } from "./nativeBridge";
 
 /**
  * Context the chat needs to render an inline upload widget (feedback: keep the
@@ -172,7 +173,7 @@ function ChatPay({
 }) {
   const [opened, setOpened] = React.useState(false);
   const [returned, setReturned] = React.useState(false);
-  const win = React.useRef<Window | null>(null);
+  const win = React.useRef<ExternalWindow | null>(null);
   const [everOpened, setEverOpened] = React.useState(false);
 
   // A closed window is not a completed payment. Whether the customer paid or gave
@@ -222,13 +223,23 @@ function ChatPay({
     return () => window.removeEventListener("message", onMsg);
   }, [onSelect, returned]);
 
+  // The native host reports the customer back from the payment page; a browser
+  // reports it by postMessage from the return page. Both end up here.
+  React.useEffect(
+    () =>
+      onNativeEvent((e) => {
+        if (e.action !== "returned" || returned) return;
+        setReturned(true);
+        win.current = null;
+        setOpened(false);
+        onSelect?.("I have completed the payment on the Emirates Post page. Please verify it and confirm my booking.");
+      }),
+    [onSelect, returned]
+  );
+
   const open = () => {
-    const w = 480;
-    const h = 720;
-    const left = Math.max(0, Math.round(((window.screen?.width ?? w) - w) / 2));
-    const top = Math.max(0, Math.round(((window.screen?.height ?? h) - h) / 2));
-    const opened = window.open(url, "dlg-extpay", `popup=yes,width=${w},height=${h},left=${left},top=${top}`);
-    // Popup blocked: a same-tab navigation still gets them there, which beats a
+    const opened = openExternal(url, { name: "dlg-extpay", kind: "payment" });
+    // Nothing opened: a same-tab navigation still gets them there, which beats a
     // button that silently does nothing.
     if (!opened) window.location.href = url;
     else {
