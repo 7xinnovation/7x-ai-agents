@@ -500,8 +500,18 @@ export async function POST(req: NextRequest) {
         const parts: string[] = [];
         if (facts.boxes.length) {
           const list = facts.boxes.map((b) => `${b.box}${b.emirate ? ` (${b.emirate})` : ""}`).join(", ");
+          // These come from the customer's own past cases, and an older case may
+          // never have recorded the emirate. Saying "do not ask for the emirate
+          // again" when we do not have one is how a box got looked up as Dubai
+          // because most boxes are: the answer was BOX NOT FOUND, and the
+          // customer was told their own box did not exist. The instruction now
+          // covers only what is actually on file.
+          const missingEmirate = facts.boxes.filter((b) => !b.emirate).map((b) => b.box);
           parts.push(
-            `PO Box${facts.boxes.length > 1 ? "es" : ""} on file: ${list} — for account questions, status checks, renewals, or the Account Pulse use these immediately (fetch fresh details/pricing from backend tools); do NOT ask for the box number or emirate again.`
+            `PO Box${facts.boxes.length > 1 ? "es" : ""} on file: ${list} — for account questions, status checks, renewals, or the Account Pulse use these immediately (fetch fresh details/pricing from backend tools); do NOT ask for the box number again.` +
+              (missingEmirate.length
+                ? ` The emirate is NOT on file for ${missingEmirate.join(", ")} — every renewal lookup is keyed on box number AND emirate, so get it from nxn_boxes_for_customer or ask the customer. Never assume Dubai: the wrong emirate returns BOX NOT FOUND, which reads to the customer as their box not existing.`
+                : " Their emirates are on file above — use them and do not ask again.")
           );
         }
         // FB-1376: surface the customer's usual branch as an offer, never a pre-selection.
@@ -793,7 +803,7 @@ export async function POST(req: NextRequest) {
           const known = new Set(registry.map((c) => (c.nameEn ?? "").trim().toLowerCase()).filter(Boolean));
           const extra = onBoxes
             .filter((b) => !known.has(String(b.holderName).trim().toLowerCase()))
-            .map((b) => ({ nameEn: b.holderName, poBox: b.boxNumber, emirate: b.emirate, bundleId: b.bundleId, boxStatus: b.status }));
+            .map((b) => ({ nameEn: b.holderName, poBox: b.boxNumber, emirate: b.emirateName ?? b.emirateCode, bundleId: b.bundleId, boxStatus: b.status }));
           if (!registry.length && !extra.length) {
             return {
               result:
@@ -815,7 +825,8 @@ export async function POST(req: NextRequest) {
           return {
             result: boxes.length
               ? JSON.stringify(boxes) +
-                "\n\nrentType says whether a box is Personal or Corporate, and on a Corporate box holderName is the COMPANY it belongs to — name it when you list that box, and treat it as one of the customer's companies. status is already in words: \"Pending approval\" means Emirates Post is still reviewing the trade licence, which is a normal stage of a corporate rental and NOT a failure or a payment problem."
+                "\n\nrentType says whether a box is Personal or Corporate, and on a Corporate box holderName is the COMPANY it belongs to — name it when you list that box, and treat it as one of the customer's companies. status is already in words: \"Pending approval\" means Emirates Post is still reviewing the trade licence, which is a normal stage of a corporate rental and NOT a failure or a payment problem." +
+                "\n\nemirateCode is the EMIRATE THIS BOX IS ACTUALLY IN. Send it VERBATIM as EmirateCode on every renewal call for that box, and never assume Dubai because most boxes are: a box looked up under the wrong emirate comes back BOX NOT FOUND, and the customer is then told their own box does not exist. If a box has no emirateCode, ASK the customer which emirate it is in before looking it up. emirateName is for showing them, never for sending. isOwner:false means they hold the box as an AGENT and cannot renew it on their own account."
               : "NO PO BOXES are held under this Emirates ID. Say so plainly and continue — it is a normal answer for a first-time customer, not an error.",
           };
         }

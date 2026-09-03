@@ -319,7 +319,14 @@ export async function companyByLicence(
 
 export interface CustomerPoBox {
   boxNumber?: string;
-  emirate?: string;
+  /**
+   * The emirate CODE, which is what every renewal call is keyed on alongside the
+   * box number. RetailApp calls it `cityCode`, not `emirateCode` -- see the
+   * mapping below, and the bug it caused.
+   */
+  emirateCode?: string;
+  /** The emirate in words, for showing the customer. Never send this to the API. */
+  emirateName?: string;
   branch?: string;
   bundleId?: string;
   expiryDate?: string;
@@ -390,14 +397,38 @@ export async function poBoxesByEmiratesId(
   }
   const json = (await res.json()) as { payload?: unknown };
   const rows = Array.isArray(json?.payload) ? (json.payload as Record<string, any>[]) : [];
+  // RetailApp names the emirate `cityCode` / `cityName` on THIS operation, and
+  // `emirateCode` / `emirateName` on the renewal ones. Reading only the latter
+  // meant the emirate was undefined for every box, JSON.stringify dropped the key
+  // entirely, and the assistant -- given a box number and no emirate -- guessed.
+  // It guessed Dubai, and a box that is not in Dubai came back BOX NOT FOUND.
+  // Both spellings are read, and the code and the name are kept apart: the code
+  // is what the API is keyed on, the name is only ever shown to the customer.
+  return mapCustomerPoBoxes(rows);
+}
+
+/**
+ * Map RetailApp's box rows. Exported so the field names can be tested against
+ * their documented payload without a credential -- the emirate went missing
+ * precisely because nothing checked the names against the source.
+ */
+export function mapCustomerPoBoxes(rows: Record<string, any>[]): CustomerPoBox[] {
   return rows.map((r) => ({
     boxNumber: r.boxNumber ?? r.poBoxNumber ?? r.box_No ?? undefined,
-    emirate: r.emirateName ?? r.emirate ?? r.emirateCode ?? undefined,
-    branch: r.officeName ?? r.branchName ?? undefined,
+    emirateCode: r.cityCode ?? r.emirateCode ?? r.emirate ?? undefined,
+    emirateName: r.cityName ?? r.emirateName ?? undefined,
+    branch: r.assignedBranchName ?? r.officeName ?? r.branchName ?? undefined,
     bundleId: r.bundleId ?? r.bundle_Id ?? undefined,
     expiryDate: r.expiryDate ?? r.currentExpiryDate ?? undefined,
     status: BOX_STATUS[String(r.status ?? r.boxStatus ?? "")] ?? (r.status ?? r.boxStatus ?? undefined),
-    isOwner: typeof r.isOwner === "boolean" ? r.isOwner : undefined,
+    // boxRelation: 0 = Owner, 1 = Agent. An agent cannot renew on their own
+    // account, so "who holds this" is not cosmetic.
+    isOwner:
+      typeof r.isOwner === "boolean"
+        ? r.isOwner
+        : r.boxRelation === undefined || r.boxRelation === null
+          ? undefined
+          : Number(r.boxRelation) === 0,
     holderName: r.ownerName ?? r.holderName ?? undefined,
     rentType: r.rentType === "C" ? "Corporate" : r.rentType === "P" ? "Personal" : (r.rentType ?? undefined),
   }));
