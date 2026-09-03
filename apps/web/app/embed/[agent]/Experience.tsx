@@ -35,7 +35,7 @@ import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
-import { openExternal, isNative, type ExternalWindow } from "./nativeBridge";
+import { openExternal, isNative, postNative, type ExternalWindow } from "./nativeBridge";
 
 interface PaymentInfo {
   reference: string;
@@ -382,6 +382,23 @@ export function Experience({
   const [locale, setLocale] = useState<Locale>(initialLocale);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [caseState, setCaseState] = useState<CaseState | null>(null);
+
+  /**
+   * Tell a native host when the customer has actually finished.
+   *
+   * The wrapper exposes an onCompleted callback, and without this nothing ever
+   * called it -- an app could not tell a completed rental from an abandoned one
+   * except by watching the conversation. Fired once per reference: the case is
+   * re-read on later turns and would otherwise repeat.
+   */
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    const reference = caseState?.reference;
+    if (!reference || caseState?.status !== "submitted") return;
+    if (announced.current === reference) return;
+    announced.current = reference;
+    postNative({ action: "completed", reference, journey: caseState?.journeyKey ?? null });
+  }, [caseState?.reference, caseState?.status, caseState?.journeyKey]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);

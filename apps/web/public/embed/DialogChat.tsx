@@ -133,6 +133,8 @@ export function DialogChat({
         return;
       }
 
+      // Fired once, when the backend has actually recorded the request -- not
+      // when the payment sheet closes, which says nothing about whether it worked.
       if (msg.action === "completed" && msg.reference) onCompleted?.(msg.reference);
     },
     [notify, onCompleted]

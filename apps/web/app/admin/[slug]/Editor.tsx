@@ -264,7 +264,14 @@ export function Editor({ slug }: { slug: string }) {
                   href={`${origin}/embed/DialogChat.tsx`}
                   download="DialogChat.tsx"
                 >
-                  Download
+                  Component
+                </a>
+                <a
+                  className="inline-flex items-center rounded-md border border-[var(--color-line)] px-2.5 py-1 text-[12px] hover:bg-surface"
+                  href={`${origin}/embed/README.md`}
+                  download="MOBILE-APP-INTEGRATION.md"
+                >
+                  Instructions
                 </a>
               </div>
             </div>
@@ -280,7 +287,7 @@ export function Editor({ slug }: { slug: string }) {
               <code className="rounded bg-surface px-1 py-0.5 font-mono">accessToken</code> and the conversation starts
               signed in; leave it out and the customer is a guest. Location, microphone and camera permissions are
               optional &mdash; without them those steps degrade rather than fail.{" "}
-              <a className="underline" href={`${origin}/embed/README.md`} target="_blank" rel="noreferrer">Integration notes</a>.
+Send the developer BOTH files &mdash; the component on its own reads as a puzzle.
             </p>
           </div>
 

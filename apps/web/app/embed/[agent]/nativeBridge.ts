@@ -38,6 +38,21 @@ export function isNative(): boolean {
   return typeof window !== "undefined" && Boolean(window.ReactNativeWebView);
 }
 
+/**
+ * Tell the native host something happened in here.
+ *
+ * One-way and best-effort: a browser has no host to tell, and a WebView that has
+ * gone away is not an error worth surfacing to a customer mid-conversation.
+ */
+export function postNative(detail: Record<string, unknown>): void {
+  if (!isNative()) return;
+  try {
+    window.ReactNativeWebView!.postMessage(JSON.stringify({ source: "dialog-native", ...detail }));
+  } catch {
+    /* the host is gone; nothing here depends on it */
+  }
+}
+
 /** Every window this widget has opened natively, so the host can close them. */
 const open = new Set<{ closed: boolean }>();
 
