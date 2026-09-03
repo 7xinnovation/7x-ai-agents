@@ -211,16 +211,22 @@ export function mapLicence(entry: Record<string, unknown>): MoeLicence | null {
  * empty `licenseInfo` beside it is a FAILURE, not "this person owns no company".
  * The two must never be reported to the customer the same way.
  */
-export function parseOwnerDetails(json: unknown): { licences: MoeLicence[]; statusCode?: string; statusText?: string } {
+export function parseOwnerDetails(json: unknown): {
+  licences: MoeLicence[];
+  /** How many entries MOEc sent, before mapping. See the note below. */
+  rawCount: number;
+  statusCode?: string;
+  statusText?: string;
+} {
   const root = (json as Record<string, unknown>)?.["getLicenseDetailsByOwnerID_Response"] as
     | Record<string, unknown>
     | undefined;
-  if (!root) return { licences: [] };
+  if (!root) return { licences: [], rawCount: 0 };
   const status = rows(root.statusMessages)[0];
+  const raw = rows(root.licenseInfo);
   return {
-    licences: rows(root.licenseInfo)
-      .map(mapLicence)
-      .filter((l): l is MoeLicence => l !== null),
+    licences: raw.map(mapLicence).filter((l): l is MoeLicence => l !== null),
+    rawCount: raw.length,
     statusCode: str(pick(status ?? {}, "statusCode")),
     statusText: str(pick(status ?? {}, "statusDescriptionEN")),
   };
@@ -412,11 +418,20 @@ export async function licencesByEmiratesId(emiratesId: string): Promise<MoeLicen
     throw new Error(`MOE licence lookup failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
   }
 
-  const { licences, statusCode, statusText } = parseOwnerDetails(await res.json());
+  const { licences, rawCount, statusCode, statusText } = parseOwnerDetails(await res.json());
   // 100 is success. Anything else means the empty list beside it is a failure,
   // not an answer, and must not be reported as "you own no companies".
   if (statusCode && statusCode !== "100" && !licences.length) {
     throw new Error(`MOE licence lookup refused (${statusCode}${statusText ? `: ${statusText}` : ""})`);
+  }
+  // MOEc sent licences and not one of them mapped. That is a shape change, not a
+  // person who owns nothing, and the two are otherwise indistinguishable: both
+  // end as an empty array, and the customer is told "nothing is registered to
+  // you" while the registry is in fact answering. GSB publishes no staging host,
+  // so this code path cannot be rehearsed before it runs for real -- it fails
+  // loudly instead of quietly returning the wrong answer.
+  if (rawCount > 0 && !licences.length) {
+    throw new Error(`MOE returned ${rawCount} licence(s) in a shape this parser does not recognise`);
   }
   log.info("moe_licences_read", { count: licences.length, statusCode });
   resultCache.set(key, { at: Date.now(), licences });

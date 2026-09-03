@@ -165,6 +165,19 @@ const wrap = (entries: unknown[], statusCode = "100") => ({
   check("no licences, status 500 is distinguishable", refused.statusCode === "500", refused);
 }
 
+// 8b. Licences that arrive in a shape we do not recognise are NOT "owns nothing".
+//     GSB has no staging host, so this path first runs for real in production;
+//     it has to be loud rather than silently correct-looking.
+{
+  const alien = parseOwnerDetails(wrap([{ someOtherShape: { ern: "412" } }, { andAnother: 1 }]));
+  check("unrecognised entries are counted raw", alien.rawCount === 2, alien.rawCount);
+  check("...and map to nothing", alien.licences.length === 0, alien.licences);
+  const genuine = parseOwnerDetails(wrap([]));
+  check("a genuinely empty registry answer has rawCount 0", genuine.rawCount === 0);
+  const partial = parseOwnerDetails(wrap([SAMPLE_ENTRY(), { junk: true }]));
+  check("a mixed response keeps what it can", partial.licences.length === 1 && partial.rawCount === 2, partial);
+}
+
 // 9. Emirates ID normalisation.
 {
   check("dashed EID", normaliseEmiratesId("784-1999-8392642-1") === "784199983926421");
