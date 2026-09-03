@@ -291,6 +291,24 @@ ${journey?.submission?.apiFlow
   // picks that option — and the ones already triggered are called out for the
   // pre-payment summary. request_payment adds them to the charged total itself.
 
+  // The document list above is raw JSON, and the model reads past it: an upload
+  // card correctly showed "Uploaded" while the message beside it asked for the
+  // same file again -- twice for the trade licence, and every time for the first
+  // partner. Spelled out in words instead, with the instruction attached, because
+  // being asked twice for a document you have just provided reads as the assistant
+  // losing your work.
+  const done = state.documents.filter((d) => d.status === "uploaded" || d.status === "accepted");
+  const rejected = state.documents.filter((d) => d.status === "rejected");
+  const documentsNote =
+    (done.length
+      ? `\nALREADY UPLOADED — do NOT ask for these again and do NOT show an upload card for them: ${done
+          .map((d) => `${d.key}${d.fileName ? ` (${d.fileName})` : ""}`)
+          .join(", ")}. If one needs replacing, say WHY and point at its Replace button rather than asking as though nothing was uploaded.`
+      : "") +
+    (rejected.length
+      ? `\nREJECTED, so these DO still need uploading: ${rejected.map((d) => d.key).join(", ")}.`
+      : "");
+
   const volatile = `# This turn
 - Session language: ${locale === "ar" ? "ARABIC" : "ENGLISH"}. Every part of this reply — prose, card/button/toggle/summary labels — must be in this language.${intent ? `
 - Classified intent: "${intent.intent}" (confidence ${intent.confidence.toFixed(2)}).` : ""}${suggestedJourney ? `
@@ -301,7 +319,7 @@ ${customerContext}` : ""}
 
 # Current case state
 Collected data: ${JSON.stringify(state.data)}
-Documents: ${JSON.stringify(state.documents)}
+Documents: ${JSON.stringify(state.documents)}${documentsNote}
 Payment: ${JSON.stringify(state.payment)}
 Submission readiness: ${state.readiness.complete ? "READY" : `NOT READY — missing ${JSON.stringify(state.readiness.missing)}`}`;
 

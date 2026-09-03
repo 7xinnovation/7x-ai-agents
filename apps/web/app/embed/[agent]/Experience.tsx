@@ -1546,7 +1546,7 @@ export function Experience({
                                   type="file"
                                   hidden
                                   accept={d.acceptedFormats.map((f) => "." + f).join(",")}
-                                  onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
+                                  onClick={(e) => { (e.currentTarget as HTMLInputElement).value = ""; }} onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
                                 />
                               </label>
                             </div>
@@ -1565,7 +1565,7 @@ export function Experience({
                                     disabled={busy}
                                     accept="image/*"
                                     capture="environment"
-                                    onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
+                                    onClick={(e) => { (e.currentTarget as HTMLInputElement).value = ""; }} onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
                                   />
                                 </label>
                                 {/* Upload from phone via QR — only on desktop (FB-6, web). */}
@@ -1592,7 +1592,7 @@ export function Experience({
                                     hidden
                                     disabled={busy}
                                     accept={d.acceptedFormats.map((f) => "." + f).join(",")}
-                                    onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
+                                    onClick={(e) => { (e.currentTarget as HTMLInputElement).value = ""; }} onChange={(e) => e.target.files?.[0] && uploadDoc(d.key, e.target.files[0])}
                                   />
                                 </label>
                               </div>

@@ -62,6 +62,19 @@ export function resolveUploadKeys(body: string[], ctx: UploadCtx): string[] {
   return out;
 }
 
+/**
+ * Clear the input before the picker opens.
+ *
+ * A file input fires `change` only when the selection CHANGES. Replace a
+ * document with the same file -- which is exactly what someone does after being
+ * told the wrong one went into a slot, or when a first attempt seemed not to
+ * register -- and the picker opens, they choose the file, and nothing happens at
+ * all. The button looks broken because from the outside it is.
+ */
+function resetFileInput(e: React.MouseEvent<HTMLInputElement>) {
+  (e.currentTarget as HTMLInputElement).value = "";
+}
+
 /** Inline, in-conversation upload control for a single document (by key). */
 function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
   const doc = ctx.docs[dkey];
@@ -90,14 +103,14 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
           <span className="fname">{st?.fileName}</span>
           <label className="dlg-upload ghost">
             {t.replace}
-            <input type="file" hidden accept={accept} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
+            <input type="file" hidden accept={accept} onClick={resetFileInput} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
           </label>
         </div>
       ) : (
         <div className="dlg-chat-upload-actions">
           <label className="dlg-upload cam" title={t.takePhoto} aria-label={t.takePhoto}>
             <Camera size={14} weight="bold" />
-            <input type="file" hidden disabled={busy} accept="image/*" capture="environment" onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
+            <input type="file" hidden disabled={busy} accept="image/*" capture="environment" onClick={resetFileInput} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
           </label>
           <button type="button" className="dlg-upload-phone" onClick={ctx.onQr} title={t.fromPhone}>
             <DeviceMobile size={14} weight="bold" /> {t.fromPhone}
@@ -112,7 +125,7 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
                 <UploadSimple size={14} weight="bold" /> {t.upload}
               </>
             )}
-            <input type="file" hidden disabled={busy} accept={accept} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
+            <input type="file" hidden disabled={busy} accept={accept} onClick={resetFileInput} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
           </label>
         </div>
       )}
