@@ -15,6 +15,7 @@ import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
+import { entityMismatch, expiredLicence, formatGulfDate } from "@/lib/docIdentity";
 
 /**
  * Which classified document types are acceptable for a given document slot,
@@ -38,45 +39,10 @@ function acceptedDocTypes(key: string, label: string): DocType[] | null {
   return null;
 }
 
-/**
- * Cross-check an uploaded document against what the application already holds
- * (renewal-round feedback: "cross-reference uploaded files against registered
- * entity data before acceptance" — a mismatched company's trade licence was
- * being accepted).
- *
- * Only identifiers we can compare unambiguously are checked, and only when BOTH
- * sides are present: the first document of a journey has nothing to contradict.
- * Returns a customer-facing reason, or null when nothing conflicts.
- */
-const IDENTITY_CHECKS: { key: string; label: string; normalize: (s: string) => string }[] = [
-  { key: "trade_license_number", label: "trade licence number", normalize: (s) => s.replace(/[^0-9a-z]/gi, "").toLowerCase() },
-  { key: "postal_license_number", label: "postal licence number", normalize: (s) => s.replace(/[^0-9a-z]/gi, "").toLowerCase() },
-  { key: "company_name", label: "company name", normalize: (s) => s.replace(/\b(llc|l\.l\.c|fze|fzc|est|establishment|company|co|trading|general)\b/gi, "").replace(/[^a-z0-9]/gi, "").toLowerCase() },
-];
-
-function entityMismatch(
-  existing: Record<string, unknown>,
-  extracted: Record<string, unknown>
-): string | null {
-  for (const check of IDENTITY_CHECKS) {
-    const before = existing[check.key];
-    const after = extracted[check.key];
-    if (typeof before !== "string" || typeof after !== "string") continue;
-    const a = check.normalize(before);
-    const b = check.normalize(after);
-    if (!a || !b || a === b) continue;
-    // Substring either way covers an abbreviated vs full legal name.
-    if (a.includes(b) || b.includes(a)) continue;
-    return (
-      `This document's ${check.label} (${after}) does not match the one already on this application (${before}). ` +
-      `Please upload the document for the same company, or correct the details first.`
-    );
-  }
-  return null;
-}
-
 /** Case-data bookkeeping key: which fields each document's extraction filled. */
 const DOC_FIELDS_KEY = "__doc_fields";
+/** A company-name disagreement awaiting the customer's answer. */
+const NAME_CONFLICT_KEY = "__name_conflict";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -208,14 +174,43 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ case: state, rejected: true, reason: mismatchReason });
   }
 
+  // An EXPIRED trade licence stops the application. The client's rule, and the
+  // right place for it is here: the licence copy is the evidence, so this is the
+  // moment we can see the date rather than take it from the conversation. Refusing
+  // at submission instead would be after the customer had done all the work.
+  const stale = expiredLicence(extraction.values ?? {});
+  if (stale) {
+    const on = formatGulfDate(stale.expiredOn);
+    const reason =
+      sessionLocale === "ar"
+        ? `الرخصة التجارية في هذا المستند منتهية الصلاحية بتاريخ ${on}. لا يمكن متابعة الطلب برخصة منتهية — يرجى تجديد الرخصة ورفع نسخة سارية.`
+        : `The trade licence in this document expired on ${on}. An application cannot proceed on an expired licence — please renew it and upload a valid copy.`;
+    const state = await mutateCase(caseRow.caseId, (fresh) =>
+      setDocument(agent.definition, fresh, {
+        key,
+        status: "rejected",
+        fileName: file.name,
+        rejectionReason: reason,
+      })
+    );
+    await audit({
+      agentId: agent.id,
+      conversationId,
+      actor: "system",
+      action: "document_rejected_expired_licence",
+      payload: { key, fileName: file.name, expiredOn: on, field: stale.field },
+    });
+    return NextResponse.json({ case: state, rejected: true, reason });
+  }
+
   // Cross-check against the entity already on the application: the right KIND of
   // document for the WRONG company must not be accepted either.
   const conflict = entityMismatch(caseRow.state.data ?? {}, extraction.values ?? {});
-  if (conflict) {
+  if (conflict?.severity === "block") {
     const reason =
       sessionLocale === "ar"
         ? `بيانات هذا المستند لا تطابق الشركة المسجلة في هذا الطلب. يرجى رفع مستند الشركة نفسها، أو تصحيح البيانات أولاً.`
-        : conflict;
+        : conflict.reason;
     const state = await mutateCase(caseRow.caseId, (fresh) =>
       setDocument(agent.definition, fresh, {
         key,
@@ -232,6 +227,21 @@ export async function POST(req: NextRequest) {
       payload: { key, fileName: file.name },
     });
     return NextResponse.json({ case: state, rejected: true, reason });
+  }
+  // Names disagree and nothing exact settles it. The document is KEPT -- a
+  // registered name beside a trade name looks identical to a wrong company, and
+  // refusing guessed wrong for a customer whose MOA was perfectly correct. The
+  // question goes to the customer instead, and the extracted names are not
+  // applied over what is already on file.
+  const nameQuery = conflict?.severity === "confirm" ? conflict.reason : null;
+  if (nameQuery) {
+    await audit({
+      agentId: agent.id,
+      conversationId,
+      actor: "system",
+      action: "document_name_needs_confirmation",
+      payload: { key, fileName: file.name },
+    });
   }
 
   // Feedback (Round 2): detect an expired Emirates ID and request a valid one
@@ -293,7 +303,12 @@ export async function POST(req: NextRequest) {
       if (!r.error) { next = r.state; extractedKeys.push(fieldKey); }
     }
     docFields[key] = extractedKeys;
-    return { ...next, data: { ...next.data, [DOC_FIELDS_KEY]: docFields } };
+    // A name disagreement the customer has to settle. Bookkeeping, not a field:
+    // the "__" prefix keeps it out of the case panel and out of any submission.
+    const data: Record<string, unknown> = { ...next.data, [DOC_FIELDS_KEY]: docFields };
+    if (nameQuery) data[NAME_CONFLICT_KEY] = nameQuery;
+    else delete data[NAME_CONFLICT_KEY];
+    return { ...next, data };
   });
   await getDb()
     .insert(documentsTable)
@@ -306,5 +321,5 @@ export async function POST(req: NextRequest) {
     payload: { key, fileName: file.name, extracted: extractedKeys },
   });
 
-  return NextResponse.json({ case: state, rejected: false, extracted: extractedKeys });
+  return NextResponse.json({ case: state, rejected: false, extracted: extractedKeys, needsConfirmation: nameQuery ?? undefined });
 }
