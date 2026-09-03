@@ -112,16 +112,33 @@ export interface EntityConflict {
  * Only ever objects on evidence: a field absent from either side is not a
  * mismatch, and the first document of an application has nothing to contradict.
  */
+/**
+ * A document slot belonging to somebody other than the owner.
+ *
+ * Partner 2's passport carries partner 2's name, number and nationality, and
+ * comparing those against the OWNER's would block the application on every
+ * partner after the first -- the person checks below are about one person's
+ * documents agreeing with each other, not about two different people.
+ */
+function isOtherPersonSlot(documentKey: string | undefined): boolean {
+  return !!documentKey && /^(partner|shareholder|agent)_\d+_/i.test(documentKey);
+}
+
 export function entityMismatch(
   existing: Record<string, unknown>,
-  extracted: Record<string, unknown>
+  extracted: Record<string, unknown>,
+  opts: { documentKey?: string } = {}
 ): EntityConflict | null {
   // Exact identifiers first. A match settles the names in ITS OWN category and no
   // further: a matching passport number says nothing about which company the
   // document belongs to, and an early return on it hid a genuine company
   // mismatch until the test below caught it.
-  const settled = { company: false, person: false };
+  // A partner's own documents are checked against each other elsewhere, never
+  // against the owner's.
+  const otherPerson = isOtherPersonSlot(opts.documentKey);
+  const settled = { company: false, person: otherPerson };
   for (const f of ID_FIELDS) {
+    if (otherPerson && f.settles === "person") continue;
     const before = existing[f.key];
     const after = extracted[f.key];
     if (typeof before !== "string" || typeof after !== "string") continue;

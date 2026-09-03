@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
 
   // Cross-check against the entity already on the application: the right KIND of
   // document for the WRONG company must not be accepted either.
-  const conflict = entityMismatch(caseRow.state.data ?? {}, extraction.values ?? {});
+  const conflict = entityMismatch(caseRow.state.data ?? {}, extraction.values ?? {}, { documentKey: key });
   if (conflict?.severity === "block") {
     const reason =
       sessionLocale === "ar"

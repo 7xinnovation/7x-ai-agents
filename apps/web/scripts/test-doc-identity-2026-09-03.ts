@@ -183,5 +183,32 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
   check("a matching passport does not hide a company mismatch", r !== null, r);
 }
 
+// 15. A PARTNER's documents belong to a different person, and must not be
+//     checked against the owner's. Without this, uploading partner 2's passport
+//     blocks the application -- a different number for a genuinely different
+//     person -- and every partner after the first is unreachable.
+{
+  const application = { owner_passport_no: "A13226785", owner_name: "MOHAMMED AL MANSOORI", owner_nationality: "UAE" };
+  const partnerPassport = { owner_passport_no: "Z99887766", owner_name: "AHMED KHALID SAEED", owner_nationality: "Indian" };
+
+  const asOwner = entityMismatch(application, partnerPassport, { documentKey: "owner_passport" });
+  check("in the OWNER's slot a different passport still blocks", asOwner?.severity === "block", asOwner);
+
+  for (const slot of ["partner_2_passport", "partner_3_emirates_id", "shareholder_2_passport", "agent_1_emirates_id"]) {
+    check(`${slot} is not checked against the owner`, entityMismatch(application, partnerPassport, { documentKey: slot }) === null,
+      entityMismatch(application, partnerPassport, { documentKey: slot }));
+  }
+
+  // The COMPANY is still checked on a partner slot -- a partner document that
+  // names another company is still the wrong paperwork.
+  const wrongCompany = entityMismatch(
+    { company_name: "YI FANG TAIWAN FRUIT TEA L.L.C", trade_license_number: "CN-111" },
+    { trade_license_number: "CN-222" },
+    { documentKey: "partner_2_passport" }
+  );
+  check("a partner slot still blocks a different company's licence number", wrongCompany?.severity === "block", wrongCompany);
+  check("partner_1 is not exempt by name alone", entityMismatch(application, partnerPassport, { documentKey: "partnership_deed" }) !== null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
