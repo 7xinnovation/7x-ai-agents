@@ -6,7 +6,7 @@ import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, a
 import { randomUUID } from "node:crypto";
 import { getDb, payments, documents as documentsTable, documentBlobs } from "@dialog/db";
 import { and, desc, eq } from "drizzle-orm";
-import { getAgentBySlug } from "@/lib/agents";
+import { getAgentBySlug, getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
@@ -19,6 +19,7 @@ import { emitEvent } from "@/lib/analytics";
 import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
+import { notifyEpglPayment } from "@/lib/epglPayment";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
@@ -100,6 +101,55 @@ function sse(event: unknown): string {
  * and internal identifiers that mean nothing to an applicant and should never
  * appear in a government-service chat.
  */
+/**
+ * Tell EPGL Salesforce about a payment that settled BEFORE the request existed.
+ *
+ * The notification is keyed on the licence request's Salesforce id, so it can
+ * only be sent once the request has been created. Our webhook fires when the
+ * money arrives -- and if the customer paid first, there was no id yet, so it
+ * returned quietly and nothing ever went. LR-37212 is that case: AED 1,010 taken
+ * and settled at 13:05, the request created at 13:07, and Amount (Paid) left at
+ * 0.00 with the money in the account.
+ *
+ * Firing here as well makes the order the customer went in irrelevant. Safe to
+ * run twice: this only sends when a settled payment exists, and Salesforce keys
+ * the notification on our payment reference.
+ */
+async function notifyEpglPaidOnSubmit(agentId: string, conversationId: string, reference: string): Promise<void> {
+  try {
+    const agent = await getAgentById(agentId);
+    if (!agent || agent.definition.tenantSlug !== "epgl") return;
+    const row = await getDb()
+      .select({ reference: payments.reference, amount: payments.amount, status: payments.status })
+      .from(payments)
+      .where(eq(payments.conversationId, conversationId))
+      .orderBy(desc(payments.createdAt))
+      .limit(1);
+    const paid = row[0];
+    if (!paid || paid.status !== "paid") return;
+
+    const env = agent.definition.activeEnvironment ?? "production";
+    const res = await notifyEpglPayment(agent.id, env, {
+      licenseRequestId: reference,
+      paymentId: paid.reference,
+      // What SETTLED, fee included -- that is the money that arrived.
+      amount: Number(paid.amount),
+      currency: "AED",
+    });
+    await audit({
+      agentId,
+      conversationId,
+      actor: "system",
+      action: res.ok ? "epgl_payment_notified" : "epgl_payment_notify_failed",
+      payload: res.ok
+        ? { at: "submit", reference, paymentId: paid.reference, amount: paid.amount }
+        : { at: "submit", reference, paymentId: paid.reference, status: res.status, reason: res.reason },
+    });
+  } catch (e) {
+    log.error("epgl_notify_on_submit_failed", e, { agentId, conversationId });
+  }
+}
+
 /**
  * Keep the real reason a turn failed, where it can be read back.
  *
@@ -1404,6 +1454,12 @@ export async function POST(req: NextRequest) {
           } else if (ev.type === "submitted") {
             submittedRef = ev.reference;
             await audit({ ...a, actor: "agent", action: "case_submitted", payload: { reference: ev.reference, journey: finalState.journeyKey } });
+            // A payment that settled BEFORE the request existed has nothing to
+            // notify Salesforce against, and the webhook gives up silently -- the
+            // licence request then sits with Amount (Paid) 0.00 forever while the
+            // money is in the account. Told now that the request exists, so the
+            // order the customer happened to go in stops mattering.
+            void notifyEpglPaidOnSubmit(agent.id, session.conversationId, ev.reference);
             await emitEvent({ type: "journey.completed", ...std, outcome: "completed", referenceId: ev.reference, attributes: { journey: finalState.journeyKey, reference: ev.reference } });
             await emitEvent({ type: "crm.case.created", ...std, referenceId: ev.reference, attributes: { reference: ev.reference } });
             await emitEvent({ type: "conversation.completed", ...std, outcome: "resolved", referenceId: ev.reference, attributes: { journey: finalState.journeyKey } });

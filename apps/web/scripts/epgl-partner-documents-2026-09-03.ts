@@ -103,6 +103,11 @@ const GUIDANCE =
   `Record each partner's NAME too — collect_field(partner_1_name, …), partner_2_name and so on, in the order the ` +
   `shareholder table lists them. The passport and Emirates ID uploaded for a partner are checked against that name, ` +
   `and without it a document filed under the wrong partner passes unnoticed with a tick beside it. ` +
+  `And record what each partner's OWN documents say, against THAT partner's fields: partner_2_emirates_id, ` +
+  `partner_2_passport_no, partner_2_nationality, and the same for every other partner. Never put a partner's ` +
+  `details into the owner fields — those belong to the primary owner, and a second partner's passport number ` +
+  `written there is either lost or overwrites someone else's. EPGL creates one record per partner and a partner ` +
+  `submitted as a bare name is the reason their documents were collected at all. ` +
   `Never mark the application ready while a partner's passport or Emirates ID is missing, and never accept one ` +
   `document as covering two partners. More than ${MAX_PARTNERS} partners is beyond what this form handles: say so ` +
   `plainly and offer a callback rather than proceeding with an incomplete set.`;
@@ -134,15 +139,43 @@ interface Journey { key: string; guidance?: string; steps?: Step[]; [k: string]:
  * lists Faisal first -- and not a word was said. Every slot showed a tick.
  */
 function nameFields(): FieldDef[] {
-  return Array.from({ length: MAX_PARTNERS }, (_, i) => ({
-    key: `partner_${i + 1}_name`,
-    label: {
-      en: `Partner ${i + 1} — full name as printed on the trade licence or MOA`,
-      ar: `الشريك ${i + 1} — الاسم الكامل كما هو مطبوع في الرخصة التجارية أو عقد التأسيس`,
-    },
-    type: "text",
-    validation: { required: false },
-  }));
+  const out: FieldDef[] = [];
+  for (let n = 1; n <= MAX_PARTNERS; n++) {
+    out.push({
+      key: `partner_${n}_name`,
+      label: {
+        en: `Partner ${n} — full name as printed on the trade licence or MOA`,
+        ar: `الشريك ${n} — الاسم الكامل كما هو مطبوع في الرخصة التجارية أو عقد التأسيس`,
+      },
+      type: "text",
+      validation: { required: false },
+    });
+    // The details each partner's OWN documents carry. Without these declared,
+    // extraction has nowhere to put them: reading partner 2's passport it filled
+    // the owner fields, found them already taken by partner 1, and dropped
+    // everything. LR-37212 reached Salesforce with partner 1 complete and
+    // partners 2 and 3 as bare names -- no Emirates ID, no passport, no
+    // nationality -- which is the whole point of collecting their documents.
+    out.push({
+      key: `partner_${n}_emirates_id`,
+      label: { en: `Partner ${n} — Emirates ID number`, ar: `الشريك ${n} — رقم الهوية الإماراتية` },
+      type: "text",
+      validation: { required: false },
+    });
+    out.push({
+      key: `partner_${n}_passport_no`,
+      label: { en: `Partner ${n} — passport number`, ar: `الشريك ${n} — رقم جواز السفر` },
+      type: "text",
+      validation: { required: false },
+    });
+    out.push({
+      key: `partner_${n}_nationality`,
+      label: { en: `Partner ${n} — nationality`, ar: `الشريك ${n} — الجنسية` },
+      type: "text",
+      validation: { required: false },
+    });
+  }
+  return out;
 }
 
 const COUNT_FIELD: FieldDef = {
