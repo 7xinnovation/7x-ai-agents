@@ -80,9 +80,14 @@ pre-filled from the registry rather than typed.
   reading `x-emirates-id`, so despite `[AllowAnonymous]` an anonymous call is a
   500, not a lookup.
 
-*The ask: the same handler without the linked-entity filter, returning MOEc's
-`licenseInfo` intact, reachable with a service credential. Our client already
-parses that shape, so it would need no change here.*
+*Status (3 Sep 2026): the Wayn team is preparing a NEW set of services for EPGL
+rather than opening this one up, so `get-moe` above is the shape of the problem
+rather than the endpoint we will end up calling. What we need from whatever they
+publish is unchanged: keyed on Emirates ID, callable server-to-server, and
+carrying the licence EXPIRY and the OWNER block — the two fields this endpoint's
+DTO discards and the two we cannot file without. Only the transport in
+`lib/moeLicences.ts` changes; the parsing, the Salesforce reconciliation and the
+tests sit above it.*
 
 **Expected responses** An empty list means the person holds no licence — a normal
 answer, not a failure. A response carrying licences that none of our mappings
