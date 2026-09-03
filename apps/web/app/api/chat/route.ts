@@ -18,6 +18,7 @@ import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
+import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
@@ -570,6 +571,7 @@ export async function POST(req: NextRequest) {
   const COMPANY_TOOL = "epgl_company_lookup";
   const COMPANY_BY_EID_TOOL = "epgl_company_by_emirates_id";
   const FORM9_TOOL = "epgl_form9_history";
+  const MOE_TOOL = "epgl_licences_for_customer";
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
         {
@@ -591,6 +593,18 @@ export async function POST(req: NextRequest) {
           input_schema: {
             type: "object",
             properties: { emiratesId: { type: "string", description: "The customer's Emirates ID, 15 digits, dashed or bare" } },
+            required: ["emiratesId"],
+          },
+        },
+        {
+          name: MOE_TOOL,
+          description:
+            "THE TRADE LICENCES REGISTERED TO A SIGNED-IN CUSTOMER, read from the Ministry of Economy's own registry using their EMIRATES ID. Call this FIRST for a signed-in customer, before " +
+            COMPANY_BY_EID_TOOL +
+            " and before asking for a licence number at all — sign-in gives you their Emirates ID, and this turns it into their actual companies with the registered name in English and Arabic, the licence number, and the expiry date. Each one comes back marked as already known to EPGL (so it is a RENEWAL and you have the account) or not (so it is a NEW application, and the details here are what you pre-fill it with). Show what comes back and let the customer pick; never choose for them, and never show a licence this tool did not return. An empty list is a normal answer meaning nothing is registered to that ID — fall back to asking for the trade licence number. This is the registry's own record, so ask the customer to CONFIRM it rather than to type it again.",
+          input_schema: {
+            type: "object",
+            properties: { emiratesId: { type: "string", description: "The customer's verified Emirates ID, 15 digits, dashed or bare" } },
             required: ["emiratesId"],
           },
         },
@@ -998,6 +1012,87 @@ export async function POST(req: NextRequest) {
           `Delivery areas in ${emirate} matching "${q}". Show these to the customer as CARDS and let them choose; send the CODE as myHomeProfile.myHomeAddress.regionName.\n` +
           JSON.stringify(hits.map((r) => ({ code: r.code, nameEn: r.nameEn, nameAr: r.nameAr }))),
       };
+    }
+    if (name === MOE_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const eid = String(input.emiratesId ?? "");
+      try {
+        const licences = await licencesByEmiratesId(eid);
+        if (!licences.length) {
+          return {
+            result:
+              "NOTHING IS REGISTERED to that Emirates ID in the Ministry of Economy registry. This is a normal answer, not a failure — plenty of applicants hold no licence in their own name, and a licence held through a partner or another emirate's authority may not appear. Do not tell the customer their licence does not exist. Ask for the trade licence number and continue as usual.",
+          };
+        }
+        // Each licence is reconciled against EPGL's own records, because the two
+        // answers lead to completely different journeys: a company EPGL already
+        // licenses is a RENEWAL with an account behind it, one it does not is a
+        // NEW application that this registry data pre-fills. Bounded, because a
+        // holding company can carry dozens and each match is its own SOQL read.
+        const MAX_RECONCILED = 10;
+        const shown = licences.slice(0, MAX_RECONCILED);
+        const rows = await Promise.all(
+          shown.map(async (l) => {
+            let epgl: { accountId?: string; knownToEpgl: boolean } = { knownToEpgl: false };
+            if (l.tradeLicenseNo) {
+              try {
+                const found = await companyByTradeLicense(agent.id, env, l.tradeLicenseNo);
+                if (found.length === 1) epgl = { knownToEpgl: true, accountId: found[0]!.accountId };
+                else if (found.length > 1) epgl = { knownToEpgl: true };
+              } catch {
+                // A licence number MOEc accepts may not pass our SOQL shape check,
+                // and a read failure is not evidence either way. Left as unknown
+                // rather than reported as "new", which would start the wrong journey.
+              }
+            }
+            const holder = licenceHolderMatch(l, eid);
+            return {
+              tradeLicenseNo: l.tradeLicenseNo,
+              nameEn: l.nameEn,
+              nameAr: l.nameAr,
+              expiryDate: l.expiryDate,
+              isBranch: l.isBranch || undefined,
+              registeredAddress: l.fullAddress,
+              // MOEc's own codes, untranslated. Never show these to the customer
+              // and never send them to Salesforce as an emirate or a regulator.
+              moecEmirateCode: l.emirateCodeRaw,
+              moecIssuingEntityCode: l.issuingEntityCode,
+              ...epgl,
+              ...(holder === "match" ? {} : { registryDoesNotNameThemAsHolder: holder }),
+            };
+          })
+        );
+        const capped =
+          licences.length > MAX_RECONCILED
+            ? `\n\nThere are ${licences.length} in total; the first ${MAX_RECONCILED} are shown. If none is theirs, ask for the trade licence number.`
+            : "";
+        // Staging serves a fixture rather than reading real people's records. Said
+        // plainly, because a synthetic company presented as real is worse than no
+        // lookup at all.
+        const mockNote = moeIsMock()
+          ? "TEST DATA — this deployment is not connected to the live registry, so the company below is invented. Tell the customer the registry lookup is not available here and ask for their trade licence number; do NOT present this company as theirs.\n\n"
+          : "";
+        return {
+          result:
+            mockNote +
+            `TRADE LICENCES REGISTERED TO THIS CUSTOMER (${licences.length}). Show these as CARDS and let them choose — do not pick one yourself. A licence marked knownToEpgl:true is already licensed by EPGL, so that is a RENEWAL and accountId is the account to use with ${FORM9_TOOL}; one marked false is a NEW application, and these details are what you pre-fill it with, asking the customer only to confirm them.\n` +
+            JSON.stringify(rows) +
+            capped,
+        };
+      } catch (err) {
+        if (err instanceof MoeNotConfiguredError) {
+          return {
+            result:
+              "THE LICENCE REGISTRY IS NOT CONNECTED on this deployment. Do not invent companies, licence numbers or issuing authorities to fill the gap, and do not tell the customer their licence could not be found — it was never looked for. Ask them for their trade licence number and continue as normal.",
+          };
+        }
+        log.error("moe_licence_lookup_failed", err, { ...a, tool: name });
+        return {
+          result:
+            "THE LICENCE REGISTRY LOOKUP FAILED. This says nothing about whether the customer holds a licence, so do not tell them none was found. Ask for the trade licence number and continue as normal.",
+          isError: true,
+        };
+      }
     }
     if (name === COMPANY_TOOL || name === FORM9_TOOL || name === COMPANY_BY_EID_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";

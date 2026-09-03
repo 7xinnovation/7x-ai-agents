@@ -38,6 +38,59 @@ key we can use to find their company.
 
 ---
 
+### A1b · Their trade licences, from the Ministry of Economy
+
+```
+GET  https://integrate.gsb.government.ae/gateway/getAccessToken_MOEc/1.0/getAccessToken
+POST https://integrate.gsb.government.ae/gateway/fetchLicenseDetailsByOwnerID_MOEc/1.0/getLicenseDetailsByOwnerID
+```
+```jsonc
+{ "ownerID": "784199983926421", "ownerContest": true, "entityContest": true }
+```
+**Why** A2 below finds only companies EPGL has *already licensed*. A first-time
+applicant holds a perfectly good trade licence and matches nothing, so we used to
+ask them to type the number, the name, the expiry and the regulator by hand. MOEc
+is the registry those came from.
+
+**Auth is server-to-server and entirely ours** — Basic credentials, `GSB-APIKey`,
+`MOEc-APIKey`, `Entity_Code`, and a client-credentials bearer that rides in
+`CustomAuth` because `Authorization` is already carrying Basic. Nothing here uses
+the customer's token, which is the point: UAE PASS gives us an Emirates ID, and
+an Emirates ID is the only input.
+
+**Take** `licenseLocalID` (the printed licence number), `BNRegNameEn` /
+`BNRegNameAr`, `licenseExpirationDate`, and the owner and manager blocks.
+
+**Then reconcile.** Each licence is looked up with A3 below. Already licensed by
+EPGL → it is a **renewal**, and we have the account. Not → it is a **new
+application**, pre-filled from the registry rather than typed.
+
+**Three things we do not do**
+- **We do not call `wayn-business-api`'s `/api/entities/get-moe`.** It is
+  `[AllowAnonymous]`, takes the Emirates ID from a request header, and returns
+  unmasked owner email and phone — anyone may ask it for anyone's licences. It
+  also hides licences the caller has already linked, which is onboarding
+  behaviour, and its DTO drops the owner block. We read the upstream ourselves.
+- **We do not translate MOEc's codes.** `licenseAddrEmirate` ("4"),
+  `licenseStatusID` ("MOECID7") and `licenseLegalTypeID` are their own numbering
+  and we have not been given the lists, so they are carried through raw and named
+  `moec…` so nothing mistakes them for EPGL's emirate or regulator values. The
+  sample licence at emirate 4 is in Ras Al Khaimah, which is not what the usual
+  UAE ordering would suggest — guessing would have been wrong.
+- **We do not read live records from staging.** GSB publishes one host for every
+  environment. `MOE_GSB_MOCK` serves a synthetic fixture unless explicitly turned
+  off, and the assistant is told in the tool result when it is looking at one.
+
+**Expected responses** An empty `licenseInfo` with `statusCode` 100 means the
+person holds no licence — a normal answer. An empty one with any other status is
+a **failure**, and the two are never reported to the customer the same way.
+
+*Open: the MOEc code lists for emirate, licence status and legal type; whether
+coverage includes emirate-level DED licences and DIFC/ADGM, or Ministry
+registrations only; and what `ownerContest` / `entityContest` scope.*
+
+---
+
 ### A2 · Find their company from that Emirates ID
 
 ```
@@ -385,7 +438,9 @@ Paid with the summed transaction amount, and approves the Payment Items.
 
 1. **`AccountByLicense`** — our integration user gets a `403` on that Apex class,
    so we join Account → Contact ourselves to resolve a company from an Emirates
-   ID. Should we be granted it, or is the join the intended route?
+   ID. Should we be granted it, or is the join the intended route? (A1b now
+   answers the first-time applicant, whom the Contact join never could, but a
+   customer already on file is still reached through that join.)
 2. **An Account id from `duplicate-check`.** It returns `matchedRecordIds` and
    `matchedRequests`, but nothing that identifies the Account, so a renewal has
    to reach the id through the SOQL read. Is that intended?
