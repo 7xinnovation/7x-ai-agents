@@ -51,6 +51,8 @@ const RENEWAL_WORDING =
   "\nIf the customer CHANGED any trade licence detail during the renewal (company name, trade name, regulator, address, partners, or any other licence field):\n" +
   '"Dear client,\nAs you have made changes to your trade license, a request has been submitted to the Licensing team and you will be contacted within one working day to update information requested."\n' +
   "\nThe second replaces the first — a renewal with changes is NOT issued within a working day, so never send both and never promise issuance when details changed. " +
+  "You do not have to work out which applies from memory: when the customer edits a detail that came off their trade licence, the tool result says so in the same breath and the case carries __licence_changed from that moment on. " +
+  "If it is set, the CHANGES wording is the only correct one. " +
   "In Arabic, translate faithfully and keep both as single confirmations.";
 
 interface Journey { key: string; requiresAuth?: boolean; guidance?: string; [k: string]: unknown }

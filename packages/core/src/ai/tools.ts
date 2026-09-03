@@ -243,6 +243,56 @@ export function processingFeeFor(
   return { amount: toFils(base * (fee.percent / 100)), label: fee.label, percent: fee.percent };
 }
 
+/** Which document supplied each field. Written by the upload route. */
+export const DOC_FIELDS_KEY = "__doc_fields";
+/** Set once the customer edits a detail their trade licence had supplied. */
+export const LICENCE_CHANGED_KEY = "__licence_changed";
+
+/** Document slots that ARE the trade licence, whatever the journey calls them. */
+const LICENCE_DOC = /^(updated_)?trade_licen[cs]e$|^initial_approval$/i;
+
+/**
+ * The document that supplied a field, if one did.
+ *
+ * `__doc_fields` maps each uploaded document to the fields its extraction
+ * filled, so when the customer edits one of those values we know which document
+ * no longer says what the application says.
+ */
+export function documentThatSupplied(state: CaseState, fieldKey: string): string | null {
+  const map = state.data[DOC_FIELDS_KEY];
+  if (!map || typeof map !== "object") return null;
+  for (const [docKey, fields] of Object.entries(map as Record<string, unknown>)) {
+    if (Array.isArray(fields) && fields.includes(fieldKey)) return docKey;
+  }
+  return null;
+}
+
+/**
+ * Did editing this field just contradict the trade licence on file?
+ *
+ * A renewal where the customer changes a licence detail -- the company name is
+ * the case the client raised -- is a different transaction from a plain renewal:
+ * it is not issued within a working day, it goes to the Licensing team, and it
+ * gets a different confirmation. Leaving that judgement to the model means the
+ * customer is sometimes promised a licence tomorrow that is not coming.
+ *
+ * It is also the moment the uploaded copy stops being evidence. The licence that
+ * was read to fill "company name" still shows the OLD name, so it no longer
+ * supports the application and a current copy has to be asked for.
+ */
+export function licenceContradiction(
+  state: CaseState,
+  fieldKey: string,
+  newValue: unknown
+): { documentKey: string; previous: string } | null {
+  const before = state.data[fieldKey];
+  if (before === undefined || before === null || before === "") return null;
+  if (String(before).trim() === String(newValue ?? "").trim()) return null;
+  const docKey = documentThatSupplied(state, fieldKey);
+  if (!docKey || !LICENCE_DOC.test(docKey)) return null;
+  return { documentKey: docKey, previous: String(before) };
+}
+
 export async function dispatchTool(
   name: string,
   input: Record<string, unknown>,
@@ -346,9 +396,38 @@ export async function dispatchTool(
 
     case "collect_field": {
       const fieldKey = String(input.key);
+      // Checked BEFORE the write, while the previous value is still there.
+      const contradicts = licenceContradiction(state, fieldKey, input.value);
       const { state: next, error } = setField(agent, state, fieldKey, input.value);
       if (error) return { result: `Validation failed: ${error.message}`, state, events, isError: true };
       state = next;
+      if (contradicts) {
+        // The copy on file was read to fill this field and still shows the old
+        // value, so it no longer evidences the application. Asking for a current
+        // one is the point -- and the flag is what decides which confirmation
+        // the customer gets, rather than the model remembering that it should.
+        state = { ...state, data: { ...state.data, [LICENCE_CHANGED_KEY]: true } };
+        state = setDocument(agent, state, {
+          key: contradicts.documentKey,
+          status: "rejected",
+          rejectionReason:
+            `This was read from the trade licence on file, which still shows "${contradicts.previous}". ` +
+            `Please upload the updated trade licence showing the new details.`,
+        });
+        events.push({ type: "case", state });
+        return {
+          result:
+            `Saved ${fieldKey}. THIS IS NOW A RENEWAL WITH CHANGES: the value came from the trade licence already ` +
+            `uploaded, which still says "${contradicts.previous}", so that copy no longer supports the application ` +
+            `and has been marked for re-upload. Ask the customer for the UPDATED trade licence showing the new ` +
+            `details. When this application is submitted it must use the CHANGES confirmation wording — the ` +
+            `Licensing team will contact them within one working day — and must NOT promise the licence will be ` +
+            `issued within one working day, because a renewal with changes is not. ` +
+            `Readiness: ${state.readiness.complete ? "complete" : `missing ${state.readiness.missing.map((m) => m.key).join(", ")}`}.`,
+          state,
+          events,
+        };
+      }
       // Consent/acknowledgment fields (e.g. the EPGL Declaration & Undertaking
       // checkbox) are legal acceptances: stamp the server date+time alongside the
       // value so the acceptance is recorded with when it happened, not just that
