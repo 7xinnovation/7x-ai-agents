@@ -73,6 +73,13 @@ function pick(source: Record<string, unknown>, fields: readonly string[]): strin
     .filter(Boolean);
 }
 
+/** Every readable value, as PRINTED -- person matching needs the spaces. */
+function rawAll(source: Record<string, unknown>, fields: readonly string[]): string[] {
+  return fields
+    .map((k) => source[k])
+    .filter((v): v is string => typeof v === "string" && v.trim().length > 1);
+}
+
 /** The first readable value, as printed, for showing the customer. */
 function raw(source: Record<string, unknown>, fields: readonly string[]): string {
   return fields.map((k) => source[k]).find((v): v is string => typeof v === "string" && v.trim().length > 1) ?? "";
@@ -88,6 +95,34 @@ function names(source: Record<string, unknown>): string[] {
 /** Same company if either name contains the other -- "YI FANG" vs "YIFANG TAIWAN". */
 function nameMatches(a: string, b: string): boolean {
   return a === b || a.includes(b) || b.includes(a);
+}
+
+/**
+ * The same PERSON, written two different ways.
+ *
+ * Substring containment is right for a company and wrong for a person. An MOA
+ * abbreviates where a passport does not, and the parts are not a prefix of each
+ * other: "Abdelaziz Mohamed Obaid" on the shareholder table is "Mohamed
+ * Abdelaziz Mohamed Balhaif Alnuaimi" on his Emirates ID. Neither contains the
+ * other, so a containment test calls one man two people -- which is what it did.
+ *
+ * Compared as name PARTS instead: the same person if most of the shorter name's
+ * parts appear in the longer one. Two parts minimum, because "Mohamed" alone is
+ * shared by half the country and one part in common is not evidence of anything.
+ */
+function personMatches(a: string, b: string): boolean {
+  // Split on punctuation as well as spaces: "Al-Mansoori" is two parts, and
+  // treating it as one made a hyphen enough to turn a man into a stranger.
+  const partsOf = (s: string) =>
+    s.split(/[\s\-_.,'\u2019]+/).map((p) => normaliseName(p)).filter((p) => p.length > 1);
+  const A = partsOf(a);
+  const B = partsOf(b);
+  if (!A.length || !B.length) return false;
+  const [short, long] = A.length <= B.length ? [A, B] : [B, A];
+  const set = new Set(long);
+  const shared = short.filter((p) => set.has(p)).length;
+  if (shared === short.length) return true;                 // every part accounted for
+  return shared >= 2 && shared / short.length >= 0.5;       // most of it, and not by one common part
 }
 
 export interface EntityConflict {
@@ -155,9 +190,9 @@ export function entityMismatch(
   }
 
   // The owner's own name, across the licence, the Emirates ID and the passport.
-  const knownPerson = settled.person ? [] : pick(existing, PERSON_NAME_FIELDS);
-  const foundPerson = pick(extracted, PERSON_NAME_FIELDS);
-  if (knownPerson.length && foundPerson.length && !foundPerson.some((f) => knownPerson.some((k) => nameMatches(k, f)))) {
+  const knownPerson = settled.person ? [] : rawAll(existing, PERSON_NAME_FIELDS);
+  const foundPerson = rawAll(extracted, PERSON_NAME_FIELDS);
+  if (knownPerson.length && foundPerson.length && !foundPerson.some((f) => knownPerson.some((k) => personMatches(k, f)))) {
     return {
       severity: "confirm",
       reason:
@@ -352,12 +387,13 @@ export function partnerDocumentCheck(
   const found = personName(extracted);
   if (!slot || !found) return { conflict: null, observedName: found };
 
-  const foundNorm = normaliseName(found);
-  if (!foundNorm) return { conflict: null, observedName: found };
+  if (!normaliseName(found)) return { conflict: null, observedName: found };
 
-  // Whose slot did this land in, and does the name agree?
+  // Whose slot did this land in, and does the name agree? Compared as name PARTS
+  // -- an MOA abbreviates where a passport does not, and neither contains the
+  // other.
   const expected = knownPartnerName(data, slot.index) ?? seenPartnerName(data, slot.index);
-  if (expected && nameMatches(normaliseName(expected), foundNorm)) {
+  if (expected && personMatches(expected, found)) {
     return { conflict: null, observedName: found };
   }
 
@@ -367,7 +403,7 @@ export function partnerDocumentCheck(
   for (let i = 1; i <= 12; i++) {
     if (i === slot.index) continue;
     const other = knownPartnerName(data, i) ?? seenPartnerName(data, i);
-    if (other && nameMatches(normaliseName(other), foundNorm)) {
+    if (other && personMatches(other, found)) {
       return {
         observedName: found,
         conflict: {

@@ -35,6 +35,11 @@ function acceptedDocTypes(key: string, label: string): DocType[] | null {
   if (/acknowledg|إقرار.?استلام|خطاب/.test(k)) return ["acknowledgement_letter"];
   if (/financial|statement|مالي/.test(k)) return ["financial_statement", "audited_financial_statement"];
   if (/declaration|undertaking|commitment|تعهد/.test(k)) return ["declaration"];
+  // Passport slots had NO rule, so any file at all satisfied one -- an Emirates
+  // ID dropped into "Partner 2 — passport copy" was accepted without comment
+  // while the reverse was correctly refused. After the Emirates ID test above,
+  // so a slot naming both still means the card.
+  if (/passport|جواز/.test(k)) return ["passport"];
   if (/trade|postal|licen[cs]e|approval|رخصة|موافقة/.test(k)) return ["trade_license", "initial_approval", "postal_license"];
   return null;
 }

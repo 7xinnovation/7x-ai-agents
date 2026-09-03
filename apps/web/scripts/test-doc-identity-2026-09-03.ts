@@ -12,7 +12,7 @@
  * Run from apps/web:
  *   npx tsx scripts/test-doc-identity-2026-09-03.ts
  */
-import { entityMismatch, expiredLicence, parseDocumentDate, formatGulfDate } from "@/lib/docIdentity";
+import { entityMismatch, expiredLicence, parseDocumentDate, formatGulfDate, partnerDocumentCheck } from "@/lib/docIdentity";
 
 let pass = 0, fail = 0;
 const check = (l: string, ok: boolean, extra?: unknown) => {
@@ -208,6 +208,41 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
   );
   check("a partner slot still blocks a different company's licence number", wrongCompany?.severity === "block", wrongCompany);
   check("partner_1 is not exempt by name alone", entityMismatch(application, partnerPassport, { documentKey: "partnership_deed" }) !== null);
+}
+
+// 16. THE REPORTED CASE. The MOA's shareholder table abbreviates; the Emirates
+//     ID does not, and the parts are not in the same order. Neither name
+//     contains the other, so containment called one man two people.
+{
+  const licence = { owner_name: "Abdelaziz Mohamed Obaid" };
+  const eid = { owner_name: "Mohamed Abdelaziz Mohamed Balhaif Alnuaimi" };
+  check("the abbreviated MOA name matches the full Emirates ID name",
+    entityMismatch(licence, eid) === null, entityMismatch(licence, eid));
+
+  // ...and the person who is genuinely someone else still does not match.
+  const other = entityMismatch({ owner_name: "Faisal Eissa Lutfi Ali Hussain" }, eid);
+  check("a genuinely different person is still raised", other !== null, other);
+
+  // Nor does one shared part. Half the country is a Mohamed.
+  const oneShared = entityMismatch({ owner_name: "Mohamed Saeed Khalfan" }, { owner_name: "Mohamed Abdelaziz Balhaif" });
+  check("one shared name part is not a match", oneShared !== null, oneShared);
+
+  // Two shared parts out of three is.
+  check("two of three parts is a match",
+    entityMismatch({ owner_name: "Ahmed Khalid Saeed" }, { owner_name: "Ahmed Khalid Saeed Al Mansoori" }) === null);
+}
+
+// 17. The same rule applied to partner slots, which is where it will bite most.
+{
+  const moa = { partner_1_name: "Faisal Eissa Lutfi Ali Hussain", partner_2_name: "Abdelaziz Mohamed Obaid", partner_3_name: "Valentina Mintah" };
+  check("partner 2's full passport name matches the MOA's short form",
+    partnerDocumentCheck("partner_2_passport", moa, { owner_name: "Mohamed Abdelaziz Mohamed Balhaif Alnuaimi" }).conflict === null);
+  check("partner 1 is unaffected",
+    partnerDocumentCheck("partner_1_passport", moa, { owner_name: "Faisal Eissa Lutfi Ali Hussain" }).conflict === null);
+  check("partner 3 is unaffected",
+    partnerDocumentCheck("partner_3_passport", moa, { owner_name: "Valentina Mintah" }).conflict === null);
+  const misfiled = partnerDocumentCheck("partner_3_passport", moa, { owner_name: "Mohamed Abdelaziz Mohamed Balhaif Alnuaimi" });
+  check("...and a misfile is still caught by parts", !!misfiled.conflict && /partner 2/.test(misfiled.conflict.reason), misfiled.conflict?.reason);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
