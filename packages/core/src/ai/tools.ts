@@ -252,6 +252,21 @@ export const LICENCE_CHANGED_KEY = "__licence_changed";
 const LICENCE_DOC = /^(updated_)?trade_licen[cs]e$|^initial_approval$/i;
 
 /**
+ * Details the customer may change freely, even though the licence printed them.
+ *
+ * A trade licence carries a contact email and phone, so extraction fills those
+ * fields from it -- and the first version of this rule then treated updating an
+ * email as amending the trade licence: it asked for a new licence copy and put
+ * the renewal down the Licensing-team route. The client's own validation sheet
+ * marks contact email, phone, name and designation "Allow client to change".
+ *
+ * Matched by pattern rather than an exact list because these keys are named
+ * differently per journey (contact_email, owner_contact_no, applicant_phone),
+ * and the failure of missing one is loud and wrong in the customer's face.
+ */
+const CUSTOMER_EDITABLE = /(^|_)(email|phone|mobile|contact_no|contact_number|designation)$|^contact_name$|_contact_(name|no|number)$/i;
+
+/**
  * The document that supplied a field, if one did.
  *
  * `__doc_fields` maps each uploaded document to the fields its extraction
@@ -285,6 +300,8 @@ export function licenceContradiction(
   fieldKey: string,
   newValue: unknown
 ): { documentKey: string; previous: string } | null {
+  // Contact details are the customer's own, whatever document they came off.
+  if (CUSTOMER_EDITABLE.test(fieldKey)) return null;
   const before = state.data[fieldKey];
   if (before === undefined || before === null || before === "") return null;
   if (String(before).trim() === String(newValue ?? "").trim()) return null;

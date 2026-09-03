@@ -53,6 +53,41 @@ const RENEWAL = state({
     licenceContradiction(RENEWAL, "accountant_name", "Someone") === null);
 }
 
+// 2b. CONTACT DETAILS are the customer's own, even though the trade licence
+//     prints them. The first version of this rule read the email off the licence
+//     and then treated updating it as amending the licence -- it asked for a new
+//     licence copy and put the renewal down the Licensing-team route, in the
+//     customer's face. The client's sheet marks these "Allow client to change".
+{
+  const licenceGaveEverything = state({
+    contact_email: "jernanmananquil12@gmail.com",
+    contact_phone: "+971500000000",
+    contact_name: "AHMED KHALID",
+    contact_designation: "Manager",
+    owner_contact_no: "+971511111111",
+    company_name: "YI FANG TAIWAN FRUIT TEA L.L.C",
+    [DOC_FIELDS_KEY]: {
+      updated_trade_license: [
+        "contact_email", "contact_phone", "contact_name", "contact_designation",
+        "owner_contact_no", "company_name",
+      ],
+    },
+  });
+  for (const [key, next] of [
+    ["contact_email", "new@example.com"],
+    ["contact_phone", "+971509999999"],
+    ["contact_name", "SOMEONE ELSE"],
+    ["contact_designation", "Director"],
+    ["owner_contact_no", "+971522222222"],
+  ] as const) {
+    check(`${key} may be changed freely`, licenceContradiction(licenceGaveEverything, key, next) === null,
+      licenceContradiction(licenceGaveEverything, key, next));
+  }
+  // ...and the licence detail beside them still is not.
+  check("the company name is still a licence change",
+    licenceContradiction(licenceGaveEverything, "company_name", "YIFANG CAFE MIDDLE EAST L.L.C") !== null);
+}
+
 // 3. Not a change at all.
 {
   check("re-saving the same value is not a change",
