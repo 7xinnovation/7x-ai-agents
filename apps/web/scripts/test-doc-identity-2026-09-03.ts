@@ -139,5 +139,49 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
     expiredLicence({ trade_license_expiry: "03/09/2026" }, earlyGulf) === null);
 }
 
+// 11. The validation sheet's person checks: owner name against the EID and
+//     passport, passport number and nationality against the MOA.
+{
+  // Exact identifiers BLOCK -- a different passport number is a different person.
+  const passport = entityMismatch({ owner_passport_no: "A13226785" }, { owner_passport_no: "Z99887766" });
+  check("a different passport number blocks", passport?.severity === "block", passport);
+  check("...naming the passport number", !!passport && passport.reason.includes("passport number"), passport?.reason);
+  const eid = entityMismatch({ owner_emirates_id: "784198970768309" }, { owner_emirates_id: "784199983926421" });
+  check("a different Emirates ID number blocks", eid?.severity === "block", eid);
+  check("the same passport in another format passes",
+    entityMismatch({ owner_passport_no: "A13226785" }, { owner_passport_no: "a-132 267 85" }) === null);
+}
+
+// 12. A person's NAME does not block. Transliteration is not evidence of fraud,
+//     and blocking on it would repeat the MOA mistake with a person's name.
+{
+  const r = entityMismatch({ owner_name: "MOHAMMED AL MANSOORI" }, { owner_name: "AHMED KHALID SAEED" });
+  check("a different owner name is raised", r !== null, r);
+  check("...but as a question, not a block", r?.severity === "confirm", r);
+  check("...and does not call the document wrong", !!r && /same person/.test(r.reason), r?.reason);
+  check("a transliteration variant passes",
+    entityMismatch({ owner_name: "MOHAMMED AL MANSOORI" }, { owner_name: "Mohammed Al-Mansoori" }) === null);
+  check("a fuller form of the same name passes",
+    entityMismatch({ owner_name: "MOHAMMED AL MANSOORI" }, { owner_name: "MOHAMMED AL MANSOORI SOLE PROPRIETORSHIP" }) === null);
+}
+
+// 13. Nationality, likewise -- "UAE" and "United Arab Emirates" are one country.
+{
+  check("an abbreviated nationality passes",
+    entityMismatch({ owner_nationality: "UAE" }, { owner_nationality: "U.A.E." }) === null);
+  const r = entityMismatch({ owner_nationality: "Indian" }, { owner_nationality: "Pakistani" });
+  check("a genuinely different nationality is raised", r?.severity === "confirm", r);
+}
+
+// 14. The company check still runs when person fields are present but agree --
+//     one passing check must not short-circuit the rest.
+{
+  const r = entityMismatch(
+    { owner_passport_no: "A13226785", company_name: "YI FANG TAIWAN FRUIT TEA L.L.C" },
+    { owner_passport_no: "A13226785", company_name: "AL MANSOORI GENERAL CONTRACTING L.L.C" }
+  );
+  check("a matching passport does not hide a company mismatch", r !== null, r);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

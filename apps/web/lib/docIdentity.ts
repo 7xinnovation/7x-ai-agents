@@ -24,10 +24,33 @@
 /** Fields that can legitimately hold one of a company's names. */
 const NAME_FIELDS = ["company_name", "company_name_ar", "trade_name_en", "trade_name_ar"] as const;
 
-/** Exact identifiers. A mismatch here is a genuinely different company. */
-const ID_FIELDS: { key: string; label: string }[] = [
-  { key: "trade_license_number", label: "trade licence number" },
-  { key: "postal_license_number", label: "postal licence number" },
+/**
+ * Exact identifiers. A mismatch here is a genuinely different company or person,
+ * so it blocks -- these are numbers, not spellings, and the client's validation
+ * sheet asks for the application to stop.
+ */
+const ID_FIELDS: { key: string; label: string; settles: "company" | "person" }[] = [
+  { key: "trade_license_number", label: "trade licence number", settles: "company" },
+  { key: "postal_license_number", label: "postal licence number", settles: "company" },
+  // From the sheet: passport number cross-referenced between EID/passport and
+  // the MOA, and the Emirates ID number checked against the card.
+  { key: "owner_passport_no", label: "passport number", settles: "person" },
+  { key: "owner_emirates_id", label: "Emirates ID number", settles: "person" },
+];
+
+/**
+ * Person fields that are compared but never blocked on.
+ *
+ * The sheet wants the owner's name verified against the Emirates ID and
+ * passport, and the nationality against the MOA. Both are strings people
+ * transliterate differently on purpose -- MOHAMMED and MUHAMMAD are one man, and
+ * "UAE", "U.A.E." and "United Arab Emirates" are one country. Blocking on those
+ * would repeat the MOA mistake with a person's name instead of a company's, so
+ * the disagreement is put to the customer.
+ */
+const PERSON_NAME_FIELDS = ["owner_name", "owner_name_ar"] as const;
+const PERSON_SOFT_FIELDS: { key: string; label: string }[] = [
+  { key: "owner_nationality", label: "nationality" },
 ];
 
 /** Legal-form suffixes and filler that differ between documents for one company. */
@@ -39,6 +62,20 @@ export function normaliseName(raw: string): string {
 
 function normaliseId(raw: string): string {
   return raw.replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
+/** The normalised values a source holds for a set of fields. */
+function pick(source: Record<string, unknown>, fields: readonly string[]): string[] {
+  return fields
+    .map((k) => source[k])
+    .filter((v): v is string => typeof v === "string" && v.trim().length > 1)
+    .map(normaliseName)
+    .filter(Boolean);
+}
+
+/** The first readable value, as printed, for showing the customer. */
+function raw(source: Record<string, unknown>, fields: readonly string[]): string {
+  return fields.map((k) => source[k]).find((v): v is string => typeof v === "string" && v.trim().length > 1) ?? "";
 }
 
 function names(source: Record<string, unknown>): string[] {
@@ -79,8 +116,11 @@ export function entityMismatch(
   existing: Record<string, unknown>,
   extracted: Record<string, unknown>
 ): EntityConflict | null {
-  // Exact identifiers first. A match settles it -- names below cannot then
-  // refuse a document that carries the very licence number on the application.
+  // Exact identifiers first. A match settles the names in ITS OWN category and no
+  // further: a matching passport number says nothing about which company the
+  // document belongs to, and an early return on it hid a genuine company
+  // mismatch until the test below caught it.
+  const settled = { company: false, person: false };
   for (const f of ID_FIELDS) {
     const before = existing[f.key];
     const after = extracted[f.key];
@@ -88,7 +128,7 @@ export function entityMismatch(
     const a = normaliseId(before);
     const b = normaliseId(after);
     if (!a || !b) continue;
-    if (a === b) return null;
+    if (a === b) { settled[f.settles] = true; continue; }
     return {
       severity: "block",
       reason:
@@ -97,9 +137,38 @@ export function entityMismatch(
     };
   }
 
+  // The owner's own name, across the licence, the Emirates ID and the passport.
+  const knownPerson = settled.person ? [] : pick(existing, PERSON_NAME_FIELDS);
+  const foundPerson = pick(extracted, PERSON_NAME_FIELDS);
+  if (knownPerson.length && foundPerson.length && !foundPerson.some((f) => knownPerson.some((k) => nameMatches(k, f)))) {
+    return {
+      severity: "confirm",
+      reason:
+        `This document names the owner as "${raw(extracted, PERSON_NAME_FIELDS)}", and the application says ` +
+        `"${raw(existing, PERSON_NAME_FIELDS)}". Names are transliterated differently on different documents, so ` +
+        `ask the customer to confirm these are the same person before continuing rather than telling them the ` +
+        `document is wrong.`,
+    };
+  }
+
+  for (const f of settled.person ? [] : PERSON_SOFT_FIELDS) {
+    const before = existing[f.key];
+    const after = extracted[f.key];
+    if (typeof before !== "string" || typeof after !== "string") continue;
+    const a = normaliseName(before);
+    const b = normaliseName(after);
+    if (!a || !b || nameMatches(a, b)) continue;
+    return {
+      severity: "confirm",
+      reason:
+        `This document gives the ${f.label} as "${after}", and the application says "${before}". ` +
+        `Ask the customer which is correct before continuing.`,
+    };
+  }
+
   // Names, compared as SETS. A legal name on the MOA and a trade name on the
   // licence are both this company's names, and either may appear in either slot.
-  const known = names(existing);
+  const known = settled.company ? [] : names(existing);
   const found = names(extracted);
   if (!known.length || !found.length) return null;
   if (found.some((f) => known.some((k) => nameMatches(k, f)))) return null;

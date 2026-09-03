@@ -1,10 +1,13 @@
 /**
  * EPGL licensing enhancements (2026-09-03), from the client's list.
  *
- * 1. SIGN-IN REQUIRED for a new licence and for a renewal, as Emirates Post
- *    already requires for a new PO Box rental. Journey.requiresAuth defaults to
- *    true in the schema, so if these are running open the stored definition sets
- *    it false explicitly -- this reports what it found rather than assuming.
+ * 1. SIGN-IN for a new licence and for a renewal, as Emirates Post already
+ *    requires for a new PO Box rental. HELD BACK on Emre's instruction (3 Sep):
+ *    forcing sign-in makes the journeys harder to test, so it is behind
+ *    --require-signin and does NOTHING unless that flag is passed. Journey
+ *    .requiresAuth defaults to true in the schema, so if these are currently
+ *    running open the stored definition sets it false explicitly; the script
+ *    reports what it found either way rather than assuming.
  *
  * 2. THE TWO RENEWAL CONFIRMATIONS, in the client's own words. A plain renewal
  *    and a renewal where the customer has changed their trade licence details
@@ -14,6 +17,7 @@
  *
  * Idempotent. Run from apps/web:
  *   npx tsx scripts/epgl-enhancements-2026-09-03.ts [--env <file>] [--dry-run]
+ *   ...and, once testing is done: --require-signin
  */
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
@@ -32,6 +36,8 @@ import { eq } from "drizzle-orm";
 const SLUG = "epgl-dialog";
 const DRY = process.argv.includes("--dry-run");
 const GATED = ["new_license", "renewal"];
+/** Off by default: sign-in gets in the way while the journeys are being tested. */
+const REQUIRE_SIGNIN = process.argv.includes("--require-signin");
 
 const MARKER = "RENEWAL CONFIRMATION WORDING";
 
@@ -58,7 +64,9 @@ async function main() {
 
   for (const j of def.journeys) {
     if (!GATED.includes(j.key)) continue;
-    if (j.requiresAuth === true) {
+    if (!REQUIRE_SIGNIN) {
+      console.log(`  (held) ${j.key}: sign-in left as ${String(j.requiresAuth)} — pass --require-signin to gate it`);
+    } else if (j.requiresAuth === true) {
       console.log(`  (already) ${j.key}: sign-in required`);
     } else {
       console.log(`  + ${j.key}: requiresAuth ${String(j.requiresAuth)} -> true`);
