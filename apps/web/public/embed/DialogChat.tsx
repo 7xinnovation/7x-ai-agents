@@ -111,8 +111,37 @@ export function DialogChat({
    * JSON.stringify does the escaping: a token is opaque, and pasting one into a
    * string literal by hand is how an injection gets in.
    */
-  const injectToken = accessToken
-    ? `window.__dialogNativeToken=${JSON.stringify(accessToken)};true;`
+  // The real token is exchanged from HERE -- native code, no WebView -- for a
+  // code that names one conversation, lasts two minutes, and is worthless
+  // against Emirates Post. Only that code is injected. If the exchange fails we
+  // open as a guest rather than falling back to shipping the token in, because
+  // the fallback is the thing this exists to avoid.
+  const [handoff, setHandoff] = useState<string | null>(null);
+  const [exchanging, setExchanging] = useState(Boolean(accessToken));
+  React.useEffect(() => {
+    if (!accessToken) { setHandoff(null); setExchanging(false); return; }
+    let live = true;
+    setExchanging(true);
+    (async () => {
+      try {
+        const res = await fetch(`${base}/api/embed/handoff`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agent, token: accessToken, locale }),
+        });
+        const data = res.ok ? ((await res.json()) as { handoff?: string }) : null;
+        if (live) setHandoff(data?.handoff ?? null);
+      } catch {
+        if (live) setHandoff(null);
+      } finally {
+        if (live) setExchanging(false);
+      }
+    })();
+    return () => { live = false; };
+  }, [accessToken, base, agent, locale]);
+
+  const injectToken = handoff
+    ? `window.__dialogNativeHandoff=${JSON.stringify(handoff)};true;`
     : "true;";
 
   /** Tell the page something happened out here. */
@@ -189,6 +218,19 @@ export function DialogChat({
     },
     [base, notify]
   );
+
+  // Holding the WebView back until the exchange resolves is deliberate: it is one
+  // request, and loading first would open the conversation as a guest and then
+  // change its mind, which the customer sees as the assistant forgetting them.
+  if (exchanging) {
+    return (
+      <View style={[styles.fill, style]}>
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.fill, style]}>

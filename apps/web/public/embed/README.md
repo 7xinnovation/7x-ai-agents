@@ -82,23 +82,33 @@ If it expires mid-conversation the assistant falls back to guest behaviour and
 asks the customer to sign in. Re-mounting with a fresh token is enough; there is
 nothing to refresh on our side.
 
-**How it is handed over, since this is the obvious thing to worry about.** The
-token is injected into the page's memory before its own scripts run
-(`injectedJavaScriptBeforeContentLoaded`). It is **not** a query parameter and
-not a header:
+**The token never enters the WebView.** This was your review comment, and the
+wrapper now does what you asked for:
 
-- Not in the URL, so it is never written to a server access log, never kept in
-  the WebView's back/forward history, and never restored with its saved state.
-- Not persisted by the wrapper — no `AsyncStorage`, no cookie, no disk. It lives
-  in the JS context and dies with the WebView.
-- Only ever sent to your own `host` origin, over TLS. `originWhitelist` pins the
-  WebView to that origin, and anything else opens in an external browser.
-- Verified **server-side** before the customer is treated as signed in. A bad or
-  expired token leaves them a guest — never half signed in.
+1. From **native code** — no WebView involved — it POSTs the token to
+   `POST {host}/api/embed/handoff`.
+2. We verify it against Emirates Post, attach it to a conversation server-side
+   (encrypted at rest), and return a short-lived **handoff code**.
+3. Only that code is injected into the page, before its own scripts run.
 
-Two things that remain yours: keep the token wherever your app already keeps it
-(Keychain / Keystore, not `AsyncStorage`), and don't log the props you pass to
-this component.
+The code is worth stealing to almost no one: it carries **no credential**, names
+**one conversation and one agent**, expires in **two minutes**, and is not a
+token as far as Emirates Post is concerned — replayed against their API it is
+just a string. The real token stays on our server, which is where the chat needs
+it anyway.
+
+It is also not in the URL, so nothing lands in a server access log, the
+WebView's back/forward history, or its restored state. The wrapper persists
+nothing: no `AsyncStorage`, no cookie, no disk.
+
+The WebView is held back for that one request rather than loading first and
+upgrading afterwards — otherwise the conversation opens as a guest and then
+changes its mind, which reads as the assistant forgetting the customer. If the
+exchange fails it opens as a guest. It never falls back to sending the token in.
+
+Two things stay yours: keep the token where your app already keeps it (Keychain /
+Keystore, not `AsyncStorage`), and don't log the props you pass to this
+component.
 
 ## 4. Permissions — do this, or steps silently degrade
 

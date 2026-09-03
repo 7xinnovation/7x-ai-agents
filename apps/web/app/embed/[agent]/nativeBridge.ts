@@ -68,6 +68,19 @@ export function nativeToken(): string | undefined {
   return typeof t === "string" && t ? t : undefined;
 }
 
+/**
+ * A short-lived handoff code, which is what a native host should send instead.
+ *
+ * Better than the token above and preferred over it: the app exchanges the real
+ * credential with our API from native code, and only this code -- two minutes,
+ * one conversation, worthless to Emirates Post -- ever reaches the WebView.
+ */
+export function nativeHandoff(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const h = (window as unknown as { __dialogNativeHandoff?: unknown }).__dialogNativeHandoff;
+  return typeof h === "string" && h ? h : undefined;
+}
+
 /** Every window this widget has opened natively, so the host can close them. */
 const open = new Set<{ closed: boolean }>();
 

@@ -35,7 +35,7 @@ import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
-import { openExternal, isNative, postNative, nativeToken, type ExternalWindow } from "./nativeBridge";
+import { openExternal, isNative, postNative, nativeToken, nativeHandoff, type ExternalWindow } from "./nativeBridge";
 
 interface PaymentInfo {
   reference: string;
@@ -612,7 +612,7 @@ export function Experience({
   const openQrHandoff = useCallback(() => {
     if (!convId.current || typeof window === "undefined") return;
     setQrUrl(`${window.location.origin}/m/${agent.slug}/${convId.current}`);
-  }, [agent.slug]);
+  }, [agent.slug, storageKey]);
 
   // Context for in-chat upload widgets (feedback: keep the upload in the chat).
   // A ```upload block in an assistant message renders a control for that doc key.
@@ -760,6 +760,33 @@ export function Experience({
    * bad one leaves them a guest rather than half signed in.
    */
   useEffect(() => {
+    // Preferred: a handoff code. The app has already exchanged the real token
+    // with us from native code, so there is nothing here worth stealing -- this
+    // only says which conversation is already signed in.
+    const handoff = nativeHandoff();
+    if (handoff) {
+      void (async () => {
+        try {
+          const res = await fetch("/api/embed/handoff", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agent: agent.slug, handoff }),
+          });
+          if (!res.ok) return;
+          const data = (await res.json()) as { conversationId?: string };
+          if (data.conversationId) {
+            convId.current = data.conversationId;
+            try { window.localStorage.setItem(storageKey, data.conversationId); } catch { /* private mode */ }
+          }
+          setAuthenticated(true);
+          setAuthReason(null);
+          setSignedInPulse(true);
+        } catch {
+          /* leave signed out; the customer can still sign in from here */
+        }
+      })();
+      return;
+    }
     const token = nativeToken();
     if (!token || uaePass.current) return;
     uaePass.current = token;
