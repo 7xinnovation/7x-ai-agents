@@ -421,6 +421,24 @@ POST /services/apexrest/paymentNotification/
 ```
 Fired from our payment webhook once the gateway settles, never from the model.
 
+**The amount is what SETTLED, fee included.** From 3 Sep 2026 EPGL takes payment
+on the Emirates Post gateway (temporarily, until it has its own) and adds **1%
+"Admin processing fees" ON TOP** — a 100,000 licence fee is charged as 101,000,
+in the client's own words. So the transaction amount reported here is 101,000,
+not 100,000, because that is the money that arrived.
+
+The fee is computed **server-side** from the licence fee, never by the model, and
+the base is remembered on the case: a percentage applied to a total that already
+contains it charges 100,000 → 101,000 → 102,010 across reissued payment links for
+one unchanged application. Merchant id `200200012694`.
+
+Only the gateway route carries it. Their process map's other route — Finance
+requesting a Virtual IBAN from the bank by hand — is at face value, and never
+passes through us at all.
+
+*Open: whether Salesforce wants the fee as its own Payment Item, or folded into
+the one total; and whether it is refunded with the fee on a rejected application.*
+
 **Two wire quirks from your own spec, noted so nobody tidies them away**
 - `currency` and `desc` are reserved words in Apex and are remapped internally,
   so those exact keys must appear on the wire.

@@ -35,8 +35,18 @@ export const CaseState = z.object({
       amount: z.number().nullable().default(null),
       currency: z.string().default("AED"),
       link: z.string().nullable().default(null),
+      /**
+       * What the total was calculated FROM, before any percentage fee.
+       *
+       * Remembered because the model passes back whatever it last quoted. A 1%
+       * fee applied to a figure that already contains it charges 100,000 ->
+       * 101,000 -> 102,010 across reissued payment links for one unchanged
+       * application -- the same way the courier fee compounded before
+       * chargeableAmount stopped trusting the override.
+       */
+      baseAmount: z.number().nullable().default(null),
     })
-    .default({ status: "none", reference: null, amount: null, currency: "AED", link: null }),
+    .default({ status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null }),
   /**
    * Journeys the customer has already been asked to confirm, once.
    *
@@ -166,7 +176,7 @@ export function emptyCase(): CaseState {
     surveyIssuedAt: null,
     gsbCompanies: [],
     readiness: { complete: false, missing: [] },
-    payment: { status: "none", reference: null, amount: null, currency: "AED", link: null },
+    payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null },
     reference: null,
     status: "draft",
   };

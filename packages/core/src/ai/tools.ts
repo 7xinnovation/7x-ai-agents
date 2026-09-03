@@ -216,6 +216,33 @@ export function chargeableAmount(
   return (override ?? sub.amount ?? 0) + surchargeTotal;
 }
 
+/**
+ * Round to fils. 1% of 12,345 is 123.45, and a gateway takes minor units -- a
+ * float left unrounded reaches N-Genius as 12345.000000000002 and is refused.
+ */
+function toFils(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+/**
+ * The percentage fee to add on top, and what to call it.
+ *
+ * ON TOP, not carved out: 100,000 at 1% is charged as 101,000, which is what
+ * EPGL confirmed. Returns zero when the journey declares none or its condition
+ * does not hold -- a journey offering both a gateway and the VIBAN route must
+ * only charge it on the gateway.
+ */
+export function processingFeeFor(
+  sub: NonNullable<Journey["submission"]>,
+  data: Record<string, unknown>,
+  base: number
+): { amount: number; label?: LocalizedString; percent?: number } {
+  const fee = sub.processingFee;
+  if (!fee || !(base > 0)) return { amount: 0 };
+  if (fee.when && !evalCondition(fee.when, data)) return { amount: 0 };
+  return { amount: toFils(base * (fee.percent / 100)), label: fee.label, percent: fee.percent };
+}
+
 export async function dispatchTool(
   name: string,
   input: Record<string, unknown>,
@@ -463,7 +490,18 @@ export async function dispatchTool(
         typeof ctx.authoritativeAmount === "number" && ctx.authoritativeAmount > 0
           ? ctx.authoritativeAmount
           : undefined;
-      const amount = backendAmount ?? chargeableAmount(sub, state.data, overrideAmount);
+      // The base, before any percentage fee. A base remembered from an earlier
+      // payment on this same unpaid case wins over the model's figure: once a
+      // total has been quoted, the number the model passes next time already
+      // contains the fee, and adding to it charges 100,000 -> 101,000 -> 102,010
+      // across reissued links for one unchanged application.
+      const remembered =
+        sub.processingFee && state.payment.status !== "paid" && typeof state.payment.baseAmount === "number"
+          ? state.payment.baseAmount
+          : undefined;
+      const base = backendAmount ?? remembered ?? chargeableAmount(sub, state.data, overrideAmount);
+      const fee = processingFeeFor(sub, state.data, base);
+      const amount = toFils(base + fee.amount);
       const applicable = applicableSurcharges(sub, state.data);
       const actx = adapterContext(agent, agent.integrations.payment);
       const res = await adapters.payment.initiate(actx, {
@@ -481,13 +519,17 @@ export async function dispatchTool(
         link: res.link ?? null,
         amount,
         currency,
+        baseAmount: base,
       });
       events.push({ type: "payment_initiated", reference: res.reference, link: res.link, amount, currency });
       events.push({ type: "case", state });
-      const breakdown = applicable.length
-        ? ` The total includes ${applicable
-            .map((s) => `${s.label.en} ${s.amount} ${currency}`)
-            .join(" + ")} on top of ${amount - applicable.reduce((sum, s) => sum + s.amount, 0)} ${currency} — state this breakdown to the customer so no fee is a surprise.`
+      const surchargeTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
+      const parts = [
+        ...applicable.map((s) => `${s.label.en} ${s.amount} ${currency}`),
+        ...(fee.amount > 0 ? [`${fee.label?.en ?? "Processing fee"} ${fee.amount} ${currency} (${fee.percent}%)`] : []),
+      ];
+      const breakdown = parts.length
+        ? ` The total includes ${parts.join(" + ")} on top of ${toFils(amount - surchargeTotal - fee.amount)} ${currency} — state this breakdown to the customer so no fee is a surprise.`
         : "";
       return {
         result: `Payment ${res.reference} initiated for ${amount} ${currency}.${breakdown} A secure "Pay now" card is now displayed to the customer inside the chat — do NOT paste any payment link or URL. Briefly tell them to complete the payment using the secure payment card shown below your message, then wait for payment confirmation before calling submit_case.`,

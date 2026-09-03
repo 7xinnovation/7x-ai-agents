@@ -71,6 +71,29 @@ export const Journey = z.object({
           })
         )
         .default([]),
+      /**
+       * A percentage charge added ON TOP of the amount being paid.
+       *
+       * EPGL's gateway option carries a 1% "Admin processing fees": a 100,000
+       * licence fee is charged as 101,000. It cannot be expressed as a surcharge
+       * above, because those are fixed amounts and this scales with a fee that
+       * comes from Salesforce.
+       *
+       * Charged only when a payment gateway is used. The VIBAN route, where
+       * Finance requests a virtual IBAN from the bank by hand, is at face value,
+       * so a journey offering both must not declare this unconditionally --
+       * `when` gates it against the collected data exactly as a surcharge does.
+       */
+      processingFee: z
+        .object({
+          key: z.string().default("admin_processing_fee"),
+          label: LocalizedString,
+          /** 1 means 1%. Added to the base, never taken out of it. */
+          percent: z.number().positive(),
+          /** Optional condition; charged unconditionally when omitted. */
+          when: z.string().optional(),
+        })
+        .optional(),
       // When present, the journey is completed END-TO-END through connected API
       // integration tools (authoritative pricing, order creation on the real
       // payment gateway, and payment confirmation) instead of the internal mock
