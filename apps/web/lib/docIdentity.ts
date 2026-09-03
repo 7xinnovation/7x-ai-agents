@@ -273,3 +273,125 @@ function startOfDayGulf(now: Date): Date {
 export function formatGulfDate(d: Date): string {
   return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
 }
+
+/* ------------------------------------------------------------------------- *
+ * Partner documents, cross-checked BY NAME.
+ *
+ * A partner's passport and Emirates ID must be the same person's, and which
+ * partner a document belongs to is decided by the NAME printed on it -- not by
+ * which slot the customer happened to drop it into. Uploading four partners'
+ * papers is exactly the task people misfile, and a set that is complete but
+ * shuffled is worse than one that is visibly short: every slot shows a green
+ * tick and partner 3 has partner 1's passport against their name.
+ *
+ * Names are compared, so nothing here BLOCKS -- transliteration varies between a
+ * passport and an Emirates ID for the same person, and the customer is the one
+ * who can settle it.
+ * ------------------------------------------------------------------------- */
+
+/** The names seen on documents so far, keyed by partner slot. Bookkeeping. */
+export const PARTNER_NAMES_KEY = "__partner_names";
+
+/** `partner_2_passport` -> { index: 2, kind: "passport" }. */
+export function partnerSlot(documentKey: string): { index: number; kind: string } | null {
+  const m = /^partner_(\d+)_(.+)$/i.exec(documentKey);
+  if (!m) return null;
+  const index = Number(m[1]);
+  return Number.isInteger(index) && index > 0 ? { index, kind: m[2]!.toLowerCase() } : null;
+}
+
+/** The person's name this document carries, however the extraction labelled it. */
+function personName(extracted: Record<string, unknown>): string | null {
+  return raw(extracted, [...PERSON_NAME_FIELDS, "full_name", "name"]) || null;
+}
+
+/** The name already on file for a partner: an explicit field, or a group row. */
+function knownPartnerName(data: Record<string, unknown>, index: number): string | null {
+  const direct = raw(data, [`partner_${index}_name`, `partner_${index}_name_en`, `partner_${index}_name_ar`]);
+  if (direct) return direct;
+  const group = data.partners ?? data.shareholders;
+  if (Array.isArray(group)) {
+    const row = group[index - 1];
+    if (row && typeof row === "object") {
+      return raw(row as Record<string, unknown>, ["name", "name_en", "name_ar", "full_name", "partner_name"]) || null;
+    }
+  }
+  return null;
+}
+
+/** Names already observed on this partner's other documents. */
+function seenPartnerName(data: Record<string, unknown>, index: number): string | null {
+  const seen = data[PARTNER_NAMES_KEY];
+  if (!seen || typeof seen !== "object") return null;
+  const v = (seen as Record<string, unknown>)[String(index)];
+  return typeof v === "string" && v.trim() ? v : null;
+}
+
+export interface PartnerCheck {
+  conflict: EntityConflict | null;
+  /** The name to record against this slot, so the next document can be matched. */
+  observedName: string | null;
+}
+
+/**
+ * Check a partner document against the name it should carry.
+ *
+ * Three questions, in the order that gives the most useful answer:
+ *   1. Does it match the name the LICENCE gives for this partner?
+ *   2. Does it match this partner's OTHER document, when no licence name exists?
+ *   3. Does it match a DIFFERENT partner? -- the misfiling case, and the one
+ *      worth naming precisely, because "wrong name" sends the customer looking
+ *      for a problem with the document rather than with the slot.
+ */
+export function partnerDocumentCheck(
+  documentKey: string,
+  data: Record<string, unknown>,
+  extracted: Record<string, unknown>
+): PartnerCheck {
+  const slot = partnerSlot(documentKey);
+  const found = personName(extracted);
+  if (!slot || !found) return { conflict: null, observedName: found };
+
+  const foundNorm = normaliseName(found);
+  if (!foundNorm) return { conflict: null, observedName: found };
+
+  // Whose slot did this land in, and does the name agree?
+  const expected = knownPartnerName(data, slot.index) ?? seenPartnerName(data, slot.index);
+  if (expected && nameMatches(normaliseName(expected), foundNorm)) {
+    return { conflict: null, observedName: found };
+  }
+
+  // Does it belong to one of the OTHER partners? Checked before reporting a
+  // plain mismatch: "this is partner 1's passport" is actionable, "this name
+  // does not match" sends them hunting through the document.
+  for (let i = 1; i <= 12; i++) {
+    if (i === slot.index) continue;
+    const other = knownPartnerName(data, i) ?? seenPartnerName(data, i);
+    if (other && nameMatches(normaliseName(other), foundNorm)) {
+      return {
+        observedName: found,
+        conflict: {
+          severity: "confirm",
+          reason:
+            `This document is in partner ${slot.index}'s slot but names "${found}", who is partner ${i} on this ` +
+            `application. It looks like it was uploaded against the wrong partner — ask the customer to confirm, ` +
+            `and upload it under partner ${i} instead. Do not tell them the document is invalid.`,
+        },
+      };
+    }
+  }
+
+  if (!expected) return { conflict: null, observedName: found };
+
+  return {
+    observedName: found,
+    conflict: {
+      severity: "confirm",
+      reason:
+        `Partner ${slot.index} is recorded as "${expected}", and this document names "${found}". ` +
+        `Every partner's passport and Emirates ID must be the same person's, so ask the customer which is right ` +
+        `before continuing — names are written differently on different documents, so this may simply be a ` +
+        `spelling difference rather than the wrong file.`,
+    },
+  };
+}

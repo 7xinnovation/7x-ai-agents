@@ -15,7 +15,7 @@ import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
-import { entityMismatch, expiredLicence, formatGulfDate } from "@/lib/docIdentity";
+import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, PARTNER_NAMES_KEY } from "@/lib/docIdentity";
 
 /**
  * Which classified document types are acceptable for a given document slot,
@@ -233,7 +233,12 @@ export async function POST(req: NextRequest) {
   // refusing guessed wrong for a customer whose MOA was perfectly correct. The
   // question goes to the customer instead, and the extracted names are not
   // applied over what is already on file.
-  const nameQuery = conflict?.severity === "confirm" ? conflict.reason : null;
+  // A partner's document is matched to a partner by the NAME on it, not by the
+  // slot it was dropped into. A shuffled but complete set is worse than a short
+  // one: every slot shows a tick and partner 3 has partner 1's passport.
+  const partner = partnerDocumentCheck(key, caseRow.state.data ?? {}, extraction.values ?? {});
+  const nameQuery =
+    partner.conflict?.reason ?? (conflict?.severity === "confirm" ? conflict.reason : null);
   if (nameQuery) {
     await audit({
       agentId: agent.id,
@@ -308,6 +313,16 @@ export async function POST(req: NextRequest) {
     const data: Record<string, unknown> = { ...next.data, [DOC_FIELDS_KEY]: docFields };
     if (nameQuery) data[NAME_CONFLICT_KEY] = nameQuery;
     else delete data[NAME_CONFLICT_KEY];
+    // Remember whose name this partner's documents carry, so the second document
+    // of a pair can be matched against the first even when the licence named
+    // nobody. Not recorded when the name is already disputed -- storing it would
+    // make the misfiled document the reference for everything after it.
+    const slot = partnerSlot(key);
+    if (slot && partner.observedName && !partner.conflict) {
+      const seen = { ...((data[PARTNER_NAMES_KEY] as Record<string, string> | undefined) ?? {}) };
+      seen[String(slot.index)] = partner.observedName;
+      data[PARTNER_NAMES_KEY] = seen;
+    }
     return { ...next, data };
   });
   await getDb()
