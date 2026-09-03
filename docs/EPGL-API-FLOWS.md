@@ -436,6 +436,22 @@ Only the gateway route carries it. Their process map's other route — Finance
 requesting a Virtual IBAN from the bank by hand — is at face value, and never
 passes through us at all.
 
+**Outlets.** Two, and they must not be swapped:
+
+| | |
+|---|---|
+| production | `b2bf0418-4bef-430c-8afc-c04154408f80` — EPGL's own, live |
+| staging | `b78ef8c7-ce2a-41d6-84c9-e6219557a991` — the N-Genius sandbox |
+
+Emirates Post said to use "anything random" on staging. An invented UUID does not
+work — N-Genius rejects an outlet it does not know, so the payment fails at order
+creation rather than harmlessly going nowhere. The sandbox outlet NXN already
+tests against does work and holds no money. The binding script refuses to put the
+production outlet on the sandbox host, or the sandbox outlet on the live one.
+
+**Charging is not switched on.** The gateway is bound and the fee declared, but
+the journeys do not require payment yet — the fee is inert until they do.
+
 *Open: whether Salesforce wants the fee as its own Payment Item, or folded into
 the one total; and whether it is refunded with the fee on a rejected application.*
 
