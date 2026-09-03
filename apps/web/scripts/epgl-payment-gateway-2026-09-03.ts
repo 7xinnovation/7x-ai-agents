@@ -23,8 +23,15 @@
  * guess happened to name. It is recorded in the binding for reference and the
  * script REFUSES to bind a gateway without a real outletRef.
  *
+ * PAYMENT IS NOT SWITCHED ON HERE. Binding the gateway and declaring the fee is
+ * safe; flipping requiresPayment makes every licence journey demand a payment
+ * before it will submit, which is squarely in the way of the document testing
+ * going on right now -- the same reason the sign-in gate was taken off. It needs
+ * --require-payment, and the fee is inert until then because nothing charges.
+ *
  * Idempotent. Run from apps/web:
  *   npx tsx scripts/epgl-payment-gateway-2026-09-03.ts --outlet-ref <uuid> [--env <file>] [--dry-run]
+ *   ...and, when the journeys should actually charge: --require-payment
  */
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
@@ -45,6 +52,7 @@ const DRY = process.argv.includes("--dry-run");
 const MERCHANT_ID = "200200012694";
 const JOURNEYS = ["new_license", "renewal"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REQUIRE_PAYMENT = process.argv.includes("--require-payment");
 
 const PROCESSING_FEE = {
   key: "admin_processing_fee",
@@ -105,9 +113,18 @@ async function main() {
   let changed = 0;
   for (const j of def.journeys) {
     if (!JOURNEYS.includes(j.key)) continue;
-    j.submission = { ...(j.submission ?? {}), requiresPayment: true, currency: "AED", processingFee: PROCESSING_FEE };
+    const sub = { ...(j.submission ?? {}), currency: "AED", processingFee: PROCESSING_FEE } as Record<string, unknown>;
+    if (REQUIRE_PAYMENT) sub.requiresPayment = true;
+    // Compare before counting it. A script that reports "written" on a re-run
+    // that changed nothing teaches you to stop reading its output.
+    const same = JSON.stringify(j.submission ?? {}) === JSON.stringify(sub);
+    j.submission = sub;
+    if (same) { console.log(`  (already) ${j.key}: 1% ${PROCESSING_FEE.label.en}`); continue; }
     changed++;
-    console.log(`  + ${j.key}: requiresPayment, 1% ${PROCESSING_FEE.label.en}`);
+    console.log(
+      `  + ${j.key}: 1% ${PROCESSING_FEE.label.en}` +
+        (REQUIRE_PAYMENT ? ", requiresPayment true" : `, requiresPayment left as ${String(sub.requiresPayment)} — pass --require-payment to charge`)
+    );
   }
   if (!changed) throw new Error(`none of ${JOURNEYS.join(", ")} found on ${SLUG}`);
 
