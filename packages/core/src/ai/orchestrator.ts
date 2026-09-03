@@ -271,7 +271,18 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         try {
           const stream = client.messages.stream({
             model,
-            max_tokens: 1500,
+            // 1500 was not enough, and the way it failed was invisible. EPGL's
+            // submission is ONE tool call carrying a composite -- an Account,
+            // every partner, a contact, a member and a row per uploaded document
+            // -- which runs to thousands of tokens of JSON. The model wrote "Got
+            // it, submitting your application now", began the tool call, hit the
+            // ceiling, and the round ended with stop_reason "max_tokens". Nothing
+            // errored: the turn just finished, having done nothing, and the
+            // customer sat there asking "are you submitting?".
+            //
+            // Sized for that composite with room to spare. It is a CEILING, not a
+            // target: a short answer still costs one short answer.
+            max_tokens: 8000,
             system,
             tools: cachedTools,
             messages,
@@ -353,6 +364,28 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
       const toolUses = final.content.filter(
         (c): c is Anthropic.ToolUseBlock => c.type === "tool_use"
       );
+
+      // Truncated mid-answer. Whatever the model was building -- most often a
+      // large tool call -- is incomplete, so treating this as a finished turn
+      // reports work as done that was never started. It is a failure and is
+      // raised as one, so it lands in the logs instead of looking like the model
+      // simply chose to stop.
+      if (final.stop_reason === "max_tokens") {
+        const partial = final.content
+          .filter((c): c is Anthropic.TextBlock => c.type === "text")
+          .map((c) => c.text)
+          .join("");
+        const attempted = final.content.find((c): c is Anthropic.ToolUseBlock => c.type === "tool_use");
+        yield {
+          type: "error",
+          message:
+            `Response hit the token ceiling before it finished` +
+            (attempted ? ` (mid tool call: ${attempted.name})` : "") +
+            `. Nothing was submitted.`,
+        };
+        yield { type: "done", message: partial, state };
+        return;
+      }
 
       if (final.stop_reason !== "tool_use" || toolUses.length === 0) {
         const text = final.content
