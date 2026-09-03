@@ -56,9 +56,13 @@ export interface DialogChatProps {
   /**
    * The customer's Emirates Post access token.
    *
-   * The web widget reads this from the page's own storage; an app has it already,
-   * so pass it and the conversation starts signed in. Leave it out and the
-   * customer is treated as a guest, which is a supported path, not a failure.
+   * An app already holds this, so pass it and the conversation starts signed in.
+   * Leave it out and the customer is a guest, which is a supported path, not a
+   * failure.
+   *
+   * It is handed to the page IN MEMORY, before its scripts run -- never as a
+   * query parameter, which would be written to server access logs and kept in
+   * WebView history. Nothing here persists it.
    */
   accessToken?: string;
   /** Resume a conversation the customer already had. */
@@ -92,9 +96,24 @@ export function DialogChat({
   const base = host.replace(/\/$/, "");
   const params = new URLSearchParams({ embedded: "1" });
   if (locale) params.set("locale", locale);
-  if (accessToken) params.set("upt", accessToken);
   if (conversationId) params.set("cid", conversationId);
   const uri = `${base}/embed/${encodeURIComponent(agent)}?${params.toString()}`;
+
+  /**
+   * The token is handed over in memory, NEVER in the URL.
+   *
+   * A query parameter would be written to the server's access log, kept in the
+   * WebView's back/forward history, and restored with its saved state. This runs
+   * before the page's own scripts, so the page finds the token waiting for it and
+   * nothing outside this process ever sees it. It is still verified server-side
+   * before the customer is treated as signed in.
+   *
+   * JSON.stringify does the escaping: a token is opaque, and pasting one into a
+   * string literal by hand is how an injection gets in.
+   */
+  const injectToken = accessToken
+    ? `window.__dialogNativeToken=${JSON.stringify(accessToken)};true;`
+    : "true;";
 
   /** Tell the page something happened out here. */
   const notify = useCallback((detail: Record<string, unknown>) => {
@@ -182,6 +201,8 @@ export function DialogChat({
         onNavigationStateChange={onNavigationStateChange}
         onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
         onLoadEnd={() => setLoading(false)}
+        injectedJavaScriptBeforeContentLoaded={injectToken}
+        injectedJavaScriptBeforeContentLoadedForMainFrameOnly
         // window.open must NOT open a second WebView we do not control; the page
         // detects that and asks us instead.
         setSupportMultipleWindows={false}

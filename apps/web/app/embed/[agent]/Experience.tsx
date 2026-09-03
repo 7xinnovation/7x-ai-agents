@@ -35,7 +35,7 @@ import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
-import { openExternal, isNative, postNative, type ExternalWindow } from "./nativeBridge";
+import { openExternal, isNative, postNative, nativeToken, type ExternalWindow } from "./nativeBridge";
 
 interface PaymentInfo {
   reference: string;
@@ -749,6 +749,36 @@ export function Experience({
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [allowedOrigins]);
+
+  /**
+   * The same handover, from a native app instead of a hosting page.
+   *
+   * A WebView has no parent frame to postMessage from and no allowedOrigins to
+   * check -- the app IS the trusted host, and it reaches the page by setting a
+   * global before our scripts run. What does not change is that the token is
+   * verified SERVER-side here before the customer is treated as signed in, so a
+   * bad one leaves them a guest rather than half signed in.
+   */
+  useEffect(() => {
+    const token = nativeToken();
+    if (!token || uaePass.current) return;
+    uaePass.current = token;
+    void (async () => {
+      try {
+        const res = await fetch("/api/uaepass/host", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agent: agent.slug, token, cid: convId.current ?? undefined }),
+        });
+        if (!res.ok) return;
+        setAuthenticated(true);
+        setAuthReason(null);
+        setSignedInPulse(true);
+      } catch {
+        /* leave signed out; the next chat turn re-verifies the same token */
+      }
+    })();
+  }, [agent.slug]);
 
   // Resume a prior session for this agent (PRD: partial-application retention).
   useEffect(() => {

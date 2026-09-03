@@ -53,6 +53,21 @@ export function postNative(detail: Record<string, unknown>): void {
   }
 }
 
+/**
+ * The customer's backend token, handed over by a native host.
+ *
+ * NOT a query parameter. A token in the URL is written to the server's access
+ * log, kept in the WebView's history and restored with its state -- the mobile
+ * developer was right to object to it. The wrapper sets this global before the
+ * page's own scripts run instead, so it exists only in memory, and it is still
+ * verified server-side before anything treats the customer as signed in.
+ */
+export function nativeToken(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const t = (window as unknown as { __dialogNativeToken?: unknown }).__dialogNativeToken;
+  return typeof t === "string" && t ? t : undefined;
+}
+
 /** Every window this widget has opened natively, so the host can close them. */
 const open = new Set<{ closed: boolean }>();
 

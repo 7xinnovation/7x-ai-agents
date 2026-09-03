@@ -82,6 +82,24 @@ If it expires mid-conversation the assistant falls back to guest behaviour and
 asks the customer to sign in. Re-mounting with a fresh token is enough; there is
 nothing to refresh on our side.
 
+**How it is handed over, since this is the obvious thing to worry about.** The
+token is injected into the page's memory before its own scripts run
+(`injectedJavaScriptBeforeContentLoaded`). It is **not** a query parameter and
+not a header:
+
+- Not in the URL, so it is never written to a server access log, never kept in
+  the WebView's back/forward history, and never restored with its saved state.
+- Not persisted by the wrapper — no `AsyncStorage`, no cookie, no disk. It lives
+  in the JS context and dies with the WebView.
+- Only ever sent to your own `host` origin, over TLS. `originWhitelist` pins the
+  WebView to that origin, and anything else opens in an external browser.
+- Verified **server-side** before the customer is treated as signed in. A bad or
+  expired token leaves them a guest — never half signed in.
+
+Two things that remain yours: keep the token wherever your app already keeps it
+(Keychain / Keystore, not `AsyncStorage`), and don't log the props you pass to
+this component.
+
 ## 4. Permissions — do this, or steps silently degrade
 
 The conversation can pin a delivery address on a map, take a spoken message, and
