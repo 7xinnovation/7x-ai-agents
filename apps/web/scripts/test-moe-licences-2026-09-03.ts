@@ -12,6 +12,8 @@
  */
 import {
   mapLicence,
+  mapSummaryRow,
+  parseMoeResponse,
   parseOwnerDetails,
   normaliseEmiratesId,
   licenceHolderMatch,
@@ -92,6 +94,7 @@ const wrap = (entries: unknown[], statusCode = "100") => ({
   check("manager EID normalised", l.managers[0]?.emiratesId === "784198970768309", l.managers[0]);
   check("owner EID normalised from dashes", l.owners[0]?.emiratesId === "784199983926421", l.owners[0]);
   check("owner share is numeric", l.owners[0]?.sharePercent === 100, l.owners[0]);
+  check("the full shape is marked as full", l.hasFullDetail === true);
 }
 
 // 2. MOEc codes are carried RAW. Translating "4" to an emirate would be wrong --
@@ -211,6 +214,56 @@ const wrap = (entries: unknown[], statusCode = "100") => ({
   let threw = "";
   await licencesByEmiratesId("nonsense").catch((e) => { threw = String(e.message); });
   check("a malformed EID throws before any call", /accepted format/.test(threw), threw);
+}
+
+// 12. The wrapper's own summary shape -- five fields, no expiry, no owners.
+{
+  const row = {
+    CompanyNameEn: "Company Name FZ-LLC",
+    CompanyNameAr: "الاسم بالعربية",
+    ERN: "4120000000047016407",
+    TradeLicenseNumber: "47016407",
+    IssuingEntityCode: 30,
+    AvailableContactMethods: [
+      { Type: "email", Value: "ow***@example.com", FullValue: "owner@example.com" },
+      { Type: "sms", Value: "+971****70", FullValue: "+971523854570" },
+    ],
+  };
+  const l = mapSummaryRow(row)!;
+  check("summary licence number", l.tradeLicenseNo === "47016407", l.tradeLicenseNo);
+  check("summary English name", l.nameEn === "Company Name FZ-LLC", l.nameEn);
+  check("summary issuing entity stringified", l.issuingEntityCode === "30", l.issuingEntityCode);
+  check("summary contact methods read", l.officialEmail === "owner@example.com" && l.mobile === "+971523854570", l);
+  // The one that matters: the summary carries NO expiry, and saying so is the
+  // difference between asking the customer for it and filing a blank date.
+  check("summary is NOT marked full", l.hasFullDetail === false);
+  check("summary has no expiry", l.expiryDate === undefined, l.expiryDate);
+  check("summary has no owners, so holder is unknown", licenceHolderMatch(l, "784199983926421") === "unknown");
+  check("a row with neither ERN nor licence number is dropped", mapSummaryRow({ CompanyNameEn: "x" }) === null);
+  check("camelCase is accepted too", mapSummaryRow({ ern: "412", tradeLicenseNumber: "9" })?.tradeLicenseNo === "9");
+}
+
+// 13. One parser, both shapes -- so a fuller endpoint later needs no deployment.
+{
+  const summary = parseMoeResponse({ payload: [{ ERN: "412", TradeLicenseNumber: "1", CompanyNameEn: "A" }] });
+  check("envelope payload parses as summary", summary.licences.length === 1 && !summary.licences[0]!.hasFullDetail, summary);
+  const full = parseMoeResponse(wrap([SAMPLE_ENTRY()]));
+  check("MOEc shape still parses as full", full.licences.length === 1 && full.licences[0]!.hasFullDetail === true);
+  check("an empty envelope is not a failure", parseMoeResponse({ payload: [] }).rawCount === 0);
+  check("neither shape yields nothing", parseMoeResponse({ unexpected: true }).licences.length === 0);
+}
+
+// 14. The government bus is not an acceptable base URL, whatever is pasted in.
+{
+  __resetMoeCaches();
+  process.env.MOE_API_TOKEN = "test-token";
+  process.env.MOE_API_BASE_URL = "https://integrate.gsb.government.ae/";
+  check("a direct GSB base URL is refused", !moeConfigured());
+  process.env.MOE_API_BASE_URL = "https://stg.wayn.ae/services/digitalbox-portalapi";
+  check("the wrapper base URL is accepted", moeConfigured());
+  delete process.env.MOE_API_BASE_URL;
+  delete process.env.MOE_API_TOKEN;
+  check("nothing configured is back to mock", moeIsMock());
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

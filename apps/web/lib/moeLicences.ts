@@ -94,6 +94,12 @@ export interface MoeLicence {
   mobile?: string;
   legalRepresentative?: string;
   isBranch: boolean;
+  /**
+   * True when this came from MOEc's full record. False when it came from the
+   * wrapper's summary shape, which carries no expiry, address, status or owners
+   * -- so a missing expiry means UNKNOWN, not "does not expire".
+   */
+  hasFullDetail: boolean;
   activities: MoeActivity[];
   owners: MoeOwner[];
   managers: MoeManager[];
@@ -179,6 +185,7 @@ export function mapLicence(entry: Record<string, unknown>): MoeLicence | null {
     mobile: str(pick(d, "licenseMobPhoneNo")),
     legalRepresentative: str(pick(d, "licenseLegalRepresentativeName")),
     isBranch: bool(pick(d, "BNBranchFlag")) === true,
+    hasFullDetail: true,
     activities: rows(activityRoot?.licenseActivity ?? activityRoot?.LicenseActivity).map((a) => ({
       code: str(pick(a, "activityCode")),
       nameEn: str(pick(a, "activityNameEN", "activityNameEn")),
@@ -232,11 +239,72 @@ export function parseOwnerDetails(json: unknown): {
   };
 }
 
+
+/**
+ * The wrapper's OWN response shape, which is far thinner than MOEc's.
+ *
+ * `GetLicenseContactInfoResponse` keeps five fields and drops the rest of the
+ * registry record — no expiry date, no address, no status, no activities, no
+ * owners. Mapped here anyway, because a name and a licence number still save the
+ * customer typing them, but `hasFullDetail` is false so nothing downstream
+ * presents a blank expiry as though the registry had said the licence never
+ * expires.
+ */
+export function mapSummaryRow(row: Record<string, unknown>): MoeLicence | null {
+  const ern = str(pick(row, "ERN", "ern"));
+  const licenceNo = str(pick(row, "TradeLicenseNumber", "tradeLicenseNumber"));
+  if (!ern && !licenceNo) return null;
+  const contacts = rows(pick(row, "AvailableContactMethods", "availableContactMethods"));
+  const contact = (type: string) =>
+    contacts
+      .filter((c) => str(pick(c, "Type", "type"))?.toLowerCase() === type)
+      .map((c) => str(pick(c, "FullValue", "fullValue")) ?? str(pick(c, "Value", "value")))
+      .find(Boolean);
+  return {
+    ern: ern ?? licenceNo!,
+    tradeLicenseNo: licenceNo,
+    nameEn: str(pick(row, "CompanyNameEn", "companyNameEn")),
+    nameAr: str(pick(row, "CompanyNameAr", "companyNameAr")),
+    issuingEntityCode: str(pick(row, "IssuingEntityCode", "issuingEntityCode")),
+    isBranch: false,
+    hasFullDetail: false,
+    officialEmail: contact("email"),
+    mobile: contact("sms"),
+    activities: [],
+    owners: [],
+    managers: [],
+  };
+}
+
+/**
+ * One parser for both shapes we might be served.
+ *
+ * Today the endpoint returns the summary rows. If the wrapper is later given a
+ * pass-through that keeps MOEc's record intact, the same call starts returning
+ * the full shape and this keeps working without a deployment — which is the whole
+ * reason both are handled rather than only the one that exists.
+ */
+export function parseMoeResponse(json: unknown): {
+  licences: MoeLicence[];
+  rawCount: number;
+  statusCode?: string;
+  statusText?: string;
+} {
+  const full = parseOwnerDetails(json);
+  if (full.rawCount > 0 || full.statusCode) return full;
+  const payload = (json as Record<string, unknown>)?.payload ?? (json as Record<string, unknown>)?.Payload;
+  const raw = rows(payload);
+  return {
+    licences: raw.map(mapSummaryRow).filter((l): l is MoeLicence => l !== null),
+    rawCount: raw.length,
+  };
+}
+
 interface MoeConfig {
   base: string;
-  entityCode: string;
-  token: { clientId: string; clientSecret: string; username: string; password: string; apiKey: string };
-  owner: { username: string; password: string; gsbApiKey: string; moecApiKey: string };
+  path: string;
+  token?: string;
+  oauth?: { tokenUrl: string; clientId: string; clientSecret: string };
 }
 
 function env(name: string): string {
@@ -244,44 +312,41 @@ function env(name: string): string {
 }
 
 function config(): MoeConfig | null {
-  const base = (env("MOE_GSB_BASE_URL") || "https://integrate.gsb.government.ae/").replace(/\/?$/, "/");
-  const cfg: MoeConfig = {
-    base,
-    entityCode: env("MOE_GSB_ENTITY_CODE"),
-    token: {
-      clientId: env("MOE_GSB_TOKEN_CLIENT_ID"),
-      clientSecret: env("MOE_GSB_TOKEN_CLIENT_SECRET"),
-      username: env("MOE_GSB_TOKEN_USERNAME"),
-      password: env("MOE_GSB_TOKEN_PASSWORD"),
-      apiKey: env("MOE_GSB_TOKEN_API_KEY"),
-    },
-    owner: {
-      username: env("MOE_GSB_OWNER_USERNAME"),
-      password: env("MOE_GSB_OWNER_PASSWORD"),
-      gsbApiKey: env("MOE_GSB_OWNER_API_KEY"),
-      moecApiKey: env("MOE_GSB_OWNER_MOEC_API_KEY"),
-    },
+  const base = env("MOE_API_BASE_URL").replace(/\/$/, "");
+  if (!base) return null;
+  // Refuse to be pointed at the government bus. Reaching GSB directly needs
+  // credentials this module no longer holds, but a base URL is the one thing
+  // someone could paste in by hand, and the whole point of the wrapper is that
+  // the registry is called by the service registered to call it.
+  if (/gsb\.government\.ae/i.test(base)) return null;
+  const token = env("MOE_API_TOKEN");
+  const oauth = {
+    tokenUrl: env("MOE_API_TOKEN_URL"),
+    clientId: env("MOE_API_CLIENT_ID"),
+    clientSecret: env("MOE_API_CLIENT_SECRET"),
   };
-  const complete =
-    cfg.entityCode &&
-    Object.values(cfg.token).every(Boolean) &&
-    Object.values(cfg.owner).every(Boolean);
-  return complete ? cfg : null;
+  const hasOauth = Object.values(oauth).every(Boolean);
+  if (!token && !hasOauth) return null;
+  return {
+    base,
+    path: env("MOE_API_PATH") || "/api/entities/get-moe",
+    token: token || undefined,
+    oauth: hasOauth ? oauth : undefined,
+  };
 }
 
 /**
- * Staging must not read live government records.
+ * Whether this deployment serves a fixture instead of calling out.
  *
- * The reference implementation has no environment override at all — one base URL
- * for every environment — so a staging deployment there queries real people. Ours
- * returns a fixture instead unless this is explicitly turned off, and the fixture
- * is obviously synthetic so nobody mistakes it for a real company.
+ * Unlike GSB, the wrapper HAS a staging host, so this is no longer the only way
+ * to keep test traffic off live records — point staging at stg.wayn.ae instead.
+ * It stays as the default for a deployment with nothing configured.
  */
 export function moeIsMock(): boolean {
-  return env("MOE_GSB_MOCK") === "1" || (!config() && env("MOE_GSB_MOCK") !== "0");
+  return env("MOE_API_MOCK") === "1" || (!config() && env("MOE_API_MOCK") !== "0");
 }
 
-/** True when this deployment can actually reach MOEc. */
+/** True when this deployment can actually reach the registry endpoint. */
 export function moeConfigured(): boolean {
   return config() !== null;
 }
@@ -303,6 +368,7 @@ const MOCK_LICENCES: MoeLicence[] = [
     mobile: "+971500000001",
     legalRepresentative: "SAMPLE OWNER",
     isBranch: false,
+    hasFullDetail: true,
     activities: [{ code: "271749963", nameEn: "Marketing Management", nameAr: "الادارة التسويقية" }],
     owners: [{ nameEn: "SAMPLE OWNER", emiratesId: "784199000000000", sharePercent: 100 }],
     managers: [{ nameEn: "SAMPLE MANAGER", emiratesId: "784199000000001", email: "mgr@example.invalid" }],
@@ -317,10 +383,6 @@ function cacheKey(eid: string): string {
   return createHmac("sha256", "moe-licence-cache").update(eid).digest("base64url");
 }
 
-function basic(user: string, pass: string): string {
-  return `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
-}
-
 async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
@@ -332,32 +394,32 @@ async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<
 }
 
 /**
- * A GSB access token, cached until it actually expires.
+ * The bearer for a registry read.
  *
- * The reference implementation fetches a fresh one on every single lookup. Inside
- * a chat turn that is a second round trip the customer waits through, for a token
- * whose own `expires_in` says it was good all along.
+ * The wrapper validates a JWT issued by accounts.emiratespost.ae — the same
+ * identity service the Emirates Post widget's tokens come from — so a static
+ * service token works and is refreshed here when client credentials are given
+ * instead. Their own services mint one at `connect/token` on that host.
  */
-async function accessToken(cfg: MoeConfig): Promise<string> {
+async function bearer(cfg: MoeConfig): Promise<string> {
+  if (cfg.token) return cfg.token;
   if (tokenCache && Date.now() < tokenCache.expiresAt) return tokenCache.token;
-  const url = new URL(`${cfg.base}${TOKEN_PATH}`);
-  url.searchParams.set("grant_type", "client_credentials");
-  url.searchParams.set("client_id", cfg.token.clientId);
-  url.searchParams.set("client_secret", cfg.token.clientSecret);
-
+  const o = cfg.oauth!;
   const res = await withTimeout((signal) =>
-    fetch(url, {
-      headers: {
-        Authorization: basic(cfg.token.username, cfg.token.password),
-        "GSB-APIKey": cfg.token.apiKey,
-        Accept: "application/json",
-      },
+    fetch(o.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: o.clientId,
+        client_secret: o.clientSecret,
+      }).toString(),
       signal,
     })
   );
-  if (!res.ok) throw new Error(`MOE token request failed (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`Registry token request failed (HTTP ${res.status})`);
   const json = (await res.json()) as { access_token?: string; expires_in?: number };
-  if (!json.access_token) throw new Error("MOE token response carried no access_token");
+  if (!json.access_token) throw new Error("Registry token response carried no access_token");
   const ttl = Number(json.expires_in) > 0 ? Number(json.expires_in) * 1000 : 10 * 60_000;
   tokenCache = { token: json.access_token, expiresAt: Date.now() + Math.max(ttl - TOKEN_SKEW_MS, 30_000) };
   return json.access_token;
@@ -390,50 +452,37 @@ export async function licencesByEmiratesId(emiratesId: string): Promise<MoeLicen
   const hit = resultCache.get(key);
   if (hit && Date.now() - hit.at < RESULT_TTL_MS) return hit.licences;
 
-  const token = await accessToken(cfg);
+  const bearerToken = await bearer(cfg);
   const res = await withTimeout((signal) =>
-    fetch(`${cfg.base}${OWNER_PATH}`, {
-      method: "POST",
+    fetch(`${cfg.base}${cfg.path}`, {
       headers: {
-        Authorization: basic(cfg.owner.username, cfg.owner.password),
-        "GSB-APIKey": cfg.owner.gsbApiKey,
-        "MOEc-APIKey": cfg.owner.moecApiKey,
-        Entity_Code: cfg.entityCode,
-        // GSB's own shape: the bearer rides here because Authorization is taken.
-        CustomAuth: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        Authorization: `Bearer ${bearerToken}`,
+        // Whose licences to read. Without it the endpoint answers for whoever the
+        // token belongs to, which is our service account and owns nothing.
+        "x-emirates-id": eid,
         Accept: "application/json",
       },
-      body: JSON.stringify({ ownerID: eid, ownerContest: true, entityContest: true }),
       signal,
     })
   );
 
-  if (res.status === 401 || res.status === 403) {
-    // A token can go stale between the cache check and the call. Drop it so the
-    // next attempt mints a fresh one rather than reusing the one just refused.
-    tokenCache = null;
-  }
+  if (res.status === 401 || res.status === 403) tokenCache = null;
   if (!res.ok) {
-    throw new Error(`MOE licence lookup failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
+    throw new Error(`Registry lookup failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
   }
 
-  const { licences, rawCount, statusCode, statusText } = parseOwnerDetails(await res.json());
-  // 100 is success. Anything else means the empty list beside it is a failure,
-  // not an answer, and must not be reported as "you own no companies".
+  const { licences, rawCount, statusCode, statusText } = parseMoeResponse(await res.json());
   if (statusCode && statusCode !== "100" && !licences.length) {
-    throw new Error(`MOE licence lookup refused (${statusCode}${statusText ? `: ${statusText}` : ""})`);
+    throw new Error(`Registry lookup refused (${statusCode}${statusText ? `: ${statusText}` : ""})`);
   }
-  // MOEc sent licences and not one of them mapped. That is a shape change, not a
+  // Licences arrived and not one of them mapped. That is a shape change, not a
   // person who owns nothing, and the two are otherwise indistinguishable: both
   // end as an empty array, and the customer is told "nothing is registered to
-  // you" while the registry is in fact answering. GSB publishes no staging host,
-  // so this code path cannot be rehearsed before it runs for real -- it fails
-  // loudly instead of quietly returning the wrong answer.
+  // you" while the registry is in fact answering.
   if (rawCount > 0 && !licences.length) {
-    throw new Error(`MOE returned ${rawCount} licence(s) in a shape this parser does not recognise`);
+    throw new Error(`Registry returned ${rawCount} licence(s) in a shape this parser does not recognise`);
   }
-  log.info("moe_licences_read", { count: licences.length, statusCode });
+  log.info("moe_licences_read", { count: licences.length, full: licences.filter((l) => l.hasFullDetail).length });
   resultCache.set(key, { at: Date.now(), licences });
   return licences;
 }
@@ -445,7 +494,8 @@ export async function licencesByEmiratesId(emiratesId: string): Promise<MoeLicen
  * owner block came back empty has NOT been checked, and collapsing that into
  * "not an owner" would refuse a legitimate applicant while collapsing it the
  * other way would wave through an unverified one. `unknown` means fall back to
- * document review.
+ * document review — and it is what the summary shape always returns, since that
+ * shape carries no owners at all.
  */
 export function licenceHolderMatch(licence: MoeLicence, emiratesId: string): "match" | "no-match" | "unknown" {
   const want = normaliseEmiratesId(emiratesId);

@@ -1050,7 +1050,9 @@ export async function POST(req: NextRequest) {
               tradeLicenseNo: l.tradeLicenseNo,
               nameEn: l.nameEn,
               nameAr: l.nameAr,
-              expiryDate: l.expiryDate,
+              // Absent from the summary shape. Said explicitly, because a missing
+              // expiry read as "no expiry" would put a blank date on the filing.
+              expiryDate: l.hasFullDetail ? l.expiryDate : "NOT RETURNED — ask the customer for it",
               isBranch: l.isBranch || undefined,
               registeredAddress: l.fullAddress,
               // MOEc's own codes, untranslated. Never show these to the customer

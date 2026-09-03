@@ -41,53 +41,58 @@ key we can use to find their company.
 ### A1b · Their trade licences, from the Ministry of Economy
 
 ```
-GET  https://integrate.gsb.government.ae/gateway/getAccessToken_MOEc/1.0/getAccessToken
-POST https://integrate.gsb.government.ae/gateway/fetchLicenseDetailsByOwnerID_MOEc/1.0/getLicenseDetailsByOwnerID
+GET {wayn}/api/entities/get-moe
+x-emirates-id: 784199983926421
+Authorization: Bearer <service JWT from accounts.emiratespost.ae>
 ```
-```jsonc
-{ "ownerID": "784199983926421", "ownerContest": true, "entityContest": true }
+```
+staging     https://stg.wayn.ae/services/digitalbox-portalapi
+production  https://www.wayn.ae/services/digitalbox-portalapi
 ```
 **Why** A2 below finds only companies EPGL has *already licensed*. A first-time
 applicant holds a perfectly good trade licence and matches nothing, so we used to
-ask them to type the number, the name, the expiry and the regulator by hand. MOEc
-is the registry those came from.
+ask them to type the number, the name, the expiry and the regulator by hand.
 
-**Auth is server-to-server and entirely ours** — Basic credentials, `GSB-APIKey`,
-`MOEc-APIKey`, `Entity_Code`, and a client-credentials bearer that rides in
-`CustomAuth` because `Authorization` is already carrying Basic. Nothing here uses
-the customer's token, which is the point: UAE PASS gives us an Emirates ID, and
-an Emirates ID is the only input.
+**We do not call GSB ourselves.** `integrate.gsb.government.ae` is reached by the
+Wayn business API (`digitalbox-portalapi`), which holds the MOEc credentials and
+is the service registered to call the bus. A base URL pointing at the government
+host is refused by our client rather than used.
 
-**Take** `licenseLocalID` (the printed licence number), `BNRegNameEn` /
-`BNRegNameAr`, `licenseExpirationDate`, and the owner and manager blocks.
+**Take** `TradeLicenseNumber`, `CompanyNameEn` / `CompanyNameAr`, `ERN` and
+`IssuingEntityCode`. **That is all this endpoint returns** — see the gaps below.
 
-**Then reconcile.** Each licence is looked up with A3 below. Already licensed by
-EPGL → it is a **renewal**, and we have the account. Not → it is a **new
-application**, pre-filled from the registry rather than typed.
+**Then reconcile.** Each licence is looked up with A3. Already licensed by EPGL →
+it is a **renewal**, and we have the account. Not → it is a **new application**,
+pre-filled from the registry rather than typed.
 
-**Three things we do not do**
-- **We do not call `wayn-business-api`'s `/api/entities/get-moe`.** It is
-  `[AllowAnonymous]`, takes the Emirates ID from a request header, and returns
-  unmasked owner email and phone — anyone may ask it for anyone's licences. It
-  also hides licences the caller has already linked, which is onboarding
-  behaviour, and its DTO drops the owner block. We read the upstream ourselves.
-- **We do not translate MOEc's codes.** `licenseAddrEmirate` ("4"),
-  `licenseStatusID` ("MOECID7") and `licenseLegalTypeID` are their own numbering
-  and we have not been given the lists, so they are carried through raw and named
-  `moec…` so nothing mistakes them for EPGL's emirate or regulator values. The
-  sample licence at emirate 4 is in Ras Al Khaimah, which is not what the usual
-  UAE ordering would suggest — guessing would have been wrong.
-- **We do not read live records from staging.** GSB publishes one host for every
-  environment. `MOE_GSB_MOCK` serves a synthetic fixture unless explicitly turned
-  off, and the assistant is told in the tool result when it is looking at one.
+**What this endpoint does not give us, and needs to**
+- **No licence expiry.** `EPG_Trade_license_Expiry_date__c` is required on the
+  filing, and the summary DTO drops the date MOEc returned. The assistant is told
+  the expiry is UNKNOWN rather than blank, so it asks — but that is a workaround.
+- **No owners.** MOEc returns the owner block; the DTO keeps only managers, and
+  the handler keeps neither. Ownership therefore reads as `unknown` and falls
+  back to document review.
+- **It filters.** Licences already linked to the *subject's* Wayn account are
+  skipped — onboarding behaviour, wrong for us. A customer who is also a Wayn
+  business user sees a short list and no indication it was shortened.
+- **It needs an admin JWT.** `GetAuthData(true)` resolves a user with
+  `IsAdmin == true` and the handler dereferences `authData.User.Id` *before*
+  reading `x-emirates-id`, so despite `[AllowAnonymous]` an anonymous call is a
+  500, not a lookup.
 
-**Expected responses** An empty `licenseInfo` with `statusCode` 100 means the
-person holds no licence — a normal answer. An empty one with any other status is
-a **failure**, and the two are never reported to the customer the same way.
+*The ask: the same handler without the linked-entity filter, returning MOEc's
+`licenseInfo` intact, reachable with a service credential. Our client already
+parses that shape, so it would need no change here.*
 
-*Open: the MOEc code lists for emirate, licence status and legal type; whether
-coverage includes emirate-level DED licences and DIFC/ADGM, or Ministry
-registrations only; and what `ownerContest` / `entityContest` scope.*
+**Expected responses** An empty list means the person holds no licence — a normal
+answer, not a failure. A response carrying licences that none of our mappings
+recognise throws instead of reading as "owns nothing": the two are otherwise
+indistinguishable.
+
+*Open: the MOEc code lists for emirate, status and legal type — their own
+`IssuingEntities` table (`GET /api/entities/issuing`) carries `EntCode` with
+emirate name and free-zone flag and is likely the join; whether coverage includes
+emirate-level DED and DIFC/ADGM; and what `ownerContest` / `entityContest` scope.*
 
 ---
 
