@@ -100,6 +100,9 @@ const GUIDANCE =
   `document, and ask them to confirm before you continue — if they say a different number, do not overwrite theirs ` +
   `with yours or yours with theirs: say the licence names N, ask which is right, and if the licence is out of date ` +
   `ask for the initial approval instead. A sole establishment with one owner is a count of 1, which is normal. ` +
+  `Record each partner's NAME too — collect_field(partner_1_name, …), partner_2_name and so on, in the order the ` +
+  `shareholder table lists them. The passport and Emirates ID uploaded for a partner are checked against that name, ` +
+  `and without it a document filed under the wrong partner passes unnoticed with a tick beside it. ` +
   `Never mark the application ready while a partner's passport or Emirates ID is missing, and never accept one ` +
   `document as covering two partners. More than ${MAX_PARTNERS} partners is beyond what this form handles: say so ` +
   `plainly and offer a callback rather than proceeding with an incomplete set.`;
@@ -117,6 +120,31 @@ interface Journey { key: string; guidance?: string; steps?: Step[]; [k: string]:
  * kind of bookkeeping it drops. Declared, the licence fills it on upload and the
  * document slots appear on their own.
  */
+/**
+ * And the partner NAMES, for the same reason.
+ *
+ * Matching a partner's document to a partner is done by the name printed on it,
+ * and that needs a name to match AGAINST. Without these declared, extraction
+ * never reads the shareholder table, nothing is on file per partner, and the
+ * check silently does nothing.
+ *
+ * Which is exactly what happened on the first real test: three partners'
+ * passports and Emirates IDs went into slots in a DIFFERENT order from the
+ * licence -- partner 1's slot got Mohamed Alnuaimi while the shareholder table
+ * lists Faisal first -- and not a word was said. Every slot showed a tick.
+ */
+function nameFields(): FieldDef[] {
+  return Array.from({ length: MAX_PARTNERS }, (_, i) => ({
+    key: `partner_${i + 1}_name`,
+    label: {
+      en: `Partner ${i + 1} — full name as printed on the trade licence or MOA`,
+      ar: `الشريك ${i + 1} — الاسم الكامل كما هو مطبوع في الرخصة التجارية أو عقد التأسيس`,
+    },
+    type: "text",
+    validation: { required: false },
+  }));
+}
+
 const COUNT_FIELD: FieldDef = {
   key: COUNT_KEY,
   label: {
@@ -160,6 +188,12 @@ async function main() {
       detailStep.fields.push(COUNT_FIELD);
       changed++;
       console.log(`  + ${j.key}/${detailStep.key}: ${COUNT_KEY} field`);
+    }
+    const addedNames = nameFields().filter((f) => !detailStep.fields!.some((x) => x.key === f.key));
+    if (addedNames.length) {
+      detailStep.fields.push(...addedNames);
+      changed++;
+      console.log(`  + ${j.key}/${detailStep.key}: ${addedNames.length} partner name field(s)`);
     }
 
     const g = String(j.guidance ?? "");

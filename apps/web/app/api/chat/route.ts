@@ -100,6 +100,43 @@ function sse(event: unknown): string {
  * and internal identifiers that mean nothing to an applicant and should never
  * appear in a government-service chat.
  */
+/**
+ * Keep the real reason a turn failed, where it can be read back.
+ *
+ * The customer gets "something went wrong on our side" and the detail goes to
+ * stdout -- which on App Service is not captured unless application logging is
+ * switched on, so a failed turn left NO trace anyone could find afterwards. A
+ * payment that never reached the gateway was invisible: no payment row, no error,
+ * nothing in the audit trail but the successful calls either side of the gap.
+ *
+ * Written to the audit log instead, truncated and best-effort: this runs while a
+ * turn is already failing and must not add a second failure on top of the first.
+ */
+async function recordTurnFailure(
+  agentId: string,
+  conversationId: string,
+  action: string,
+  err: unknown
+): Promise<void> {
+  try {
+    const message = err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
+    await audit({
+      agentId,
+      conversationId,
+      actor: "system",
+      action,
+      payload: {
+        // Bounded: a provider can return a very large body, and this is a
+        // diagnostic breadcrumb rather than the whole failure.
+        message: String(message ?? "").slice(0, 600),
+        stack: err instanceof Error ? String(err.stack ?? "").split("\n").slice(1, 4).join(" | ").slice(0, 400) : undefined,
+      },
+    });
+  } catch {
+    /* the turn is already failing; do not make it worse */
+  }
+}
+
 function customerFacingError(err: unknown, locale: "en" | "ar"): string {
   const status = (err as { status?: number } | undefined)?.status;
   // Accepts a thrown error or an already-stringified message (runTurn's error
@@ -1291,6 +1328,7 @@ export async function POST(req: NextRequest) {
           // chat this way, bypassing the catch below.
           if (ev.type === "error") {
             log.error("turn_failed", ev.message, { agentId: agent.id, conversationId: session.conversationId });
+            void recordTurnFailure(agent.id, session.conversationId, "turn_failed", ev.message);
             send({ type: "error", message: customerFacingError(ev.message, body.locale) });
             continue;
           }
@@ -1615,6 +1653,7 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         log.error("chat_stream_failed", err, { agentId: agent.id, conversationId: session.conversationId });
+        void recordTurnFailure(agent.id, session.conversationId, "chat_stream_failed", err);
         // Never relay the provider's own text: a throttled model returned a raw
         // 429 JSON blob ("Rate limit of 50000 per 60s exceeded for
         // UserByModelByMinuteUncachedInputTokens…") straight into the chat.
