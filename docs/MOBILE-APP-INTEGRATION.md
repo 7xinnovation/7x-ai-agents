@@ -23,6 +23,11 @@ npx expo install react-native-webview expo-web-browser
 npm i react-native-webview expo-web-browser && npx pod-install
 ```
 
+`expo-web-browser` needs `expo-modules-core`. If this is a bare app without the
+Expo modules installed, tell us rather than adding them — we will send a version
+using `Linking.openURL` instead. It is a small change and not worth pulling in a
+dependency for.
+
 Copy `DialogChat.tsx` into the project. Don't edit it — see §7 if something
 doesn't fit.
 

@@ -14,14 +14,16 @@
  *
  * Install:
  *   npx expo install react-native-webview expo-web-browser
- *   (bare RN: npm i react-native-webview && npx pod-install)
+ *   bare RN: npm i react-native-webview expo-web-browser && npx pod-install
+ *     - expo-web-browser needs expo-modules-core. A bare app without the Expo
+ *       modules should say so and we will swap it for Linking.openURL.
  *
  * Use:
  *   <DialogChat
  *     host="https://agent.7x.ae"
  *     agent="nxn-dialog"
  *     locale="en"
- *     accessToken={session.accessToken}   // the customer's Emirates Post token
+ *     accessToken={session.accessToken}   // exchanged natively; never enters the WebView
  *   />
  *
  * PERMISSIONS. The conversation can pin an address on a map and take a spoken
@@ -54,21 +56,26 @@ export interface DialogChatProps {
   /** "en" or "ar". Defaults to the agent's first locale. */
   locale?: "en" | "ar";
   /**
-   * The customer's Emirates Post access token.
+   * The customer's Emirates Post access token - the one your app already uses for
+   * their API calls.
    *
-   * An app already holds this, so pass it and the conversation starts signed in.
-   * Leave it out and the customer is a guest, which is a supported path, not a
-   * failure.
+   * Pass it and the conversation starts signed in. Leave it out and the customer
+   * is a guest, which is a supported path, not a failure - so pass it when you
+   * have one and nothing when you do not, rather than blocking on it.
    *
-   * It is handed to the page IN MEMORY, before its scripts run -- never as a
-   * query parameter, which would be written to server access logs and kept in
-   * WebView history. Nothing here persists it.
+   * It is NOT given to the WebView. It is exchanged from native code for a
+   * short-lived code (see below), so it never reaches the page, the URL, an
+   * access log or the WebView's history. Nothing here persists it.
    */
   accessToken?: string;
   /** Resume a conversation the customer already had. */
   conversationId?: string;
   style?: ViewStyle;
-  /** Called when the customer completes a purchase, with its reference. */
+  /**
+   * Called once with the reference when a request is actually recorded by the
+   * backend - a rental, a renewal, any completed journey. Not when the payment
+   * sheet closes, which says nothing about whether the payment worked.
+   */
   onCompleted?: (reference: string) => void;
 }
 
@@ -100,22 +107,23 @@ export function DialogChat({
   const uri = `${base}/embed/${encodeURIComponent(agent)}?${params.toString()}`;
 
   /**
-   * The token is handed over in memory, NEVER in the URL.
+   * The customer's token is exchanged HERE, in native code, and never enters the
+   * WebView.
    *
-   * A query parameter would be written to the server's access log, kept in the
-   * WebView's back/forward history, and restored with its saved state. This runs
-   * before the page's own scripts, so the page finds the token waiting for it and
-   * nothing outside this process ever sees it. It is still verified server-side
-   * before the customer is treated as signed in.
+   * We send it to our API, which verifies it with Emirates Post, attaches it to a
+   * conversation server-side, and returns a short code. The code carries no
+   * credential, names one conversation and one agent, expires in two minutes, and
+   * is meaningless to Emirates Post - replayed against their API it is a string.
+   * Only the code is injected into the page.
    *
-   * JSON.stringify does the escaping: a token is opaque, and pasting one into a
-   * string literal by hand is how an injection gets in.
+   * A failed exchange opens the conversation as a GUEST. It never falls back to
+   * putting the real token in the WebView, which is the thing this exists to
+   * prevent. One retry, because a single dropped request should not silently cost
+   * the customer their sign-in.
+   *
+   * JSON.stringify does the escaping below: never paste a value into a script
+   * string by hand.
    */
-  // The real token is exchanged from HERE -- native code, no WebView -- for a
-  // code that names one conversation, lasts two minutes, and is worthless
-  // against Emirates Post. Only that code is injected. If the exchange fails we
-  // open as a guest rather than falling back to shipping the token in, because
-  // the fallback is the thing this exists to avoid.
   const [handoff, setHandoff] = useState<string | null>(null);
   const [exchanging, setExchanging] = useState(Boolean(accessToken));
   React.useEffect(() => {
@@ -123,14 +131,26 @@ export function DialogChat({
     let live = true;
     setExchanging(true);
     (async () => {
-      try {
+      const attempt = async () => {
         const res = await fetch(`${base}/api/embed/handoff`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ agent, token: accessToken, locale }),
         });
-        const data = res.ok ? ((await res.json()) as { handoff?: string }) : null;
-        if (live) setHandoff(data?.handoff ?? null);
+        // 401 means the token itself is no good. Retrying cannot fix that, and the
+        // customer belongs in the conversation as a guest rather than waiting.
+        if (res.status === 401) return null;
+        if (!res.ok) throw new Error(`handoff ${res.status}`);
+        return ((await res.json()) as { handoff?: string }).handoff ?? null;
+      };
+      try {
+        let code: string | null = null;
+        try {
+          code = await attempt();
+        } catch {
+          code = await attempt();
+        }
+        if (live) setHandoff(code);
       } catch {
         if (live) setHandoff(null);
       } finally {
