@@ -69,6 +69,22 @@ const JOURNEYS = ["new_license", "renewal"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REQUIRE_PAYMENT = process.argv.includes("--require-payment");
 
+/**
+ * A fee to charge, because EPGL has not given us one.
+ *
+ * There is no pricing tool on these journeys and no amount in the definition, so
+ * requiresPayment alone would charge ZERO -- or, worse, leave the model to supply
+ * a licence fee it has no source for and would therefore invent. Neither is
+ * acceptable, so the amount is explicit and has to be passed.
+ */
+function amount(): number | null {
+  const i = process.argv.indexOf("--amount");
+  if (i === -1) return null;
+  const v = Number(process.argv[i + 1]);
+  if (!Number.isFinite(v) || v <= 0) throw new Error(`--amount must be a positive number, got "${process.argv[i + 1]}"`);
+  return v;
+}
+
 const PROCESSING_FEE = {
   key: "admin_processing_fee",
   label: { en: "Admin processing fees", ar: "رسوم المعالجة الإدارية" },
@@ -132,7 +148,11 @@ async function main() {
       // Recorded because the client gave it and someone will ask. Nothing sends
       // it: the adapter keys everything on outletRef.
       merchantId: MERCHANT_ID,
-      redirectUrl: `${process.env.PUBLIC_APP_URL ?? "https://agent.7x.ae"}/api/payments/return`,
+      // Derived from the ENVIRONMENT, not from PUBLIC_APP_URL. Run from a laptop
+      // that variable is usually unset, and the fallback sent a customer paying
+      // on staging back to the production host -- a return URL that looks right
+      // in the config and strands the payment.
+      redirectUrl: `${sandbox ? "https://7xagents.7x-lab.com" : "https://agent.7x.ae"}/api/payments/return`,
     },
     secretRefs: ["NGENIUS_API_KEY"],
   };
@@ -142,6 +162,14 @@ async function main() {
     if (!JOURNEYS.includes(j.key)) continue;
     const sub = { ...(j.submission ?? {}), currency: "AED", processingFee: PROCESSING_FEE } as Record<string, unknown>;
     if (REQUIRE_PAYMENT) sub.requiresPayment = true;
+    const fee = amount();
+    if (fee !== null) sub.amount = fee;
+    if (REQUIRE_PAYMENT && sub.amount === undefined && !(sub.apiFlow as { pricingTool?: string } | undefined)?.pricingTool) {
+      throw new Error(
+        `${j.key} would charge with no amount and no pricing tool: the payment would be AED 0, or the model would ` +
+          `invent a licence fee. Pass --amount <n>, or wait for EPGL's fee schedule.`
+      );
+    }
     // Compare before counting it. A script that reports "written" on a re-run
     // that changed nothing teaches you to stop reading its output.
     const same = JSON.stringify(j.submission ?? {}) === JSON.stringify(sub);

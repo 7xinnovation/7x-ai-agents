@@ -104,7 +104,28 @@ const GUIDANCE =
   `document as covering two partners. More than ${MAX_PARTNERS} partners is beyond what this form handles: say so ` +
   `plainly and offer a callback rather than proceeding with an incomplete set.`;
 
-interface Journey { key: string; guidance?: string; steps?: { key: string; documents?: DocReq[] }[]; [k: string]: unknown }
+interface FieldDef { key: string; label: { en: string; ar: string }; type: string; validation?: Record<string, unknown> }
+interface Step { key: string; documents?: DocReq[]; fields?: FieldDef[] }
+interface Journey { key: string; guidance?: string; steps?: Step[]; [k: string]: unknown }
+
+/**
+ * The count has to be a DECLARED field, not just something the guidance asks for.
+ *
+ * Extraction only looks for fields the journey declares, so an undeclared
+ * partner_count is never read off the trade licence -- the model would have to
+ * count the partners itself and remember to record it, which is precisely the
+ * kind of bookkeeping it drops. Declared, the licence fills it on upload and the
+ * document slots appear on their own.
+ */
+const COUNT_FIELD: FieldDef = {
+  key: COUNT_KEY,
+  label: {
+    en: "Number of partners named on the trade licence",
+    ar: "عدد الشركاء المذكورين في الرخصة التجارية",
+  },
+  type: "number",
+  validation: { required: false, min: 1, max: MAX_PARTNERS },
+};
 
 async function main() {
   const db = getDb();
@@ -131,6 +152,16 @@ async function main() {
     } else {
       console.log(`  (already) ${j.key}: partner slots present`);
     }
+    // The count goes on the step that already holds the licence details, so the
+    // licence's own upload fills it in the same pass.
+    const detailStep = steps.find((st) => (st.fields ?? []).some((f) => /trade_license_number/.test(f.key))) ?? target;
+    detailStep.fields = detailStep.fields ?? [];
+    if (!detailStep.fields.some((f) => f.key === COUNT_KEY)) {
+      detailStep.fields.push(COUNT_FIELD);
+      changed++;
+      console.log(`  + ${j.key}/${detailStep.key}: ${COUNT_KEY} field`);
+    }
+
     const g = String(j.guidance ?? "");
     if (!g.includes(MARKER)) {
       j.guidance = g ? `${g}\n\n${GUIDANCE}` : GUIDANCE;
