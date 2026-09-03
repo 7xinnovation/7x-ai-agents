@@ -286,6 +286,78 @@ export function withEpglDocumentPlaceholders(
   return { ...input, body };
 }
 
+/**
+ * Fill the licence request's own fields from the case, deterministically.
+ *
+ * The composite is composed BY THE MODEL, so which fields it carries varies run
+ * to run -- and under repeated prompting it gets shorter. LR-37212's request
+ * carried the emirate, region, activity codes, service, terms acceptance, the
+ * amount paid and the payment reference. LR-37214, submitted after the customer
+ * had to ask three times whether it was submitting, carried five fields and none
+ * of those. Same journey, same data collected, a record with Payment Info empty
+ * and Terms and Conditions unticked.
+ *
+ * These are not judgement calls: every one of them is a value already on the case
+ * or a payment already settled. So they are written here rather than requested in
+ * a prompt and hoped for. The model's own values win where it supplied one --
+ * this fills gaps, it does not overrule.
+ */
+export interface EpglRequestFacts {
+  emirate?: string;
+  region?: string;
+  activityCodes?: string;
+  regulator?: string;
+  termsAccepted?: boolean;
+  /** What actually settled, fee included. */
+  amountPaid?: number;
+  paymentReference?: string;
+}
+
+export function withEpglRequestFields(
+  input: Record<string, unknown> | undefined,
+  facts: EpglRequestFacts
+): Record<string, unknown> | undefined {
+  const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+  const items = Array.isArray(body.compositeRequest)
+    ? [...(body.compositeRequest as Record<string, unknown>[])]
+    : [];
+  if (!items.length) return input;
+
+  const fill = (item: Record<string, unknown> | undefined, values: Record<string, unknown>) => {
+    if (!item) return false;
+    const b = { ...((item.body ?? {}) as Record<string, unknown>) };
+    let changed = false;
+    for (const [k, v] of Object.entries(values)) {
+      if (v === undefined || v === null || v === "") continue;
+      // Never overwrite what the model read off the documents.
+      if (b[k] !== undefined && b[k] !== null && b[k] !== "") continue;
+      b[k] = v;
+      changed = true;
+    }
+    if (changed) item.body = b;
+    return changed;
+  };
+
+  let patched = false;
+  patched = fill(items.find((i) => /sobjects\/Account$/i.test(String(i?.url ?? ""))), {
+    EPG_Regulator__c: facts.regulator,
+    EPG_Emirates__c: facts.emirate,
+  }) || patched;
+
+  patched = fill(items.find((i) => /EPG_License_Request__c$/i.test(String(i?.url ?? ""))), {
+    EPG_Emirates__c: facts.emirate,
+    EPG_Region__c: facts.region,
+    EPG_Activity_Codes__c: facts.activityCodes,
+    Terms_Conditions_Accepted__c: facts.termsAccepted === true ? true : undefined,
+    EPG_Amount_Paid__c: facts.amountPaid,
+    EPG_Payment_Reference__c: facts.paymentReference,
+  }) || patched;
+
+  if (!patched) return input;
+  body.compositeRequest = items;
+  return { ...input, body };
+}
+
 export function normaliseCompanyKey(v: unknown): string {
   return String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -329,6 +401,13 @@ export async function buildApiTools(
      * distinction, and skips the document upload when it holds.
      */
     gsbCompanies?: string[];
+    /**
+     * Licence-request values taken from the case rather than from the model.
+     * See withEpglRequestFields: the composite is the model's to compose, so
+     * which fields it carries varies run to run, and the ones it drops are the
+     * ones nobody notices until the record is reviewed.
+     */
+    epglRequestFacts?: EpglRequestFacts;
     /**
      * The documents this case holds, for the EPGL composite's placeholder rows.
      *
@@ -819,8 +898,13 @@ export async function buildApiTools(
       if (patched) input = { ...input, body };
     }
 
-    if (/submitlicenserequest$/i.test(toolName) && (opts.epglDocuments ?? []).length) {
-      input = withEpglDocumentPlaceholders(input, opts.epglDocuments ?? []) ?? input;
+    if (/submitlicenserequest$/i.test(toolName)) {
+      if ((opts.epglDocuments ?? []).length) {
+        input = withEpglDocumentPlaceholders(input, opts.epglDocuments ?? []) ?? input;
+      }
+      if (opts.epglRequestFacts) {
+        input = withEpglRequestFields(input, opts.epglRequestFacts) ?? input;
+      }
     }
 
     // The documents the customer uploaded, onto the rental they belong to.

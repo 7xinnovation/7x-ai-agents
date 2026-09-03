@@ -76,6 +76,17 @@ const PULSE_DIRECTIVE =
 // state; this just has the agent acknowledge and finish the journey. Note the
 // agent cannot fake this to submit — submit_case independently verifies the
 // case payment status which only the verified webhook can set.
+/** A non-empty string from case data, or undefined. */
+function str(v: unknown): string | undefined {
+  const t = typeof v === "string" ? v.trim() : v === undefined || v === null ? "" : String(v).trim();
+  return t || undefined;
+}
+
+/** Consent fields arrive as booleans, "true", "yes" or Arabic — all mean yes. */
+function isTrue(v: unknown): boolean {
+  return v === true || /^(true|yes|نعم|1)$/i.test(String(v ?? ""));
+}
+
 const PAYMENT_SETTLED_DIRECTIVE =
   "(System: the customer just completed the payment in the secure gateway window — this is an internal notification, not a message they typed. " +
   "1) Warmly confirm the payment was received. " +
@@ -495,6 +506,29 @@ export async function POST(req: NextRequest) {
     // per document. Read here rather than left to the model, which was asked for
     // them twice and sent none.
     epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
+    // The licence request's own fields, from the case rather than from whatever
+    // the model remembers to include. LR-37212 carried the emirate, region,
+    // activities, terms acceptance, amount paid and payment reference; LR-37214,
+    // submitted after the customer had asked three times whether it was
+    // submitting, carried none of them -- same journey, same data, a record with
+    // Payment Info empty and Terms and Conditions unticked.
+    epglRequestFacts:
+      agent.definition.tenantSlug === "epgl"
+        ? {
+            emirate: str(session.state.data.emirate),
+            region: str(session.state.data.region),
+            activityCodes: str(session.state.data.activity_codes),
+            regulator: str(session.state.data.regulator),
+            termsAccepted:
+              isTrue(session.state.data.terms_accepted) || isTrue(session.state.data.declaration_accepted),
+            amountPaid:
+              session.state.payment.status === "paid" && typeof session.state.payment.amount === "number"
+                ? session.state.payment.amount
+                : undefined,
+            paymentReference:
+              session.state.payment.status === "paid" ? session.state.payment.reference ?? undefined : undefined,
+          }
+        : undefined,
     // The same files, base64, for Emirates Post's rental save -- the trade licence
     // and the agent's ID pages travel inside that payload rather than in a
     // separate upload call.
