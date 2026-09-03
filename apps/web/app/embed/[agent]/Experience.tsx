@@ -287,6 +287,11 @@ function PaymentCard({
         if (cancelled) return;
         if (status === "paid") {
           setPhase("paid");
+          // Close the gateway window ourselves. It ends on "Thank you, your
+          // payment has been received" with a Return to basket button that has no
+          // basket to return to, so the customer is left looking at a finished
+          // payment page while the conversation has already moved on behind it.
+          try { popupRef.current?.close(); } catch { /* already gone, or blocked */ }
           if (!paidRef.current) {
             paidRef.current = true;
             onPaid();

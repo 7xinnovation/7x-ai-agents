@@ -362,6 +362,22 @@ function seenPartnerName(data: Record<string, unknown>, index: number): string |
   return typeof v === "string" && v.trim() ? v : null;
 }
 
+/**
+ * Which partner is this person, by name?
+ *
+ * The owner is usually also one of the partners, and their Emirates ID is one
+ * card. Asked for it as "the owner's", then again as "Partner 1's", the customer
+ * uploads the same file twice and is right to find that stupid.
+ */
+export function partnerIndexByName(data: Record<string, unknown>, name: string, max = 12): number | null {
+  if (!name.trim()) return null;
+  for (let i = 1; i <= max; i++) {
+    const known = knownPartnerName(data, i) ?? seenPartnerName(data, i);
+    if (known && personMatches(known, name)) return i;
+  }
+  return null;
+}
+
 export interface PartnerCheck {
   conflict: EntityConflict | null;
   /** The name to record against this slot, so the next document can be matched. */

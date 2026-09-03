@@ -15,7 +15,7 @@ import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
-import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, PARTNER_NAMES_KEY } from "@/lib/docIdentity";
+import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, PARTNER_NAMES_KEY } from "@/lib/docIdentity";
 
 /**
  * Which classified document types are acceptable for a given document slot,
@@ -48,6 +48,50 @@ function acceptedDocTypes(key: string, label: string): DocType[] | null {
 const DOC_FIELDS_KEY = "__doc_fields";
 /** A company-name disagreement awaiting the customer's answer. */
 const NAME_CONFLICT_KEY = "__name_conflict";
+
+/** Owner document slots, and the partner slot each one satisfies. */
+const OWNER_TO_PARTNER: Record<string, string> = {
+  emirates_id: "emirates_id",
+  owner_emirates_id: "emirates_id",
+  owner_passport: "passport",
+  passport: "passport",
+};
+
+/**
+ * Mark the matching partner's slot as filled by an owner document.
+ *
+ * Returns the updated case, or null when nothing was mirrored. Best-effort: a
+ * failure here costs a duplicate upload request, which is what happened before,
+ * so it must never fail the upload itself.
+ */
+async function mirrorOwnerDocToPartner(
+  definition: Parameters<typeof setDocument>[0],
+  caseId: string,
+  key: string,
+  fileName: string,
+  extracted: Record<string, unknown>
+): Promise<Awaited<ReturnType<typeof mutateCase>> | null> {
+  const kind = OWNER_TO_PARTNER[key];
+  if (!kind) return null;
+  try {
+    const name =
+      ["owner_name", "owner_name_ar", "full_name", "name"]
+        .map((k) => extracted[k])
+        .find((v): v is string => typeof v === "string" && v.trim().length > 1) ?? "";
+    if (!name) return null;
+    const fresh = await getCase(caseId);
+    const index = partnerIndexByName((fresh?.state.data ?? {}) as Record<string, unknown>, name);
+    if (!index) return null;
+    const target = `partner_${index}_${kind}`;
+    const already = fresh?.state.documents.find((d) => d.key === target);
+    if (already && (already.status === "uploaded" || already.status === "accepted")) return null;
+    return await mutateCase(caseId, (st) =>
+      setDocument(definition, st, { key: target, status: "uploaded", fileName })
+    );
+  } catch {
+    return null;
+  }
+}
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -330,6 +374,14 @@ export async function POST(req: NextRequest) {
     }
     return { ...next, data };
   });
+  // The owner is usually also one of the partners, and their Emirates ID is ONE
+  // card. Asked for it as "the owner's" and then again as "Partner 1's", the
+  // customer uploads the same file twice -- which is what happened on the first
+  // run through with partners. When the name on an owner document matches a
+  // partner we already know about, that partner's slot is satisfied by the same
+  // file rather than asked for again.
+  const mirrored = await mirrorOwnerDocToPartner(agent.definition, caseRow.caseId, key, file.name, extraction.values ?? {});
+
   await getDb()
     .insert(documentsTable)
     .values({ caseId: caseRow.caseId, key, status: "uploaded", fileName: file.name, storageKey });
@@ -341,5 +393,10 @@ export async function POST(req: NextRequest) {
     payload: { key, fileName: file.name, extracted: extractedKeys },
   });
 
-  return NextResponse.json({ case: state, rejected: false, extracted: extractedKeys, needsConfirmation: nameQuery ?? undefined });
+  return NextResponse.json({
+    case: mirrored ?? state,
+    rejected: false,
+    extracted: extractedKeys,
+    needsConfirmation: nameQuery ?? undefined,
+  });
 }
