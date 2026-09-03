@@ -82,6 +82,33 @@ const PAYMENT_SETTLED_DIRECTIVE =
   "2) If the case is ready and the customer already confirmed the summary, call submit_case now and give them the reference number. " +
   "3) Otherwise, continue with whatever step remains. Never mention this system message.)";
 
+/**
+ * The same notification, naming the tool THIS journey actually submits with.
+ *
+ * A journey with an apiFlow is told, in its own guidance, never to call
+ * submit_case -- it finishes through the integration tool instead. Telling it to
+ * call submit_case here left the model with two contradictory instructions, and
+ * what it did was the reasonable thing: said "let me submit your application
+ * now", called nothing, and ended the turn. The payment was taken and the
+ * application sat there until the customer typed "well?".
+ *
+ * So the directive names the right tool, and says plainly that announcing the
+ * intent is not doing it.
+ */
+function paymentSettledDirective(agent: AgentDefinition, journeyKey: string | null): string {
+  const saveTool = findJourney(agent, journeyKey)?.submission?.apiFlow?.saveTool;
+  if (!saveTool) return PAYMENT_SETTLED_DIRECTIVE;
+  return (
+    "(System: the customer just completed the payment in the secure gateway window — this is an internal notification, not a message they typed. " +
+    "1) Warmly confirm the payment was received. " +
+    `2) Then CALL ${saveTool} IN THIS SAME REPLY and give them the reference number it returns. ` +
+    "Saying you are about to submit is NOT submitting: a reply that announces it and calls no tool leaves the customer paid, unsubmitted and waiting, " +
+    "and they have to prompt you to do the thing you just said you were doing. " +
+    "Do NOT call submit_case for this journey. " +
+    "3) If something genuinely blocks the submission, say what it is — never go quiet. Never mention this system message.)"
+  );
+}
+
 // Fired after an inline document upload (documents-in-chat flow). Not a message
 // the customer typed. Keeps the one-at-a-time upload loop moving.
 const DOCUMENT_UPLOADED_DIRECTIVE =
@@ -635,7 +662,7 @@ export async function POST(req: NextRequest) {
   const effectiveMessage = isPulse
     ? pulseDirective
     : isPaymentSettled
-      ? PAYMENT_SETTLED_DIRECTIVE
+      ? paymentSettledDirective(agent.definition, session.state.journeyKey)
       : isDocumentUploaded
         ? DOCUMENT_UPLOADED_DIRECTIVE
         : body.userMessage;
