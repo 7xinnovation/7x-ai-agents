@@ -1,39 +1,32 @@
 /**
- * Trade licences by Emirates ID — MOEc, over the Government Service Bus.
+ * Trade licences by Emirates ID — the IDEP wrapper in front of MOEc.
  *
- * This is the authoritative by-EID lookup, and it is NOT the one NXN uses.
- * lib/gsbLookup talks to Emirates Post's own MOE proxy (/api/MOE/GetEntitiesById)
- * with Emirates Post credentials and, for most tiers, the customer's session
- * bearer. EPGL has neither: its customers sign in with UAE PASS directly, and a
- * UAE PASS token is not a currency any Emirates Post endpoint accepts (FB-1485).
+ * EPGL's team stood this up so we do not talk to the Government Service Bus
+ * ourselves; their service holds the GSB credentials and is the one registered
+ * to call it. Ours are a client id and secret for THEIR API.
  *
- * So EPGL goes to the source instead. Every credential here belongs to us, the
- * call is server-to-server, and the only thing the customer supplies is the
- * Emirates ID their UAE PASS sign-in already proved. Two hops:
+ *   POST /api/v1/Auth/authenticate        { clientId, clientSecret } -> accessToken
+ *   POST /api/v1/Moe/licenses-by-owner    { ownerId }                -> the customer's licences
+ *   POST /api/v1/Moe/license-details-by-ern { licenseId, entityId }  -> one licence + its OWNERS
  *
- *   GET  gateway/getAccessToken_MOEc/1.0/getAccessToken            (client_credentials)
- *   POST gateway/fetchLicenseDetailsByOwnerID_MOEc/1.0/getLicenseDetailsByOwnerID
+ * THE TWO CALLS RETURN DIFFERENT THINGS, and the difference decides the flow.
+ * by-owner answers "which licences does this Emirates ID hold" and comes back
+ * with statusCode 101 — "Only license information is fetched, Personal details
+ * are not retrieved as it needs a prior consent" — so it carries no owners.
+ * by-ern answers for ONE licence and does include `owners.personDetails[]`, each
+ * with a `personEmiratesID`. So proving that a person owns a licence means
+ * looking that licence up specifically; the list alone cannot do it.
  *
- * The token goes on the second call as `CustomAuth`, NOT as Authorization —
- * Authorization carries Basic credentials on both hops. That is GSB's shape, not
- * a mistake.
+ * 101 IS A SUCCESS. Verified live on 4 Sep 2026: six real licences returned
+ * alongside it. Treating anything but 100 as failure — which an earlier version
+ * of this file did — would have reported a customer's own licences as an error
+ * the moment the list came back empty for an unrelated reason.
  *
- * WHAT WE DELIBERATELY DO NOT DO
- *
- * The reference implementation (wayn-business-api, GET /api/entities/get-moe) is
- * not called, and is not a fallback. It is [AllowAnonymous], takes the Emirates
- * ID from an `x-emirates-id` header, and returns UNMASKED owner email and phone
- * in `FullValue` — anyone may ask it for anyone's licences. It also filters out
- * licences the caller has already linked, which is onboarding behaviour we would
- * have to work around, and its DTO drops the owner block entirely. We want the
- * whole list and we want the owners, so we parse the upstream response ourselves.
- *
- * MOEc CODES ARE NOT TRANSLATED HERE. `licenseAddrEmirate` ("4"), `licenseStatusID`
- * ("MOECID7") and `licenseLegalTypeID` are MOEc's own numbering and we have not
- * been given the lists. They are carried through raw and named *Raw so that
- * nothing downstream mistakes them for the three-letter emirate codes EPGL's
- * Salesforce uses. Guessing "4 = Ajman" from the usual UAE ordering would have
- * been wrong: the sample licence at emirate 4 is in Ras Al Khaimah.
+ * MOEc CODES ARE NOT TRANSLATED HERE. `licenseAddrEmirate` ("1"),
+ * `licenseStatusID` ("MOECID7") and `licenseLegalTypeID` are MOEc's own
+ * numbering and we have not been given the lists. They are carried through raw
+ * and named *Raw so nothing downstream mistakes them for the three-letter
+ * emirate codes EPGL's Salesforce uses.
  */
 import { createHmac } from "node:crypto";
 import { log } from "./logger";
@@ -53,6 +46,9 @@ export interface MoeOwner {
   nameAr?: string;
   emiratesId?: string;
   nationality?: string;
+  passportNo?: string;
+  mobile?: string;
+  email?: string;
   /** Share of the licence, when MOEc reports one. */
   sharePercent?: number;
 }
@@ -116,10 +112,19 @@ export function normaliseEmiratesId(raw: unknown): string | null {
   return /^\d{15}$/.test(digits) ? digits : null;
 }
 
+/**
+ * A real value, or undefined.
+ *
+ * Real records carry placeholders where a field is simply not held:
+ * personFullNameEN is a literal "-", personEmail is "not applicable". Passed
+ * through, those become a person named "-" on a card the customer is asked to
+ * confirm.
+ */
+const PLACEHOLDER = /^(null|undefined|-+|n\/?a|not applicable|none)$/i;
 function str(v: unknown): string | undefined {
   if (v === null || v === undefined) return undefined;
   const s = String(v).trim();
-  return s && s.toLowerCase() !== "null" ? s : undefined;
+  return s && !PLACEHOLDER.test(s) ? s : undefined;
 }
 
 /** MOEc sends booleans as the strings "true"/"false". */
@@ -184,7 +189,9 @@ export function mapLicence(entry: Record<string, unknown>): MoeLicence | null {
     officialEmail: str(pick(d, "licenseOfficialEmail")),
     mobile: str(pick(d, "licenseMobPhoneNo")),
     legalRepresentative: str(pick(d, "licenseLegalRepresentativeName")),
-    isBranch: bool(pick(d, "BNBranchFlag")) === true,
+    // Lowercase in the live response ("bnBranchFlag"), title-case in MOEc's own
+    // published sample. Both, because we see both.
+    isBranch: bool(pick(d, "bnBranchFlag", "BNBranchFlag")) === true,
     hasFullDetail: true,
     activities: rows(activityRoot?.licenseActivity ?? activityRoot?.LicenseActivity).map((a) => ({
       code: str(pick(a, "activityCode")),
@@ -192,11 +199,17 @@ export function mapLicence(entry: Record<string, unknown>): MoeLicence | null {
       nameAr: str(pick(a, "activityNameAR", "activityNameAr")),
       startDate: str(pick(a, "activityStartDate")),
     })),
-    owners: rows(ownerRoot?.PersonDetails ?? ownerRoot?.personDetails ?? ownerRoot?.OwnerDetails).map((o) => ({
+    owners: rows(ownerRoot?.personDetails ?? ownerRoot?.PersonDetails ?? ownerRoot?.OwnerDetails).map((o) => ({
+      // personFullNameEN comes back as a literal "-" on real records where only
+      // the Arabic name is held. `str` drops it, so the Arabic name is what a
+      // caller sees rather than a dash presented as somebody's name.
       nameEn: str(pick(o, "personFullNameEN", "personFullNameEn", "ownerFullNameEN", "nameEn")),
       nameAr: str(pick(o, "personFullNameAR", "personFullNameAr", "ownerFullNameAR", "nameAr")),
       emiratesId: normaliseEmiratesId(pick(o, "personEmiratesID", "ownerEmiratesID", "emiratesId")) ?? undefined,
       nationality: str(pick(o, "personNationality", "ownerNationality")),
+      passportNo: str(pick(o, "personPassportNo", "ownerPassportNo")),
+      mobile: str(pick(o, "personMobileNo", "ownerMobileNo")),
+      email: str(pick(o, "personEmail", "ownerEmail")),
       sharePercent: num(pick(o, "personSharePercentage", "ownerSharePercentage")),
     })),
     managers: rows(managerRoot?.ManagerDetails ?? managerRoot?.managerDetails).map((m) => ({
@@ -225,11 +238,14 @@ export function parseOwnerDetails(json: unknown): {
   statusCode?: string;
   statusText?: string;
 } {
-  const root = (json as Record<string, unknown>)?.["getLicenseDetailsByOwnerID_Response"] as
+  const j = json as Record<string, unknown> | undefined;
+  const root = (j?.["getLicenseDetailsByOwnerID_Response"] ?? j?.["getLicenseDetails_Response"]) as
     | Record<string, unknown>
     | undefined;
   if (!root) return { licences: [], rawCount: 0 };
   const status = rows(root.statusMessages)[0];
+  // by-owner returns an ARRAY; by-ern returns a single OBJECT. `rows` handles
+  // both, which is why one parser serves both endpoints.
   const raw = rows(root.licenseInfo);
   return {
     licences: raw.map(mapLicence).filter((l): l is MoeLicence => l !== null),
@@ -302,10 +318,13 @@ export function parseMoeResponse(json: unknown): {
 
 interface MoeConfig {
   base: string;
-  path: string;
-  token?: string;
-  oauth?: { tokenUrl: string; clientId: string; clientSecret: string };
+  clientId: string;
+  clientSecret: string;
 }
+
+const AUTH_PATH = "/api/v1/Auth/authenticate";
+const BY_OWNER_PATH = "/api/v1/Moe/licenses-by-owner";
+const BY_ERN_PATH = "/api/v1/Moe/license-details-by-ern";
 
 function env(name: string): string {
   return (process.env[name] ?? "").trim();
@@ -313,26 +332,14 @@ function env(name: string): string {
 
 function config(): MoeConfig | null {
   const base = env("MOE_API_BASE_URL").replace(/\/$/, "");
-  if (!base) return null;
-  // Refuse to be pointed at the government bus. Reaching GSB directly needs
-  // credentials this module no longer holds, but a base URL is the one thing
-  // someone could paste in by hand, and the whole point of the wrapper is that
-  // the registry is called by the service registered to call it.
+  const clientId = env("MOE_API_CLIENT_ID");
+  const clientSecret = env("MOE_API_CLIENT_SECRET");
+  if (!base || !clientId || !clientSecret) return null;
+  // Refuse to be pointed at the government bus. The whole arrangement is that
+  // EPGL's service calls GSB and we call EPGL's service; a base URL is the one
+  // thing someone could paste in by hand.
   if (/gsb\.government\.ae/i.test(base)) return null;
-  const token = env("MOE_API_TOKEN");
-  const oauth = {
-    tokenUrl: env("MOE_API_TOKEN_URL"),
-    clientId: env("MOE_API_CLIENT_ID"),
-    clientSecret: env("MOE_API_CLIENT_SECRET"),
-  };
-  const hasOauth = Object.values(oauth).every(Boolean);
-  if (!token && !hasOauth) return null;
-  return {
-    base,
-    path: env("MOE_API_PATH") || "/api/entities/get-moe",
-    token: token || undefined,
-    oauth: hasOauth ? oauth : undefined,
-  };
+  return { base, clientId, clientSecret };
 }
 
 /**
@@ -394,35 +401,82 @@ async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<
 }
 
 /**
- * The bearer for a registry read.
+ * An access token for the wrapper, cached until it actually expires.
  *
- * The wrapper validates a JWT issued by accounts.emiratespost.ae — the same
- * identity service the Emirates Post widget's tokens come from — so a static
- * service token works and is refreshed here when client credentials are given
- * instead. Their own services mint one at `connect/token` on that host.
+ * Their auth returns `expiresIn` as a STRING of seconds ("3600"), so it is
+ * coerced rather than trusted to be a number. Refreshed a minute early: a token
+ * that expires between the check and the call costs the customer a failed turn.
  */
 async function bearer(cfg: MoeConfig): Promise<string> {
-  if (cfg.token) return cfg.token;
   if (tokenCache && Date.now() < tokenCache.expiresAt) return tokenCache.token;
-  const o = cfg.oauth!;
   const res = await withTimeout((signal) =>
-    fetch(o.tokenUrl, {
+    fetch(`${cfg.base}${AUTH_PATH}`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: o.clientId,
-        client_secret: o.clientSecret,
-      }).toString(),
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret }),
       signal,
     })
   );
-  if (!res.ok) throw new Error(`Registry token request failed (HTTP ${res.status})`);
-  const json = (await res.json()) as { access_token?: string; expires_in?: number };
-  if (!json.access_token) throw new Error("Registry token response carried no access_token");
-  const ttl = Number(json.expires_in) > 0 ? Number(json.expires_in) * 1000 : 10 * 60_000;
-  tokenCache = { token: json.access_token, expiresAt: Date.now() + Math.max(ttl - TOKEN_SKEW_MS, 30_000) };
-  return json.access_token;
+  if (!res.ok) throw new Error(`Registry auth failed (HTTP ${res.status})`);
+  const json = (await res.json()) as { accessToken?: string; expiresIn?: string | number };
+  if (!json.accessToken) throw new Error("Registry auth returned no accessToken");
+  const secs = Number(json.expiresIn);
+  const ttl = Number.isFinite(secs) && secs > 0 ? secs * 1000 : 10 * 60_000;
+  tokenCache = { token: json.accessToken, expiresAt: Date.now() + Math.max(ttl - TOKEN_SKEW_MS, 30_000) };
+  return json.accessToken;
+}
+
+/** One authenticated POST, with a single retry when the token is refused. */
+async function post(cfg: MoeConfig, path: string, body: unknown): Promise<unknown> {
+  const call = async () => {
+    const token = await bearer(cfg);
+    return withTimeout((signal) =>
+      fetch(`${cfg.base}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+        signal,
+      })
+    );
+  };
+  let res = await call();
+  if (res.status === 401 || res.status === 403) {
+    // A token can go stale between the cache check and the call. Mint a fresh
+    // one and try once more rather than failing the customer's turn.
+    tokenCache = null;
+    res = await call();
+  }
+  if (!res.ok) throw new Error(`Registry ${path} failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
+/**
+ * Did the registry actually answer, or fail quietly?
+ *
+ * 100 is "Success". 101 is "Success (Only license information is fetched,
+ * Personal details are not retrieved as it needs a prior consent)" -- a real
+ * success, verified live alongside six real licences. Anything else, with
+ * nothing returned, is a failure and must not be reported to a customer as
+ * "you own no companies".
+ *
+ * And licences that arrived but did not map are a SHAPE CHANGE, not an empty
+ * registry -- both end as an empty array, and only one of them means what the
+ * customer would be told.
+ */
+const SUCCESS_STATUS = new Set(["100", "101"]);
+
+function assertRegistryAnswered(r: {
+  licences: MoeLicence[];
+  rawCount: number;
+  statusCode?: string;
+  statusText?: string;
+}): void {
+  if (r.statusCode && !SUCCESS_STATUS.has(r.statusCode) && !r.licences.length) {
+    throw new Error(`Registry lookup refused (${r.statusCode}${r.statusText ? `: ${r.statusText}` : ""})`);
+  }
+  if (r.rawCount > 0 && !r.licences.length) {
+    throw new Error(`Registry returned ${r.rawCount} licence(s) in a shape this parser does not recognise`);
+  }
 }
 
 export class MoeNotConfiguredError extends Error {
@@ -452,39 +506,53 @@ export async function licencesByEmiratesId(emiratesId: string): Promise<MoeLicen
   const hit = resultCache.get(key);
   if (hit && Date.now() - hit.at < RESULT_TTL_MS) return hit.licences;
 
-  const bearerToken = await bearer(cfg);
-  const res = await withTimeout((signal) =>
-    fetch(`${cfg.base}${cfg.path}`, {
-      headers: {
-        Authorization: `Bearer ${bearerToken}`,
-        // Whose licences to read. Without it the endpoint answers for whoever the
-        // token belongs to, which is our service account and owns nothing.
-        "x-emirates-id": eid,
-        Accept: "application/json",
-      },
-      signal,
-    })
-  );
-
-  if (res.status === 401 || res.status === 403) tokenCache = null;
-  if (!res.ok) {
-    throw new Error(`Registry lookup failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
-  }
-
-  const { licences, rawCount, statusCode, statusText } = parseMoeResponse(await res.json());
-  if (statusCode && statusCode !== "100" && !licences.length) {
-    throw new Error(`Registry lookup refused (${statusCode}${statusText ? `: ${statusText}` : ""})`);
-  }
-  // Licences arrived and not one of them mapped. That is a shape change, not a
-  // person who owns nothing, and the two are otherwise indistinguishable: both
-  // end as an empty array, and the customer is told "nothing is registered to
-  // you" while the registry is in fact answering.
-  if (rawCount > 0 && !licences.length) {
-    throw new Error(`Registry returned ${rawCount} licence(s) in a shape this parser does not recognise`);
-  }
+  const { licences, rawCount, statusCode, statusText } = parseMoeResponse(await post(cfg, BY_OWNER_PATH, { ownerId: eid }));
+  assertRegistryAnswered({ licences, rawCount, statusCode, statusText });
   log.info("moe_licences_read", { count: licences.length, full: licences.filter((l) => l.hasFullDetail).length });
   resultCache.set(key, { at: Date.now(), licences });
   return licences;
+}
+
+/**
+ * ONE licence, by its printed number — and, unlike the list, with its OWNERS.
+ *
+ * This is the call that can answer "does this person own this licence". The
+ * by-owner list comes back with statusCode 101 and no personal details, so it
+ * establishes which licences exist and nothing about who holds them. Ownership
+ * has to be checked here, on the specific licence.
+ *
+ * `entityId` is the issuing authority (`licenseIssuanceEDID` on any licence the
+ * list returned) and defaults to 1, which is what the live records carry.
+ */
+export async function licenceByNumber(licenceNo: string, entityId = 1): Promise<MoeLicence | null> {
+  const no = String(licenceNo ?? "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9\-/ ]{0,38}$/.test(no)) throw new Error("licence number is not in an accepted format");
+
+  if (moeIsMock()) return MOCK_LICENCES.find((l) => l.tradeLicenseNo === no) ?? null;
+  const cfg = config();
+  if (!cfg) throw new MoeNotConfiguredError();
+
+  const parsed = parseMoeResponse(await post(cfg, BY_ERN_PATH, { licenseId: no, entityId }));
+  assertRegistryAnswered(parsed);
+  const licence = parsed.licences[0] ?? null;
+  log.info("moe_licence_read", { found: Boolean(licence), owners: licence?.owners.length ?? 0 });
+  return licence;
+}
+
+/**
+ * Is this Emirates ID one of the licence's owners?
+ *
+ * Three-valued, and the middle value is the point. "The registry returned no
+ * readable owner" is NOT "this person is not an owner": the by-owner list never
+ * carries owners at all, and a licence looked up there would otherwise read as
+ * a failed ownership check. `unknown` means fall back to document review.
+ */
+export function ownerMatch(licence: MoeLicence, emiratesId: string): "match" | "no-match" | "unknown" {
+  const want = normaliseEmiratesId(emiratesId);
+  if (!want) return "unknown";
+  const known = licence.owners.map((o) => o.emiratesId).filter((v): v is string => !!v);
+  if (!known.length) return "unknown";
+  return known.includes(want) ? "match" : "no-match";
 }
 
 /**
