@@ -82,6 +82,39 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "for a corporate box on a company card should not have to ask for the option — so never charge the saved card " +
       "just because it is there, and never present it as the only way to proceed.",
   },
+  {
+    marker: "SAY WHEN THE BOX EXPIRES",
+    journeys: /corporate_po_box_rental/,
+    text:
+      "SAY WHEN THE BOX EXPIRES, in the customer's own terms. A corporate rental runs to a fixed expiry date rather " +
+      "than a rolling year from today, so state BOTH the date and the span it covers when you present the period " +
+      "options and again in the pre-payment summary — for example \"expires 31 December 2027, so this covers 2 years " +
+      "and 4 months\". Take the dates from the expiry-dates tool and never compute one yourself. If the span is " +
+      "shorter than a full year because of when they are applying, say so plainly rather than letting them work it " +
+      "out from a date: a company budgeting for a year should not discover at renewal that they bought eight months.",
+  },
+  {
+    marker: "A CORPORATE BOX IS APPROVED BEFORE IT IS OPEN",
+    journeys: /corporate_po_box_rental/,
+    text:
+      "A CORPORATE BOX IS APPROVED BEFORE IT IS OPEN, and the customer should be able to follow that. When the " +
+      "rental is submitted, tell them plainly what happens next: Emirates Post reviews the trade licence and the " +
+      "authorisation, the box shows as PENDING APPROVAL until they do, and the reference you just gave them is what " +
+      "to quote. If they come back and ask where it has got to, look it up with the customer's own box list rather " +
+      "than guessing — status \"Pending approval\" means the review is still running and is NOT a failure or a " +
+      "payment problem, \"Active\" means it is open, and \"Rejected\" means they need to speak to Emirates Post. " +
+      "Never tell a customer their corporate box is ready while it is still pending.",
+  },
+  {
+    marker: "A PENDING BOX CANNOT BE MANAGED YET",
+    journeys: /manage_po_box|renewal/,
+    text:
+      "A PENDING BOX CANNOT BE MANAGED YET. A box whose status is \"Pending approval\" or \"Rejected\" is not open, " +
+      "so do NOT offer to renew it, add an agent to it, change its subscription, or set auto-renewal — none of those " +
+      "can complete and each one ends in a backend error the customer reads as a fault of their own. If they ask, " +
+      "say the box is still being approved, name the reference, and offer to help with anything else. Only a box " +
+      "showing as Active can be managed.",
+  },
 ];
 
 interface Journey { key: string; guidance?: string }
