@@ -17,6 +17,11 @@
  * STAGING ONLY. Refuses to run against a production integration: a hold on a
  * live box is somebody's box.
  *
+ * AND IT HOLDS BOXES FOR 30 MINUTES. Run it against a branch NOBODY IS TESTING.
+ * On 4 Sep it was pointed at Al Barsha while that branch was under test, and the
+ * tester's own reservation came back 108 BOX_NOT_FREE on a box this script was
+ * holding. `--office` has no default for that reason.
+ *
  * Run from apps/web:
  *   npx tsx scripts/nxn-observe-registration-fees-2026-09-04.ts --env <file> --token <jwt> [--office 244] [--force]
  */
@@ -44,7 +49,12 @@ const arg = (n: string) => {
   return i !== -1 ? process.argv[i + 1] : undefined;
 };
 const TOKEN = arg("--token");
-const OFFICE = arg("--office") ?? "244";
+// NO DEFAULT, deliberately. On 4 Sep this ran against Al Barsha (244) — the
+// branch being tested at that moment — and put 30-minute holds on boxes the
+// tester was then offered, so their reservation failed with 108 BOX_NOT_FREE on
+// a box we were holding ourselves. Naming the branch has to be a decision.
+const OFFICE = arg("--office");
+if (!OFFICE) throw new Error("--office <officeId> is required. NEVER pick a branch anyone is testing on: this script HOLDS boxes for 30 minutes.");
 const FORCE = process.argv.includes("--force");
 const ONLY = arg("--bundle")?.split(",");
 if (!TOKEN) throw new Error("--token <the customer's Emirates Post session jwt> is required");
@@ -118,7 +128,8 @@ async function main() {
           note: "Reservation made by scripts/nxn-observe-registration-fees-2026-09-04 to read the NEW-REG line. Not a customer rental.",
         },
       });
-      console.log(`${b.id} ${b.name}: AED ${[...fees.values()][0]} — recorded (held box ${box.uniqueBoxId}, expires in 30 min)`);
+      const until = new Date(Date.now() + 30 * 60 * 1000).toISOString().slice(11, 16);
+      console.log(`${b.id} ${b.name}: AED ${[...fees.values()][0]} — recorded. HOLDING box ${box.uniqueBoxId} until ~${until} UTC; nobody else can reserve it until then.`);
       recorded = true;
       break;
     }
