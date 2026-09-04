@@ -582,6 +582,8 @@ export async function buildApiTools(
       boxNumber?: string | null;
       emirateCode?: string | null;
       bundleId?: string | null;
+      /** Did the customer ask for the key by courier? A fallback, not the source. */
+      keyDelivery?: boolean;
     };
     /**
      * The card Emirates Post already holds for this signed-in customer.
@@ -1000,7 +1002,40 @@ export async function buildApiTools(
       // choices — the same function the summary card uses — so the card and the
       // charge cannot say different things.
       const facts = opts.rentalSaveFacts?.();
-      if (facts && typeof facts.totalAmount === "number" && facts.totalAmount > 0 && body.totalAmount !== facts.totalAmount) {
+      // PRICE WHAT THIS PAYLOAD ACTUALLY ASKS FOR.
+      //
+      // Reading the customer's choices off the CASE looked right and is not:
+      // the case is written when the turn ends, and since the preferences step
+      // moved after the reservation, the courier choice and the save now happen
+      // in the same round — so the save was priced against a case that did not
+      // yet know about it. Summary AED 700, order AED 670, twice in a row.
+      //
+      // The payload does know. It carries `additionalServiceDetailList` and a
+      // `keyDeliveryAddress`, and those are the services Emirates Post is being
+      // asked to provide. Charging for exactly what is being requested cannot
+      // drift from it, whatever the case knows at that instant.
+      const services = Array.isArray(body.additionalServiceDetailList)
+        ? (body.additionalServiceDetailList as Record<string, unknown>[])
+        : [];
+      const courierAsked =
+        services.some((sv) => /key[-_ ]?delivery/i.test(String(sv?.serviceType ?? ""))) ||
+        Boolean(body.keyDeliveryAddress) ||
+        Boolean(facts?.keyDelivery);
+      // The customer asked for it and the payload forgot to request it: a
+      // courier they chose, paid for and never receive is the worse half of this.
+      if (courierAsked && !services.some((sv) => /key[-_ ]?delivery/i.test(String(sv?.serviceType ?? "")))) {
+        body.additionalServiceDetailList = [...services, { quantity: 1, serviceType: "KEY-DELIVERY" }];
+        patched = true;
+      }
+      const agents = Array.isArray(body.listBoxAgentDetail) ? (body.listBoxAgentDetail as unknown[]).length : 1;
+      const owed =
+        typeof lastHold.amount === "number"
+          ? rentalTotal(
+              { base: lastHold.amount, agentExtraPrice: lastHold.agentExtraPrice, keyDeliveryPrice: lastHold.keyDeliveryPrice },
+              { agentCount: Math.max(1, agents), keyDelivery: courierAsked }
+            ).total
+          : null;
+      if (owed !== null && owed > 0 && body.totalAmount !== owed) {
         void audit({
           agentId,
           conversationId: opts.conversationId,
@@ -1010,11 +1045,11 @@ export async function buildApiTools(
             tool: toolName,
             method: entry.op.method,
             path: entry.op.path,
-            input: { sent: body.totalAmount, charged: facts.totalAmount },
-            response: `The save was about to ask for ${String(body.totalAmount)}; the reservation and the customer's choices come to ${facts.totalAmount}.`,
+            input: { sent: body.totalAmount, charged: owed, courier: courierAsked, agents },
+            response: `The save was about to ask for ${String(body.totalAmount)}; the reservation plus the services it requests come to ${owed}.`,
           },
         }).catch(() => {});
-        body.totalAmount = facts.totalAmount;
+        body.totalAmount = owed;
         patched = true;
       }
       // The rest of what the payload must state, and what a 157 was hiding: a

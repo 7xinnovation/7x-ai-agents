@@ -522,6 +522,7 @@ export async function POST(req: NextRequest) {
       boxNumber: str(liveState.data.box_number) ?? null,
       emirateCode: str(liveState.data.emirate) ?? null,
       bundleId: apiTools.getLastHold()?.bundleId ?? str(liveState.data.package) ?? null,
+      keyDelivery: wantsKeyDelivery(liveState.data.key_delivery ?? liveState.data.key_delivery_option),
     }),
     // Asked once. The duplicate list grows with every attempt, so without this
     // the same question came back on each one -- after the customer had already
