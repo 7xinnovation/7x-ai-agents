@@ -94,6 +94,37 @@ corporate bundles — needs `true`, while MyHome and MyHome Instant are delivere
 and take `false`. Nothing in the spec says so, and the error names pricing.
 Worth documenting on your side.
 
+## A payment that succeeded and is reported as unpaid (4 Sep)
+
+**This is the one blocking us.** A payment completed on your own N-Genius page,
+and `Rental/UpdatePayment` reports the order as unpaid.
+
+```
+order 260972875 · box 455558 · Al Warqa · MyBox, 2 years · AED 700.00
+  Rental/Select   → 260612192, minimumAmount 670, KEY-DELIVERY line 30
+  Rental/Save     → 200, niOrderResult.amount.value 70000   (AED 700 — correct)
+  paypage         → paid by the customer, redirected back with
+                    ?73ad27cf-c71f-4d92-a2a4-21a7ba7153ff
+  UpdatePayment/73ad27cf-… → 200
+      { "paymentStatus": 2, "isPaymentSuccess": false,
+        "amountPaid": 0.0, "paymentRefNo": null,
+        "orderNumber": "260972875" }
+```
+
+The reference resolves — the response carries the right order, box and branch —
+so it is not the wrong UUID. Re-checked repeatedly over several minutes; the
+answer does not change. **The same shape has now happened on 260972864,
+260972866, 260972869, 260972870, 260972871 and 260972872.**
+
+This order was created by a script, straight against the API, with no assistant
+involved: reserve, save, pay. So it isolates the question completely. **Why does
+UpdatePayment report `amountPaid: 0` for an order that was paid on your gateway,
+and what does `paymentStatus: 2` mean?** Payments settled normally on 2 and 3
+September and up to 13:19 on 4 September, so something changed on that side
+during the 4th.
+
+---
+
 **One open question (4 Sep).** One corporate `Rental/Select` was refused with an
 *empty* error object, so we could not tell the customer anything:
 
