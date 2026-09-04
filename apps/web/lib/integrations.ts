@@ -242,6 +242,29 @@ const PAYMENT_SETTLE_GRACE_MS = 75_000;
 /** How many times we have asked about one order's payment, so the answer stops repeating. */
 const paymentChecks = new Map<string, number>();
 
+/**
+ * The rental end dates Emirates Post offered, remembered across turns.
+ *
+ * Same shape as the halls: the durations are fetched in one turn and the box is
+ * reserved in a later one, so by the time the term matters the list is gone —
+ * and the correction that exists to reserve the right term had nothing to
+ * correct against. 15:53: a two-year choice reserved for one year, again.
+ */
+const expiryMemory = new Map<string, { at: number; byBundle: Record<string, string[]> }>();
+
+function rememberExpiryDates(conversationId: string | undefined, byBundle: Map<string, string[]>) {
+  if (!conversationId || !byBundle.size) return;
+  if (expiryMemory.size > 500) for (const [k, v] of expiryMemory) if (Date.now() - v.at > HALL_TTL_MS) expiryMemory.delete(k);
+  expiryMemory.set(conversationId, { at: Date.now(), byBundle: Object.fromEntries(byBundle) });
+}
+
+function recallExpiryDates(conversationId: string | undefined): Map<string, string[]> {
+  if (!conversationId) return new Map();
+  const hit = expiryMemory.get(conversationId);
+  if (!hit || Date.now() - hit.at > HALL_TTL_MS) return new Map();
+  return new Map(Object.entries(hit.byBundle));
+}
+
 const hallMemory = new Map<string, { at: number; halls: { officeId: string; name: string; alternative: string }[] }>();
 const HALL_TTL_MS = 2 * 60 * 60 * 1000;
 
@@ -691,7 +714,7 @@ export async function buildApiTools(
   /** Registration fees observed for this integration, loaded when bundles are listed. */
   let feeBook: Map<string, number> = new Map();
   /** The rental end dates Emirates Post offered for a bundle, exactly as written. */
-  const expiryDatesByBundle = new Map<string, string[]>();
+  const expiryDatesByBundle = recallExpiryDates(opts.conversationId);
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -862,7 +885,14 @@ export async function buildApiTools(
           ? lastHold.expiresAt
           : `${lastHold.expiresAt}Z`
       ) > Date.now();
-      if (asked && asked === lastHold.uniqueBoxId && (!bundle || bundle === lastHold.bundleId) && live) {
+      // The TERM has to match too. 15:54: the customer had picked two years, the
+      // first reservation went out for one, the model corrected itself and asked
+      // again with the two-year date — and this guard handed back the one-year
+      // hold because the box number was the same. Same box, different term, is a
+      // different reservation and must be made afresh.
+      const wantedExpiry = asStr(body.poBoxExpiryDate);
+      const sameTerm = !wantedExpiry || !lastHold.expiryDate || wantedExpiry === lastHold.expiryDate;
+      if (asked && asked === lastHold.uniqueBoxId && (!bundle || bundle === lastHold.bundleId) && sameTerm && live) {
         void audit({
           agentId,
           conversationId: opts.conversationId,
@@ -973,14 +1003,43 @@ export async function buildApiTools(
       ] as const) {
         if (value && !body[key]) { body[key] = /^\d+$/.test(String(value)) && key === "boxNumber" ? Number(value) : value; patched = true; }
       }
-      // A saved card with an EMPTY token is not a saved card. One was invented
-      // for a save that then failed; the attempt that fetched the real token
-      // succeeded. Send the block only when there is something in it.
+      // THE SAVED CARD IS NOT THE MODEL'S TO WRITE.
+      //
+      // 15:54: `"savedCard": {"scheme":"Visa","cardToken":"1111","maskedPan":
+      // "XXXXXXXXXXXX1111"}`. The customer's real token is a 60-character
+      // tokenised pan; "1111" is the last four digits of their card, made up to
+      // fill the field. Emirates Post refused with 157 ERROR_GETTING_HOLD_DETAILS
+      // — an error that names the hold and says nothing about the card — and the
+      // chat told the customer AED 400 had been charged to their Visa. Nothing
+      // had been charged. No order existed.
+      //
+      // There is exactly one place a card token can come from: the saved-cards
+      // lookup. If it says the customer has one, that is what goes; if it says
+      // they have none, no card goes at all.
       const props = (body.paymentProperties ?? {}) as Record<string, unknown>;
-      const card = props.savedCard as Record<string, unknown> | undefined;
-      if (card && !String(card.cardToken ?? "").trim()) {
-        delete props.savedCard;
-        patched = true;
+      const written = props.savedCard as Record<string, unknown> | undefined;
+      const real = opts.savedCard ? await opts.savedCard().catch(() => null) : null;
+      if (written) {
+        if (!real) {
+          delete props.savedCard;
+          patched = true;
+        } else if (String(written.cardToken ?? "") !== String((real as Record<string, unknown>).cardToken ?? "")) {
+          props.savedCard = real;
+          patched = true;
+          void audit({
+            agentId,
+            conversationId: opts.conversationId,
+            actor: "system",
+            action: "rental_save_card_corrected",
+            payload: {
+              tool: toolName,
+              method: entry.op.method,
+              path: entry.op.path,
+              input: { sentTokenLength: String(written.cardToken ?? "").length },
+              response: "The save carried a card token the saved-cards lookup did not issue; the real one was substituted.",
+            },
+          }).catch(() => {});
+        }
       }
       // A SAVE CANNOT DISAGREE WITH ITS OWN RESERVATION. On 4 Sep the save
       // claimed `expiryDate: 2028-09-03` and AED 400 over a hold made to
@@ -2041,6 +2100,22 @@ export async function buildApiTools(
     // just chose. Whatever was held before is for a different box, so it must not
     // stand in for this one — that is what let a charge through on a box the
     // backend had already refused.
+    // A SAVE THAT FAILED IS NOT A PAYMENT.
+    //
+    // 15:54: Rental/Save answered 157, no order was created, no money moved —
+    // and the customer was told "your payment of AED 400.00 went through on your
+    // Visa ending 1111, but Emirates Post could not record the booking", with a
+    // reference to quote to support. There was nothing to quote and nothing had
+    // been charged. Telling someone they have paid when they have not is the
+    // single worst thing this journey can say.
+    if (res.isError && /(rental_save|guest_renewal_save)$/i.test(toolName)) {
+      res = {
+        ...res,
+        result:
+          res.result +
+          "\n\nNO ORDER WAS CREATED AND NO MONEY HAS MOVED. This call failed, so there is no order, no payment reference and no charge — the customer's card has not been touched, whatever card was involved. Do NOT say their payment went through, do NOT say they have been charged, do NOT give them a payment reference, and do NOT tell them to raise an enquiry about a payment that never happened. Their reservation is still held. Say plainly that the booking could not be created, that nothing has been charged, and try once more; if it fails again, offer a callback and give them ONLY the reservation reference.",
+      };
+    }
     if (res.isError && /rental_select$/i.test(toolName)) {
       const asked = String(((input?.body ?? {}) as Record<string, unknown>).uniqueBoxID ?? "");
       if (asked && lastHold && lastHold.uniqueBoxId !== asked) lastHold = null;
@@ -2139,6 +2214,7 @@ export async function buildApiTools(
         const bundle = asStr(inp.BundleId ?? inp.bundleId ?? inp.bundle_Id);
         if (bundle && Array.isArray(dates) && dates.length) {
           expiryDatesByBundle.set(bundle, dates.map(String));
+          rememberExpiryDates(opts.conversationId, expiryDatesByBundle);
           // WHAT EACH TERM COSTS.
           //
           // This response carries dates and no prices, so the cards showed five
