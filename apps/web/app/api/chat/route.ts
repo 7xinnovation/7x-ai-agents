@@ -20,6 +20,7 @@ import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
 import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { notifyEpglPayment } from "@/lib/epglPayment";
+import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
@@ -585,7 +586,26 @@ export async function POST(req: NextRequest) {
     : allApiTools;
   // Emirates Post quotes the real total when it issues the hold; that figure
   // outranks the advertised bundle price when the customer is charged.
-  const authoritativeAmount = () => apiTools.getLastHold()?.amount ?? null;
+  /**
+   * What the customer is actually charged, extras included.
+   *
+   * This used to return the bare hold. The hold is rent + registration + the
+   * first agent; it is NOT the total once someone has asked for key delivery or
+   * a second agent. So the summary quoted 370 while the payment page charged
+   * 400, and the customer agreed to one number and paid another.
+   *
+   * Computed from the same function the save uses, against the choices actually
+   * on the case, so the two cannot drift.
+   */
+  const authoritativeAmount = () => {
+    const hold = apiTools.getLastHold();
+    if (!hold || typeof hold.amount !== "number") return null;
+    const data = session.state.data as Record<string, unknown>;
+    return rentalTotal(
+      { base: hold.amount, agentExtraPrice: hold.agentExtraPrice, keyDeliveryPrice: hold.keyDeliveryPrice },
+      { agentCount: agentCountFrom(data), keyDelivery: wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) }
+    ).total;
+  };
   // Emirates Post records a rental against a reservation, so a payment taken
   // before one exists cannot be attached to anything. The journey is read live
   // inside the tool — deciding here would use the turn's opening state, which is

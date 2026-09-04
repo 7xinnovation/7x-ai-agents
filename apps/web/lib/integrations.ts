@@ -8,6 +8,8 @@ import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
+import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
+import { rentalTotal, bundlePeriods, describePeriods } from "./rentalTotal";
 
 export type EnvKey = "staging" | "production";
 
@@ -884,11 +886,12 @@ export async function buildApiTools(
       // agent's 50 on top, showed the customer 450, and the backend answered
       // "121 MISMATCH_IN_AMOUNT: TotalAmountShouldBe:400".
       if (typeof lastHold.amount === "number") {
-        const extraAgents = Math.max(0, agentCount - 1);
-        const total =
-          lastHold.amount +
-          extraAgents * (lastHold.agentExtraPrice ?? 0) +
-          (wantsCourier ? lastHold.keyDeliveryPrice ?? 0 : 0);
+        // The same function the summary and the payment use. Three copies of
+        // this sum disagreed with each other; there is one now.
+        const { total } = rentalTotal(
+          { base: lastHold.amount, agentExtraPrice: lastHold.agentExtraPrice, keyDeliveryPrice: lastHold.keyDeliveryPrice },
+          { agentCount, keyDelivery: wantsCourier }
+        );
         if (body.totalAmount !== total) {
           body.totalAmount = total;
           patched = true;
@@ -1258,11 +1261,37 @@ export async function buildApiTools(
     // so the card says a fee applies and the figure comes from the hold, where it
     // is itemised. Naming a number we cannot source is how AED 25 happened.
     if (!res.isError && /rental_bundle$/i.test(toolName)) {
+      // Each bundle prices its own terms, and the model was quoting bundle_Price
+      // for all of them -- AED 300 whether the customer picked one year or three.
+      // The per-period table is built here so there is nothing to infer.
+      let periodNote = "";
+      try {
+        const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const list = (parsed?.payload ?? parsed) as Record<string, unknown>[];
+        if (Array.isArray(list)) {
+          const lines = list
+            .map((bn) => {
+              const periods = bundlePeriods(bn);
+              if (periods.length < 2) return null;
+              return `${asStr(bn.name_En) || asStr(bn.bundle_Id)}: ${describePeriods(periods)}`;
+            })
+            .filter(Boolean);
+          if (lines.length) {
+            periodNote =
+              "\n\nEACH RENTAL PERIOD HAS ITS OWN PRICE, and they are listed here. Quote these EXACTLY when you show the customer their period options — do not use the 12-month price for every period, and never multiply one period's price to reach another:\n" +
+              lines.join("\n") +
+              "\nA bundle not listed here prices only one term, so it has only the one price. A period the customer asks for that is not listed is not offered for that bundle — say so rather than quoting a figure for it.";
+          }
+        }
+      } catch {
+        /* an unreadable list just means no period table; the fields are still in the payload */
+      }
       res = {
         ...res,
         result:
           res.result +
-          "\n\nbundle_Price is the ANNUAL RENTAL ONLY. Every new rental also carries a one-time registration fee that is not in this response and cannot be looked up before the box is reserved. On each bundle card, put the rental as the price and add a line beneath it saying a one-time registration fee applies and is shown in full before payment (e.g. `desc: Plus a one-time registration fee, shown before you pay`). Do NOT state an amount for it, do NOT add one to the price, and do NOT leave it unmentioned — the customer sees the real total for the first time at the payment summary, and it is higher than the card.",
+          periodNote +
+          "\n\nbundle_Price is the TWELVE-MONTH RENTAL ONLY. Every new rental also carries a one-time registration fee that is not in this response and cannot be looked up before the box is reserved. On each bundle card, put the rental as the price and add a line beneath it saying a one-time registration fee applies and is shown in full before payment (e.g. `desc: Plus a one-time registration fee, shown in full before you pay`). Do NOT state an amount for it, do NOT add one to the price, and do NOT leave it unmentioned — the customer sees the real total for the first time at the payment summary, and it is higher than the card.",
       };
     }
     // Tell the customer which branches actually have boxes.
@@ -1309,31 +1338,29 @@ export async function buildApiTools(
               }
             })
           );
-          const byLoc = new Map(counts);
-          let annotated = false;
-          for (const r of rows) {
-            const n = pooled ? byLoc.get(emirate) : byLoc.get(asStr(r.officeId));
-            if (n !== null && n !== undefined) {
-              r.freeBoxCount = n;
-              annotated = true;
-            }
-            // Whether the doors are open, worked out from the two strings already
-            // in this row. The model has no clock in Dubai and reads "20:00 PM"
-            // as ambiguous, so it is not asked to.
-            const h = parseHours(asStr(r.workingDays), asStr(r.workingTime));
-            if (h) {
-              const state = openNow(h);
-              r.openNow = state.open;
-              if (!state.open) r.opensAt = state.opensAt;
-              annotated = true;
-            }
-          }
+          const byLoc = new Map<string, number | null>(counts);
+          // Annotated AND filtered in one place, testable on its own: a branch
+          // with nothing to rent is dropped rather than greyed out, and a PO Box
+          // hall is marked so the customer is warned before they choose it.
+          const { branches, hidden } = prepareBranches(rows as BranchRow[], byLoc, { pooled, emirate });
+          const annotated = branches.length !== rows.length || branches.some((x) => x.freeBoxCount !== undefined || x.openNow !== undefined || x.isPoBoxHall);
+          (b as Record<string, unknown>).payload = branches;
+          const halls = branches.filter((x) => x.isPoBoxHall);
           if (annotated) {
             res = {
               ...res,
               result:
                 `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(b)}` +
-                "\n\nfreeBoxCount is how many boxes are FREE at that branch right now, counted live. A branch with 0 has none: show it, but show it as unavailable — a fenced cards block line `disabled: yes` greys it out and stops the customer choosing it — and never present it as an option or let them pick it. Branches with no freeBoxCount were not counted; leave those alone." +
+                "\n\nfreeBoxCount is how many boxes are FREE at that branch right now, counted live. Branches with none have ALREADY BEEN REMOVED from this list" +
+                (hidden ? ` (${hidden} of them)` : "") +
+                ", so show every branch here as available and never mention the ones that are missing. Branches with no freeBoxCount were not counted; show those normally too." +
+                (halls.length
+                  ? "\n\nSOME OF THESE ARE PO BOX HALLS, NOT BRANCHES: " +
+                    halls.map((h) => `${h.nameEn} (keys and counter services at ${h.alternativeBranchEn ?? "another branch"})`).join("; ") +
+                    ". A box hall gives access to boxes only — no counter, no parcels, no registered mail — and the KEY IS NOT ISSUED THERE. Mark each one on its card (e.g. `badge: P.O. Box Hall`). If the customer chooses one, you MUST show them this notice WORD FOR WORD before going any further, and get their explicit acknowledgement before reserving anything:\n\n" +
+                    poBoxHallNotice("<the alternativeBranchEn for the hall they chose>") +
+                    "\n\nSubstitute the real branch name where the placeholder is. Do not paraphrase, shorten or summarise the notice, and do not proceed on an assumed yes — a customer who is not told turns up at a room of boxes expecting a post office, with their key in another building."
+                  : "") +
                 "\n\nopenNow says whether the branch is open at this moment, in UAE time; when it is false, opensAt is when it next opens. A CLOSED branch can still be rented — say so — but the customer must be told before they pick it, not after: put `badge: Closed now` on its card and give the opening time in the line beneath (e.g. `desc: Closed now, opens 08:00`). If the branch they choose is closed, tell them plainly, say when it opens, and in the same reply name a branch from this list that is open now and has boxes, as an alternative they can take instead. Never let a customer walk to a closed counter because we did not mention it.",
               raw: JSON.stringify(b),
             };

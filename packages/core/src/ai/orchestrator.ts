@@ -253,7 +253,12 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const sys = buildSystemPrompt(agent, state, locale, authenticated, input.businessOpen, intent, input.customerContext);
+      // Re-read every round: the customer can add an agent or ask for key
+      // delivery mid-turn, and the total they are quoted has to move with it.
+      const sys = buildSystemPrompt(
+        agent, state, locale, authenticated, input.businessOpen, intent, input.customerContext,
+        input.authoritativeAmount?.() ?? null
+      );
       // Split system: cacheable stable prefix + small volatile tail (case state).
       // cache_control is accepted by the GA messages endpoint at runtime; the
       // SDK 0.32 GA types don't surface it yet, hence the cast.

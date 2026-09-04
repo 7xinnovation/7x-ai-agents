@@ -88,7 +88,10 @@ export function buildSystemPrompt(
   intent?: { intent: string; confidence: number },
   // Server-verified facts about the signed-in customer (e.g. PO Boxes on file
   // from previous authenticated sessions) — so the agent never re-asks for them.
-  customerContext?: string
+  customerContext?: string,
+  // The charged total for the active rental, extras included, computed
+  // server-side. See amountNote below.
+  authoritativeAmount?: number | null
 ): SystemPrompt {
   const journey = findJourney(agent, state.journeyKey);
   const g = agent.guardrails;
@@ -309,6 +312,18 @@ ${journey?.submission?.apiFlow
       ? `\nREJECTED, so these DO still need uploading: ${rejected.map((d) => d.key).join(", ")}.`
       : "");
 
+  // The one figure the customer must be quoted.
+  //
+  // A summary said AED 370 while the payment page charged 400 -- the courier fee
+  // the customer had just chosen was in the payment and missing from the
+  // summary. The model was adding these up itself, from a hold that already
+  // contained some of them. It is computed server-side now and stated here, so
+  // there is nothing left to work out.
+  const amountNote =
+    typeof authoritativeAmount === "number" && authoritativeAmount > 0
+      ? `\nAMOUNT TO CHARGE: AED ${authoritativeAmount.toFixed(2)}. This is the WHOLE total — the box, the registration fee, the first agent, and any extra agents or key delivery this customer has chosen. Quote exactly this figure in the summary and anywhere else you state a total. Do NOT add anything to it, do NOT recompute it from the price lines, and do NOT quote the hold's minimumAmount instead: it is the base, not the total, and quoting it showed a customer 370 for a rental that charged 400.`
+      : "";
+
   const volatile = `# This turn
 - Session language: ${locale === "ar" ? "ARABIC" : "ENGLISH"}. Every part of this reply — prose, card/button/toggle/summary labels — must be in this language.${intent ? `
 - Classified intent: "${intent.intent}" (confidence ${intent.confidence.toFixed(2)}).` : ""}${suggestedJourney ? `
@@ -320,7 +335,7 @@ ${customerContext}` : ""}
 # Current case state
 Collected data: ${JSON.stringify(state.data)}
 Documents: ${JSON.stringify(state.documents)}${documentsNote}
-Payment: ${JSON.stringify(state.payment)}
+Payment: ${JSON.stringify(state.payment)}${amountNote}
 Submission readiness: ${state.readiness.complete ? "READY" : `NOT READY — missing ${JSON.stringify(state.readiness.missing)}`}`;
 
   return { stable, volatile };
