@@ -126,5 +126,32 @@ const ROWS: BranchRow[] = [
   check("no rows, no branches", branches.length === 0 && hidden === 0);
 }
 
+// 9. CLOSED BRANCHES AND BOX HALLS WITH BOXES ARE SHOWN, not hidden. Only an
+//    EMPTY location is removed. A closed branch can still be rented from and a
+//    hall still has boxes — hiding either would take a real option away.
+{
+  const counts = new Map<string, number | null>([["201", 5], ["202", 8], ["206", 2]]);
+  const { branches } = prepareBranches(ROWS, counts);
+  check("the box hall with boxes is SHOWN", branches.some((b) => b.officeId === "202"), branches.map((b) => b.officeId));
+  check("...still flagged as a hall", branches.find((b) => b.officeId === "202")?.isPoBoxHall === true);
+  check("...still naming its alternative branch",
+    branches.find((b) => b.officeId === "202")?.alternativeBranchEn === "NXN - Al Riqqa Branch");
+  check("...and keeping its count", branches.find((b) => b.officeId === "202")?.freeBoxCount === 8);
+  check("every branch survives when all have boxes", branches.length === 3, branches.length);
+
+  // A branch closed right now keeps its place; only openNow marks it.
+  const closed = prepareBranches(
+    [{ ...ROWS[0]!, workingTime: " 08:00 AM- 09:00 AM", workingDays: " Monday - Friday  " }],
+    new Map<string, number | null>([["201", 4]])
+  );
+  check("a branch closed right now is still listed", closed.branches.length === 1, closed.branches);
+  check("...and keeps its boxes", closed.branches[0]?.freeBoxCount === 4);
+
+  // An EMPTY hall is the one case that goes: there is nothing to rent in it.
+  const emptyHall = prepareBranches(ROWS, new Map<string, number | null>([["202", 0]]));
+  check("an empty hall is removed like any other empty location",
+    !emptyHall.branches.some((b) => b.officeId === "202"), emptyHall.branches.map((b) => b.officeId));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
