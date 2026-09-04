@@ -64,6 +64,12 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "- terms_accepted: I accept the [Terms and Conditions](https://www.emiratespost.ae/en/terms-and-conditions)\n" +
       "confirm: Proceed to payment\n" +
       "```\n" +
+      "ORDER OF THE PAYMENT STEP, and it does not vary: (1) the preferences block below, with the Terms checkbox, " +
+      "(2) if Emirates Post holds a card, the choice of saved card or a different one, (3) reserve the box, " +
+      "(4) the itemised breakdown with the exact total, (5) the payment button. Everything the customer decides is " +
+      "settled BEFORE the reservation, because the reservation starts a clock and the total is computed from what " +
+      "they have already chosen — asking for preferences after the box is held put the courier fee in the breakdown " +
+      "and left it out of the charge. Never reserve the box before the Terms are accepted.\n" +
       "Record each with collect_field from the results. `default: on` is REQUIRED and is what makes the two " +
       "switches start enabled — Emirates Post asked for saving the card and auto-renewal to be the default, and " +
       "there is an endpoint behind both. It never ticks the Terms checkbox: a pre-ticked acknowledgment is not an " +

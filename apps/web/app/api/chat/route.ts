@@ -514,14 +514,14 @@ export async function POST(req: NextRequest) {
     epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
     // The rental duration the customer chose, so the reservation is made for the
     // term they picked rather than the one the model remembers.
-    chosenDuration: () => str(session.state.data.duration) ?? str(session.state.data.rental_duration) ?? null,
+    chosenDuration: () => str(liveState.data.duration) ?? str(liveState.data.rental_duration) ?? null,
     // What the save must state, rather than recall. Lazy on purpose: the hold it
     // reads is created several turns after this is wired up.
     rentalSaveFacts: () => ({
       totalAmount: authoritativeAmount(),
-      boxNumber: str(session.state.data.box_number) ?? null,
-      emirateCode: str(session.state.data.emirate) ?? null,
-      bundleId: apiTools.getLastHold()?.bundleId ?? str(session.state.data.package) ?? null,
+      boxNumber: str(liveState.data.box_number) ?? null,
+      emirateCode: str(liveState.data.emirate) ?? null,
+      bundleId: apiTools.getLastHold()?.bundleId ?? str(liveState.data.package) ?? null,
     }),
     // Asked once. The duplicate list grows with every attempt, so without this
     // the same question came back on each one -- after the customer had already
@@ -617,10 +617,21 @@ export async function POST(req: NextRequest) {
    * Computed from the same function the save uses, against the choices actually
    * on the case, so the two cannot drift.
    */
+  /**
+   * The case as it stands RIGHT NOW, not as it stood when the request arrived.
+   *
+   * `session.state` is a snapshot taken before the turn runs. Everything the
+   * customer answers during the turn — and since the preferences step moved to
+   * after the reservation, that now includes the whole payment step — lands on
+   * the case afterwards. Reading the snapshot meant the save was priced against
+   * a case that did not yet know about the key courier: the breakdown said AED
+   * 700 and the order was created for 670.
+   */
+  let liveState = session.state;
   const authoritativeAmount = () => {
     const hold = apiTools.getLastHold();
     if (!hold || typeof hold.amount !== "number") return null;
-    const data = session.state.data as Record<string, unknown>;
+    const data = liveState.data as Record<string, unknown>;
     return rentalTotal(
       { base: hold.amount, agentExtraPrice: hold.agentExtraPrice, keyDeliveryPrice: hold.keyDeliveryPrice },
       { agentCount: agentCountFrom(data), keyDelivery: wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) }
@@ -1551,9 +1562,9 @@ export async function POST(req: NextRequest) {
             language: body.locale,
             journeyType: finalState.journeyKey ?? undefined,
           };
-          if (ev.type === "case") finalState = ev.state;
+          if (ev.type === "case") finalState = liveState = ev.state;
           else if (ev.type === "done") {
-            finalState = ev.state;
+            finalState = liveState = ev.state;
             // Fall back to the round's text only if nothing was streamed.
             if (!finalText) finalText = ev.message;
           } else if (ev.type === "citation" && !citedThisTurn) {
