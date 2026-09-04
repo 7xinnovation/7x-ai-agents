@@ -420,14 +420,19 @@ export function partnerDocumentCheck(
     if (i === slot.index) continue;
     const other = knownPartnerName(data, i) ?? seenPartnerName(data, i);
     if (other && personMatches(other, found)) {
+      // BLOCK, not ask. This is not a transliteration question: the name on the
+      // document positively matches a DIFFERENT person named on this same
+      // application, so we know exactly whose it is and it is not this
+      // partner's. Accepting it -- which is what "confirm" did -- left a green
+      // tick against partner 1 with partner 3's card behind it, and the customer
+      // reasonably read the tick as "done".
       return {
         observedName: found,
         conflict: {
-          severity: "confirm",
+          severity: "block",
           reason:
-            `This document is in partner ${slot.index}'s slot but names "${found}", who is partner ${i} on this ` +
-            `application. It looks like it was uploaded against the wrong partner — ask the customer to confirm, ` +
-            `and upload it under partner ${i} instead. Do not tell them the document is invalid.`,
+            `This is ${found}'s Emirates ID, and they are partner ${i} on this application — not partner ${slot.index}. ` +
+            `Please upload partner ${slot.index}'s document here, and ${found}'s under partner ${i}.`,
         },
       };
     }

@@ -54,9 +54,12 @@ const doc = (name: string) => ({ owner_name: name });
   const r = partnerDocumentCheck("partner_3_passport", LICENCE, doc("MOHAMMED AL MANSOORI"));
   check("a misfiled document is caught", r.conflict !== null, r.conflict);
   check("...and says which slot it belongs in", !!r.conflict && /partner 1/.test(r.conflict.reason), r.conflict?.reason);
-  check("...and does not call the document invalid",
-    !!r.conflict && /not tell them the document is invalid/.test(r.conflict.reason), r.conflict?.reason);
-  check("...as a question, never a block", r.conflict?.severity === "confirm", r.conflict);
+  // BLOCKED, not asked. We know exactly whose document this is -- it matches
+  // another person named on this same application -- so there is nothing to
+  // confirm. Accepting it put a green tick against a slot holding the wrong
+  // person's card, and a tick reads as done however the note beneath is worded.
+  check("...and is REJECTED, not accepted with a note", r.conflict?.severity === "block", r.conflict);
+  check("...telling them where each one goes", !!r.conflict && /upload partner 3's document here/i.test(r.conflict.reason), r.conflict?.reason);
 }
 
 // 4. A name belonging to nobody on the application.

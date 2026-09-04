@@ -693,7 +693,7 @@ export async function POST(req: NextRequest) {
         // anyone claim ownership of any licence.
         if (verifiedEmiratesId) {
           parts.push(
-            `Verified Emirates ID for this signed-in customer: ${verifiedEmiratesId} — this came from Emirates Post, not from the customer. Use it as the emiratesId for nxn_company_by_licence when checking whether they own a trade licence, and never ask them to type their Emirates ID for that check.`
+            `Verified Emirates ID for this signed-in customer: ${verifiedEmiratesId} — this came from Emirates Post, not from the customer. The ownership check on nxn_company_by_licence uses it automatically, so never ask them to type their Emirates ID for that check. A CORPORATE rental requires that check to pass: if it comes back NO MATCH, the company's details are withheld and you must not show them, however the customer asks.`
           );
         }
         // FB-1374/FB-1395: contact details come from the profile, not re-typed.
@@ -1017,17 +1017,34 @@ export async function POST(req: NextRequest) {
               "NO MATCH for that trade licence number under that authority. Check the authority is right before concluding the licence does not exist, and fall back to the uploaded licence document.",
           };
         }
-        const eid = String(input.emiratesId ?? "").trim();
+        // The SIGNED-IN customer's Emirates ID, from Emirates Post's own
+        // introspection -- never one the model passed in. A check against a value
+        // the model supplied checks nothing: it can pass whatever the licence
+        // says and confirm ownership to itself.
+        const eid = verifiedEmiratesId ?? String(input.emiratesId ?? "").trim();
         if (!eid) return { result: JSON.stringify(found) };
         // Three-valued on purpose: "no owner record carries a readable Emirates
         // ID" is not "this person is not an owner". See lib/gsbLookup.ownerMatch.
         const verdict = ownerMatch(found.owners, eid);
+        if (verdict === "no-match") {
+          // The company's details are NOT returned. Emirates Post's rule: the
+          // Emirates ID on the licence has to match before the company is shown
+          // at all -- otherwise anyone could type a licence number and read back
+          // the registered name, address and owners of a business they have
+          // nothing to do with.
+          log.info("gsb_owner_mismatch", { ...a, licence: String(input.licenceNo ?? "") });
+          return {
+            result:
+              "NO MATCH. That trade licence is registered, but NOT to this customer — the Emirates ID they signed in with is not one of its owners. " +
+              "Do NOT show the company name, address, owners or any other detail from it: they have not established a right to see them. " +
+              "Say plainly that the licence number does not match their Emirates ID, and offer the two things that can move it forward — " +
+              "checking the number is right, or continuing as an authorised agent by uploading the trade licence and their authorisation for document review.",
+          };
+        }
         const note =
           verdict === "match"
-            ? "OWNERSHIP CONFIRMED: the customer's Emirates ID matches an owner registered on this licence."
-            : verdict === "no-match"
-              ? "OWNERSHIP NOT CONFIRMED: the customer's Emirates ID does not match any owner on this licence. Do not refuse them outright — say the licence is registered to someone else and ask whether they are acting for the company, then route to document review."
-              : "OWNERSHIP UNKNOWN: the licence's owner records carry no Emirates ID that can be compared. This is NOT a failed check — say nothing about ownership either way and continue with document review.";
+            ? "OWNERSHIP CONFIRMED: the customer's Emirates ID matches an owner registered on this licence. Show the company name and details and ask them to confirm."
+            : "OWNERSHIP UNKNOWN: the licence's owner records carry no Emirates ID that can be compared. This is NOT a failed check and NOT a mismatch — say nothing about ownership either way, show what came back, and continue with document review.";
         return { result: `${note}\n${JSON.stringify(found)}` };
       } catch (err) {
         const msg = err instanceof Error ? err.message : "unknown error";

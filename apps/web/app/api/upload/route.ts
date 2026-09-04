@@ -345,6 +345,24 @@ export async function POST(req: NextRequest) {
   // slot it was dropped into. A shuffled but complete set is worse than a short
   // one: every slot shows a tick and partner 3 has partner 1's passport.
   const partner = partnerDocumentCheck(key, caseRow.state.data ?? {}, extraction.values ?? {});
+  // A document that positively belongs to ANOTHER partner on this application is
+  // refused outright. It used to be accepted with a note beneath it -- a green
+  // tick against partner 1 with partner 3's card behind it -- and a tick reads as
+  // done however carefully the note is worded.
+  if (partner.conflict?.severity === "block") {
+    const reason = partner.conflict.reason;
+    const state = await mutateCase(caseRow.caseId, (fresh) =>
+      setDocument(agent.definition, fresh, { key, status: "rejected", fileName: file.name, rejectionReason: reason })
+    );
+    await audit({
+      agentId: agent.id,
+      conversationId,
+      actor: "system",
+      action: "document_rejected_wrong_partner",
+      payload: { key, fileName: file.name },
+    });
+    return NextResponse.json({ case: state, rejected: true, reason });
+  }
   const nameQuery =
     partner.conflict?.reason ?? (conflict?.severity === "confirm" ? conflict.reason : null);
   if (nameQuery) {
