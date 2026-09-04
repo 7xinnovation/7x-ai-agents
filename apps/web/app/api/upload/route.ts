@@ -81,30 +81,52 @@ async function mirrorIdentityDoc(
   extracted: Record<string, unknown>
 ): Promise<{ state: Awaited<ReturnType<typeof mutateCase>>; filled: string } | null> {
   try {
-    const name =
-      ["owner_name", "owner_name_ar", "full_name", "name"]
-        .map((k) => extracted[k])
-        .find((v): v is string => typeof v === "string" && v.trim().length > 1) ?? "";
-    if (!name) return null;
     const fresh = await getCase(caseId);
     const data = (fresh?.state.data ?? {}) as Record<string, unknown>;
+
+    /**
+     * Which partner is the owner?
+     *
+     * Worked out from the CASE first, not from the document. An Emirates ID card
+     * often yields a number and no readable name -- the audit log shows
+     * emirates_id uploads extracting owner_emirates_id and nothing else -- so a
+     * mirror that waited for a name on the document never fired, and the
+     * customer was asked for the same card twice.
+     *
+     * Three ways, cheapest first: the owner's name against the partner names on
+     * the licence; the Emirates ID number the document DID yield; then the name,
+     * if there was one.
+     */
+    const ownerIndex = (): number | null => {
+      const ownerName = ["owner_name", "owner_name_ar"]
+        .map((k) => data[k])
+        .find((v): v is string => typeof v === "string" && v.trim().length > 1);
+      if (ownerName) {
+        const byName = partnerIndexByName(data, ownerName);
+        if (byName) return byName;
+      }
+      const eid = String(extracted.owner_emirates_id ?? data.owner_emirates_id ?? "").replace(/\D/g, "");
+      if (eid.length === 15) {
+        for (let i = 1; i <= 12; i++) {
+          if (String(data[`partner_${i}_emirates_id`] ?? "").replace(/\D/g, "") === eid) return i;
+        }
+      }
+      const docName = ["owner_name", "owner_name_ar", "full_name", "name"]
+        .map((k) => extracted[k])
+        .find((v): v is string => typeof v === "string" && v.trim().length > 1);
+      return docName ? partnerIndexByName(data, docName) : null;
+    };
 
     let target: string | null = null;
     const ownerKind = OWNER_TO_PARTNER[key];
     if (ownerKind) {
-      // Owner document → the partner it belongs to.
-      const index = partnerIndexByName(data, name);
+      const index = ownerIndex();
       if (index) target = `partner_${index}_${ownerKind}`;
     } else {
-      // Partner document → the owner slot, when it is the owner's own card.
+      // A partner document, where that partner IS the owner, fills the owner slot.
       const slot = partnerSlot(key);
       if (slot && (slot.kind === "emirates_id" || slot.kind === "passport")) {
-        const owner = ["owner_name", "owner_name_ar"]
-          .map((k) => data[k])
-          .find((v): v is string => typeof v === "string" && v.trim().length > 1);
-        if (owner && partnerIndexByName({ partner_1_name: owner }, name) === 1) {
-          target = slot.kind === "emirates_id" ? "emirates_id" : "owner_passport";
-        }
+        if (ownerIndex() === slot.index) target = slot.kind === "emirates_id" ? "emirates_id" : "owner_passport";
       }
     }
     if (!target || target === key) return null;

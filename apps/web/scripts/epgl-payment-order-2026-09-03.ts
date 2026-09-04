@@ -39,6 +39,16 @@ const REMOVE = process.argv.includes("--remove");
 const JOURNEYS = ["new_license", "renewal"];
 const MARKER = "PAYMENT — AFTER SUBMISSION, NEVER BEFORE";
 
+const DUPLICATE_GUIDANCE =
+  "EXISTING APPLICATIONS — ASK ONCE. The duplicate check lists every application ever filed for this trade licence, " +
+  "and that list grows with each attempt, so it will keep coming back. Put the choice to the customer ONCE: update an " +
+  "existing application, or submit as new. The moment they answer, record it with " +
+  "collect_field(__duplicate_decision, \"new\") or collect_field(__duplicate_decision, \"update LR-xxxxx\"), and from " +
+  "then on act on it without showing the list again. Re-asking a question they have already answered — with the same " +
+  "list, on the next attempt — reads as not having listened, and it is the single thing most likely to make someone " +
+  "abandon a form they have spent ten minutes on. If they said submit as new, submit as new: do not argue for " +
+  "updating, do not warn again about duplicates, and do not make them say it twice.";
+
 const GUIDANCE =
   `${MARKER}. This journey is chargeable, and the payment comes AFTER the licence request exists — not before, and ` +
   `not instead of submitting. The order is: duplicate check, then the save tool, THEN payment. ` +
@@ -76,14 +86,18 @@ async function main() {
     const has = g.includes(MARKER);
     if (REMOVE) {
       if (!has) { console.log(`  (already) ${j.key}: no payment guidance`); continue; }
-      j.guidance = g.split("\n\n").filter((p) => !p.includes(MARKER)).join("\n\n").trim();
+      j.guidance = g
+        .split("\n\n")
+        .filter((p) => !p.includes(MARKER) && !p.includes("EXISTING APPLICATIONS — ASK ONCE"))
+        .join("\n\n")
+        .trim();
       changed++;
       console.log(`  - ${j.key}: payment guidance removed`);
       continue;
     }
     if (has) { console.log(`  (already) ${j.key}: payment guidance present`); continue; }
     // FIRST, so it is read before the flow it corrects.
-    j.guidance = `${GUIDANCE}\n\n${g}`.trim();
+    j.guidance = `${GUIDANCE}\n\n${DUPLICATE_GUIDANCE}\n\n${g}`.trim();
     changed++;
     console.log(`  + ${j.key}: payment guidance`);
   }

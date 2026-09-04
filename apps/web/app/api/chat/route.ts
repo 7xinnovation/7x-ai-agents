@@ -510,6 +510,10 @@ export async function POST(req: NextRequest) {
     // per document. Read here rather than left to the model, which was asked for
     // them twice and sent none.
     epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
+    // Asked once. The duplicate list grows with every attempt, so without this
+    // the same question came back on each one -- after the customer had already
+    // answered it.
+    duplicateDecision: () => str(session.state.data.__duplicate_decision) ?? null,
     // The licence request's own fields, from the case rather than from whatever
     // the model remembers to include. LR-37212 carried the emirate, region,
     // activities, terms acceptance, amount paid and payment reference; LR-37214,

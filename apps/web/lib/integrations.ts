@@ -404,6 +404,8 @@ export async function buildApiTools(
      * distinction, and skips the document upload when it holds.
      */
     gsbCompanies?: string[];
+    /** What the customer already decided about existing applications, if anything. */
+    duplicateDecision?: () => string | null;
     /**
      * Licence-request values taken from the case rather than from the model.
      * See withEpglRequestFields: the composite is the model's to compose, so
@@ -1276,6 +1278,25 @@ export async function buildApiTools(
       } catch {
         /* an unreadable list leaves the previous ids in place */
       }
+    }
+    // The duplicate check, asked ONCE.
+    //
+    // It returns every application ever filed for this trade licence, and the
+    // list grows with each test or resubmission, so the model kept putting the
+    // same question in front of the customer -- "there are drafts, update one
+    // instead?" -- on every attempt. They had already answered it. Once they
+    // have chosen, the choice is recorded on the case and the model is told to
+    // proceed rather than ask again.
+    if (!res.isError && /duplicatecheck$/i.test(toolName)) {
+      const decided = opts.duplicateDecision?.();
+      res = {
+        ...res,
+        result:
+          res.result +
+          (decided
+            ? `\n\nTHE CUSTOMER HAS ALREADY ANSWERED THIS. They chose: ${decided}. Do NOT show the list of existing applications again and do NOT ask whether to update one — they have decided, and asking a second time reads as not having listened. Proceed on that decision.`
+            : "\n\nIf this returns existing applications, put the choice to the customer ONCE — update an existing one, or submit as new — and then remember what they said. Asking again on a later attempt, with the same list, is the same question they have already answered."),
+      };
     }
     // A renewal offers the customer's own bundle and the tiers ABOVE it, never
     // below. Emirates Post does not support downgrading here, so a cheaper
