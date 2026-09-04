@@ -411,7 +411,7 @@ function ChatCardSelect({
 function ChatToggles({
   items, title, confirmLabel, variant, defaultOn, onSelect,
 }: {
-  items: { key: string; label: string }[];
+  items: { key: string; label: string; variant?: "switch" | "checkbox" }[];
   title?: string;
   confirmLabel: string;
   variant?: "switch" | "checkbox";
@@ -419,6 +419,18 @@ function ChatToggles({
   onSelect: (text: string) => void;
 }) {
   const checkbox = variant === "checkbox";
+  /**
+   * Style per ITEM, not per block.
+   *
+   * Payment preferences are switches and the Terms acceptance is a tickbox --
+   * different kinds of thing, and merging them into one list made the switches
+   * look like consent tickboxes. Splitting them into two blocks instead gave the
+   * customer TWO confirm buttons for one decision. They belong in one block,
+   * rendered differently.
+   */
+  const isCheck = (it: { variant?: "switch" | "checkbox" }) => (it.variant ?? variant) === "checkbox";
+  /** Only acknowledgments gate the button; a preference left off is an answer. */
+  const required = items.filter(isCheck);
   // Switches may start on when the journey opts in (a preference the customer is
   // expected to want, which they can still turn off before confirming).
   // CHECKBOXES NEVER DO: that variant is the terms-and-conditions acknowledgment,
@@ -427,7 +439,7 @@ function ChatToggles({
     defaultOn && !checkbox ? Object.fromEntries(items.map((it) => [it.key, true])) : {}
   );
   if (!items.length) return null;
-  const allOn = items.every((it) => on[it.key]);
+  const allOn = (required.length ? required : items).every((it) => on[it.key]);
   const submit = () => {
     // Strip markdown links from labels (e.g. the T&C link) so the sent reply
     // reads clean.
@@ -442,12 +454,12 @@ function ChatToggles({
         <button
           key={it.key}
           type="button"
-          role={checkbox ? "checkbox" : "switch"}
+          role={isCheck(it) ? "checkbox" : "switch"}
           aria-checked={!!on[it.key]}
-          className={`dlg-toggle${on[it.key] ? " is-on" : ""}`}
+          className={`dlg-toggle${on[it.key] ? " is-on" : ""}${isCheck(it) ? " is-checkbox-row" : ""}`}
           onClick={() => setOn((s) => ({ ...s, [it.key]: !s[it.key] }))}
         >
-          {checkbox ? (
+          {isCheck(it) ? (
             <span className="dlg-checkbox-box" aria-hidden="true">
               {on[it.key] ? (
                 <svg viewBox="0 0 12 12" fill="none">
@@ -466,7 +478,7 @@ function ChatToggles({
           >
             {renderInline(it.label)}
           </span>
-          {checkbox ? null : (
+          {isCheck(it) ? null : (
             <span className="dlg-toggle-track" aria-hidden="true"><span className="dlg-toggle-thumb" /></span>
           )}
         </button>
@@ -766,18 +778,21 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         let tConfirm = "Confirm";
         let tVariant: "switch" | "checkbox" = "switch";
         let tDefaultOn = false;
-        const tItems: { key: string; label: string }[] = [];
+        const tItems: { key: string; label: string; variant?: "switch" | "checkbox" }[] = [];
+        let tCheckKeys = new Set<string>();
         for (const l of body) {
           const item = l.match(/^\s*-\s+([\w.-]+)\s*:\s*(.+?)\s*$/);
-          const meta = l.match(/^\s*(title|confirm|style|default)\s*:\s*(.+?)\s*$/i);
+          const meta = l.match(/^\s*(title|confirm|style|default|checkboxes)\s*:\s*(.+?)\s*$/i);
           if (item) tItems.push({ key: item[1]!.trim(), label: item[2]!.trim() });
           else if (meta) {
             if (/^title$/i.test(meta[1]!)) tTitle = meta[2]!.trim();
             else if (/^style$/i.test(meta[1]!)) tVariant = /checkbox/i.test(meta[2]!) ? "checkbox" : "switch";
             else if (/^default$/i.test(meta[1]!)) tDefaultOn = /^(on|yes|true)$/i.test(meta[2]!.trim());
+            else if (/^checkboxes$/i.test(meta[1]!)) tCheckKeys = new Set(meta[2]!.split(",").map((x) => x.trim()).filter(Boolean));
             else tConfirm = meta[2]!.trim();
           }
         }
+        for (const it of tItems) if (tCheckKeys.has(it.key)) it.variant = "checkbox";
         if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} variant={tVariant} defaultOn={tDefaultOn} onSelect={onSelect} />);
         continue;
       }

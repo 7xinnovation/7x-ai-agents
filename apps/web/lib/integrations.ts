@@ -1189,6 +1189,58 @@ export async function buildApiTools(
       // again" (FB-1485) — their identity is fine, that backend session is not.
       customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
     });
+
+    /**
+     * The saved card was refused, so try again WITHOUT it.
+     *
+     * Emirates Post answers a rental save carrying an unusable saved card with
+     * `400 {"errorDetails":{"Error":"Error from payment gateway"}}` -- seen with
+     * the token VISA1111 on a staging account. The card is theirs, not ours, and
+     * we cannot tell a good token from a bad one before sending it.
+     *
+     * Without this the journey simply stops: the box is held, nothing is
+     * charged, and the customer is offered "try again", which sends the same
+     * card and fails the same way. Dropping the card and retrying opens the
+     * payment page for them to enter one, which is what they would have got had
+     * they picked "a different card" -- so it turns a dead end into the path
+     * they can actually finish on.
+     *
+     * Once, and only for this specific failure: a retry loop against a payment
+     * endpoint is its own kind of danger.
+     */
+    if (
+      res.isError &&
+      /rental_save$/i.test(toolName) &&
+      /error from payment gateway/i.test(res.result ?? "") &&
+      (((input?.body as Record<string, unknown>)?.paymentProperties as Record<string, unknown>)?.savedCard)
+    ) {
+      const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      const pay = { ...((body.paymentProperties ?? {}) as Record<string, unknown>) };
+      delete pay.savedCard;
+      body.paymentProperties = pay;
+      const retryInput = { ...input, body };
+      const retry = await executeOperation(liveSpec, entry.op, retryInput, runtimeToken(), {
+        redactPII: !identified,
+        identityToken: opts.uaePassToken,
+        customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
+      });
+      void audit({
+        agentId,
+        conversationId: opts.conversationId,
+        actor: "system",
+        action: retry.isError ? "rental_save_retry_without_card_failed" : "rental_save_retried_without_card",
+        payload: { tool: toolName, path: entry.op.path },
+      }).catch(() => {});
+      if (!retry.isError) {
+        input = retryInput;
+        res = {
+          ...retry,
+          result:
+            retry.result +
+            "\n\nTHE SAVED CARD WAS REFUSED by Emirates Post's payment gateway, so the order was created WITHOUT it and the payment page will ask for card details instead. Tell the customer plainly that their saved card could not be used this time and they will need to enter a card on the payment page — do NOT say the payment failed, because no payment was attempted, and do NOT offer to retry with the saved card.",
+        };
+      }
+    }
     // The hold Emirates Post issued, kept out of the model's hands.
     //
     // Rental/Save looks its reservation up by subscriptionReferenceNumber, and the
