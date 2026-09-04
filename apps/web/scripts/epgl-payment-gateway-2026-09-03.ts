@@ -71,6 +71,21 @@ const SANDBOX_OUTLET = "b78ef8c7-ce2a-41d6-84c9-e6219557a991";
 const JOURNEYS = ["new_license", "renewal"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REQUIRE_PAYMENT = process.argv.includes("--require-payment");
+/**
+ * Bind the LIVE gateway on an agent that is not yet running in production mode.
+ *
+ * EPGL's production agent has activeEnvironment "staging", because there is no
+ * Salesforce production org yet -- so it writes to the sandbox. Left to itself
+ * the script therefore picks the sandbox gateway even against the production
+ * database, which is not what "put the production credentials on prod" means.
+ *
+ * This says: configure the live gateway anyway. It is safe on its own, because
+ * a bound gateway charges nobody -- only requiresPayment does that, and the
+ * guard below refuses to set it while the agent is still writing to a sandbox.
+ * Configuring and ARMING are separated deliberately: the dangerous combination
+ * is real money against a record that does not exist.
+ */
+const LIVE_GATEWAY = process.argv.includes("--live-gateway");
 
 /**
  * A fee to charge, because EPGL has not given us one.
@@ -141,14 +156,27 @@ async function main() {
     activeEnvironment?: string;
   };
 
-  const sandbox = /sandbox/i.test(process.env.NGENIUS_BASE_URL ?? "") || def.activeEnvironment === "staging";
+  const sandbox = LIVE_GATEWAY
+    ? false
+    : /sandbox/i.test(process.env.NGENIUS_BASE_URL ?? "") || def.activeEnvironment === "staging";
   const baseUrl = sandbox
     ? "https://api-gateway.sandbox.ngenius-payments.com"
     : "https://api-gateway.ngenius-payments.com";
   // The same guard NXN's binding carries: a sandbox outlet on a production agent
   // takes real money nowhere.
-  if (!sandbox && def.activeEnvironment !== "production") {
+  if (!sandbox && def.activeEnvironment !== "production" && !LIVE_GATEWAY) {
     throw new Error(`refusing to bind the LIVE gateway: activeEnvironment is "${def.activeEnvironment}"`);
+  }
+  // The combination that must never exist: real money taken against a backend
+  // that is still a sandbox. The customer is charged 150,000 and the licence
+  // request they paid for lands in a Salesforce org EPGL does not look at.
+  if (!sandbox && REQUIRE_PAYMENT && def.activeEnvironment !== "production") {
+    throw new Error(
+      `refusing to ARM the live gateway while activeEnvironment is "${def.activeEnvironment}".\n` +
+        `A payment taken here is real money against a Salesforce SANDBOX record.\n` +
+        `Bind the gateway now (drop --require-payment) and arm it once EPGL's\n` +
+        `production org exists and activeEnvironment is "production".`
+    );
   }
   const ref = outletRef(sandbox);
 
