@@ -553,6 +553,32 @@ export async function buildApiTools(
    */
   const bundlePriceBook = new Map<string, BundlePeriod[]>();
 
+  /**
+   * The bundle's per-term prices, re-fetching if this turn has not seen them.
+   *
+   * The book is filled when Rental/Bundle is read, and that usually happened
+   * SEVERAL TURNS EARLIER -- the customer picks a bundle, then a branch, then a
+   * box, and only then a period. The book lives for one turn, so by the time the
+   * periods are shown it is empty and the prices are gone. One extra call is
+   * cheaper than showing a customer a price that was multiplied rather than
+   * quoted.
+   */
+  const bundlePricesFor = async (bundleId: string): Promise<BundlePeriod[]> => {
+    if (!bundleId) return [];
+    const known = bundlePriceBook.get(bundleId);
+    if (known?.length) return known;
+    const bundleTool = [...map.keys()].find((t) => /rental_bundle$/i.test(t));
+    if (!bundleTool) return [];
+    try {
+      // exec() runs the tool through the same path, which fills the book on the
+      // way past -- so this is a cache warm, not a second parser.
+      await exec(bundleTool, {});
+    } catch {
+      /* best-effort: without it the periods simply carry no prices */
+    }
+    return bundlePriceBook.get(bundleId) ?? [];
+  };
+
   /** Learn the box's expiry from any renewal Details response, cached or fresh. */
   const rememberExpiry = (toolName: string, r: { result: string; isError?: boolean }) => {
     if (r.isError || !/renewal_details/i.test(toolName)) return;
@@ -1231,7 +1257,13 @@ export async function buildApiTools(
             // the hold minus the published price of the term they chose. Stated
             // only when that subtraction is trustworthy.
             (regFee !== null
-              ? ` THE ONE-TIME REGISTRATION FEE IS AED ${regFee.toFixed(2)}, and it is part of that total — a first-time rental pays it once. Show it as its OWN LINE in the pre-payment summary (rental AED ${(lastHold.amount - regFee).toFixed(2)} + registration AED ${regFee.toFixed(2)}) so the customer sees what the extra is before they pay, rather than wondering why the total is higher than the bundle card.`
+              ? ` THE ONE-TIME REGISTRATION FEE IS AED ${regFee.toFixed(2)}. The box is now reserved, so this figure is known — and this is the moment to show it. BEFORE you open the payment card, give the customer the final itemised total as a summary block, with the registration fee on its own line:\n` +
+                "```summary\ntitle: What you will pay\n" +
+                `- Box rental: AED ${(lastHold.amount - regFee).toFixed(2)}\n` +
+                `- One-time registration fee: AED ${regFee.toFixed(2)}\n` +
+                "- <any extra agents or key delivery, each on its own line>\n" +
+                "- Total: AED <the AMOUNT TO CHARGE given to you>\n```\n" +
+                "Their earlier summary could not name this amount because the box had not been reserved yet, so if it said the fee would be shown before payment, this is where that promise is kept. Never send them to the payment page without it."
               : " A one-time registration fee is inside that total. Its exact amount cannot be separated out for this rental, so say a one-time registration fee is included and do NOT state a figure for it.") +
             (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}.` : "") +
             (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
@@ -1297,6 +1329,42 @@ export async function buildApiTools(
             ? `\n\nTHE CUSTOMER HAS ALREADY ANSWERED THIS. They chose: ${decided}. Do NOT show the list of existing applications again and do NOT ask whether to update one — they have decided, and asking a second time reads as not having listened. Proceed on that decision.`
             : "\n\nIf this returns existing applications, put the choice to the customer ONCE — update an existing one, or submit as new — and then remember what they said. Asking again on a later attempt, with the same list, is the same question they have already answered."),
       };
+    }
+    // The rental periods, priced from the bundle rather than multiplied.
+    //
+    // Rental/ExpiryDates returns DATES and no prices at all, so the model had the
+    // annual figure and a list of dates and did the only thing it could: 300 x
+    // the number of years. Every term came out exactly linear -- 600, 900, 1500,
+    // 3000 -- which is not what Emirates Post charges, and it hid the multi-year
+    // discount entirely. The real per-term prices were read from Rental/Bundle
+    // earlier in the same conversation, so they are attached here.
+    if (!res.isError && /rental_expirydates$/i.test(toolName)) {
+      const inp = (input ?? {}) as Record<string, unknown>;
+      const bundleId = asStr(inp.bundleId ?? inp.BundleId);
+      const periods = await bundlePricesFor(bundleId);
+      if (periods.length) {
+        const savings = periodSavings(periods);
+        const bySaving = new Map(savings.map((x) => [x.months, x]));
+        const lines = periods.map((pd) => {
+          const sv = bySaving.get(pd.months);
+          return (
+            `  ${pd.years} year${pd.years === 1 ? "" : "s"}: AED ${pd.price.toFixed(2)} TOTAL` +
+            (sv ? ` — saves AED ${sv.saving.toFixed(2)} (${sv.percent}%) against ${sv.years} x AED ${(sv.yearlyEquivalent / sv.years).toFixed(2)}` : "")
+          );
+        });
+        res = {
+          ...res,
+          result:
+            res.result +
+            "\n\nTHESE ARE THE PRICES FOR EACH PERIOD. This response carries DATES ONLY — it has no prices in it — so take them from here and NEVER multiply the yearly price by the number of years. Doing that produced 2 years = AED 600 for a bundle that actually costs less, and it hid the multi-year discount completely:\n" +
+            lines.join("\n") +
+            (savings.length
+              ? "\nPut the total in `price` and the saving in `pricenote` (e.g. `pricenote: saves AED 50 (8%) vs paying yearly`) so the discount is visible on the card where the customer is choosing. Quote the saving exactly as given above." +
+                " A period with no saving listed has none — say nothing about a discount for it rather than implying one."
+              : "\nNone of these periods carries a discount, so do NOT suggest one — quote the totals as they are.") +
+            "\nA period listed here with no price above is not priced for this bundle: offer the dates you have prices for.",
+        };
+      }
     }
     // A renewal offers the customer's own bundle and the tiers ABOVE it, never
     // below. Emirates Post does not support downgrading here, so a cheaper

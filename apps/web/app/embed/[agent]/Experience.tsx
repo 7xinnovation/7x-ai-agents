@@ -1320,6 +1320,25 @@ export function Experience({
                   style={{ width: `${progress.pct}%` }}
                 />
               </div>
+              {/* The requirements themselves, beside the bar rather than in the
+                  side panel. A percentage says how far along they are; only the
+                  list says what is actually LEFT, and that was the half they had
+                  to leave the conversation to read. Completed items stay and stay
+                  ticked (FB-1437) — the list is the whole set, not the remainder. */}
+              {checklist.length ? (
+                <div className="dlg-progress-checks">
+                  {checklist.map((m) => (
+                    <span
+                      className={`dlg-progress-check ${m.done ? "done" : "todo"}`}
+                      key={`${m.kind}:${m.key}`}
+                      title={labelMap.get(m.key) ?? m.key}
+                    >
+                      {m.done ? <CheckCircle size={12} weight="fill" /> : <Circle size={12} weight={iconWeight} />}
+                      {labelMap.get(m.key) ?? m.key}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <div className="dlg-messages" ref={scrollRef}>
@@ -1636,43 +1655,6 @@ export function Experience({
                   </div>
                 ) : null}
 
-                <div className="dlg-card">
-                  <h3>
-                    <ListChecks size={15} weight="bold" /> {t.missing}
-                  </h3>
-                  {caseState!.readiness.complete ? (
-                    <div className="dlg-check done">
-                      <CheckCircle size={18} weight="fill" color={c.success} />
-                      {t.ready}
-                    </div>
-                  ) : null}
-                  {checklist.length ? (
-                    // Completed items stay listed and ticked (FB-1437) — the list
-                    // shows the full set of requirements, not only what's missing.
-                    checklist.map((m) => (
-                      <div className={`dlg-check ${m.done ? "done" : "todo"}`} key={`${m.kind}:${m.key}`}>
-                        {m.done ? (
-                          <CheckCircle size={18} weight="fill" color={c.success} />
-                        ) : (
-                          <Circle size={18} weight={iconWeight} />
-                        )}
-                        {labelMap.get(m.key) ?? m.key}
-                        {/* Only documents get a kind badge. "field" repeated down
-                            every row of a form says nothing — everything on this
-                            list is a field unless it is a document, and THAT is
-                            worth flagging because it means something to upload. */}
-                        {m.kind === "document" ? (
-                          <span className="kind">{t.missingKind[m.kind] ?? m.kind}</span>
-                        ) : null}
-                      </div>
-                    ))
-                  ) : !caseState!.readiness.complete ? (
-                    <div className="dlg-check todo">
-                      <ArrowRight size={16} weight="bold" />
-                      {t.emptyBody}
-                    </div>
-                  ) : null}
-                </div>
               </>
             )}
           </div>

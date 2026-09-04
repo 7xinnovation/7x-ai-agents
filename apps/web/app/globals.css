@@ -1825,6 +1825,37 @@ body {
   margin: 0 5px;
   opacity: 0.5;
 }
+/* The requirements, as chips beside the bar. Wraps rather than scrolls: a row
+   the customer has to drag sideways hides the very items it exists to show. */
+.dlg-progress-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 3px;
+}
+.dlg-progress-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+  color: var(--c-text-muted);
+}
+.dlg-progress-check.done {
+  color: color-mix(in srgb, var(--c-success) 80%, var(--c-text));
+}
+.dlg-progress-check.done svg {
+  color: var(--c-success);
+}
+.dlg-progress-check.todo {
+  font-weight: 600;
+  color: var(--c-text);
+}
+.dlg-progress-check.todo svg {
+  opacity: 0.45;
+}
+
 .dlg-progress-top .dlg-progress-track {
   height: 4px;
 }

@@ -51,21 +51,26 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
     journeys: /rental|renewal/,
     text:
       "TERMS AND CONDITIONS GO WITH THE PAYMENT TOGGLES, not earlier. Do NOT ask for acceptance as its own step " +
-      "partway through the conversation. At the payment step, present ONE ```toggles block containing the " +
-      "acceptance and the payment preferences together, then the proceed button:\\n" +
-      "```toggles\\n" +
-      "title: Before payment\\n" +
-      "style: checkbox\\n" +
-      "- terms_accepted: I accept the Terms and Conditions\\n" +
-      "- save_card_consent: Save my card for future payments\\n" +
-      "- auto_renew_consent: Renew my box automatically next year\\n" +
-      "confirm: Proceed to payment\\n" +
-      "```\\n" +
-      "Record each one with collect_field from the toggle results. terms_accepted is MANDATORY and payment is " +
-      "refused server-side without it, so if they proceed without ticking it, say plainly that the Terms have to be " +
-      "accepted before paying and show the block again. The other two are genuinely optional and must default to " +
-      "OFF — never enable auto-renewal or card saving on a customer's behalf. For a GUEST, offer only " +
-      "terms_accepted: saving a card and auto-renewal both need an account.",
+      "partway through the conversation.\n\n" +
+      "At the payment step, emit the preferences EXACTLY as they have always been — a toggles block, rendering as " +
+      "toggle switches, with NO style line — and then the Terms acceptance as a separate CHECKBOX block underneath " +
+      "it. The preferences are switches and the acceptance is a tickbox; they are different kinds of thing and must " +
+      "not be merged into one list:\n" +
+      "```toggles\n" +
+      "title: Before payment\n" +
+      "- save_card_consent: Save my card for future payments\n" +
+      "- auto_renew_consent: Renew my box automatically next year\n" +
+      "```\n" +
+      "```toggles\n" +
+      "style: checkbox\n" +
+      "- terms_accepted: I accept the [Terms and Conditions](https://www.emiratespost.ae/en/terms-and-conditions)\n" +
+      "confirm: Proceed to payment\n" +
+      "```\n" +
+      "Record each with collect_field from the toggle results. terms_accepted is MANDATORY and payment is refused " +
+      "server-side without it, so if they proceed without ticking it, say plainly that the Terms have to be accepted " +
+      "and show the block again. The two preferences are genuinely optional and must default to OFF — never enable " +
+      "auto-renewal or card saving on a customer's behalf. For a GUEST, emit only the Terms block: saving a card and " +
+      "auto-renewal both need an account.",
   },
   {
     marker: "A SAVED CARD IS AN OFFER, NOT THE ONLY OPTION",
