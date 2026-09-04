@@ -41,6 +41,9 @@ export interface PublicAgent {
   documentsDisclaimer?: LocalizedString;
   // Uploads happen inline in the chat (panel Documents section suppressed).
   documentsInChat?: boolean;
+  // Where the readiness bar lives: the case panel (default) or above the chat.
+  // Emirates Post asked for theirs above the chat; nobody else did.
+  progressPlacement?: "panel" | "top";
   // Cap on upload controls shown per assistant message (FB-1565).
   uploadsPerMessage?: number;
   journeys: PublicJourney[];

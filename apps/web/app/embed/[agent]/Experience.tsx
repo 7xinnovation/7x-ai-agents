@@ -1304,7 +1304,7 @@ export function Experience({
               on a phone the panel is a tab they have to leave the chat to see,
               so the one thing telling them how far through they are was the one
               thing out of sight. */}
-          {progress ? (
+          {progress && agent.progressPlacement === "top" ? (
             <div className="dlg-progress-top" role="status" aria-live="polite">
               <div className="dlg-progress-top-row">
                 <span className="dlg-progress-step">{progress.pct === 100 ? t.ready : t.missing}</span>
@@ -1508,6 +1508,26 @@ export function Experience({
                         {t.receipt}
                       </a>
                     ) : null}
+                  </div>
+                ) : null}
+
+                {/* The readiness bar in the panel, which is where it lived until
+                    Emirates Post asked for theirs above the chat. Restored for
+                    every agent that did not ask for the move. */}
+                {progress && agent.progressPlacement !== "top" ? (
+                  <div className="dlg-progress">
+                    <div className="dlg-progress-row">
+                      <span>{progress.pct === 100 ? t.ready : t.missing}</span>
+                      <span>
+                        <strong>{progress.done}</strong> / {progress.total} {t.readyShort}
+                      </span>
+                    </div>
+                    <div className="dlg-progress-track">
+                      <div
+                        className={`dlg-progress-fill ${progress.pct === 100 ? "done" : ""}`}
+                        style={{ width: `${progress.pct}%` }}
+                      />
+                    </div>
                   </div>
                 ) : null}
 

@@ -89,6 +89,17 @@ export const AgentDefinition = z.object({
   // live in the right-side panel. Feedback: keep the upload in the chat.
   documentsInChat: z.boolean().default(false),
   /**
+   * Where the submission-readiness bar and its checklist live.
+   *
+   * "panel" is how it has always been: in the right-hand case panel, beside the
+   * conversation. Emirates Post asked for it ABOVE the chat instead — on a phone
+   * the panel is a tab you have to leave the conversation to see, so the one
+   * thing telling you how far through you are was the one thing out of sight.
+   * That was their request and it was applied to every agent, which moved EPGL's
+   * too. It is a per-agent choice now, and the default is what it always was.
+   */
+  progressPlacement: z.enum(["panel", "top"]).default("panel"),
+  /**
    * Hard cap on how many in-chat upload controls one assistant message may show
    * (FB-1565: the next step must be a single, unambiguous ask). The prompt has
    * always told the agent to request one document at a time, but at the opening
