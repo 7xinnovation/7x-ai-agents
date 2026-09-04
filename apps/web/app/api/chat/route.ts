@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { Locale, type AgentDefinition } from "@dialog/config";
+import { Locale, type AgentDefinition, type CaseState } from "@dialog/config";
 import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, adapterContext } from "@dialog/core";
 import { randomUUID } from "node:crypto";
 import { getDb, payments, documents as documentsTable, documentBlobs } from "@dialog/db";
@@ -382,6 +382,36 @@ async function rentalAttachmentRows(
   return out;
 }
 
+/**
+ * Where the key courier goes, assembled from what the customer already gave us.
+ *
+ * The save has to carry both the KEY-DELIVERY service AND an address for it. On
+ * 4 Sep it carried neither: the summary charged AED 30 for a courier the payload
+ * never requested, so the customer would have paid for a delivery nobody was
+ * ever asked to make. The address is not something to be recalled — every part
+ * of it is on the case.
+ */
+function keyDeliveryAddressFrom(data: Record<string, unknown>): Record<string, string> | null {
+  const s = (v: unknown) => (v === undefined || v === null ? "" : String(v).trim());
+  const line = [
+    s(data.home_villa_apt) && `Apt ${s(data.home_villa_apt)}`,
+    s(data.home_building),
+    s(data.home_street),
+    s(data.home_area),
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const emirate = s(data.emirate);
+  const mobile = s(data.contact_phone) || s(data.mobile);
+  if (!line || !emirate) return null;
+  return {
+    name: s(data.customer_name) || s(data.full_name) || "",
+    mobileNo: mobile,
+    emirateCode: emirate,
+    deliveryAddress: line,
+  };
+}
+
 export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) {
@@ -523,6 +553,7 @@ export async function POST(req: NextRequest) {
       emirateCode: str(liveState.data.emirate) ?? null,
       bundleId: apiTools.getLastHold()?.bundleId ?? str(liveState.data.package) ?? null,
       keyDelivery: wantsKeyDelivery(liveState.data.key_delivery ?? liveState.data.key_delivery_option),
+      keyDeliveryAddress: keyDeliveryAddressFrom(liveState.data as Record<string, unknown>),
     }),
     // Asked once. The duplicate list grows with every attempt, so without this
     // the same question came back on each one -- after the customer had already
@@ -981,7 +1012,12 @@ export async function POST(req: NextRequest) {
       }
     }
   };
-  const runExtraTool = async (name: string, input: Record<string, unknown>) => {
+  const runExtraTool = async (name: string, input: Record<string, unknown>, turnState?: CaseState) => {
+    // The case as the turn has it RIGHT NOW. collect_field runs in the same round
+    // as the save that follows it, so the snapshot this request opened with does
+    // not yet know the customer chose a courier — and the save was going out
+    // without one, and without the 30 the summary had just charged for.
+    if (turnState) liveState = turnState;
     if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL || name === MYBOXES_TOOL || name === MYCOMPANIES_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       // The customer's own session is what the MOE endpoints mean by "requires

@@ -27,8 +27,17 @@ function heldTail(s: string): number {
   return 0;
 }
 
+/** A row that names the fee AND states an amount for it. */
+const PRICED_FEE = /^[ \t]*-[ \t]+[^\n:]*registration[^\n:]*:[^\n]*\d/im;
+
 export function insertRegistrationFee(block: string, fee: number): string {
-  if (/registration/i.test(block)) return block;
+  // Naming the fee is not stating it. "Registration fee and exact total:
+  // confirmed when box is reserved" mentions the word and leaves the customer
+  // without the number — and it satisfied the old check, so the row was never
+  // added. A row that names the fee without an amount is replaced.
+  if (PRICED_FEE.test(block)) return block;
+  const vague = /^[ \t]*-[ \t]+[^\n:]*registration[^\n:]*:[^\n]*$/im.exec(block);
+  if (vague) return block.replace(vague[0], `- One-time registration fee: AED ${fee.toFixed(2)}`);
   const close = /\n[ \t]*```[ \t]*$/.exec(block);
   if (!close) return block;
   const body = block.slice(OPEN.length, close.index);

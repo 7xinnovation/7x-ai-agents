@@ -50,6 +50,17 @@ eq("two cards both get the row",
   "2");
 eq("direct helper: no rows, no row added", insertRegistrationFee("```summary\ntitle: x\n```", 70), "```summary\ntitle: x\n```");
 
+console.log("\nA row that names the fee without stating it");
+eq("the promise is replaced by the amount",
+  run("```summary\n- Bundle: MyBox\n- Registration fee and exact total: confirmed when box is reserved\n```", 70),
+  "```summary\n- Bundle: MyBox\n- One-time registration fee: AED 70.00\n```");
+eq("a row that already states it is left alone",
+  run("```summary\n- Registration fee: AED 70.00\n```", 70),
+  "```summary\n- Registration fee: AED 70.00\n```");
+eq("a priced row elsewhere still counts",
+  run("```summary\n- Box rental: AED 600.00\n- One-time registration fee: AED 70.00\n```", 70),
+  "```summary\n- Box rental: AED 600.00\n- One-time registration fee: AED 70.00\n```");
+
 console.log("\nThe total");
 // The card read 600 + 70 + 30 and footed it at 670 over a page asking for 700.
 eq("arithmetic done from memory is replaced",

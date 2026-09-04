@@ -582,8 +582,10 @@ export async function buildApiTools(
       boxNumber?: string | null;
       emirateCode?: string | null;
       bundleId?: string | null;
-      /** Did the customer ask for the key by courier? A fallback, not the source. */
+      /** Did the customer ask for the key by courier? */
       keyDelivery?: boolean;
+      /** Where that courier goes, assembled from the case. */
+      keyDeliveryAddress?: Record<string, string> | null;
     };
     /**
      * The card Emirates Post already holds for this signed-in customer.
@@ -1026,6 +1028,27 @@ export async function buildApiTools(
       if (courierAsked && !services.some((sv) => /key[-_ ]?delivery/i.test(String(sv?.serviceType ?? "")))) {
         body.additionalServiceDetailList = [...services, { quantity: 1, serviceType: "KEY-DELIVERY" }];
         patched = true;
+      }
+      // And somewhere to deliver it to. A courier line with no address is a
+      // charge for a delivery nobody can make.
+      if (courierAsked && !body.keyDeliveryAddress && facts?.keyDeliveryAddress) {
+        body.keyDeliveryAddress = facts.keyDeliveryAddress;
+        patched = true;
+      }
+      if (courierAsked !== Boolean(services.length) || !body.keyDeliveryAddress) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "rental_save_courier_checked",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: { courierAsked, servicesSent: services.length, addressPresent: Boolean(body.keyDeliveryAddress) },
+            response: "Key delivery reconciled between the customer's choice and the save payload.",
+          },
+        }).catch(() => {});
       }
       const agents = Array.isArray(body.listBoxAgentDetail) ? (body.listBoxAgentDetail as unknown[]).length : 1;
       const owed =

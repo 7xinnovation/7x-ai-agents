@@ -118,7 +118,18 @@ export interface RunTurnInput {
   customerContext?: string;
   // Dynamic tools from the agent's API integrations (imported from OpenAPI).
   extraTools?: Anthropic.Tool[];
-  runExtraTool?: (name: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
+  /**
+   * `state` is passed because the case as the HOST sees it is a snapshot taken
+   * before the turn. Builtin tools like collect_field update the state in this
+   * loop, and an integration tool called in the SAME round — the save, right
+   * after the preferences are recorded — needs what the customer just chose, not
+   * what they had chosen when the request arrived.
+   */
+  runExtraTool?: (
+    name: string,
+    input: Record<string, unknown>,
+    state: CaseState
+  ) => Promise<{ result: string; isError?: boolean }>;
   /**
    * A total the backend has committed to, read fresh each time it is needed —
    * an integration tool may establish it partway through the turn (an Emirates
@@ -406,7 +417,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         // Route integration (non-builtin) tools to the dynamic handler.
         if (!builtin.has(tu.name) && input.runExtraTool) {
           yield { type: "integration", tool: tu.name };
-          const r = await input.runExtraTool(tu.name, tu.input as Record<string, unknown>);
+          const r = await input.runExtraTool(tu.name, tu.input as Record<string, unknown>, state);
           toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: r.result, is_error: r.isError });
           // apiFlow journeys complete through a backend saveTool (e.g. Salesforce
           // submitLicenseRequest), not the internal submit_case. When the active
