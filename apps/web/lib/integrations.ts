@@ -10,6 +10,7 @@ import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods } from "./rentalTotal";
+import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
 export type EnvKey = "staging" | "production";
 
@@ -1251,6 +1252,34 @@ export async function buildApiTools(
         }
       } catch {
         /* an unreadable list leaves the previous ids in place */
+      }
+    }
+    // A renewal offers the customer's own bundle and the tiers ABOVE it, never
+    // below. Emirates Post does not support downgrading here, so a cheaper
+    // bundle on the list is a choice that cannot complete -- and the customer
+    // only discovers that after picking it.
+    if (!res.isError && /renewal_details/i.test(toolName)) {
+      try {
+        const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const sub = (parsed?.payload?.poBoxRenewalDetails ?? parsed?.payload ?? parsed)?.poBoxSubscriptionDetails as
+          | Record<string, unknown>
+          | undefined;
+        const possible = sub?.listPossibleBundles;
+        if (sub && Array.isArray(possible) && possible.length) {
+          const { bundles, dropped } = renewalChoices(possible as RenewalBundle[], sub.currentBundle as RenewalBundle);
+          if (dropped > 0) {
+            sub.listPossibleBundles = bundles;
+            res = {
+              ...res,
+              raw: JSON.stringify(parsed),
+              result:
+                `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(parsed)}` +
+                `\n\nlistPossibleBundles has already been filtered to the customer's CURRENT bundle and the tiers above it; ${dropped} lower tier(s) were removed because a renewal cannot downgrade. Offer exactly what is left and do not mention the ones that are missing. If the customer asks to move to a cheaper bundle, say plainly that a renewal keeps their current bundle or upgrades it, and that changing down is done through Emirates Post directly.`,
+            };
+          }
+        }
+      } catch {
+        /* an unreadable body leaves the list exactly as it arrived */
       }
     }
     // The registration fee, named on the bundle card.
