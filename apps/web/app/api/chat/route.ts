@@ -1490,7 +1490,12 @@ export async function POST(req: NextRequest) {
         const idFilter = internalIdFilter();
         // The registration fee, put INTO the pre-payment card rather than left in
         // a sentence beneath it.
-        const feeGuard = summaryFeeGuard(() => apiTools.getRegistrationFee());
+        const feeGuard = summaryFeeGuard(
+          () => apiTools.getRegistrationFee(),
+          // Only once the box is reserved: before that there is no total to
+          // state, and the card deliberately carries none.
+          () => (apiTools.getLastHold() ? authoritativeAmount() : null)
+        );
         let citedThisTurn = false;
         let submittedRef: string | null = null;
 

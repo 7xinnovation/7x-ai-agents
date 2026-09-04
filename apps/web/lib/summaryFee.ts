@@ -11,6 +11,12 @@
  * amount are. A card that already names the fee is left alone; a card with a
  * `total:` footer gets the row above it, because a total that does not include
  * the line above it is worse than no total at all.
+ *
+ * AND THE TOTAL ITSELF. A card listing 600 + 70 + 30 footed at "Total AED
+ * 670.00" over a payment page asking 700 is not a rounding difference, it is
+ * arithmetic done from memory. Where the real charge is known it replaces
+ * whatever was written, so the card, the payment button and the gateway all say
+ * one number.
  */
 const OPEN = "```summary";
 
@@ -34,7 +40,22 @@ export function insertRegistrationFee(block: string, fee: number): string {
   return OPEN + next + block.slice(close.index);
 }
 
-export function summaryFeeGuard(fee: () => number | null) {
+/** Force the card's footer to the amount that will actually be charged. */
+export function correctTotal(block: string, total: number): string {
+  const close = /\n[ \t]*```[ \t]*$/.exec(block);
+  if (!close) return block;
+  const body = block.slice(OPEN.length, close.index);
+  if (!/^[ \t]*-[ \t]+\S/m.test(body)) return block;
+  const line = `total: AED ${total.toFixed(2)}`;
+  const written = /^[ \t]*total[ \t]*:.*$/im.exec(body);
+  // A card with no footer is left without one: adding a total to a summary that
+  // deliberately has none (the pre-reservation one, where the figure is not yet
+  // final) would state a number the journey is not ready to state.
+  if (!written) return block;
+  return OPEN + body.replace(written[0], line) + block.slice(close.index);
+}
+
+export function summaryFeeGuard(fee: () => number | null, total: () => number | null = () => null) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
 
@@ -60,7 +81,10 @@ export function summaryFeeGuard(fee: () => number | null) {
       const trailing = close[1] ?? "";
       const block = buf.slice(0, end - trailing.length);
       const amount = fee();
-      out += (amount !== null && Number.isFinite(amount) ? insertRegistrationFee(block, amount) : block) + trailing;
+      let fixed = amount !== null && Number.isFinite(amount) ? insertRegistrationFee(block, amount) : block;
+      const charge = total();
+      if (charge !== null && Number.isFinite(charge) && charge > 0) fixed = correctTotal(fixed, charge);
+      out += fixed + trailing;
       buf = buf.slice(end);
       mode = "pass";
     }
