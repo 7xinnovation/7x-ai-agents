@@ -513,6 +513,22 @@ export async function buildApiTools(
      */
     chosenDuration?: () => string | null;
     /**
+     * The facts a rental save must state, from the reservation and the case.
+     *
+     * `totalAmount` is the money. It was left to the model, which wrote 700 on
+     * one attempt and 670 on the retry twenty seconds later for the same box —
+     * the second one dropping the AED 30 courier the breakdown had just promised
+     * — and Emirates Post charges whatever it is sent. The same payload also
+     * arrived once without boxNumber, emirateCode, expiryDate or newBundleId and
+     * was refused 157. None of it was ever unknown to us.
+     */
+    rentalSaveFacts?: () => {
+      totalAmount: number | null;
+      boxNumber?: string | null;
+      emirateCode?: string | null;
+      bundleId?: string | null;
+    };
+    /**
      * The card Emirates Post already holds for this signed-in customer.
      *
      * Their own rent flow puts it on paymentProperties.savedCard and still sends
@@ -867,6 +883,49 @@ export async function buildApiTools(
       let patched = false;
       if (body.subscriptionReferenceNumber !== lastHold.reference) {
         body.subscriptionReferenceNumber = lastHold.reference;
+        patched = true;
+      }
+      // THE AMOUNT IS NOT THE MODEL'S TO WRITE. Emirates Post charges what this
+      // field says: 700 on one attempt, 670 on the retry, for one unchanged
+      // rental. It is computed from the reservation and the customer's own
+      // choices — the same function the summary card uses — so the card and the
+      // charge cannot say different things.
+      const facts = opts.rentalSaveFacts?.();
+      if (facts && typeof facts.totalAmount === "number" && facts.totalAmount > 0 && body.totalAmount !== facts.totalAmount) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "rental_save_amount_corrected",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: { sent: body.totalAmount, charged: facts.totalAmount },
+            response: `The save was about to ask for ${String(body.totalAmount)}; the reservation and the customer's choices come to ${facts.totalAmount}.`,
+          },
+        }).catch(() => {});
+        body.totalAmount = facts.totalAmount;
+        patched = true;
+      }
+      // The rest of what the payload must state, and what a 157 was hiding: a
+      // save arrived with none of these and Emirates Post answered
+      // ERROR_GETTING_HOLD_DETAILS, which names the hold and not the four
+      // missing fields.
+      for (const [key, value] of [
+        ["boxNumber", facts?.boxNumber],
+        ["emirateCode", facts?.emirateCode],
+        ["newBundleId", facts?.bundleId ?? lastHold.bundleId],
+      ] as const) {
+        if (value && !body[key]) { body[key] = /^\d+$/.test(String(value)) && key === "boxNumber" ? Number(value) : value; patched = true; }
+      }
+      // A saved card with an EMPTY token is not a saved card. One was invented
+      // for a save that then failed; the attempt that fetched the real token
+      // succeeded. Send the block only when there is something in it.
+      const props = (body.paymentProperties ?? {}) as Record<string, unknown>;
+      const card = props.savedCard as Record<string, unknown> | undefined;
+      if (card && !String(card.cardToken ?? "").trim()) {
+        delete props.savedCard;
         patched = true;
       }
       // A SAVE CANNOT DISAGREE WITH ITS OWN RESERVATION. On 4 Sep the save

@@ -515,6 +515,14 @@ export async function POST(req: NextRequest) {
     // The rental duration the customer chose, so the reservation is made for the
     // term they picked rather than the one the model remembers.
     chosenDuration: () => str(session.state.data.duration) ?? str(session.state.data.rental_duration) ?? null,
+    // What the save must state, rather than recall. Lazy on purpose: the hold it
+    // reads is created several turns after this is wired up.
+    rentalSaveFacts: () => ({
+      totalAmount: authoritativeAmount(),
+      boxNumber: str(session.state.data.box_number) ?? null,
+      emirateCode: str(session.state.data.emirate) ?? null,
+      bundleId: apiTools.getLastHold()?.bundleId ?? str(session.state.data.package) ?? null,
+    }),
     // Asked once. The duplicate list grows with every attempt, so without this
     // the same question came back on each one -- after the customer had already
     // answered it.
