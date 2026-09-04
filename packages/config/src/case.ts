@@ -83,6 +83,13 @@ export const CaseState = z.object({
       /** What the confirm call is keyed on. */
       reference: z.string(),
       orderNo: z.string().nullable().default(null),
+      /**
+       * When the payment page was opened. A payment asked about twenty-six
+       * seconds after that is a payment still being typed, and the backend
+       * answers "not paid" for it — which the chat then reported as a failure
+       * while the customer's card page was open in front of them.
+       */
+      openedAt: z.string().nullable().default(null),
       /** When Emirates Post confirmed the money arrived. */
       paidAt: z.string().nullable().default(null),
     })

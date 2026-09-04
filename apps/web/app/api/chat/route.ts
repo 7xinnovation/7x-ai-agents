@@ -1808,7 +1808,15 @@ export async function POST(req: NextRequest) {
         if (payNow && (payNow.reference !== finalState.gatewayPayment?.reference || (payNow.paidAt ?? null) !== (finalState.gatewayPayment?.paidAt ?? null))) {
           finalState = {
             ...finalState,
-            gatewayPayment: { url: payNow.url, reference: payNow.reference, orderNo: payNow.orderNo, paidAt: payNow.paidAt ?? null },
+            gatewayPayment: {
+              url: payNow.url,
+              reference: payNow.reference,
+              orderNo: payNow.orderNo,
+              // When the payment page was opened, so the next turn knows whether
+              // the customer has plausibly had time to finish on it.
+              openedAt: payNow.openedAt ?? null,
+              paidAt: payNow.paidAt ?? null,
+            },
           };
         }
         if (heldNow && holdChanged) {

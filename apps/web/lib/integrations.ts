@@ -230,6 +230,15 @@ function auditableInput(input: unknown): unknown {
  * the hall notice never appeared for Naif: nothing that could recognise a hall
  * still existed at the moment one was chosen. So the halls outlive their turn.
  */
+/**
+ * How long a customer needs before "have you paid?" is a fair question.
+ *
+ * Measured, not chosen: today's settled payments were confirmed after the
+ * customer had finished, and every "not paid" answer came from a check made
+ * 26-57 seconds after the order was created -- while they were still typing.
+ */
+const PAYMENT_SETTLE_GRACE_MS = 75_000;
+
 /** How many times we have asked about one order's payment, so the answer stops repeating. */
 const paymentChecks = new Map<string, number>();
 
@@ -570,7 +579,7 @@ export async function buildApiTools(
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
   /** The payment Emirates Post opened on their gateway, from either save. */
-  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null; amount?: number | null; paidAt?: string | null } | null;
+  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null; amount?: number | null; openedAt?: string | null; paidAt?: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -632,7 +641,7 @@ export async function buildApiTools(
    * A rental gets here through a hold; a guest renewal has no hold at all. Kept
    * apart from the hold so both can find it.
    */
-  let gatewayPayment: { url: string; reference: string; orderNo: string | null; amount?: number | null; paidAt?: string | null } | null =
+  let gatewayPayment: { url: string; reference: string; orderNo: string | null; amount?: number | null; openedAt?: string | null; paidAt?: string | null } | null =
     opts.initialGatewayPayment
       ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null, paidAt: opts.initialGatewayPayment.paidAt ?? null }
       : null;
@@ -867,6 +876,43 @@ export async function buildApiTools(
             (typeof lastHold.amount === "number" ? `, total AED ${lastHold.amount.toFixed(2)}` : "") +
             (lastHold.expiresAt ? `, held until ${lastHold.expiresAt}` : "") +
             ". Emirates Post was NOT called again: reserving a box a second time answers 108 BOX_NOT_FREE because the first reservation is holding it, and relaying that told a customer their own box had been taken by someone else. Nothing has gone wrong and the customer has lost nothing. Do NOT tell them the box is unavailable, do NOT offer them another number, and do NOT reserve anything again — continue from this reservation straight to Rental/Save.",
+        };
+      }
+    }
+
+    // DO NOT ASK WHETHER THEY HAVE PAID WHILE THEY ARE STILL PAYING.
+    //
+    // 4 Sep, order 260972870: created 15:36:18, asked about at 15:36:44. Nobody
+    // opens a payment page, reads a card number off a card and types it in
+    // twenty-six seconds. Every payment that settled today was confirmed after
+    // the customer had finished; every "not paid" came from a check made 26 to
+    // 57 seconds after the order was created, while the page was still open.
+    //
+    // Asking early is not free. It is a POST against the backend's payment
+    // record, it answers paymentStatus 2 for an order that has simply not been
+    // paid YET, and the chat then tells the customer their payment failed and
+    // hands them another link -- while the page they are typing into is open in
+    // front of them. So the first check waits until they have plausibly had time.
+    if (/(updatepayment|guest_renewal_confirmpayment)$/i.test(toolName) && gatewayPayment?.openedAt && !gatewayPayment.paidAt) {
+      const age = Date.now() - Date.parse(gatewayPayment.openedAt);
+      if (Number.isFinite(age) && age >= 0 && age < PAYMENT_SETTLE_GRACE_MS) {
+        const wait = Math.ceil((PAYMENT_SETTLE_GRACE_MS - age) / 1000);
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "payment_check_too_early",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: input ?? {},
+            response: `The order was opened ${Math.round(age / 1000)}s ago; not asking for another ${wait}s.`,
+          },
+        }).catch(() => {});
+        return {
+          result:
+            `NOT ASKED YET. This order was created ${Math.round(age / 1000)} seconds ago and the customer is very likely still on the payment page — nobody types a card number in that time. Asking now would come back "not paid" for an order that has simply not been paid YET, and telling them that while their payment page is open is how a payment that was about to go through gets abandoned. Say you will confirm it the moment it lands, ask them to finish on the payment page, and check again in about ${wait} seconds. Do NOT say the payment failed, do NOT say it has not come through, and do NOT offer them a new payment link.`,
         };
       }
     }
@@ -1900,6 +1946,7 @@ export async function buildApiTools(
             reference: String(g.referenceNumber),
             orderNo: p?.orderNo ? String(p.orderNo) : p?.orderNumber ? String(p.orderNumber) : null,
             amount: Number.isFinite(minor) && minor > 0 && /^[A-Z]{3}$/.test(cur) ? minor / 100 : null,
+            openedAt: new Date().toISOString(),
           };
         }
       } catch {
