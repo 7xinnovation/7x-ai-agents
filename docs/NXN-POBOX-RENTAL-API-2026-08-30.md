@@ -116,12 +116,40 @@ so it is not the wrong UUID. Re-checked repeatedly over several minutes; the
 answer does not change. **The same shape has now happened on 260972864,
 260972866, 260972869, 260972870, 260972871 and 260972872.**
 
-This order was created by a script, straight against the API, with no assistant
-involved: reserve, save, pay. So it isolates the question completely. **Why does
-UpdatePayment report `amountPaid: 0` for an order that was paid on your gateway,
-and what does `paymentStatus: 2` mean?** Payments settled normally on 2 and 3
-September and up to 13:19 on 4 September, so something changed on that side
-during the 4th.
+**The gateway agrees with you — the card is being declined.** Read from N-Genius
+directly, outlet `b78ef8c7-ce2a-41d6-84c9-e6219557a991`, MID `200200001514`:
+
+```
+260972862  13:18  PURCHASED  authResponse { success: true, resultCode "00",
+                             authorizationCode "AB0012" }
+260972864  14:17  FAILED
+260972866  14:54  FAILED
+260972869  15:22  FAILED
+260972870  15:36  FAILED
+260972871  16:10  FAILED
+260972872  16:52  FAILED     authResponse { success: false, mid "200200001514" }
+260972873  17:05  FAILED
+260972874  17:23  FAILED
+260972875  17:38  FAILED
+```
+
+Same outlet, same MID, same card (VISA 411111\*\*\*\*\*\*1111, expiry 2030-12), and
+3-D Secure passes every time — `transStatus: "Y"`, `eci: "05"`. The
+authorisation then returns `success: false` **with no resultCode and no
+resultMessage at all**, where the settled one returned `00` and an
+authorisation code.
+
+So `UpdatePayment` is correct: those payments genuinely did not happen. **The
+question is for the acquirer, not for the API.** Payments approved normally on 2
+and 3 September and at 10:14 and 13:18 on the 4th, then every attempt since has
+been refused with no reason given. **Could someone check MID `200200001514`'s
+sandbox limits — a daily count or velocity cap would fit exactly: it approved
+twice this morning and has refused a dozen times since, on the same card and
+amounts it had already approved (AED 400 approved at 10:14, refused at 14:54).**
+
+Nothing on our side changed between the last approval and the first refusal; the
+order above was built by a script with no assistant involved and was refused the
+same way.
 
 ---
 
