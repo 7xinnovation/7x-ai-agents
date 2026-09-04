@@ -544,6 +544,16 @@ export async function POST(req: NextRequest) {
     epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
     // The rental duration the customer chose, so the reservation is made for the
     // term they picked rather than the one the model remembers.
+    // The rental's payment is opened on the backend's own N-Genius outlet, which
+    // is the outlet our checkout is configured against — so the same key reads
+    // it, and a refusal can be reported as a refusal instead of as silence.
+    gateway: (() => {
+      const st = (agent.definition.integrations?.payment?.settings ?? {}) as Record<string, unknown>;
+      const apiKey = process.env.NGENIUS_API_KEY ?? "";
+      const outletRef = str(st.outletRef) ?? "";
+      const baseUrl = str(st.baseUrl) ?? "";
+      return apiKey && outletRef && baseUrl ? { apiKey, outletRef, baseUrl } : undefined;
+    })(),
     chosenDuration: () => str(liveState.data.duration) ?? str(liveState.data.rental_duration) ?? null,
     // What the save must state, rather than recall. Lazy on purpose: the hold it
     // reads is created several turns after this is wired up.

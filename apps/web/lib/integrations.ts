@@ -11,6 +11,7 @@ import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
 import { registrationFees, rememberFees, feesInSelectResponse } from "./registrationFees";
+import { gatewayOrderState } from "./gatewayOrder";
 import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
 export type EnvKey = "staging" | "production";
@@ -566,6 +567,8 @@ export async function buildApiTools(
      * for 370. They were about to buy a different box from the one they chose.
      * The date is not something to be recalled; it is read from the case here.
      */
+    /** Read-only access to the gateway the backend opened the payment on. */
+    gateway?: { baseUrl: string; outletRef: string; apiKey: string };
     chosenDuration?: () => string | null;
     /**
      * The facts a rental save must state, from the reservation and the case.
@@ -621,7 +624,7 @@ export async function buildApiTools(
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
   /** The payment Emirates Post opened on their gateway, from either save. */
-  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null; amount?: number | null; openedAt?: string | null; paidAt?: string | null } | null;
+  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null; amount?: number | null; openedAt?: string | null; gatewayOrderId?: string | null; paidAt?: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -683,7 +686,7 @@ export async function buildApiTools(
    * A rental gets here through a hold; a guest renewal has no hold at all. Kept
    * apart from the hold so both can find it.
    */
-  let gatewayPayment: { url: string; reference: string; orderNo: string | null; amount?: number | null; openedAt?: string | null; paidAt?: string | null } | null =
+  let gatewayPayment: { url: string; reference: string; orderNo: string | null; amount?: number | null; openedAt?: string | null; gatewayOrderId?: string | null; paidAt?: string | null } | null =
     opts.initialGatewayPayment
       ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null, paidAt: opts.initialGatewayPayment.paidAt ?? null }
       : null;
@@ -2106,6 +2109,9 @@ export async function buildApiTools(
             orderNo: p?.orderNo ? String(p.orderNo) : p?.orderNumber ? String(p.orderNumber) : null,
             amount: Number.isFinite(minor) && minor > 0 && /^[A-Z]{3}$/.test(cur) ? minor / 100 : null,
             openedAt: new Date().toISOString(),
+            // The gateway's own order id, so a refusal can be asked about
+            // directly instead of being reported as "not come through yet".
+            gatewayOrderId: String(g?.niOrderResult?._id ?? "").replace(/^urn:order:/, "") || null,
           };
         }
       } catch {
@@ -2165,6 +2171,36 @@ export async function buildApiTools(
           if (lastHold) lastHold = { ...lastHold, paidAt: lastHold.paidAt ?? new Date().toISOString() };
           if (gatewayPayment) gatewayPayment = { ...gatewayPayment, paidAt: gatewayPayment.paidAt ?? new Date().toISOString() };
         } else if (p && p.isPaymentSuccess === false) {
+          // Ask the gateway what it actually did. "paymentStatus 2" covers a
+          // declined card and a payment nobody has attempted, and telling a
+          // customer whose card was refused to "try the payment page again"
+          // sends them round the same loop with the same card.
+          const gw = opts.gateway && gatewayPayment?.gatewayOrderId
+            ? await gatewayOrderState({ ...opts.gateway, orderId: gatewayPayment.gatewayOrderId }).catch(() => null)
+            : null;
+          if (gw?.paid) {
+            // The gateway took the money and the backend has not caught up.
+            res = {
+              ...res,
+              result:
+                res.result +
+                `\n\nTHE GATEWAY SAYS THIS IS PAID${gw.card ? ` (${gw.card})` : ""} AND EMIRATES POST HAS NOT RECORDED IT YET. The customer HAS been charged. Do not ask them to pay again under any circumstances, and do not offer the payment link. Say the payment went through and is still being recorded, give them the order number, and offer a callback so it can be reconciled.`,
+            };
+          } else if (gw && !gw.untouched) {
+            res = {
+              ...res,
+              result:
+                res.result +
+                `\n\nTHE CARD WAS REFUSED AT THE GATEWAY. N-Genius reports this attempt as ${gw.state}${gw.card ? ` on ${gw.card}` : ""}${gw.reason ? ` — ${gw.reason}` : ""}. That is a bank decline, not a fault on Emirates Post's side and not something the customer did wrong. Tell them the card was declined, say plainly that nothing has been charged, and offer to open the payment page again SO THEY CAN USE A DIFFERENT CARD — retrying the same card gets the same answer. Their reservation still stands.`,
+            };
+          } else if (gw?.untouched) {
+            res = {
+              ...res,
+              result:
+                res.result +
+                "\n\nNO PAYMENT HAS BEEN ATTEMPTED ON THIS ORDER. The gateway has no attempt against it at all, so the customer has not finished on the payment page — they have not been charged and nothing has failed. Ask them to complete it on the page that is already open, and check again when they say they are done.",
+            };
+          }
           // "YOU HAVE NOT BEEN CHARGED" IS NOT OURS TO SAY.
           //
           // 4 Sep: a customer completed the payment, we checked 42 seconds later,
