@@ -6,8 +6,11 @@
  * 1. The licensing journeys become chargeable through the same Network
  *    International gateway NXN uses. Temporary, until EPGL has its own.
  *
- * 2. They declare a 1% "Admin processing fees", charged ON TOP: a 100,000
- *    licence fee is taken as 101,000. Confirmed by the client in those words.
+ * 2. THE 1% IS OFF. It was declared on 3 Sep -- "Admin processing fees", charged
+ *    on top, 100,000 taken as 101,000 -- and removed on 4 Sep at the client's
+ *    instruction: the fee is 150,000 flat, with nothing added. Pass --fee-percent
+ *    to put it back rather than editing this file, since the reasoning that
+ *    produced it (their own payment process map) has not changed.
  *
  * WHY THE FEE IS UNCONDITIONAL HERE. Their process map has two payment routes,
  * and only the gateway one carries the fee -- the VIBAN route, where Finance
@@ -85,11 +88,20 @@ function amount(): number | null {
   return v;
 }
 
-const PROCESSING_FEE = {
+/** Off unless --fee-percent says otherwise. */
+function feePercent(): number | null {
+  const i = process.argv.indexOf("--fee-percent");
+  if (i === -1) return null;
+  const v = Number(process.argv[i + 1]);
+  if (!Number.isFinite(v) || v <= 0) throw new Error(`--fee-percent must be a positive number, got "${process.argv[i + 1]}"`);
+  return v;
+}
+
+const PROCESSING_FEE = (percent: number) => ({
   key: "admin_processing_fee",
   label: { en: "Admin processing fees", ar: "رسوم المعالجة الإدارية" },
-  percent: 1,
-};
+  percent,
+});
 
 function outletRef(sandbox: boolean): string {
   const i = process.argv.indexOf("--outlet-ref");
@@ -160,7 +172,12 @@ async function main() {
   let changed = 0;
   for (const j of def.journeys) {
     if (!JOURNEYS.includes(j.key)) continue;
-    const sub = { ...(j.submission ?? {}), currency: "AED", processingFee: PROCESSING_FEE } as Record<string, unknown>;
+    const sub = { ...(j.submission ?? {}), currency: "AED" } as Record<string, unknown>;
+    const pct = feePercent();
+    // Removed rather than left behind: a stale processingFee on the journey would
+    // keep charging a percentage nobody asked for, silently.
+    if (pct === null) delete sub.processingFee;
+    else sub.processingFee = PROCESSING_FEE(pct);
     if (REQUIRE_PAYMENT) sub.requiresPayment = true;
     const fee = amount();
     if (fee !== null) sub.amount = fee;
@@ -174,10 +191,11 @@ async function main() {
     // that changed nothing teaches you to stop reading its output.
     const same = JSON.stringify(j.submission ?? {}) === JSON.stringify(sub);
     j.submission = sub;
-    if (same) { console.log(`  (already) ${j.key}: 1% ${PROCESSING_FEE.label.en}`); continue; }
+    if (same) { console.log(`  (already) ${j.key}: amount ${sub.amount ?? "—"} ${sub.currency}, ${pct === null ? "no fee" : `${pct}% fee`}`); continue; }
     changed++;
     console.log(
-      `  + ${j.key}: 1% ${PROCESSING_FEE.label.en}` +
+      `  + ${j.key}: amount ${sub.amount ?? "—"} ${sub.currency}, ` +
+        (pct === null ? "no processing fee" : `${pct}% processing fee`) +
         (REQUIRE_PAYMENT ? ", requiresPayment true" : `, requiresPayment left as ${String(sub.requiresPayment)} — pass --require-payment to charge`)
     );
   }

@@ -55,9 +55,10 @@ const GUIDANCE =
   `and is the only figure that will actually be charged. Quoting a number from memory and then charging a different ` +
   `one is worse than saying nothing: the customer has been told a price that is not the price. Until the tool has ` +
   `returned, say only that a fee applies and that you will bring up the exact amount. ` +
-  `\n\nDo NOT work out the total yourself. request_payment returns the figure to quote and it already includes the ` +
-  `1% Admin processing fees on top of the licence fee — quote exactly what it returns, and name the fee as its own ` +
-  `line so it is never a surprise. Never call request_payment before the save tool has returned a reference: the ` +
+  `\n\nDo NOT work out the total yourself. request_payment returns the figure to quote, already complete — quote ` +
+  `exactly what it returns and add nothing to it. If it names any fee alongside the licence fee, show that as its ` +
+  `own line; if it names none, there is none, and inventing a processing or admin fee tells the customer they are ` +
+  `paying something they are not. Never call request_payment before the save tool has returned a reference: the ` +
   `payment is reported to Salesforce against that reference, and a payment taken first has nothing to attach to.`;
 
 interface Journey { key: string; guidance?: string }
