@@ -10,6 +10,7 @@ import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
+import { registrationFees, rememberFees } from "./registrationFees";
 import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
 export type EnvKey = "staging" | "production";
@@ -219,6 +220,30 @@ function auditableInput(input: unknown): unknown {
     return v;
   };
   return walk(input ?? {});
+}
+
+/**
+ * The box halls in a conversation's branch list, remembered across turns.
+ *
+ * The list is fetched in the turn the branches are shown; the customer picks one
+ * in the NEXT turn, by which time the annotated rows are long gone. That is why
+ * the hall notice never appeared for Naif: nothing that could recognise a hall
+ * still existed at the moment one was chosen. So the halls outlive their turn.
+ */
+const hallMemory = new Map<string, { at: number; halls: { officeId: string; name: string; alternative: string }[] }>();
+const HALL_TTL_MS = 2 * 60 * 60 * 1000;
+
+function rememberHalls(conversationId: string | undefined, halls: { officeId: string; name: string; alternative: string }[]) {
+  if (!conversationId) return;
+  if (hallMemory.size > 500) for (const [k, v] of hallMemory) if (Date.now() - v.at > HALL_TTL_MS) hallMemory.delete(k);
+  hallMemory.set(conversationId, { at: Date.now(), halls });
+}
+
+function recallHalls(conversationId: string | undefined) {
+  if (!conversationId) return [];
+  const hit = hallMemory.get(conversationId);
+  if (!hit || Date.now() - hit.at > HALL_TTL_MS) return [];
+  return hit.halls;
 }
 
 /** A priced line from Rental/Select, by service and (optionally) criteria. */
@@ -456,7 +481,9 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** PO Box halls in the branch list this turn, and where their keys are issued. */
-  getLastBranchHalls: () => { name: string; alternative: string }[];
+  getLastBranchHalls: () => { officeId: string; name: string; alternative: string }[];
+  /** The hall the customer chose, if the box lookup was made against one. */
+  getChosenHall: () => { name: string; alternative: string } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
@@ -563,7 +590,16 @@ export async function buildApiTools(
    * which is what guidance does under pressure, and why the map block beside it
    * is appended deterministically too.
    */
-  let lastBranchHalls: { name: string; alternative: string }[] = [];
+  let lastBranchHalls: { officeId: string; name: string; alternative: string }[] = recallHalls(opts.conversationId);
+  /**
+   * The hall the customer actually PICKED, if they picked one.
+   *
+   * Listing the notice for every hall in the emirate the moment the branch cards
+   * appear is noise: Emirates Post shows it when a hall is CHOSEN. Choosing is
+   * not a thing the model reports — but asking FreeBoxes for a hall's officeId
+   * is exactly what choosing it does, so that is the signal.
+   */
+  let chosenHall: { name: string; alternative: string } | null = null;
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -676,6 +712,46 @@ export async function buildApiTools(
           delete body.uniqueBoxId;
           input = { ...input, body };
         }
+      }
+    }
+
+    // A BOX WE ALREADY HOLD IS NOT A BOX SOMEONE ELSE TOOK.
+    //
+    // 4 Sep: box 902015 was reserved at 13:16:21 (hold 260612174, AED 765). The
+    // customer tapped "Pay with my saved Visa", the model called Select AGAIN on
+    // the same box 26 seconds later, and Emirates Post answered 108 BOX_NOT_FREE
+    // — correctly, because WE were holding it. The chat told the customer someone
+    // else had just taken their box and walked them back to the box list, with
+    // the reservation they had already been quoted still live behind them. The
+    // same shape ended the corporate flow.
+    //
+    // Selecting a box twice is not a second reservation; the reservation already
+    // in hand IS the answer. Serve it, and never spend the customer's box on a
+    // call that can only refuse it.
+    if (/rental_select$/i.test(toolName) && lastHold) {
+      const body = (input?.body ?? {}) as Record<string, unknown>;
+      const asked = String(body.uniqueBoxID ?? body.uniqueBoxId ?? "");
+      const bundle = String(body.bundleId ?? "");
+      const live = !lastHold.expiresAt || Date.parse(
+        lastHold.expiresAt.endsWith("Z") || /[+-]\d\d:?\d\d$/.test(lastHold.expiresAt)
+          ? lastHold.expiresAt
+          : `${lastHold.expiresAt}Z`
+      ) > Date.now();
+      if (asked && asked === lastHold.uniqueBoxId && (!bundle || bundle === lastHold.bundleId) && live) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "rental_select_reused_hold",
+          payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: input ?? {}, response: `hold ${lastHold.reference} already covers box ${asked}` },
+        }).catch(() => {});
+        return {
+          result:
+            `This box is ALREADY RESERVED BY THIS CONVERSATION — reservation ${lastHold.reference}` +
+            (typeof lastHold.amount === "number" ? `, total AED ${lastHold.amount.toFixed(2)}` : "") +
+            (lastHold.expiresAt ? `, held until ${lastHold.expiresAt}` : "") +
+            ". Emirates Post was NOT called again: reserving a box a second time answers 108 BOX_NOT_FREE because the first reservation is holding it, and relaying that told a customer their own box had been taken by someone else. Nothing has gone wrong and the customer has lost nothing. Do NOT tell them the box is unavailable, do NOT offer them another number, and do NOT reserve anything again — continue from this reservation straight to Rental/Save.",
+        };
       }
     }
 
@@ -1263,9 +1339,15 @@ export async function buildApiTools(
     // value is captured here and written into the save below; a reference is not
     // something to be recalled, it is something to be held onto.
     if (!res.isError && /rental_select$/i.test(toolName)) {
+      // The registration fee for this bundle, in this environment, straight from
+      // Emirates Post — so the NEXT customer sees the amount on the bundle card
+      // instead of a promise that it will be shown later.
+      rememberFees(toolName, res.result);
+      let lastHoldDetails: unknown = null;
       try {
         const body = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const p = body?.payload ?? body;
+        lastHoldDetails = p?.priceDetails ?? null;
         const ref = p?.subscriptionReferenceNumber;
         if (ref) {
           lastHold = {
@@ -1308,10 +1390,14 @@ export async function buildApiTools(
         // price against the bundle's own table: the one whose price leaves a
         // plausible registration fee. With one term priced there is no ambiguity.
         const terms = bundlePriceBook.get(lastHold.bundleId ?? "") ?? [];
-        const regFee = terms
-          .map((t) => registrationFee(lastHold!.amount, t.price))
-          .filter((v): v is number => v !== null)
-          .sort((a, b) => a - b)[0] ?? null;
+        // Emirates Post itemises the fee as a NEW-REG line. Read it; the
+        // subtraction below is only the fallback for a response that omits it.
+        const regFee =
+          priceOf(lastHoldDetails, "NEW-REG") ??
+          (terms
+            .map((t) => registrationFee(lastHold!.amount, t.price))
+            .filter((v): v is number => v !== null)
+            .sort((a, b) => a - b)[0] ?? null);
         res = {
           ...res,
           result:
@@ -1470,6 +1556,8 @@ export async function buildApiTools(
       // for all of them -- AED 300 whether the customer picked one year or three.
       // The per-period table is built here so there is nothing to infer.
       let periodNote = "";
+      /** The bundle ids in THIS response — not every one ever looked up. */
+      const idsThisCall: string[] = [];
       // Kept so the registration fee can be derived at Select: it is the hold
       // minus the published price of the term the customer chose, and nothing
       // else states it.
@@ -1481,6 +1569,7 @@ export async function buildApiTools(
             .map((bn) => {
               const periods = bundlePeriods(bn);
               const id = asStr(bn.bundle_Id);
+              if (id) idsThisCall.push(id);
               if (id && periods.length) bundlePriceBook.set(id, periods);
               if (periods.length < 2) return null;
               const savings = periodSavings(periods);
@@ -1500,14 +1589,34 @@ export async function buildApiTools(
       } catch {
         /* an unreadable list just means no period table; the fields are still in the payload */
       }
+      // THE FEE, WITH ITS AMOUNT.
+      //
+      // Emirates Post asked three times for the figure to sit under the price,
+      // and until now the honest answer was that nothing prices it before the
+      // box is reserved. It is priced afterwards, though — the NEW-REG line of
+      // every Select — so the amount comes from the Selects this deployment has
+      // already made, per bundle, in this environment. A bundle nobody has
+      // rented yet still says the fee is shown before payment; it stops saying
+      // that the moment one rental goes through.
+      const selectTool = [...map.keys()].find((t) => /rental_select$/i.test(t));
+      const feeBook = selectTool ? await registrationFees(agentId, selectTool) : new Map<string, number>();
+      const known = idsThisCall
+        .map((id) => (feeBook.has(id) ? `${id} = AED ${feeBook.get(id)!.toFixed(2)}` : null))
+        .filter(Boolean);
+      const feeNote = known.length
+        ? "\n\nTHE REGISTRATION FEE FOR THESE BUNDLES, from Emirates Post's own pricing: " +
+          known.join(", ") +
+          ". Put the amount in `pricenote` on that bundle's card, exactly as `pricenote: + AED <amount> one-time registration fee`, with no rounding and no arithmetic of your own. A bundle NOT named in that list has no figure yet — give it `pricenote: + one-time registration fee, shown in full before you pay` and do not borrow another bundle's number for it."
+        : "\n\nNo registration fee has been observed for these bundles yet, so give every card `pricenote: + one-time registration fee, shown in full before you pay` and state no amount.";
       res = {
         ...res,
         result:
           res.result +
           periodNote +
-          "\n\nbundle_Price is the TWELVE-MONTH RENTAL ONLY. Every new rental also carries a one-time registration fee, which is not in this response and cannot be looked up until the box is reserved. Put the rental in `price` and the fee in `pricenote`, which renders as small print DIRECTLY UNDER the price where it belongs:\n" +
-          "```cards\n- title: MyBox\n  price: AED 300 / year\n  pricenote: + one-time registration fee, shown in full before you pay\n  desc: Dedicated mailbox at an Emirates Post branch.\n```\n" +
-          "Do NOT put it in `badge` — that renders as a large pill above the product name, which shouts a footnote louder than the price it qualifies. Do NOT put it in `desc`, which is for what the bundle IS. Do NOT state an amount for it here and do NOT add one to the price: the figure is not knowable until the box is reserved, and it is stated in full at the pre-payment summary. Never leave it unmentioned — the customer would otherwise meet a total higher than the card with no warning.",
+          "\n\nbundle_Price is the TWELVE-MONTH RENTAL ONLY. Every new rental also carries a one-time registration fee, which is not in this response. Put the rental in `price` and the fee in `pricenote`, which renders as small print DIRECTLY UNDER the price where it belongs:\n" +
+          "```cards\n- title: MyBox\n  price: AED 300 / year\n  pricenote: + AED 70 one-time registration fee\n  desc: Dedicated mailbox at an Emirates Post branch.\n```\n" +
+          "Do NOT put it in `badge` — that renders as a large pill above the product name, which shouts a footnote louder than the price it qualifies. Do NOT put it in `desc`, which is for what the bundle IS. Do NOT add the fee to the price: the price line is the rental, the fee is its own line, and the pre-payment summary itemises both. Never leave it unmentioned — the customer would otherwise meet a total higher than the card with no warning." +
+          feeNote,
       };
     }
     // Tell the customer which branches actually have boxes.
@@ -1563,9 +1672,11 @@ export async function buildApiTools(
           (b as Record<string, unknown>).payload = branches;
           const halls = branches.filter((x) => x.isPoBoxHall);
           lastBranchHalls = halls.map((h) => ({
+            officeId: String(h.officeId ?? ""),
             name: String(h.nameEn ?? h.officeId ?? ""),
             alternative: String(h.alternativeBranchEn ?? ""),
           }));
+          rememberHalls(opts.conversationId, lastBranchHalls);
           if (annotated) {
             res = {
               ...res,
@@ -1682,6 +1793,30 @@ export async function buildApiTools(
     if (res.isError && /rental_select$/i.test(toolName)) {
       const asked = String(((input?.body ?? {}) as Record<string, unknown>).uniqueBoxID ?? "");
       if (asked && lastHold && lastHold.uniqueBoxId !== asked) lastHold = null;
+      // 108 says the box is not free. It does NOT say who has it, and the chat
+      // filled that in — "it may have just been taken by another customer" —
+      // which is a story about a competitor for a box that is usually held by an
+      // abandoned attempt, or by us. Say what is known.
+      // A refusal that names no reason. Corporate rentals hit this on 4 Sep:
+      // `{"errorDetails":{},"payload":null}` — and the chat turned it into "Al
+      // Barsha Post Office has no available boxes at the moment", which the
+      // backend never said. An unexplained refusal has to STAY unexplained.
+      if (/"errorDetails"\s*:\s*\{\s*\}/.test(res.result)) {
+        res = {
+          ...res,
+          result:
+            res.result +
+            "\n\nEmirates Post refused this reservation and gave NO reason: the error object is empty. You therefore do not know why, so do not supply a reason. In particular do NOT say the branch has no boxes, that the branch is full, or that someone else took the number — none of that is in this response, and the branch listing said otherwise. Tell the customer this number could not be reserved and offer the other numbers from the same branch; if a second number fails the same way, stop trying, say the reservation service is not accepting this booking right now, and offer a callback. Never re-run the branch availability lookup to explain a failed reservation — an empty list from a lookup made afterwards is a different question, not the answer to this one.",
+        };
+      }
+      if (/BOX_NOT_FREE|BOX IS NOT AVAILABLE/i.test(res.result)) {
+        res = {
+          ...res,
+          result:
+            res.result +
+            "\n\nThis box cannot be reserved. Emirates Post does not say WHY, so do not say why either — in particular do NOT tell the customer another customer just took it, which is a guess that reads as bad luck they caused. Say the number is not available to reserve, apologise once, and offer the remaining numbers at the same branch. If this is a box you already reserved for them in this conversation, their reservation still stands and nothing needs redoing.",
+        };
+      }
     }
     // Capture a freshly-minted session token from a login/token op for reuse.
     if (!res.isError && isAuthOperation(entry.op)) {
@@ -1729,6 +1864,14 @@ export async function buildApiTools(
           `and if the customer asks whether these are live numbers, say plainly that this is a test environment.`,
         isError: false,
       };
+    }
+    // Which branch did they choose? Asking for the boxes at a hall IS choosing it.
+    if (/freeboxes/i.test(toolName)) {
+      const inp = (input ?? {}) as Record<string, unknown>;
+      const loc = asStr(inp.LocationId ?? inp.locationId ?? inp.OfficeId ?? inp.officeId);
+      const hall = loc ? lastBranchHalls.find((h) => h.officeId === loc) : undefined;
+      if (hall) chosenHall = { name: hall.name, alternative: hall.alternative };
+      else if (loc) chosenHall = null;
     }
     rememberExpiry(toolName, res);
     if (cacheKey && !res.isError) writeCache(cacheKey, res);
@@ -1788,6 +1931,7 @@ export async function buildApiTools(
     getCapturedToken: () => captured,
     getLastBranchQuery: () => lastBranchQuery,
     getLastBranchHalls: () => lastBranchHalls,
+    getChosenHall: () => chosenHall,
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
     getGatewayPayment: () => gatewayPayment,

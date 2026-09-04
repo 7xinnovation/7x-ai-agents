@@ -313,6 +313,9 @@ function ChatPay({
  * takes over when the list is genuinely long, and it keeps everything the card
  * carried: the badge, the hours, and whether the option can be chosen at all.
  */
+/** Above this many buttons the list stops being a set of choices and becomes a pile. */
+const BUTTON_LIST_MAX = 12;
+
 const SELECT_STR = {
   en: { count: (n: number) => `${n} to choose from`, search: "Search", empty: "Nothing matches that." },
   ar: { count: (n: number) => `${n} خيارات متاحة`, search: "بحث", empty: "لا توجد نتائج مطابقة." },
@@ -408,6 +411,81 @@ function ChatCardSelect({
   );
 }
 
+/**
+ * A dropdown, for a list too long to be buttons.
+ *
+ * The corporate journey asks which authority issued the trade licence, and there
+ * are around sixty of them. Rendered as chips they filled the screen twice over
+ * before the customer had read the question — so the whole list loaded, pushed
+ * the conversation off the top, and asked them to hunt. A native <select> is one
+ * line, groups by emirate, and on a phone opens the platform's own picker with
+ * type-ahead already in it.
+ */
+function ChatSelect({
+  options, title, placeholder, confirmLabel, onSelect,
+}: {
+  options: { label: string; group?: string }[];
+  title?: string;
+  placeholder: string;
+  confirmLabel: string;
+  onSelect: (text: string) => void;
+}) {
+  const [value, setValue] = React.useState("");
+  const [sent, setSent] = React.useState(false);
+  if (!options.length) return null;
+  // Preserve the order the groups arrived in; an alphabetical re-sort would
+  // separate an emirate's authorities from its heading.
+  const groups: { name: string; items: string[] }[] = [];
+  for (const o of options) {
+    const name = o.group ?? "";
+    const last = groups[groups.length - 1];
+    if (last && last.name === name) last.items.push(o.label);
+    else groups.push({ name, items: [o.label] });
+  }
+  const grouped = groups.some((g) => g.name);
+  return (
+    <div className="dlg-select">
+      {title ? <div className="dlg-select-title">{title}</div> : null}
+      <div className="dlg-select-row">
+        <select
+          className="dlg-select-input"
+          value={value}
+          disabled={sent}
+          onChange={(e) => setValue(e.target.value)}
+          aria-label={title ?? placeholder}
+        >
+          <option value="">{placeholder}</option>
+          {grouped
+            ? groups.map((g) =>
+                g.name ? (
+                  <optgroup key={g.name} label={g.name}>
+                    {g.items.map((l) => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </optgroup>
+                ) : (
+                  g.items.map((l) => (
+                    <option key={l} value={l}>{l}</option>
+                  ))
+                )
+              )
+            : options.map((o) => (
+                <option key={o.label} value={o.label}>{o.label}</option>
+              ))}
+        </select>
+        <button
+          type="button"
+          className="dlg-select-confirm"
+          disabled={!value || sent}
+          onClick={() => { setSent(true); onSelect(value); }}
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ChatToggles({
   items, title, confirmLabel, variant, defaultOn, onSelect,
 }: {
@@ -436,7 +514,7 @@ function ChatToggles({
   // CHECKBOXES NEVER DO: that variant is the terms-and-conditions acknowledgment,
   // and a pre-ticked acknowledgment is not an acknowledgment.
   const [on, setOn] = React.useState<Record<string, boolean>>(() =>
-    defaultOn && !checkbox ? Object.fromEntries(items.map((it) => [it.key, true])) : {}
+    defaultOn ? Object.fromEntries(items.filter((it) => !isCheck(it)).map((it) => [it.key, true])) : {}
   );
   if (!items.length) return null;
   const allOn = (required.length ? required : items).every((it) => on[it.key]);
@@ -706,7 +784,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
-    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary|map|locate|pay)?\s*$/);
+    const fence = line.match(/^\s*```\s*(cards|upload|buttons|toggles|summary|map|locate|pay|select)?\s*$/);
     if (fence) {
       const isCards = fence[1] === "cards";
       const isUpload = fence[1] === "upload";
@@ -716,6 +794,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
       const isMap = fence[1] === "map";
       const isLocate = fence[1] === "locate";
       const isPay = fence[1] === "pay";
+      const isSelect = fence[1] === "select";
       i++;
       const body: string[] = [];
       while (i < lines.length && !/^\s*```\s*$/.test(lines[i]!)) { body.push(lines[i]!); i++; }
@@ -765,9 +844,57 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
           );
         continue;
       }
+      if (isSelect) {
+        // `title:` / `placeholder:` / `confirm:` lines, `group: <heading>` to open
+        // a section, and `- Label` for each option.
+        let sTitle: string | undefined;
+        let sPlaceholder = "Choose an option";
+        let sConfirm = "Continue";
+        let sGroup: string | undefined;
+        const sOptions: { label: string; group?: string }[] = [];
+        for (const l of body) {
+          const item = l.match(/^\s*-\s+(.*\S)\s*$/);
+          const meta = l.match(/^\s*(title|placeholder|confirm|group)\s*:\s*(.+?)\s*$/i);
+          if (item) sOptions.push({ label: item[1]!.trim(), group: sGroup });
+          else if (meta) {
+            const v = meta[2]!.trim();
+            if (/^title$/i.test(meta[1]!)) sTitle = v;
+            else if (/^placeholder$/i.test(meta[1]!)) sPlaceholder = v;
+            else if (/^group$/i.test(meta[1]!)) sGroup = v;
+            else sConfirm = v;
+          }
+        }
+        if (onSelect && sOptions.length)
+          nodes.push(
+            <ChatSelect
+              key={k++}
+              options={sOptions}
+              title={sTitle}
+              placeholder={sPlaceholder}
+              confirmLabel={sConfirm}
+              onSelect={onSelect}
+            />
+          );
+        continue;
+      }
       if (isButtons) {
         // Each `- Label` line is an action button; tapping sends that label.
         const labels = body.map((l) => l.match(/^\s*-\s+(.*\S)\s*$/)).filter(Boolean).map((m) => m![1]!.trim());
+        // The same wall the cards had. Sixty licensing authorities as chips
+        // filled the screen twice and pushed the question out of sight, so a
+        // long run of buttons collapses into the searchable dropdown too — the
+        // customer types two letters instead of hunting through the pile.
+        if (onSelect && labels.length > BUTTON_LIST_MAX) {
+          nodes.push(
+            <ChatCardSelect
+              key={k++}
+              cards={labels.map((l) => ({ title: l, attrs: [] }))}
+              locale={uploadCtx?.locale}
+              onSelect={onSelect}
+            />
+          );
+          continue;
+        }
         if (onSelect && labels.length) nodes.push(<ChatButtons key={k++} labels={labels} onSelect={onSelect} />);
         continue;
       }

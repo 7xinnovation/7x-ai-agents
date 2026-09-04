@@ -80,10 +80,28 @@ Rental/Save          subscriptionReferenceNumber, totalAmount,
 - `LocationId` means two different things: the branch's `officeId` for MyBox, the
   **emirate code** for MyHome and MyHome Instant. The wrong one returns an empty
   list, not an error, so every branch looked sold out.
-- `LocationId` is the branch's own `officeId`, not `mainOfficeId` — Naif is
-  `214` / `209`, and `209` returns an empty list rather than an error.
+- `LocationId` is the branch's own `officeId`, not `mainOfficeId`. Where the two
+  differ the location is a box hall (`155` / `101`, New Suoq Complex), and the
+  `mainOfficeId` returns an empty list rather than an error.
 - `Rental/Save` takes **~17s**; `Select` under 1s. Expected?
 - `FreeBoxes` returns 401 with the API key alone — it needs a customer session.
+
+**One open question (4 Sep).** A corporate `Rental/Select` is refused with an
+empty error object, so we cannot tell the customer why:
+
+```
+POST /api/Rental/Select
+{ "bundleId": "LI", "uniqueBoxID": "2450404",
+  "poBoxExpiryDate": "2027-09-03T00:00:00+00:00", "physicalBoxRequired": true }
+→ 400 {"errorDetails":{},"payload":null}
+```
+
+`2450404` came from `FreeBoxes?BundleId=LI&LocationId=244` in the same journey,
+and the identical shape with `bundleId=IN` succeeds on boxes from that same list.
+A personal Select that cannot proceed answers `108 BOX_NOT_FREE`, which we can
+relay; this one says nothing at all. **Does a corporate rental need something on
+the session we are not sending — the licence, or an approved company profile —
+and can the refusal carry a code?** Staging, 4 Sep 13:32 UTC.
 
 *We previously raised `157 ERROR_GETTING_HOLD_DETAILS` with you. That was ours — an
 invented reference, a stale hold, and the partial `billingDetail` above. No action

@@ -26,6 +26,7 @@ import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/
 import { addressFromPin } from "@/lib/epGeocode";
 import { savedCards, describeCard } from "@/lib/epSavedCards";
 import { payFenceGuard } from "@/lib/payFence";
+import { internalIdFilter } from "@/lib/internalIds";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
@@ -1469,6 +1470,7 @@ export async function POST(req: NextRequest) {
         )
           ? payFenceGuard(() => apiTools.getGatewayPayment()?.url ?? apiTools.getLastHold()?.paymentUrl ?? null)
           : null;
+        const idFilter = internalIdFilter();
         let citedThisTurn = false;
         let submittedRef: string | null = null;
 
@@ -1501,17 +1503,19 @@ export async function POST(req: NextRequest) {
             send({ type: "error", message: customerFacingError(ev.message, body.locale) });
             continue;
           }
-          if (payGuard && ev.type === "text") {
-            const out = payGuard.push(ev.delta);
+          if (ev.type === "text") {
+            // Two streaming filters in a row: the pay fence rewrites the payment
+            // URL, and the id filter takes the backend's own keys back out of the
+            // prose ("Naif Post Office (officeId: 214) confirmed").
+            const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
+            const out = idFilter.push(piped);
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            if (payGuard) {
-              const rest = payGuard.flush();
-              if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
-            }
+            const held = idFilter.push(payGuard ? payGuard.flush() : "") + idFilter.flush();
+            if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
           // Standard analytics attributes shared by every event this turn.
@@ -1521,12 +1525,7 @@ export async function POST(req: NextRequest) {
             language: body.locale,
             journeyType: finalState.journeyKey ?? undefined,
           };
-          if (ev.type === "text") {
-            // Accumulate the full streamed reply (including text from rounds
-            // before tool calls + the inserted separators) so the persisted
-            // message matches what the user saw, not just the final round.
-            if (!payGuard) finalText += ev.delta;
-          } else if (ev.type === "case") finalState = ev.state;
+          if (ev.type === "case") finalState = ev.state;
           else if (ev.type === "done") {
             finalState = ev.state;
             // Fall back to the round's text only if nothing was streamed.
@@ -1613,12 +1612,18 @@ export async function POST(req: NextRequest) {
         // the turn is doing. So it is appended here whenever the branch list this
         // turn contained a hall and the reply did not already carry the notice,
         // the same way the map block beside it is.
-        const halls = apiTools.getLastBranchHalls();
-        if (halls.length && /```\s*cards/i.test(finalText) && !/Important Notice/i.test(finalText)) {
+        // WHEN it appears matters as much as whether. Listing every hall in the
+        // emirate on the branch cards buried the notice under branches nobody had
+        // picked; Emirates Post shows it when a hall is CHOSEN. Choosing one is
+        // exactly what asking for its box numbers means, so that is the trigger —
+        // and the fallback still covers the cards, in case they never get that far.
+        const chosen = apiTools.getChosenHall();
+        const halls = chosen ? [chosen] : [];
+        if (halls.length && !/Important Notice/i.test(finalText)) {
           const alt = halls.find((h) => h.alternative)?.alternative ?? "the designated operational branch";
           const named = halls.map((h) => h.name).filter(Boolean).join(", ");
           const notice =
-            `\n\n> **Important Notice** — ${named || "One of these locations"} ` +
+            `\n\n> **Important Notice** — ${named || "This location"} ` +
             `${halls.length > 1 ? "operate" : "operates"} as a P.O. Box Hall/complex and ` +
             `${halls.length > 1 ? "provide" : "provides"} P.O. Box access only.\n` +
             ">\n" +

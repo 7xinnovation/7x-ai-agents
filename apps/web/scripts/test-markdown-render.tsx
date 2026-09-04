@@ -37,6 +37,10 @@ const cases: [string, string, string[]][] = [
   ["locate block custom label", "```locate\nlabel: Share company location\n```", ["Share company location"]],
   ["buttons block renders actions", "```buttons\n- Apply for a new courier license\n- Renew an existing license\n```", ["dlg-chat-btn", "Apply for a new courier license"]],
   ["toggles checkbox with markdown link label", "```toggles\nstyle: checkbox\n- terms_accepted: I agree to the [Terms](https://example.com/tc)\nconfirm: Agree\n```", ["dlg-toggles", "href=\"https://example.com/tc\"", "dlg-checkbox-box"]],
+  ["toggles: default on ticks the switches, never the checkbox", "```toggles\ntitle: Before payment\ndefault: on\ncheckboxes: terms_accepted\n- save_card_consent: Save my card\n- auto_renew_consent: Renew automatically\n- terms_accepted: I accept\nconfirm: Proceed to payment\n```", ["aria-checked=\"true\"", "dlg-checkbox-box"]],
+  ["select block renders one grouped dropdown", "```select\ntitle: Which authority?\nplaceholder: Select the issuing authority\ngroup: Dubai\n- Dubai Department of Economy & Tourism\ngroup: Ajman\n- Ajman Free Zone\nconfirm: Continue\n```", ["dlg-select-input", "optgroup", "Select the issuing authority", "Continue"]],
+  ["a long buttons list collapses into the dropdown", "```buttons\n" + Array.from({ length: 13 }, (_, i) => `- Authority ${i + 1}`).join("\n") + "\n```", ["dlg-cardselect", "to choose from"]],
+  ["a short buttons list stays as buttons", "```buttons\n- Yes\n- No\n```", ["dlg-chat-btn"]],
   ["cards block renders options", "```cards\n- title: MyHome\n  price: AED 695 / year\n```", ["dlg-card-opt", "MyHome", "AED 695 / year"]],
   ["map block renders browse CTA", "```map\nemirate: DXB\nbundle: MYHOME3\n```", ["dlg-map"]],
   // Twenty-one branches as cards filled several screens before the question.
