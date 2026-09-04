@@ -185,9 +185,12 @@ async function main() {
     settings: {
       baseUrl,
       outletRef: ref,
-      // Recorded because the client gave it and someone will ask. Nothing sends
-      // it: the adapter keys everything on outletRef.
-      merchantId: MERCHANT_ID,
+      // Recorded on a LIVE binding only. Nothing sends it -- the adapter keys
+      // everything on outletRef -- but a production merchant id sitting in a
+      // sandbox config is a question someone has to answer every time they see
+      // it. It was stripped from staging once already and this script put it
+      // straight back, because it rewrites settings wholesale.
+      ...(sandbox ? {} : { merchantId: MERCHANT_ID }),
       // Derived from the ENVIRONMENT, not from PUBLIC_APP_URL. Run from a laptop
       // that variable is usually unset, and the fallback sent a customer paying
       // on staging back to the production host -- a return URL that looks right
@@ -227,10 +230,19 @@ async function main() {
         (REQUIRE_PAYMENT ? ", requiresPayment true" : `, requiresPayment left as ${String(sub.requiresPayment)} — pass --require-payment to charge`)
     );
   }
-  if (!changed) throw new Error(`none of ${JOURNEYS.join(", ")} found on ${SLUG}`);
+  // "No journey changed" is not "the journeys are missing". Conflating them threw
+  // on a re-run where everything was already correct -- and the throw skipped the
+  // write, so a settings-only change (the merchant id removal) never landed.
+  const missing = JOURNEYS.filter((k) => !def.journeys.some((j) => j.key === k));
+  if (missing.length) throw new Error(`journeys not found on ${SLUG}: ${missing.join(", ")}`);
 
-  console.log(`\ngateway: ${baseUrl}\noutlet:  ${ref}\nmerchant: ${MERCHANT_ID} (reference only)`);
+  console.log(
+    `\ngateway: ${baseUrl}\noutlet:  ${ref}` +
+      (sandbox ? "\nmerchant: — not recorded on a sandbox binding" : `\nmerchant: ${MERCHANT_ID} (reference only)`)
+  );
   if (DRY) { console.log("\n--dry-run: nothing written."); return; }
+  // Written unconditionally: the payment binding above is rebuilt every run, so
+  // there is always something to persist even when no journey moved.
   await db.update(agents).set({ definition: def as never }).where(eq(agents.id, row.id));
   console.log("\nwritten.");
 }
