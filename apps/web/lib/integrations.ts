@@ -230,6 +230,9 @@ function auditableInput(input: unknown): unknown {
  * the hall notice never appeared for Naif: nothing that could recognise a hall
  * still existed at the moment one was chosen. So the halls outlive their turn.
  */
+/** How many times we have asked about one order's payment, so the answer stops repeating. */
+const paymentChecks = new Map<string, number>();
+
 const hallMemory = new Map<string, { at: number; halls: { officeId: string; name: string; alternative: string }[] }>();
 const HALL_TTL_MS = 2 * 60 * 60 * 1000;
 
@@ -491,7 +494,7 @@ export async function buildApiTools(
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
   /** The payment Emirates Post opened on their gateway, from either save. */
-  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null; paidAt?: string | null } | null;
+  getGatewayPayment: () => { url: string; reference: string; orderNo: string | null; amount?: number | null; paidAt?: string | null } | null;
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
@@ -553,7 +556,7 @@ export async function buildApiTools(
    * A rental gets here through a hold; a guest renewal has no hold at all. Kept
    * apart from the hold so both can find it.
    */
-  let gatewayPayment: { url: string; reference: string; orderNo: string | null; paidAt?: string | null } | null =
+  let gatewayPayment: { url: string; reference: string; orderNo: string | null; amount?: number | null; paidAt?: string | null } | null =
     opts.initialGatewayPayment
       ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null, paidAt: opts.initialGatewayPayment.paidAt ?? null }
       : null;
@@ -1719,10 +1722,17 @@ export async function buildApiTools(
         const p = b?.payload ?? b;
         const g = p?.paymentGateWayResponse ?? {};
         if (g.paymentUrl && g.referenceNumber) {
+          // What the gateway will actually ask for, in the gateway's own words.
+          // N-Genius states it in the minor unit: 67000 fils is AED 670.00. The
+          // chat card said AED 700 for this order because the model added up
+          // priceDetails and counted the first agent, whose line is Inclusive.
+          const minor = Number(g?.niOrderResult?.amount?.value);
+          const cur = String(g?.niOrderResult?.amount?.currencyCode ?? "AED");
           gatewayPayment = {
             url: String(g.paymentUrl),
             reference: String(g.referenceNumber),
             orderNo: p?.orderNo ? String(p.orderNo) : p?.orderNumber ? String(p.orderNumber) : null,
+            amount: Number.isFinite(minor) && minor > 0 && /^[A-Z]{3}$/.test(cur) ? minor / 100 : null,
           };
         }
       } catch {
@@ -1781,6 +1791,33 @@ export async function buildApiTools(
           // gateway payment carries it instead.
           if (lastHold) lastHold = { ...lastHold, paidAt: lastHold.paidAt ?? new Date().toISOString() };
           if (gatewayPayment) gatewayPayment = { ...gatewayPayment, paidAt: gatewayPayment.paidAt ?? new Date().toISOString() };
+        } else if (p && p.isPaymentSuccess === false) {
+          // "YOU HAVE NOT BEEN CHARGED" IS NOT OURS TO SAY.
+          //
+          // 4 Sep: a customer completed the payment, we checked 42 seconds later,
+          // Emirates Post answered isPaymentSuccess:false / amountPaid:0, and the
+          // chat told them they had not been charged and offered the button
+          // again. Half an hour later the answer was still the same, so the
+          // check was not premature — but nothing in that response describes the
+          // customer's CARD. It describes Emirates Post's record of this order.
+          // Those are different facts, and only the bank knows the first one.
+          const order = String(p?.orderNumber ?? gatewayPayment?.orderNo ?? "").trim();
+          const attempts = (paymentChecks.get(order || "?") ?? 0) + 1;
+          paymentChecks.set(order || "?", attempts);
+          res = {
+            ...res,
+            result:
+              res.result +
+              "\n\nEMIRATES POST HAS NOT RECORDED A PAYMENT AGAINST THIS ORDER. That is the whole of what this response says. It does NOT say the customer's card was untouched, and you must never tell them they have not been charged, that no money left their account, or that the payment definitely failed — a customer who has just paid reads that as us losing their money, and a bank authorisation we cannot see is not ours to rule out. Say that the payment has not reached Emirates Post against order " +
+              (order ? `${order}` : "this order") +
+              ", and that if their bank shows a charge they must NOT pay again." +
+              (attempts >= 2
+                ? " THIS IS ATTEMPT " +
+                  attempts +
+                  " AND THE ANSWER HAS NOT CHANGED. Stop offering the payment button: a second link for an order the gateway has already refused is how a customer ends up paying twice. Give them the order number, say Emirates Post's team will trace it, take a contact number and raise a callback."
+                : " Offer to check once more in a moment, and if it is still not recorded, stop and raise a callback with the order number rather than sending them back to the payment page.") +
+              " The reservation is still held, so nothing they have done is lost.",
+          };
         }
       } catch {
         /* an unreadable confirm leaves the purchase unconfirmed, which is the safe way round */

@@ -25,7 +25,20 @@ function heldTail(s: string): number {
   return 0;
 }
 
-export function payFenceGuard(expectedUrl: () => string | null) {
+export function payFenceGuard(
+  expectedUrl: () => string | null,
+  /**
+   * What the gateway will actually ask for.
+   *
+   * The URL was guarded from the start and the AMOUNT beside it was not, so on
+   * 4 Sep a card read "AED 700.00" over a payment page asking for AED 670 — the
+   * model had added up priceDetails and counted the first authorised agent,
+   * whose line comes back marked Inclusive. It is the same arithmetic that
+   * produced 450 for a 400 rental, and the customer meets it at the one moment
+   * they are about to hand over money. The figure is not the model's to write.
+   */
+  expectedAmount: () => number | null = () => null
+) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
 
@@ -35,8 +48,18 @@ export function payFenceGuard(expectedUrl: () => string | null) {
       return "\n_The payment link is not ready yet — the order still has to be created with Emirates Post._\n";
     }
     const has = /^\s*url\s*:\s*(\S+)\s*$/im.exec(block);
-    if (!has) return block.replace(/```pay/i, "```pay\nurl: " + url);
-    return has[1] === url ? block : block.replace(has[0], has[0].replace(has[1]!, url));
+    let out = !has
+      ? block.replace(/```pay/i, "```pay\nurl: " + url)
+      : has[1] === url
+        ? block
+        : block.replace(has[0], has[0].replace(has[1]!, url));
+    const amount = expectedAmount();
+    if (amount !== null && Number.isFinite(amount)) {
+      const line = `amount: AED ${amount.toFixed(2)}`;
+      const written = /^[ \t]*amount[ \t]*:.*$/im.exec(out);
+      out = written ? out.replace(written[0], line) : out.replace(/^([ \t]*url[ \t]*:.*)$/im, `$1\n${line}`);
+    }
+    return out;
   };
 
   const step = (): string => {

@@ -1468,7 +1468,12 @@ export async function POST(req: NextRequest) {
         const payGuard = (agent.definition.journeys ?? []).some(
           (j) => j.submission?.apiFlow?.saveTool && j.submission?.apiFlow?.confirmTool
         )
-          ? payFenceGuard(() => apiTools.getGatewayPayment()?.url ?? apiTools.getLastHold()?.paymentUrl ?? null)
+          ? payFenceGuard(
+              () => apiTools.getGatewayPayment()?.url ?? apiTools.getLastHold()?.paymentUrl ?? null,
+              // The gateway's own figure first; the hold's total is the fallback
+              // for a backend that does not echo the order back.
+              () => apiTools.getGatewayPayment()?.amount ?? apiTools.getLastHold()?.amount ?? null
+            )
           : null;
         const idFilter = internalIdFilter();
         let citedThisTurn = false;
