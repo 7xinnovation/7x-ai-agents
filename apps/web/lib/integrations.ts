@@ -9,7 +9,7 @@ import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
-import { rentalTotal, bundlePeriods, describePeriods } from "./rentalTotal";
+import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
 import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
 export type EnvKey = "staging" | "production";
@@ -541,6 +541,15 @@ export async function buildApiTools(
   // anniversaryExpiry) and the model kept substituting 31 December, so the date
   // is corrected here rather than left to prompting.
   let knownExpiry: { box: string; iso: string; bundle?: string } | null = null;
+
+  /**
+   * Per-term prices for each bundle, learned when the bundle list is read.
+   *
+   * The registration fee is nowhere in any response. It is the hold's
+   * minimumAmount minus the published price of the term the customer chose, so
+   * that published price has to survive from the bundle list to the hold.
+   */
+  const bundlePriceBook = new Map<string, BundlePeriod[]>();
 
   /** Learn the box's expiry from any renewal Details response, cached or fresh. */
   const rememberExpiry = (toolName: string, r: { result: string; isError?: boolean }) => {
@@ -1203,11 +1212,25 @@ export async function buildApiTools(
       if (lastHold && typeof lastHold.amount === "number") {
         const agentExtra = lastHold.agentExtraPrice;
         const courier = lastHold.keyDeliveryPrice;
+        // Which term did they take? The hold does not say, so it is matched by
+        // price against the bundle's own table: the one whose price leaves a
+        // plausible registration fee. With one term priced there is no ambiguity.
+        const terms = bundlePriceBook.get(lastHold.bundleId ?? "") ?? [];
+        const regFee = terms
+          .map((t) => registrationFee(lastHold!.amount, t.price))
+          .filter((v): v is number => v !== null)
+          .sort((a, b) => a - b)[0] ?? null;
         res = {
           ...res,
           result:
             res.result +
             `\n\nWHAT THIS RENTAL COSTS. The total for the box, with one authorised agent and no courier, is AED ${lastHold.amount.toFixed(2)} — minimumAmount above. It ALREADY includes the annual rental, the registration fee and the first agent (its AGENT line is marked Inclusive, which means free). Do NOT add the first agent's fee: a summary that did showed AED 450 for a 400 rental.` +
+            // The registration fee, at last with a figure. Derived, not guessed:
+            // the hold minus the published price of the term they chose. Stated
+            // only when that subtraction is trustworthy.
+            (regFee !== null
+              ? ` THE ONE-TIME REGISTRATION FEE IS AED ${regFee.toFixed(2)}, and it is part of that total — a first-time rental pays it once. Show it as its OWN LINE in the pre-payment summary (rental AED ${(lastHold.amount - regFee).toFixed(2)} + registration AED ${regFee.toFixed(2)}) so the customer sees what the extra is before they pay, rather than wondering why the total is higher than the bundle card.`
+              : " A one-time registration fee is inside that total. Its exact amount cannot be separated out for this rental, so say a one-time registration fee is included and do NOT state a figure for it.") +
             (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}.` : "") +
             (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
             (opts.savedCard ? " If Emirates Post already holds a card for this customer it is sent with the order, so the payment page opens on that card — tell them which card it is and that they can change it there. Never say they have been charged, and never ask them for card details yourself." : "") +
@@ -1294,6 +1317,9 @@ export async function buildApiTools(
       // for all of them -- AED 300 whether the customer picked one year or three.
       // The per-period table is built here so there is nothing to infer.
       let periodNote = "";
+      // Kept so the registration fee can be derived at Select: it is the hold
+      // minus the published price of the term the customer chose, and nothing
+      // else states it.
       try {
         const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const list = (parsed?.payload ?? parsed) as Record<string, unknown>[];
@@ -1301,13 +1327,19 @@ export async function buildApiTools(
           const lines = list
             .map((bn) => {
               const periods = bundlePeriods(bn);
+              const id = asStr(bn.bundle_Id);
+              if (id && periods.length) bundlePriceBook.set(id, periods);
               if (periods.length < 2) return null;
-              return `${asStr(bn.name_En) || asStr(bn.bundle_Id)}: ${describePeriods(periods)}`;
+              const savings = periodSavings(periods);
+              return (
+                `${asStr(bn.name_En) || id}: ${describePeriods(periods)}` +
+                (savings.length ? `\n    SAVINGS — ${describeSavings(savings)}` : "")
+              );
             })
             .filter(Boolean);
           if (lines.length) {
             periodNote =
-              "\n\nEACH RENTAL PERIOD HAS ITS OWN PRICE, and they are listed here. Quote these EXACTLY when you show the customer their period options — do not use the 12-month price for every period, and never multiply one period's price to reach another:\n" +
+              "\n\nEACH RENTAL PERIOD HAS ITS OWN PRICE, and where a longer term saves money the saving is stated. Show the saving on the card for that period (e.g. `badge: Save AED 50`) so a longer term reads as a choice rather than a bigger number — and quote the saving exactly as given, never work one out yourself. These are the prices: Quote these EXACTLY when you show the customer their period options — do not use the 12-month price for every period, and never multiply one period's price to reach another:\n" +
               lines.join("\n") +
               "\nA bundle not listed here prices only one term, so it has only the one price. A period the customer asks for that is not listed is not offered for that bundle — say so rather than quoting a figure for it.";
           }

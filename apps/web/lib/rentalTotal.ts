@@ -142,3 +142,83 @@ export function describePeriods(periods: BundlePeriod[]): string {
     .map((p) => `${p.years} year${p.years === 1 ? "" : "s"} (${p.months} months) — AED ${p.price.toFixed(2)}`)
     .join("; ");
 }
+
+/**
+ * The one-time registration fee, worked out rather than guessed.
+ *
+ * Emirates Post publishes no endpoint for it and it appears in no response of
+ * its own, so it has always been described to the customer as "a fee applies,
+ * shown before you pay" — which is true and unhelpful, and they have now asked
+ * for the amount before payment.
+ *
+ * It is derivable: the hold's `minimumAmount` is the rental for the chosen term
+ * PLUS the registration PLUS the first agent, and the first agent is Inclusive
+ * (zero). So the registration is the difference between the hold and the
+ * published price of the term the customer picked.
+ *
+ * Returns null rather than a number whenever the arithmetic cannot be trusted —
+ * an unknown term price, a difference of zero, or a negative. A registration fee
+ * stated wrongly is worse than one described in words, and AED 25 taught us that
+ * once already.
+ */
+export function registrationFee(holdAmount: number | null | undefined, termPrice: number | null | undefined): number | null {
+  if (typeof holdAmount !== "number" || !Number.isFinite(holdAmount)) return null;
+  if (typeof termPrice !== "number" || !Number.isFinite(termPrice) || termPrice <= 0) return null;
+  const fee = fils(holdAmount - termPrice);
+  // Zero means the hold equals the rental, so nothing was added and there is
+  // nothing to announce. Negative means the two figures are not what we think
+  // they are, and inventing a fee from that is exactly the mistake to avoid.
+  return fee > 0 ? fee : null;
+}
+
+/**
+ * What a multi-year term saves against paying yearly.
+ *
+ * The comparison the customer actually makes: this term versus the same number
+ * of years bought one at a time. Emirates Post asked for the saving to be shown
+ * so a longer term reads as a choice rather than a bigger number.
+ *
+ * Only returned when it is a genuine saving. A term that costs the same or more
+ * than yearly renewal has no discount, and dressing that up would be a lie in
+ * the customer's own arithmetic.
+ */
+export interface PeriodSaving {
+  months: number;
+  years: number;
+  price: number;
+  /** What the same span costs bought a year at a time. */
+  yearlyEquivalent: number;
+  saving: number;
+  percent: number;
+}
+
+export function periodSavings(periods: BundlePeriod[]): PeriodSaving[] {
+  const yearly = periods.find((p) => p.months === 12);
+  if (!yearly) return [];
+  const out: PeriodSaving[] = [];
+  for (const p of periods) {
+    if (p.months === 12) continue;
+    const yearlyEquivalent = fils(yearly.price * p.years);
+    const saving = fils(yearlyEquivalent - p.price);
+    if (saving <= 0) continue;
+    out.push({
+      months: p.months,
+      years: p.years,
+      price: p.price,
+      yearlyEquivalent,
+      saving,
+      percent: Math.round((saving / yearlyEquivalent) * 100),
+    });
+  }
+  return out;
+}
+
+/** "2 years AED 550 — saves AED 50 (8%) against 2 × AED 300" */
+export function describeSavings(savings: PeriodSaving[]): string {
+  return savings
+    .map(
+      (s) =>
+        `${s.years} years at AED ${s.price.toFixed(2)} saves AED ${s.saving.toFixed(2)} (${s.percent}%) against paying yearly (${s.years} × AED ${(s.yearlyEquivalent / s.years).toFixed(2)} = AED ${s.yearlyEquivalent.toFixed(2)})`
+    )
+    .join("; ");
+}

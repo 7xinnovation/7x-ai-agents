@@ -62,6 +62,7 @@ const STR = {
     ready: "Ready to submit",
     readyShort: "ready",
     reference: "Reference",
+    receipt: "Download receipt",
     signIn: "Sign in",
     signedIn: "Signed in",
     expand: "Expand",
@@ -109,6 +110,7 @@ const STR = {
     ready: "جاهز للإرسال",
     readyShort: "جاهز",
     reference: "الرقم المرجعي",
+    receipt: "تحميل الإيصال",
     signIn: "تسجيل الدخول",
     signedIn: "تم الدخول",
     expand: "توسيع",
@@ -1297,6 +1299,29 @@ export function Experience({
       <div className="dlg-split">
         {/* LEFT: conversation */}
         <section className="dlg-chat">
+          {/* Progress sits ABOVE the conversation, not in the side panel.
+              Emirates Post asked for it where the customer is actually looking:
+              on a phone the panel is a tab they have to leave the chat to see,
+              so the one thing telling them how far through they are was the one
+              thing out of sight. */}
+          {progress ? (
+            <div className="dlg-progress-top" role="status" aria-live="polite">
+              <div className="dlg-progress-top-row">
+                <span className="dlg-progress-step">{progress.pct === 100 ? t.ready : t.missing}</span>
+                <span className="dlg-progress-count">
+                  <strong>{progress.pct}%</strong>
+                  <span className="sep">·</span>
+                  {progress.done}/{progress.total} {t.readyShort}
+                </span>
+              </div>
+              <div className="dlg-progress-track">
+                <div
+                  className={`dlg-progress-fill ${progress.pct === 100 ? "done" : ""}`}
+                  style={{ width: `${progress.pct}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
           <div className="dlg-messages" ref={scrollRef}>
             <div className="dlg-msg assistant">
               <span className="dlg-orb" aria-hidden="true" />
@@ -1450,23 +1475,20 @@ export function Experience({
                     <CheckCircle size={20} weight="fill" color={c.success} />
                     <span className="ref-label">{t.reference}</span>
                     <strong>{caseState!.reference}</strong>
-                  </div>
-                ) : null}
-
-                {progress ? (
-                  <div className="dlg-progress">
-                    <div className="dlg-progress-row">
-                      <span>{progress.pct === 100 ? t.ready : t.missing}</span>
-                      <span>
-                        <strong>{progress.done}</strong> / {progress.total} {t.readyShort}
-                      </span>
-                    </div>
-                    <div className="dlg-progress-track">
-                      <div
-                        className={`dlg-progress-fill ${progress.pct === 100 ? "done" : ""}`}
-                        style={{ width: `${progress.pct}%` }}
-                      />
-                    </div>
+                    {/* The receipt has always been generated and never offered.
+                        A customer who has just paid wants it now, not after
+                        asking for it. Opens in a tab so it can be printed or
+                        saved — a download attribute is inert inside an iframe. */}
+                    {caseState!.payment.status === "paid" && convId.current ? (
+                      <a
+                        className="dlg-receipt-link"
+                        href={`/api/receipt/${encodeURIComponent(caseState!.payment.reference ?? caseState!.reference!)}?c=${encodeURIComponent(convId.current)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t.receipt}
+                      </a>
+                    ) : null}
                   </div>
                 ) : null}
 
