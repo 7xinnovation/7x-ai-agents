@@ -151,6 +151,27 @@ Nothing on our side changed between the last approval and the first refusal; the
 order above was built by a script with no assistant involved and was refused the
 same way.
 
+**And it is not the PO Box service at all.** The EPGL licence agent takes its
+payment through a completely different code path — our own checkout, not
+`Rental/Save` — on the same outlet and the same MID. The same amount was
+approved this morning and refused this evening:
+
+```
+07:20  AED 1,010  CAPTURED  resultCode "00"  authorizationCode "AB0012"
+12:21  AED 1,000  CAPTURED  resultCode "00"  authorizationCode "AB0012"
+18:04  AED 1,000  FAILED    { success: false, mid "200200001514" }
+18:10  AED 1,000  FAILED    { success: false, mid "200200001514" }
+```
+
+Two different products, two different integrations, one merchant id. **AED 1,000
+approved at 12:21 and refused at 18:04.** The last approval anywhere on this MID
+was 13:18; every attempt since — ten of them, across both services, from AED 370
+to AED 1,000 — has been refused with no result code.
+
+**The request is not the variable. The merchant id is.** Please ask Network
+International what changed on `200200001514` today, or whether it has a daily
+authorisation cap that was reached at around 13:20 Gulf time.
+
 ---
 
 **One open question (4 Sep).** One corporate `Rental/Select` was refused with an
