@@ -162,7 +162,20 @@ export async function knownCustomerFacts(agentId: string, userRef: string): Prom
       if (/^(po)?box(number|no)?$/.test(nk) && (typeof v === "string" || typeof v === "number")) box = String(v);
       else if (nk === "emirate" && typeof v === "string") emirate = v;
     }
-    if (box && !seenBoxes.has(box) && seenBoxes.size < 5) {
+    // A BOX NUMBER FROM AN ABANDONED ATTEMPT IS NOT A BOX ON FILE.
+    //
+    // This reads the customer's past cases, and a case exists from the moment
+    // they pick a number — long before anyone pays for it. After an afternoon of
+    // testing, five numbers that had been reserved and never paid for were
+    // announced to the customer as "your PO Boxes", the agent fetched details
+    // for each, and Emirates Post answered BOX NOT FOUND five times, which reads
+    // as the customer's own boxes having vanished. Their real boxes — seventeen
+    // of them, all Active — were never mentioned, because these came first.
+    //
+    // A rental counts only once it completed: submitted with a reference, or
+    // paid. Anything short of that is an attempt, and attempts are not property.
+    const completed = st?.status === "submitted" || Boolean(st?.reference) || st?.payment?.status === "paid";
+    if (box && completed && !seenBoxes.has(box) && seenBoxes.size < 5) {
       seenBoxes.add(box);
       facts.boxes.push({ box, emirate });
     }

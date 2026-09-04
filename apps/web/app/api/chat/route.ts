@@ -705,7 +705,7 @@ export async function POST(req: NextRequest) {
           // covers only what is actually on file.
           const missingEmirate = facts.boxes.filter((b) => !b.emirate).map((b) => b.box);
           parts.push(
-            `PO Box${facts.boxes.length > 1 ? "es" : ""} on file: ${list} — for account questions, status checks, renewals, or the Account Pulse use these immediately (fetch fresh details/pricing from backend tools); do NOT ask for the box number again.` +
+            `PO Box${facts.boxes.length > 1 ? "es" : ""} seen in this customer's earlier completed requests: ${list}. They are a shortcut, not the account: the AUTHORITY on what this customer holds is nxn_boxes_for_customer, so when they ask about their boxes, call it and answer from what it returns. If a number here is not in that list, it is not one of their boxes — do NOT look it up, do NOT name it to them, and never announce a box you have not seen the account confirm.` +
               (missingEmirate.length
                 ? ` The emirate is NOT on file for ${missingEmirate.join(", ")} — every renewal lookup is keyed on box number AND emirate, so get it from nxn_boxes_for_customer or ask the customer. Never assume Dubai: the wrong emirate returns BOX NOT FOUND, which reads to the customer as their box not existing.`
                 : " Their emirates are on file above — use them and do not ask again.")

@@ -288,6 +288,14 @@ export function dateForYears(dates: string[], years: number): string | null {
   return null;
 }
 
+/** Whole years from today to an offered expiry date, or null if it is not readable. */
+export function yearsUntil(date: string, now: Date = new Date()): number | null {
+  const t = new Date(date);
+  if (Number.isNaN(t.getTime())) return null;
+  const years = Math.round((t.getTime() - now.getTime()) / (365.2425 * 24 * 60 * 60 * 1000));
+  return years >= 1 && years <= 20 ? years : null;
+}
+
 /** A priced line from Rental/Select, by service and (optionally) criteria. */
 function priceOf(details: unknown, serviceType: string, criteria?: string): number | null {
   if (!Array.isArray(details)) return null;
@@ -2082,7 +2090,47 @@ export async function buildApiTools(
         const dates = (b?.payload ?? b)?.dates;
         const inp = (input ?? {}) as Record<string, unknown>;
         const bundle = asStr(inp.BundleId ?? inp.bundleId ?? inp.bundle_Id);
-        if (bundle && Array.isArray(dates) && dates.length) expiryDatesByBundle.set(bundle, dates.map(String));
+        if (bundle && Array.isArray(dates) && dates.length) {
+          expiryDatesByBundle.set(bundle, dates.map(String));
+          // WHAT EACH TERM COSTS.
+          //
+          // This response carries dates and no prices, so the cards showed five
+          // durations and nothing to choose between them — and before that the
+          // model was multiplying the annual rate in its head, which is the same
+          // arithmetic that put AED 700 over a 670 payment page. It is not
+          // guesswork: a bundle that publishes a price for a term uses that
+          // price, one that does not is the annual rate for that many years, and
+          // the one-time registration fee is added once. MyBox two years is
+          // 600 + 70 = 670, which is exactly what the reservation comes back at.
+          const periods = bundlePriceBook.get(bundle) ?? [];
+          const annual = periods.find((p) => p.years === 1)?.price ?? null;
+          const fee = feeBook.get(bundle) ?? null;
+          const lines = dates
+            .map(String)
+            .map((d) => {
+              const years = yearsUntil(d);
+              if (years === null) return null;
+              const published = periods.find((p) => p.years === years)?.price ?? null;
+              const rent = published ?? (annual !== null ? annual * years : null);
+              if (rent === null) return null;
+              const total = fee !== null ? rent + fee : rent;
+              return (
+                `${years} year${years === 1 ? "" : "s"} (expires ${d.slice(0, 10)}) — AED ${total.toFixed(2)}` +
+                (fee !== null ? ` (rental AED ${rent.toFixed(2)} + registration AED ${fee.toFixed(2)})` : " rental, plus the one-time registration fee")
+              );
+            })
+            .filter(Boolean);
+          if (lines.length) {
+            res = {
+              ...res,
+              result:
+                res.result +
+                "\n\nWHAT EACH DURATION COSTS. This response carries dates and no prices, and a list of durations with no prices is not a choice. Put the amount on every duration card, exactly as given here, and never work one out yourself:\n" +
+                lines.join("\n") +
+                "\nThese totals already include the one-time registration fee, which is charged once however long the term is. Quote them verbatim; the reservation will come back at the same figure.",
+            };
+          }
+        }
       } catch {
         /* an unreadable list just means the model's own date stands */
       }
