@@ -455,6 +455,8 @@ export async function buildApiTools(
   exec: (toolName: string, input: Record<string, unknown>) => Promise<{ result: string; isError?: boolean }>;
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
+  /** PO Box halls in the branch list this turn, and where their keys are issued. */
+  getLastBranchHalls: () => { name: string; alternative: string }[];
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
@@ -552,6 +554,16 @@ export async function buildApiTools(
    * that published price has to survive from the bundle list to the hold.
    */
   const bundlePriceBook = new Map<string, BundlePeriod[]>();
+
+  /**
+   * Halls in the branch list this turn.
+   *
+   * Kept so the notice can be rendered by US rather than asked for in prose. The
+   * guidance told the model to show it word for word and the model did not --
+   * which is what guidance does under pressure, and why the map block beside it
+   * is appended deterministically too.
+   */
+  let lastBranchHalls: { name: string; alternative: string }[] = [];
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -1550,6 +1562,10 @@ export async function buildApiTools(
           const annotated = branches.length !== rows.length || branches.some((x) => x.freeBoxCount !== undefined || x.openNow !== undefined || x.isPoBoxHall);
           (b as Record<string, unknown>).payload = branches;
           const halls = branches.filter((x) => x.isPoBoxHall);
+          lastBranchHalls = halls.map((h) => ({
+            name: String(h.nameEn ?? h.officeId ?? ""),
+            alternative: String(h.alternativeBranchEn ?? ""),
+          }));
           if (annotated) {
             res = {
               ...res,
@@ -1771,6 +1787,7 @@ export async function buildApiTools(
     exec,
     getCapturedToken: () => captured,
     getLastBranchQuery: () => lastBranchQuery,
+    getLastBranchHalls: () => lastBranchHalls,
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
     getGatewayPayment: () => gatewayPayment,

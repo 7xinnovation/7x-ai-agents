@@ -1604,6 +1604,37 @@ export async function POST(req: NextRequest) {
           finalText += mapBlock;
         }
 
+        // The PO Box hall notice, rendered by US.
+        //
+        // Emirates Post require it before a customer commits to a location that
+        // is boxes-only — no counter, no parcels, and the key issued somewhere
+        // else. It was asked for in the tool guidance, word for word, and the
+        // model still did not print it: prose instructions lose to whatever else
+        // the turn is doing. So it is appended here whenever the branch list this
+        // turn contained a hall and the reply did not already carry the notice,
+        // the same way the map block beside it is.
+        const halls = apiTools.getLastBranchHalls();
+        if (halls.length && /```\s*cards/i.test(finalText) && !/Important Notice/i.test(finalText)) {
+          const alt = halls.find((h) => h.alternative)?.alternative ?? "the designated operational branch";
+          const named = halls.map((h) => h.name).filter(Boolean).join(", ");
+          const notice =
+            `\n\n> **Important Notice** — ${named || "One of these locations"} ` +
+            `${halls.length > 1 ? "operate" : "operates"} as a P.O. Box Hall/complex and ` +
+            `${halls.length > 1 ? "provide" : "provides"} P.O. Box access only.\n` +
+            ">\n" +
+            "> The P.O. Box is designated for normal mail items that fit within the physical dimensions of the selected box size.\n" +
+            ">\n" +
+            "> Counter services, large parcel handling, registered mail processing, and additional services are not available at this location.\n" +
+            ">\n" +
+            "> P.O. Box keys can only be collected from the respective operational branch, or through the approved delivery option (if available). Keys are not issued at this P.O. Box Hall location.\n" +
+            ">\n" +
+            `> To obtain services beyond P.O. Box access, please visit the designated Alternative Operational Branch: **${alt}**.\n` +
+            ">\n" +
+            "> By proceeding, you acknowledge and accept these service limitations.\n";
+          send({ type: "text", delta: notice });
+          finalText += notice;
+        }
+
         // Deterministic upload widget (feedback FB-1425: "AI says upload slots
         // appeared but no upload fields display"): when the reply talks about
         // uploading but contains no ```upload block, append the block(s) for the
