@@ -249,6 +249,45 @@ function recallHalls(conversationId: string | undefined) {
   return hit.halls;
 }
 
+/**
+ * How many years is a recorded duration? `2_YEAR`, "2 years", "24 months", "2".
+ * Anything unreadable returns null, and the model's own date is left alone.
+ */
+export function durationYears(duration: string | null | undefined): number | null {
+  const t = String(duration ?? "").trim().toLowerCase();
+  if (!t) return null;
+  const months = /(\d+)\s*_?\s*month/.exec(t);
+  if (months) {
+    const m = Number(months[1]);
+    return Number.isFinite(m) && m > 0 && m % 12 === 0 ? m / 12 : null;
+  }
+  const n = /(\d+)/.exec(t);
+  if (!n) return null;
+  const v = Number(n[1]);
+  return Number.isFinite(v) && v > 0 && v <= 20 ? v : null;
+}
+
+/**
+ * The offered date that is `years` away, copied verbatim.
+ *
+ * Emirates Post offers 1, 2, 3, 5 and 10 years as absolute dates, and the string
+ * must go back exactly as it came — recomputing one returns "Invalid date value".
+ * Matched by the YEAR it lands in rather than by position, so a list that offers
+ * a different set still resolves correctly, and an unmatched year returns null.
+ */
+export function dateForYears(dates: string[], years: number): string | null {
+  const now = new Date();
+  for (const d of dates) {
+    const t = new Date(d);
+    if (Number.isNaN(t.getTime())) continue;
+    // Whole years between today and that date, rounded to the nearest year: the
+    // dates sit on the anniversary, so this is exact in practice.
+    const diff = (t.getTime() - now.getTime()) / (365.2425 * 24 * 60 * 60 * 1000);
+    if (Math.round(diff) === years) return d;
+  }
+  return null;
+}
+
 /** A priced line from Rental/Select, by service and (optionally) criteria. */
 function priceOf(details: unknown, serviceType: string, criteria?: string): number | null {
   if (!Array.isArray(details)) return null;
@@ -463,6 +502,17 @@ export async function buildApiTools(
      */
     rentalAttachments?: () => Promise<{ key: string; fileName: string; fileFormat: string; base64: string }[]>;
     /**
+     * The rental duration the customer actually chose, from the case.
+     *
+     * 4 Sep: they picked "2 Years — expires 03-09-2028, AED 670", the case
+     * recorded `duration: 2_YEAR`, and the reservation went out with the ONE
+     * YEAR date. Emirates Post held 370 for a year, the save then claimed two
+     * years and AED 400, and the gateway — which prices from the hold — asked
+     * for 370. They were about to buy a different box from the one they chose.
+     * The date is not something to be recalled; it is read from the case here.
+     */
+    chosenDuration?: () => string | null;
+    /**
      * The card Emirates Post already holds for this signed-in customer.
      *
      * Their own rent flow puts it on paymentProperties.savedCard and still sends
@@ -476,7 +526,7 @@ export async function buildApiTools(
     /** The gateway payment opened in an earlier turn; the confirm comes later. */
     initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null; paidAt?: string | null } | null;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -490,7 +540,7 @@ export async function buildApiTools(
   /** The one-time registration fee, as Emirates Post has priced it. */
   getRegistrationFee: () => number | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
   /** Normalised company keys GSB has returned in this case. */
@@ -545,7 +595,7 @@ export async function buildApiTools(
   const gsbCompanies = new Set(opts.gsbCompanies ?? []);
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
@@ -607,6 +657,8 @@ export async function buildApiTools(
   let chosenHall: { name: string; alternative: string } | null = null;
   /** Registration fees observed for this integration, loaded when bundles are listed. */
   let feeBook: Map<string, number> = new Map();
+  /** The rental end dates Emirates Post offered for a bundle, exactly as written. */
+  const expiryDatesByBundle = new Map<string, string[]>();
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -705,6 +757,39 @@ export async function buildApiTools(
     // up to 2026-08-18 and zero times after. The apiFlow notes already said "after
     // the payment settles", but a note is guidance and this is an ordering
     // invariant, so it is enforced here rather than asked for.
+    // Reserve the box for the TERM the customer actually chose.
+    //
+    // `poBoxExpiryDate` is the only place the duration exists in a reservation,
+    // and the model writes it from memory: on 4 Sep it wrote the one-year date
+    // over a two-year choice, and every figure after that described a rental
+    // nobody had asked for. The offered dates are known — Rental/ExpiryDates
+    // returned them minutes earlier — and so is the choice, so neither is left
+    // to recall.
+    if (/rental_select$/i.test(toolName) && opts.chosenDuration) {
+      const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      const bundle = asStr(body.bundleId ?? body.BundleId);
+      const dates = expiryDatesByBundle.get(bundle) ?? [];
+      const years = durationYears(opts.chosenDuration());
+      const wanted = years !== null ? dateForYears(dates, years) : null;
+      if (wanted && asStr(body.poBoxExpiryDate) !== wanted) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "rental_select_expiry_corrected",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: { sent: body.poBoxExpiryDate, used: wanted, duration: opts.chosenDuration(), offered: dates },
+            response: `The customer chose ${years} year(s); the reservation was about to be made to ${String(body.poBoxExpiryDate)}.`,
+          },
+        }).catch(() => {});
+        body.poBoxExpiryDate = wanted;
+        input = { ...input, body };
+      }
+    }
+
     // Reserve the box the customer actually chose, with the id the backend issued.
     if (/rental_select$/i.test(toolName) && offeredBoxIds.length) {
       const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
@@ -782,6 +867,15 @@ export async function buildApiTools(
       let patched = false;
       if (body.subscriptionReferenceNumber !== lastHold.reference) {
         body.subscriptionReferenceNumber = lastHold.reference;
+        patched = true;
+      }
+      // A SAVE CANNOT DISAGREE WITH ITS OWN RESERVATION. On 4 Sep the save
+      // claimed `expiryDate: 2028-09-03` and AED 400 over a hold made to
+      // 2027-09-03 for 370. Emirates Post prices from the hold, so the gateway
+      // asked for a year — and the two-year rental the customer had chosen
+      // existed only in our sentences. The reservation is the fact.
+      if (lastHold.expiryDate && body.expiryDate && body.expiryDate !== lastHold.expiryDate) {
+        body.expiryDate = lastHold.expiryDate;
         patched = true;
       }
       // billingDetail is optional in the spec and mandatory in practice. Without it
@@ -1362,6 +1456,8 @@ export async function buildApiTools(
             amount: typeof p?.minimumAmount === "number" ? p.minimumAmount : null,
             expiresAt: p?.subcsriptionReferenceNumberExpiryDate ?? p?.subscriptionReferenceNumberExpiryDate ?? null,
             uniqueBoxId: String(((input?.body ?? {}) as Record<string, unknown>).uniqueBoxID ?? "") || null,
+            // The term this reservation is actually for, in the backend's words.
+            expiryDate: p?.poBoxExpiryDate ? String(p.poBoxExpiryDate) : null,
             bundleId: String(((input?.body ?? {}) as Record<string, unknown>).bundleId ?? "") || null,
             // Which extras this box can actually carry. The portal reads the same
             // list to decide whether to OFFER key delivery at all; sending a line
@@ -1918,6 +2014,21 @@ export async function buildApiTools(
         isError: false,
       };
     }
+    // The rental durations Emirates Post offers, kept verbatim. `poBoxExpiryDate`
+    // must be one of these strings, offset and all, and the customer's choice of
+    // duration is nothing but a choice of which one.
+    if (!res.isError && /expirydates/i.test(toolName)) {
+      try {
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const dates = (b?.payload ?? b)?.dates;
+        const inp = (input ?? {}) as Record<string, unknown>;
+        const bundle = asStr(inp.BundleId ?? inp.bundleId ?? inp.bundle_Id);
+        if (bundle && Array.isArray(dates) && dates.length) expiryDatesByBundle.set(bundle, dates.map(String));
+      } catch {
+        /* an unreadable list just means the model's own date stands */
+      }
+    }
+
     // Which branch did they choose? Asking for the boxes at a hall IS choosing it.
     if (/freeboxes/i.test(toolName)) {
       const inp = (input ?? {}) as Record<string, unknown>;

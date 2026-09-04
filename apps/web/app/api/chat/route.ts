@@ -512,6 +512,9 @@ export async function POST(req: NextRequest) {
     // per document. Read here rather than left to the model, which was asked for
     // them twice and sent none.
     epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
+    // The rental duration the customer chose, so the reservation is made for the
+    // term they picked rather than the one the model remembers.
+    chosenDuration: () => str(session.state.data.duration) ?? str(session.state.data.rental_duration) ?? null,
     // Asked once. The duplicate list grows with every attempt, so without this
     // the same question came back on each one -- after the customer had already
     // answered it.
