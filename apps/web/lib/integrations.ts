@@ -251,6 +251,21 @@ const paymentChecks = new Map<string, number>();
  * correct against. 15:53: a two-year choice reserved for one year, again.
  */
 const expiryMemory = new Map<string, { at: number; byBundle: Record<string, string[]> }>();
+/** The published term prices per bundle, for the turn the durations are shown in. */
+const priceBookMemory = new Map<string, { at: number; byBundle: Record<string, BundlePeriod[]> }>();
+
+function rememberPriceBook(conversationId: string | undefined, book: Map<string, BundlePeriod[]>) {
+  if (!conversationId || !book.size) return;
+  if (priceBookMemory.size > 500) for (const [k, v] of priceBookMemory) if (Date.now() - v.at > HALL_TTL_MS) priceBookMemory.delete(k);
+  priceBookMemory.set(conversationId, { at: Date.now(), byBundle: Object.fromEntries(book) });
+}
+
+function recallPriceBook(conversationId: string | undefined): Map<string, BundlePeriod[]> {
+  if (!conversationId) return new Map();
+  const hit = priceBookMemory.get(conversationId);
+  if (!hit || Date.now() - hit.at > HALL_TTL_MS) return new Map();
+  return new Map(Object.entries(hit.byBundle));
+}
 
 function rememberExpiryDates(conversationId: string | undefined, byBundle: Map<string, string[]>) {
   if (!conversationId || !byBundle.size) return;
@@ -691,7 +706,11 @@ export async function buildApiTools(
    * minimumAmount minus the published price of the term the customer chose, so
    * that published price has to survive from the bundle list to the hold.
    */
-  const bundlePriceBook = new Map<string, BundlePeriod[]>();
+  // Seeded from the conversation: the bundles are listed in one turn and the
+  // durations priced in a later one, so a per-request map was empty exactly when
+  // the duration cards needed it — which is why they showed five dates and no
+  // prices. Same shape as the box halls and the offered dates.
+  const bundlePriceBook = recallPriceBook(opts.conversationId);
 
   /**
    * Halls in the branch list this turn.
@@ -923,7 +942,13 @@ export async function buildApiTools(
     // paid YET, and the chat then tells the customer their payment failed and
     // hands them another link -- while the page they are typing into is open in
     // front of them. So the first check waits until they have plausibly had time.
-    if (/(updatepayment|guest_renewal_confirmpayment)$/i.test(toolName) && gatewayPayment?.openedAt && !gatewayPayment.paidAt) {
+    // NOT anchored, deliberately. The rental's confirm tool is called
+    // `…post_api_Rental_UpdatePayment_paymentReferenceNo` — the path parameter is
+    // part of the name — so `/updatepayment$/` matched nothing, and both this
+    // wait and the paid-at stamp below were dead code for every rental. The
+    // signed-in renewal's `post_api_Renewal_ConfirmPayment` was missed the other
+    // way, by a pattern that only named the GUEST one.
+    if (/(updatepayment|confirmpayment)/i.test(toolName) && gatewayPayment?.openedAt && !gatewayPayment.paidAt) {
       const age = Date.now() - Date.parse(gatewayPayment.openedAt);
       if (Number.isFinite(age) && age >= 0 && age < PAYMENT_SETTLE_GRACE_MS) {
         const wait = Math.ceil((PAYMENT_SETTLE_GRACE_MS - age) / 1000);
@@ -1854,6 +1879,7 @@ export async function buildApiTools(
               );
             })
             .filter(Boolean);
+          rememberPriceBook(opts.conversationId, bundlePriceBook);
           if (lines.length) {
             periodNote =
               "\n\nEACH RENTAL PERIOD HAS ITS OWN PRICE, and where a longer term saves money the saving is stated. Show the saving on the card for that period (e.g. `badge: Save AED 50`) so a longer term reads as a choice rather than a bigger number — and quote the saving exactly as given, never work one out yourself. These are the prices: Quote these EXACTLY when you show the customer their period options — do not use the 12-month price for every period, and never multiply one period's price to reach another:\n" +
@@ -2055,7 +2081,7 @@ export async function buildApiTools(
     // for -- it says "payment confirmed" whenever it reads well -- and the survey
     // Emirates Post asked us to show is owed to a completed purchase, not to a
     // hopeful one.
-    if (!res.isError && /(updatepayment|guest_renewal_confirmpayment)$/i.test(toolName)) {
+    if (!res.isError && /(updatepayment|confirmpayment)/i.test(toolName)) {
       try {
         const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const p = b?.payload ?? b;
@@ -2227,6 +2253,13 @@ export async function buildApiTools(
           // 600 + 70 = 670, which is exactly what the reservation comes back at.
           const periods = bundlePriceBook.get(bundle) ?? [];
           const annual = periods.find((p) => p.years === 1)?.price ?? null;
+          // The fee book is loaded when the bundles are listed, which may have
+          // been a different turn; a duration priced without the registration
+          // fee is a duration priced wrong.
+          if (!feeBook.size) {
+            const selTool = [...map.keys()].find((t) => /rental_select$/i.test(t));
+            if (selTool) feeBook = await registrationFees(agentId, selTool);
+          }
           const fee = feeBook.get(bundle) ?? null;
           const lines = dates
             .map(String)
