@@ -150,6 +150,17 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "branch that issues it, name that branch if you know it, and offer to arrange a callback.",
   },
   {
+    marker: "THE MONEY GOES IN THE CARD",
+    journeys: /rental|renewal/,
+    text:
+      "THE MONEY GOES IN THE CARD, not in a sentence under it. Every amount the customer will pay — the rental for " +
+      "the period they chose, the one-time registration fee, each extra agent, key delivery — is a `- Label: AED x` " +
+      "ROW inside the ```summary block, with `total:` as the last line. A figure written as prose beneath the card " +
+      "is the one place a customer reading a table of what they owe does not look, and it has been mistaken for a " +
+      "missing fee twice. Never write \"the registration fee is added when the box is reserved\" as a paragraph: " +
+      "put the row in. If you genuinely do not have an amount yet, leave that row out rather than describing it.",
+  },
+  {
     marker: "A PENDING BOX CANNOT BE MANAGED YET",
     journeys: /manage_po_box|renewal/,
     text:

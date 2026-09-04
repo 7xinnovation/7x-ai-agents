@@ -86,8 +86,16 @@ Rental/Save          subscriptionReferenceNumber, totalAmount,
 - `Rental/Save` takes **~17s**; `Select` under 1s. Expected?
 - `FreeBoxes` returns 401 with the API key alone — it needs a customer session.
 
-**One open question (4 Sep).** A corporate `Rental/Select` is refused with an
-empty error object, so we cannot tell the customer why:
+**`physicalBoxRequired` (4 Sep).** A corporate `Rental/Select` sent with
+`physicalBoxRequired: false` answers `154 ERROR_GETTING_PRICING_DETAILS`. The
+same box, same date, with `true` reserves cleanly (260612178, AED 1,065). So the
+flag is not advisory: a box collected at a branch — MyBox and all three
+corporate bundles — needs `true`, while MyHome and MyHome Instant are delivered
+and take `false`. Nothing in the spec says so, and the error names pricing.
+Worth documenting on your side.
+
+**One open question (4 Sep).** One corporate `Rental/Select` was refused with an
+*empty* error object, so we could not tell the customer anything:
 
 ```
 POST /api/Rental/Select
@@ -96,12 +104,14 @@ POST /api/Rental/Select
 → 400 {"errorDetails":{},"payload":null}
 ```
 
-`2450404` came from `FreeBoxes?BundleId=LI&LocationId=244` in the same journey,
-and the identical shape with `bundleId=IN` succeeds on boxes from that same list.
-A personal Select that cannot proceed answers `108 BOX_NOT_FREE`, which we can
-relay; this one says nothing at all. **Does a corporate rental need something on
-the session we are not sending — the licence, or an approved company profile —
-and can the refusal carry a code?** Staging, 4 Sep 13:32 UTC.
+Ten deliberate attempts afterwards, same shape and same branch, produced only
+`108` and `154` — never an empty object again. **Is there a path that returns a
+400 with no code at all, and can it be given one?** Staging, 4 Sep 13:32 UTC.
+
+**The registration fee** is the `NEW-REG` line of the `Select` response, and it
+is AED 70 on all six bundles (IN, MYHOME3, MYHOMEF, LI, BR, GO). It is not in
+`Rental/Bundle`, so a customer cannot be shown the full price of a box until
+they have reserved one. **Could `Rental/Bundle` carry it?**
 
 *We previously raised `157 ERROR_GETTING_HOLD_DETAILS` with you. That was ours — an
 invented reference, a stale hold, and the partial `billingDetail` above. No action

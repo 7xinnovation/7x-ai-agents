@@ -27,6 +27,7 @@ import { addressFromPin } from "@/lib/epGeocode";
 import { savedCards, describeCard } from "@/lib/epSavedCards";
 import { payFenceGuard } from "@/lib/payFence";
 import { internalIdFilter } from "@/lib/internalIds";
+import { summaryFeeGuard } from "@/lib/summaryFee";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
@@ -1476,6 +1477,9 @@ export async function POST(req: NextRequest) {
             )
           : null;
         const idFilter = internalIdFilter();
+        // The registration fee, put INTO the pre-payment card rather than left in
+        // a sentence beneath it.
+        const feeGuard = summaryFeeGuard(() => apiTools.getRegistrationFee());
         let citedThisTurn = false;
         let submittedRef: string | null = null;
 
@@ -1513,13 +1517,14 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = idFilter.push(piped);
+            const out = idFilter.push(feeGuard.push(piped));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = idFilter.push(payGuard ? payGuard.flush() : "") + idFilter.flush();
+            const held =
+              idFilter.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) + idFilter.flush();
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }

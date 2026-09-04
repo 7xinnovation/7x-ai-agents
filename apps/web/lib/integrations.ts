@@ -10,7 +10,7 @@ import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
-import { registrationFees, rememberFees } from "./registrationFees";
+import { registrationFees, rememberFees, feesInSelectResponse } from "./registrationFees";
 import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
 export type EnvKey = "staging" | "production";
@@ -487,6 +487,8 @@ export async function buildApiTools(
   getLastBranchHalls: () => { officeId: string; name: string; alternative: string }[];
   /** The hall the customer chose, if the box lookup was made against one. */
   getChosenHall: () => { name: string; alternative: string } | null;
+  /** The one-time registration fee, as Emirates Post has priced it. */
+  getRegistrationFee: () => number | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
@@ -603,6 +605,8 @@ export async function buildApiTools(
    * is exactly what choosing it does, so that is the signal.
    */
   let chosenHall: { name: string; alternative: string } | null = null;
+  /** Registration fees observed for this integration, loaded when bundles are listed. */
+  let feeBook: Map<string, number> = new Map();
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -1602,7 +1606,7 @@ export async function buildApiTools(
       // rented yet still says the fee is shown before payment; it stops saying
       // that the moment one rental goes through.
       const selectTool = [...map.keys()].find((t) => /rental_select$/i.test(t));
-      const feeBook = selectTool ? await registrationFees(agentId, selectTool) : new Map<string, number>();
+      feeBook = selectTool ? await registrationFees(agentId, selectTool) : new Map<string, number>();
       const known = idsThisCall
         .map((id) => (feeBook.has(id) ? `${id} = AED ${feeBook.get(id)!.toFixed(2)}` : null))
         .filter(Boolean);
@@ -1846,6 +1850,18 @@ export async function buildApiTools(
             "\n\nEmirates Post refused this reservation and gave NO reason: the error object is empty. You therefore do not know why, so do not supply a reason. In particular do NOT say the branch has no boxes, that the branch is full, or that someone else took the number — none of that is in this response, and the branch listing said otherwise. Tell the customer this number could not be reserved and offer the other numbers from the same branch; if a second number fails the same way, stop trying, say the reservation service is not accepting this booking right now, and offer a callback. Never re-run the branch availability lookup to explain a failed reservation — an empty list from a lookup made afterwards is a different question, not the answer to this one.",
         };
       }
+      // 154 is not a mystery: a corporate reservation sent with
+      // physicalBoxRequired=false cannot be priced. Proved on staging 4 Sep —
+      // the same box, same date, answered 154 with false and reserved cleanly
+      // with true (260612178, AED 1,065).
+      if (/ERROR_GETTING_PRICING_DETAILS|"154"/.test(res.result)) {
+        res = {
+          ...res,
+          result:
+            res.result +
+            "\n\nEmirates Post could not price this reservation. Check `physicalBoxRequired` before you tell the customer anything: a box COLLECTED AT A BRANCH — MyBox and every corporate bundle — needs `physicalBoxRequired: true`, and sending false answers exactly this error. MyHome and MyHome Instant are delivered to the customer's address and take false. Correct the flag and reserve again. This is not a problem with the box, the branch or the customer, so do not describe it as one, and do not send them back to choose a different number.",
+        };
+      }
       if (/BOX_NOT_FREE|BOX IS NOT AVAILABLE/i.test(res.result)) {
         res = {
           ...res,
@@ -1954,6 +1970,16 @@ export async function buildApiTools(
           // A write gets more room -- a composite response names an item per
           // record and the interesting one is rarely first.
           response: res.result.slice(0, isWriteCall ? 4000 : 600),
+          // The registration fee, extracted before that truncation can lose it.
+          // A corporate reservation prices seven services and its NEW-REG line
+          // sits past 4000 characters, so the row that was meant to remember the
+          // fee for the bundle cards remembered everything except the fee.
+          ...(!res.isError && /rental_select$/i.test(toolName)
+            ? (() => {
+                const f = feesInSelectResponse(res.result);
+                return f.size ? { fees: Object.fromEntries(f) } : {};
+              })()
+            : {}),
         },
       }).catch(() => {
         /* diagnostics must never take down the call they are describing */
@@ -1969,6 +1995,16 @@ export async function buildApiTools(
     getLastBranchQuery: () => lastBranchQuery,
     getLastBranchHalls: () => lastBranchHalls,
     getChosenHall: () => chosenHall,
+    getRegistrationFee: () => {
+      // The bundle they chose, when we know it. Otherwise: every bundle Emirates
+      // Post prices charges the same registration fee, and while that stays true
+      // the figure does not depend on which one they picked. The moment two
+      // differ, this stops answering rather than guessing between them.
+      const forBundle = lastHold?.bundleId ? feeBook.get(lastHold.bundleId) : undefined;
+      if (forBundle !== undefined) return forBundle;
+      const vals = [...feeBook.values()];
+      return vals.length && vals.every((v) => v === vals[0]) ? vals[0]! : null;
+    },
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
     getGatewayPayment: () => gatewayPayment,

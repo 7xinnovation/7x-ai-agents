@@ -19,7 +19,7 @@
  * production: the two are separate integrations with separate prefixes.
  */
 import { getDb, auditLog } from "@dialog/db";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 
 /** bundleId → the fee Emirates Post charged for it, as last observed. */
 export type FeeBook = Map<string, number>;
@@ -95,19 +95,34 @@ export async function registrationFees(agentId: string, selectToolName: string):
       .where(
         and(
           eq(auditLog.agentId, agentId),
-          eq(auditLog.action, "integration_write"),
+          // `integration_write` is a Select the chat made. `registration_fee_observed`
+          // is one made deliberately by scripts/nxn-observe-registration-fees, for a
+          // bundle no customer has rented yet — same response, same backend, and
+          // labelled so the two are never confused afterwards.
+          inArray(auditLog.action, ["integration_write", "registration_fee_observed"]),
           gt(auditLog.createdAt, new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)),
           sql`${auditLog.payload}->>'tool' like ${key + "\\_\\_%"}`,
-          sql`${auditLog.payload}->>'response' like '%NEW-REG%'`
+          // Either the fee was extracted when the row was written, or it is still
+          // readable in the body. A long corporate response is truncated at 4000
+          // characters and its NEW-REG line falls off the end, which is exactly
+          // why the extracted copy exists.
+          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload}->>'response' like '%NEW-REG%')`
         )
       )
       .orderBy(desc(auditLog.createdAt))
       .limit(80);
     // Oldest first, so a newer row overwrites an older one for the same bundle.
     for (const r of rows.reverse()) {
-      const p = r.payload as { response?: string } | null;
-      if (!p?.response) continue;
-      for (const [b, amt] of feesInSelectResponse(p.response)) fees.set(b, amt);
+      const p = r.payload as { response?: string; fees?: Record<string, unknown> } | null;
+      if (!p) continue;
+      // The extracted copy first: it was taken from the whole response, before
+      // the audit truncated it.
+      let took = false;
+      for (const [b, v] of Object.entries(p.fees ?? {})) {
+        const n = Number(v);
+        if (b && Number.isFinite(n) && n > 0) { fees.set(b, n); took = true; }
+      }
+      if (!took && p.response) for (const [b, amt] of feesInSelectResponse(p.response)) fees.set(b, amt);
     }
   } catch {
     /* diagnostics for pricing must never take down pricing */

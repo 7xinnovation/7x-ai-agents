@@ -518,6 +518,11 @@ function ChatToggles({
   );
   if (!items.length) return null;
   const allOn = (required.length ? required : items).every((it) => on[it.key]);
+  // The button is not offered until the acknowledgment is made. Disabled was not
+  // enough: a greyed-out "Proceed to payment" still reads as the next step, and
+  // the customer taps it and nothing happens. Where there is nothing to
+  // acknowledge, the button is simply there.
+  const showConfirm = required.length === 0 || allOn;
   const submit = () => {
     // Strip markdown links from labels (e.g. the T&C link) so the sent reply
     // reads clean.
@@ -561,7 +566,9 @@ function ChatToggles({
           )}
         </button>
       ))}
-      <button type="button" className="dlg-toggles-confirm" disabled={checkbox && !allOn} onClick={submit}>{confirmLabel}</button>
+      {showConfirm ? (
+        <button type="button" className="dlg-toggles-confirm" onClick={submit}>{confirmLabel}</button>
+      ) : null}
     </div>
   );
 }
