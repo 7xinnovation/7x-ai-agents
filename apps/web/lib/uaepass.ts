@@ -148,6 +148,21 @@ export interface UaePassIdentity {
   accessToken: string;
   sub: string;
   name?: string;
+  /**
+   * The customer's Emirates ID, as UAE PASS states it (`idn`).
+   *
+   * This is the ONLY identifier EPGL's licence registry accepts, so a sign-in
+   * that does not carry it forward leaves the whole lookup with nothing to look
+   * up. Absent when the customer's UAE PASS profile does not expose it -- a
+   * visitor-level account, for instance -- which is a normal answer, not a fault.
+   */
+  emiratesId?: string;
+}
+
+/** 15 digits, however UAE PASS punctuated them. */
+function normaliseIdn(raw: unknown): string | undefined {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  return /^\d{15}$/.test(digits) ? digits : undefined;
 }
 
 /** Exchange the auth code for an access token + verified identity. */
@@ -169,6 +184,10 @@ export async function exchangeCode(code: string, redirectUri: string, tenant?: s
   if (!userRes.ok) throw new Error(`UAE PASS userinfo failed: ${userRes.status}`);
   const u = (await userRes.json()) as { sub?: string; uuid?: string; idn?: string; fullnameEN?: string; firstnameEN?: string; lastnameEN?: string };
   return {
+    // UAE PASS returns the Emirates ID as `idn`. It was only ever read as a
+    // FALLBACK for the subject and then discarded -- which left EPGL's licence
+    // lookup with nothing to look up, since an Emirates ID is its only input.
+    emiratesId: normaliseIdn(u.idn),
     accessToken: tokens.access_token,
     sub: u.sub || u.uuid || u.idn || "uaepass-user",
     name: u.fullnameEN || [u.firstnameEN, u.lastnameEN].filter(Boolean).join(" ") || undefined,

@@ -57,6 +57,34 @@ function readSessionToken(stored: string | null | undefined): {
   return { token: plain, kind: "backend" };
 }
 
+/**
+ * Where a verified Emirates ID lives on a case.
+ *
+ * Bookkeeping, so the "__" prefix: it is filtered out of the case panel and
+ * never reaches a submission as a field of its own. It is here rather than on
+ * the conversation because the conversations table has nowhere to put it and a
+ * migration to hold one string that only EPGL reads is not worth the schema.
+ */
+export const VERIFIED_EID_KEY = "__verified_emirates_id";
+
+/**
+ * Remember the Emirates ID UAE PASS just verified.
+ *
+ * EPGL's licence registry takes an Emirates ID and nothing else, so a sign-in
+ * that does not carry this forward leaves the lookup with nothing to work with.
+ * Best-effort: a failure here costs the customer a prefilled licence list, not
+ * their sign-in.
+ */
+export async function rememberVerifiedEmiratesId(caseId: string, emiratesId: string): Promise<void> {
+  const digits = String(emiratesId ?? "").replace(/\D/g, "");
+  if (!/^\d{15}$/.test(digits)) return;
+  try {
+    await mutateCase(caseId, (st) => ({ ...st, data: { ...st.data, [VERIFIED_EID_KEY]: digits } }));
+  } catch {
+    /* the sign-in itself has already succeeded; do not fail it for this */
+  }
+}
+
 /** Mark a conversation as authenticated and record the external identity (e.g. UAE PASS sub). */
 export async function markAuthenticated(conversationId: string, userRef: string) {
   await getDb().update(conversations).set({ authenticated: true, userRef }).where(eq(conversations.id, conversationId));

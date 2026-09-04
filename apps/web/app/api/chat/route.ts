@@ -8,7 +8,7 @@ import { getDb, payments, documents as documentsTable, documentBlobs } from "@di
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug, getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, VERIFIED_EID_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
@@ -87,6 +87,9 @@ function str(v: unknown): string | undefined {
 function isTrue(v: unknown): boolean {
   return v === true || /^(true|yes|نعم|1)$/i.test(String(v ?? ""));
 }
+
+/** Declared once: the customerContext above names it before the tool list is built. */
+const MOE_TOOL_NAME = "epgl_licences_for_customer";
 
 const PAYMENT_SETTLED_DIRECTIVE =
   "(System: the customer just completed the payment in the secure gateway window — this is an internal notification, not a message they typed. " +
@@ -658,6 +661,15 @@ export async function POST(req: NextRequest) {
     if (agent.definition.slug === "epgl-dialog") {
       const profile = await knownEpglProfile(agent.id, userRef).catch(() => ({}));
       customerContext = formatEpglProfileContext(profile);
+      // Signed in, and we know their Emirates ID -- so their own trade licences
+      // can be fetched rather than asked for. Named here so the model reaches
+      // for the tool instead of asking a signed-in customer to type a licence
+      // number we could have looked up.
+      const eid = str(session.state.data[VERIFIED_EID_KEY]);
+      if (eid) {
+        customerContext =
+          `${customerContext ?? ""}\nVerified Emirates ID for this signed-in customer: ${eid} — from their UAE PASS sign-in, not from them. Call ${MOE_TOOL_NAME} FIRST to fetch the trade licences registered to it: it needs no argument from you and the Emirates ID is supplied automatically. Do not ask a signed-in customer for a trade licence number before you have looked.`.trim();
+      }
     } else if (userRef === MOCK_PERSONA_SUB) {
       // TEST-ONLY: the mock UAE PASS persona (UAEPASS_MOCK=1) is given a couple of
       // existing PO Boxes so signed-in flows have account data to work with.
@@ -749,7 +761,7 @@ export async function POST(req: NextRequest) {
   const COMPANY_TOOL = "epgl_company_lookup";
   const COMPANY_BY_EID_TOOL = "epgl_company_by_emirates_id";
   const FORM9_TOOL = "epgl_form9_history";
-  const MOE_TOOL = "epgl_licences_for_customer";
+  const MOE_TOOL = MOE_TOOL_NAME;
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
         {
@@ -1211,7 +1223,12 @@ export async function POST(req: NextRequest) {
     }
     if (name === MOE_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
-      const eid = String(input.emiratesId ?? "");
+      // The Emirates ID UAE PASS verified for this session, stored on the case
+      // at sign-in. Preferred over anything the model passes: a lookup keyed on
+      // a value the model chose returns whoever it asked about, not whoever is
+      // signed in, and these are somebody's company records.
+      const signedInEid = str(session.state.data[VERIFIED_EID_KEY]);
+      const eid = signedInEid ?? String(input.emiratesId ?? "");
       try {
         const licences = await licencesByEmiratesId(eid);
         if (!licences.length) {

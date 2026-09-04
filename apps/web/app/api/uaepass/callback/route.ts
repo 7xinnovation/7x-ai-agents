@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uaePassConfigured, uaePassMockAllowed, exchangeCode, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
-import { saveSessionToken, markAuthenticated, getOrCreateSession } from "@/lib/conversation";
+import { saveSessionToken, markAuthenticated, getOrCreateSession, rememberVerifiedEmiratesId } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
 import { MOCK_PERSONA_SUB, MOCK_PERSONA_NAME } from "@/lib/mockPersona";
 import { log } from "@/lib/logger";
@@ -67,11 +67,21 @@ export async function GET(req: NextRequest) {
     // here so the verified identity has somewhere to live; the redirect's ?cid=
     // pins it in the embed, and the post-sign-in pulse lands in it.
     let cid = flow.cid;
-    if (!cid && flow.agent) {
+    let caseId: string | undefined;
+    if (flow.agent) {
       const agent = await getAgentBySlug(flow.agent);
       if (agent) {
-        const s = await getOrCreateSession({ agentId: agent.id, locale: "en", authenticated: false });
+        // Resolved whether or not a conversation already exists: the Emirates ID
+        // below belongs on the case, and before this the session was only looked
+        // up when there was no conversation yet.
+        const s = await getOrCreateSession({
+          agentId: agent.id,
+          conversationId: cid,
+          locale: "en",
+          authenticated: false,
+        });
         cid = s.conversationId;
+        caseId = s.caseId;
       }
     }
     if (cid) {
@@ -85,6 +95,9 @@ export async function GET(req: NextRequest) {
       // for journey gating.
       if (!isMock) await saveSessionToken(cid, id.accessToken, "uaepass");
       await markAuthenticated(cid, id.sub);
+      // The Emirates ID UAE PASS just verified. EPGL's licence registry accepts
+      // nothing else, so a sign-in that drops it leaves the lookup with no input.
+      if (caseId && id.emiratesId) await rememberVerifiedEmiratesId(caseId, id.emiratesId);
     }
     return back({ uaepass: "ok" }, cid);
   } catch (e) {
