@@ -15,7 +15,7 @@ import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
-import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, PARTNER_NAMES_KEY } from "@/lib/docIdentity";
+import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, ownerDocumentCheck, PARTNER_NAMES_KEY } from "@/lib/docIdentity";
 
 /**
  * Which classified document types are acceptable for a given document slot,
@@ -58,21 +58,28 @@ const OWNER_TO_PARTNER: Record<string, string> = {
 };
 
 /**
- * Mark the matching partner's slot as filled by an owner document.
+ * One card, one upload — mirror an identity document between the owner slot and
+ * the matching partner slot, in EITHER direction.
  *
- * Returns the updated case, or null when nothing was mirrored. Best-effort: a
- * failure here costs a duplicate upload request, which is what happened before,
- * so it must never fail the upload itself.
+ * The owner is very often also partner 1, and their Emirates ID is one card.
+ * Asked for it as "the owner's" and then again as "Partner 1's", the customer
+ * uploads the same file twice and is right to find that stupid.
+ *
+ * Both directions matter. Mirroring only owner → partner left the reverse case
+ * untouched: upload partner 1's card first and the owner slot is still empty, so
+ * it gets asked for anyway. Whichever arrives first now fills the other.
+ *
+ * Returns the updated case and which slot it filled, or null. Best-effort: a
+ * failure here costs a duplicate upload request, so it must never fail the
+ * upload itself.
  */
-async function mirrorOwnerDocToPartner(
+async function mirrorIdentityDoc(
   definition: Parameters<typeof setDocument>[0],
   caseId: string,
   key: string,
   fileName: string,
   extracted: Record<string, unknown>
-): Promise<Awaited<ReturnType<typeof mutateCase>> | null> {
-  const kind = OWNER_TO_PARTNER[key];
-  if (!kind) return null;
+): Promise<{ state: Awaited<ReturnType<typeof mutateCase>>; filled: string } | null> {
   try {
     const name =
       ["owner_name", "owner_name_ar", "full_name", "name"]
@@ -80,14 +87,34 @@ async function mirrorOwnerDocToPartner(
         .find((v): v is string => typeof v === "string" && v.trim().length > 1) ?? "";
     if (!name) return null;
     const fresh = await getCase(caseId);
-    const index = partnerIndexByName((fresh?.state.data ?? {}) as Record<string, unknown>, name);
-    if (!index) return null;
-    const target = `partner_${index}_${kind}`;
+    const data = (fresh?.state.data ?? {}) as Record<string, unknown>;
+
+    let target: string | null = null;
+    const ownerKind = OWNER_TO_PARTNER[key];
+    if (ownerKind) {
+      // Owner document → the partner it belongs to.
+      const index = partnerIndexByName(data, name);
+      if (index) target = `partner_${index}_${ownerKind}`;
+    } else {
+      // Partner document → the owner slot, when it is the owner's own card.
+      const slot = partnerSlot(key);
+      if (slot && (slot.kind === "emirates_id" || slot.kind === "passport")) {
+        const owner = ["owner_name", "owner_name_ar"]
+          .map((k) => data[k])
+          .find((v): v is string => typeof v === "string" && v.trim().length > 1);
+        if (owner && partnerIndexByName({ partner_1_name: owner }, name) === 1) {
+          target = slot.kind === "emirates_id" ? "emirates_id" : "owner_passport";
+        }
+      }
+    }
+    if (!target || target === key) return null;
+
     const already = fresh?.state.documents.find((d) => d.key === target);
     if (already && (already.status === "uploaded" || already.status === "accepted")) return null;
-    return await mutateCase(caseId, (st) =>
-      setDocument(definition, st, { key: target, status: "uploaded", fileName })
+    const state = await mutateCase(caseId, (st) =>
+      setDocument(definition, st, { key: target!, status: "uploaded", fileName })
     );
+    return { state, filled: target };
   } catch {
     return null;
   }
@@ -221,6 +248,38 @@ export async function POST(req: NextRequest) {
       payload: { key, fileName: file.name, classified: extraction.docType },
     });
     return NextResponse.json({ case: state, rejected: true, reason: mismatchReason });
+  }
+
+  // An identity document for somebody this licence does not name is REFUSED, not
+  // remarked upon. A stranger's Emirates ID used to be accepted with a note that
+  // the name did not seem to appear on the licence -- the card stayed on the
+  // case, its number filled the owner's field, and the application carried
+  // somebody else's identity into Salesforce.
+  const ownerKind = OWNER_TO_PARTNER[key];
+  if (ownerKind) {
+    const verdict = ownerDocumentCheck(
+      (caseRow.state.data ?? {}) as Record<string, unknown>,
+      extraction.values ?? {},
+      ownerKind === "passport" ? "passport" : "Emirates ID"
+    );
+    if (verdict.reject) {
+      const state = await mutateCase(caseRow.caseId, (fresh) =>
+        setDocument(agent.definition, fresh, {
+          key,
+          status: "rejected",
+          fileName: file.name,
+          rejectionReason: verdict.reject!,
+        })
+      );
+      await audit({
+        agentId: agent.id,
+        conversationId,
+        actor: "system",
+        action: "document_rejected_wrong_person",
+        payload: { key, fileName: file.name },
+      });
+      return NextResponse.json({ case: state, rejected: true, reason: verdict.reject });
+    }
   }
 
   // An EXPIRED trade licence stops the application. The client's rule, and the
@@ -380,7 +439,7 @@ export async function POST(req: NextRequest) {
   // run through with partners. When the name on an owner document matches a
   // partner we already know about, that partner's slot is satisfied by the same
   // file rather than asked for again.
-  const mirrored = await mirrorOwnerDocToPartner(agent.definition, caseRow.caseId, key, file.name, extraction.values ?? {});
+  const mirrored = await mirrorIdentityDoc(agent.definition, caseRow.caseId, key, file.name, extraction.values ?? {});
 
   await getDb()
     .insert(documentsTable)
@@ -394,9 +453,12 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({
-    case: mirrored ?? state,
+    case: mirrored?.state ?? state,
     rejected: false,
     extracted: extractedKeys,
     needsConfirmation: nameQuery ?? undefined,
+    // Named so the assistant can say it out loud rather than silently skipping a
+    // slot the customer was expecting to fill.
+    alsoFilled: mirrored?.filled,
   });
 }

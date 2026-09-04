@@ -101,9 +101,19 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
       {uploaded ? (
         <div className="dlg-chat-upload-file">
           <span className="fname">{st?.fileName}</span>
-          <label className="dlg-upload ghost">
-            {t.replace}
-            <input type="file" hidden accept={accept} onClick={resetFileInput} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
+          {/* Replace showed no sign of working. The label never changed, so a
+              replacement that took several seconds to read looked identical to a
+              dead button -- and people clicked it again, which is why it read as
+              broken even on the runs where it worked. */}
+          <label className={`dlg-upload ghost ${busy ? "busy" : ""}`}>
+            {busy ? (
+              <>
+                <ArrowClockwise size={13} weight="bold" className="spin" /> {t.uploading}
+              </>
+            ) : (
+              t.replace
+            )}
+            <input type="file" hidden disabled={busy} accept={accept} onClick={resetFileInput} onChange={(e) => e.target.files?.[0] && ctx.onUpload(dkey, e.target.files[0])} />
           </label>
         </div>
       ) : (

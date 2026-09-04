@@ -447,3 +447,68 @@ export function partnerDocumentCheck(
     },
   };
 }
+
+/* ------------------------------------------------------------------------- *
+ * The OWNER's own identity documents.
+ *
+ * A licence names its owner and its partners. An Emirates ID uploaded into the
+ * owner's slot has to be that person's -- and until now a stranger's card was
+ * ACCEPTED, with a remark afterwards that the name did not seem to appear on the
+ * trade licence. A remark is not a rejection: the document stayed on the case,
+ * its Emirates ID number filled the owner's field, and the application carried
+ * somebody else's identity into Salesforce.
+ *
+ * Partner documents already refuse this properly. This is the same rule for the
+ * owner, and it is deliberately WIDER than "the owner": the owner is very often
+ * also one of the partners, and on a multi-partner licence any of the named
+ * people can legitimately be the one whose card is on file. So the card is
+ * accepted when it belongs to ANY person the licence names, and refused when it
+ * belongs to none of them -- which is the case worth stopping.
+ * ------------------------------------------------------------------------- */
+
+/** Everyone this application names: the owner, and every partner on file. */
+export function namedPeople(data: Record<string, unknown>, max = 12): { label: string; name: string }[] {
+  const out: { label: string; name: string }[] = [];
+  const owner = raw(data, PERSON_NAME_FIELDS);
+  if (owner) out.push({ label: "the owner", name: owner });
+  for (let i = 1; i <= max; i++) {
+    const n = knownPartnerName(data, i) ?? seenPartnerName(data, i);
+    if (n) out.push({ label: `partner ${i}`, name: n });
+  }
+  return out;
+}
+
+export interface OwnerDocCheck {
+  /** Refuse the upload with this reason, or null to accept. */
+  reject: string | null;
+  /** Which named person it turned out to be, when it matched one. */
+  matched?: string;
+}
+
+/**
+ * Does this identity document belong to someone this licence names?
+ *
+ * Silent -- accepts -- when there is nothing to check against: no name on the
+ * document, or no names on file yet. The first document of an application has
+ * nothing to contradict, and refusing it would stall every journey at step one.
+ */
+export function ownerDocumentCheck(
+  data: Record<string, unknown>,
+  extracted: Record<string, unknown>,
+  kind: "Emirates ID" | "passport" = "Emirates ID"
+): OwnerDocCheck {
+  const found = raw(extracted, [...PERSON_NAME_FIELDS, "full_name", "name"]);
+  if (!found) return { reject: null };
+  const people = namedPeople(data);
+  if (!people.length) return { reject: null };
+
+  const hit = people.find((p) => personMatches(p.name, found));
+  if (hit) return { reject: null, matched: hit.label };
+
+  const list = people.map((p) => `${p.name} (${p.label})`).join(", ");
+  return {
+    reject:
+      `This ${kind} is in the name of ${found}, who is not named on this licence. ` +
+      `The licence names: ${list}. Please upload the ${kind} for one of them.`,
+  };
+}

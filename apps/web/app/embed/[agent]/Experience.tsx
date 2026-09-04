@@ -1545,8 +1545,8 @@ export function Experience({
                           {uploaded ? (
                             <div className="dlg-docslot-meta">
                               <span className="fname">{d.fileName}</span>
-                              <label className="dlg-upload ghost">
-                                {t.replace}
+                              <label className={`dlg-upload ghost ${busy ? "busy" : ""}`}>
+                                {busy ? t.uploading : t.replace}
                                 <input
                                   type="file"
                                   hidden
