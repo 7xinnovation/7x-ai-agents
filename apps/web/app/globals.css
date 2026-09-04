@@ -1764,6 +1764,18 @@ body {
 /* Progress meter (legitimate form feedback) */
 /* The journey's progress, above the conversation. A thin strip: it has to be
    readable at a glance and must not steal room from the messages. */
+/* The small print under a price: a registration fee, a per-year breakdown. It
+   has to read as a qualifier on the number above it, not as another claim. */
+.dlg-card-opt-pricenote,
+.dlg-cardselect-pricenote {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--c-text-muted);
+}
+
 .dlg-receipt-link {
   margin-inline-start: auto;
   font-size: 12px;

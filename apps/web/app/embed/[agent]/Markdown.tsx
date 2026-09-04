@@ -395,6 +395,7 @@ function ChatCardSelect({
                   </span>
                   {c.desc ? <span className="dlg-cardselect-desc">{c.desc}</span> : null}
                   {c.price ? <span className="dlg-cardselect-price">{c.price}</span> : null}
+                  {c.priceNote ? <span className="dlg-cardselect-pricenote">{c.priceNote}</span> : null}
                 </button>
               ))
             ) : (
@@ -578,6 +579,15 @@ const isTableRow = (line: string) => /\|/.test(line) && line.trim().length > 0;
 interface OptionCard {
   title: string;
   price?: string;
+  /**
+   * A small line UNDER the price — what else the customer will pay.
+   *
+   * Without it the registration fee had nowhere to go, so the model put it in
+   * `badge`, which renders as a large pill at the TOP of the card: a fee shouted
+   * above the product name and the price it qualifies. It belongs beneath the
+   * number it modifies, in the quieter type a footnote gets.
+   */
+  priceNote?: string;
   desc?: string;
   badge?: string;
   /** Shown, but not choosable — a branch with no boxes left, say. */
@@ -607,7 +617,8 @@ function applyCardKey(card: OptionCard, key: string, value: string) {
   const k = key.trim().toLowerCase();
   const v = value.trim();
   if (k === "title" || k === "name") card.title = v;
-  else if (k === "price" || k === "cost" || k === "fee") card.price = v;
+  else if (k === "price" || k === "cost") card.price = v;
+  else if (k === "pricenote" || k === "price_note" || k === "fee" || k === "feenote") card.priceNote = v;
   else if (k === "desc" || k === "description" || k === "subtitle") card.desc = v;
   else if (k === "badge" || k === "tag") card.badge = v;
   else if (k === "disabled" || k === "unavailable") card.disabled = !/^(no|false|0)$/i.test(v);
@@ -853,6 +864,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
                       </div>
                     ) : null}
                     {c.price ? <div className="dlg-card-opt-price">{c.price}</div> : null}
+                    {c.priceNote ? <div className="dlg-card-opt-pricenote">{renderInline(c.priceNote)}</div> : null}
                   </>
                 );
                 return tappable ? (

@@ -1373,7 +1373,9 @@ export async function buildApiTools(
         result:
           res.result +
           periodNote +
-          "\n\nbundle_Price is the TWELVE-MONTH RENTAL ONLY. Every new rental also carries a one-time registration fee that is not in this response and cannot be looked up before the box is reserved. On each bundle card, put the rental as the price and add a line beneath it saying a one-time registration fee applies and is shown in full before payment (e.g. `desc: Plus a one-time registration fee, shown in full before you pay`). Do NOT state an amount for it, do NOT add one to the price, and do NOT leave it unmentioned — the customer sees the real total for the first time at the payment summary, and it is higher than the card.",
+          "\n\nbundle_Price is the TWELVE-MONTH RENTAL ONLY. Every new rental also carries a one-time registration fee, which is not in this response and cannot be looked up until the box is reserved. Put the rental in `price` and the fee in `pricenote`, which renders as small print DIRECTLY UNDER the price where it belongs:\n" +
+          "```cards\n- title: MyBox\n  price: AED 300 / year\n  pricenote: + one-time registration fee, shown in full before you pay\n  desc: Dedicated mailbox at an Emirates Post branch.\n```\n" +
+          "Do NOT put it in `badge` — that renders as a large pill above the product name, which shouts a footnote louder than the price it qualifies. Do NOT put it in `desc`, which is for what the bundle IS. Do NOT state an amount for it here and do NOT add one to the price: the figure is not knowable until the box is reserved, and it is stated in full at the pre-payment summary. Never leave it unmentioned — the customer would otherwise meet a total higher than the card with no warning.",
       };
     }
     // Tell the customer which branches actually have boxes.
