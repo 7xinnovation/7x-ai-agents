@@ -1078,12 +1078,28 @@ export async function buildApiTools(
       // they have none, no card goes at all.
       const props = (body.paymentProperties ?? {}) as Record<string, unknown>;
       const written = props.savedCard as Record<string, unknown> | undefined;
-      const real = opts.savedCard ? await opts.savedCard().catch(() => null) : null;
+      // ONLY the five fields the spec defines for savedCard: expiry, scheme,
+      // cardToken, maskedPan, cardholderName. The saved-cards lookup returns the
+      // whole card record — isDefault, isExpired and the rest — and substituting
+      // it wholesale started sending Emirates Post a shape their contract does
+      // not describe. Every payment that has ever settled carried exactly these
+      // five; the three that did not settle after 16:10 carried seven.
+      const raw = opts.savedCard ? await opts.savedCard().catch(() => null) : null;
+      const real = raw
+        ? (Object.fromEntries(
+            (["expiry", "scheme", "cardToken", "maskedPan", "cardholderName"] as const)
+              .map((k) => [k, (raw as Record<string, unknown>)[k]])
+              .filter(([, v]) => v !== undefined && v !== null && v !== "")
+          ) as Record<string, unknown>)
+        : null;
       if (written) {
         if (!real) {
           delete props.savedCard;
           patched = true;
-        } else if (String(written.cardToken ?? "") !== String((real as Record<string, unknown>).cardToken ?? "")) {
+        } else if (
+          String(written.cardToken ?? "") !== String(real.cardToken ?? "") ||
+          Object.keys(written).some((k) => !(k in real))
+        ) {
           props.savedCard = real;
           patched = true;
           void audit({
