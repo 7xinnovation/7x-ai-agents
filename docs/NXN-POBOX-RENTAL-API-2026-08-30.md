@@ -168,9 +168,27 @@ approved at 12:21 and refused at 18:04.** The last approval anywhere on this MID
 was 13:18; every attempt since — ten of them, across both services, from AED 370
 to AED 1,000 — has been refused with no result code.
 
+**AED 1.00 is refused (5 Sep, 10:07).** An order created directly on the outlet
+with our own key, no Emirates Post service involved at all:
+
+```
+order 4464e442-0f00-4701-8d1c-4d9c05ecc7cf   SALE   AED 1.00
+  state        FAILED
+  authResponse { success: false, mid "200200001514" }
+  paymentMethod VISA 411111******1111, expiry 2030-12
+  3ds2         transStatus "Y", eci "05"          (authentication PASSES)
+```
+
+One dirham. So it is not an amount ceiling, not a daily cap — it did not reset
+overnight — and not anything either service sends. **MID `200200001514` has not
+authorised a single transaction since 13:18 on 4 September**, and it approved
+AED 1,010 and AED 1,000 earlier that same day on the same card.
+
 **The request is not the variable. The merchant id is.** Please ask Network
-International what changed on `200200001514` today, or whether it has a daily
-authorisation cap that was reached at around 13:20 Gulf time.
+International what changed on `200200001514` at around 13:20 on 4 September. 3-D
+Secure authenticates every time and the authorisation returns `success: false`
+with no result code and no message, which is the acquirer refusing rather than
+declining — a live card would get a reason.
 
 ---
 
