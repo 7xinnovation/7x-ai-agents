@@ -146,9 +146,16 @@ async function main() {
   check("one toggles block, not two", (all.match(/```\s*toggles/gi) ?? []).length <= 1);
   check("the Terms rode with it as a checkbox", /checkboxes:\s*terms_accepted/i.test(all) || /terms and conditions/i.test(all));
   check("a payment page was reached", /paypage\.|```\s*pay/i.test(last), last.slice(-400));
-  const shown = amounts(last).filter((a) => a >= 100);
-  check("one total, not two", new Set(shown).size <= 1, `the last turn showed ${shown.join(", ") || "nothing"}`);
-  check("the total covers rental + registration + courier", shown.includes(700), `saw ${shown.join(", ")}`);
+  // The card's footer against the button's figure — NOT every amount in the
+  // reply, which legitimately includes each line of the breakdown.
+  const totalLine = /^[ \t]*total[ \t]*:[ \t]*AED\s*([\d,]+(?:\.\d{1,2})?)/im.exec(last);
+  const payLine = /^[ \t]*amount[ \t]*:[ \t]*AED\s*([\d,]+(?:\.\d{1,2})?)/im.exec(last);
+  const num = (m: RegExpExecArray | null) => (m ? Number(m[1]!.replace(/,/g, "")) : null);
+  check("the card carries a total", num(totalLine) !== null, last.slice(-400));
+  check("the summary total and the pay button are the same number",
+    num(totalLine) !== null && num(totalLine) === num(payLine),
+    `card ${num(totalLine)}, button ${num(payLine)}`);
+  check("that total covers rental + registration + courier", num(totalLine) === 700, `card total ${num(totalLine)}`);
 
   console.log("\n  what a customer must never see");
   check("no internal identifier", !/officeid|uniqueboxid|bundle_id|entcode/i.test(all));
