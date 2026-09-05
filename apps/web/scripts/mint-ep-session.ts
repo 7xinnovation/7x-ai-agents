@@ -29,6 +29,8 @@
  *   npx tsx scripts/mint-ep-session.ts --verify 05XXXXXXXX 123456
  *   add --prod to use box.emiratespost.ae instead of box-stg
  */
+export {}; // a module, so its locals do not collide with the other scripts
+
 const arg = (name: string) => {
   const i = process.argv.indexOf(name);
   return i !== -1 ? process.argv.slice(i + 1, i + 3).filter((x) => !x.startsWith("--")) : undefined;

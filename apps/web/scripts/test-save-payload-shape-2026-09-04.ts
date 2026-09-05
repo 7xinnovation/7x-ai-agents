@@ -9,6 +9,8 @@
  *
  * Run from apps/web:  npx tsx scripts/test-save-payload-shape-2026-09-04.ts
  */
+export {}; // a module, so its locals do not collide with the other scripts
+
 const SPEC_FIELDS = ["expiry", "scheme", "cardToken", "maskedPan", "cardholderName"] as const;
 
 /** The same trim the save applies, kept here so the shape is testable on its own. */
