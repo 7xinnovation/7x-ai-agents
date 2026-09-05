@@ -1750,8 +1750,17 @@ export async function POST(req: NextRequest) {
             `> To obtain services beyond P.O. Box access, please visit the designated Alternative Operational Branch: **${alt}**.\n` +
             ">\n" +
             "> By proceeding, you acknowledge and accept these service limitations.\n";
-          send({ type: "text", delta: notice });
-          finalText += notice;
+          // Emirates Post's requirement is that the customer ACKNOWLEDGES it,
+          // not merely that they are shown it — their own site makes them click
+          // before it will go on. So the notice comes with the two answers, and
+          // the choice is theirs to make rather than ours to assume.
+          const ack =
+            body.locale === "ar"
+              ? "\n\n```buttons\n- أوافق على هذه الشروط، تابع\n- اختيار فرع آخر\n```\n"
+              : "\n\n```buttons\n- I accept these limitations, continue\n- Choose a different branch\n```\n";
+          const withAck = notice + ack;
+          send({ type: "text", delta: withAck });
+          finalText += withAck;
         }
 
         // Deterministic upload widget (feedback FB-1425: "AI says upload slots
@@ -1783,7 +1792,11 @@ export async function POST(req: NextRequest) {
         // Completed transaction extras (feedback FB-1396): a paid, submitted case
         // always ends with a receipt download link (the model additionally offers
         // email via the send_confirmation_email tool).
-        if (submittedRef && finalState.payment.status === "paid" && finalState.payment.reference && !finalText.includes("/api/receipt/")) {
+        // A PAID PURCHASE ALWAYS ENDS WITH A RECEIPT THEY CAN OPEN. This used to
+        // wait for a submission reference from this turn, so a renewal confirmed
+        // in a later turn got no link — and the model filled the gap with
+        // Emirates Post's own invoice URL, which answers 500.
+        if (finalState.payment.status === "paid" && finalState.payment.reference && !finalText.includes("/api/receipt/")) {
           const receiptUrl = `/api/receipt/${encodeURIComponent(finalState.payment.reference)}?c=${encodeURIComponent(session.conversationId)}`;
           const receiptLine =
             body.locale === "ar" ? `\n\n[تنزيل الإيصال](${receiptUrl})` : `\n\n[Download your receipt](${receiptUrl})`;

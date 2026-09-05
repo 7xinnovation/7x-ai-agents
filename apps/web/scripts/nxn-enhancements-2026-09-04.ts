@@ -167,6 +167,30 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "put the row in. If you genuinely do not have an amount yet, leave that row out rather than describing it.",
   },
   {
+    marker: "SOMETHING THAT IS NOT A PO BOX",
+    journeys: /./,
+    text:
+      "SOMETHING THAT IS NOT A PO BOX. This assistant covers PO Box rental, renewal and management, and nothing " +
+      "else. When a customer asks about anything outside that — a parcel, a shipment, tracking, a passport, " +
+      "customs, a bill, a branch service — do NOT attempt an answer from your own knowledge and do NOT invent a " +
+      "process. Say in one line that it is handled elsewhere, point them at Emirates Post's own help pages " +
+      "(https://www.emiratespost.ae/en/customer-support), and offer to raise an enquiry so someone can call them " +
+      "back. Then return to whatever PO Box matter you were on, if any. One line and a link beats a confident " +
+      "answer about a service whose rules you do not have: a wrong shipping or customs answer sends someone to a " +
+      "counter for the wrong thing.",
+  },
+  {
+    marker: "A BOX HALL IS ACKNOWLEDGED, NOT JUST ANNOUNCED",
+    journeys: /rental/,
+    text:
+      "A BOX HALL IS ACKNOWLEDGED, NOT JUST ANNOUNCED. When the customer picks a P.O. Box hall or complex the " +
+      "notice is added to your reply for you, with two buttons — accept, or choose a different branch. Do NOT " +
+      "reserve a box, take a payment or move the journey on until they have pressed one. If they accept, carry on " +
+      "normally and do not repeat the notice. If they choose another branch, go back to the branch list. Emirates " +
+      "Post's own site makes the customer click before it will proceed, and a limitation nobody agreed to is not a " +
+      "limitation they were told about.",
+  },
+  {
     marker: "A PENDING BOX CANNOT BE MANAGED YET",
     journeys: /manage_po_box|renewal/,
     text:

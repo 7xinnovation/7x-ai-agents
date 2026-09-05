@@ -883,7 +883,12 @@ export function Experience({
     setCaseState(null);
     setInput("");
     setAuthReason(null);
-    setAuthenticated(false);
+    // The SIGN-IN SURVIVES A NEW CHAT. Clearing it here made the header say
+    // signed-out while the identity token was still held and the very next turn
+    // was still authenticated — so the customer could not tell whether they were
+    // logged in, which is the one thing that header exists to answer. Starting a
+    // fresh conversation is not signing out; the sign-out is the token going.
+    if (!uaePass.current) setAuthenticated(false);
   }, [streaming, storageKey]);
 
   // Sign-in: real UAE PASS OIDC when configured, else the dev mock toggle.

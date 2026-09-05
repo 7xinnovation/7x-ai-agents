@@ -2213,6 +2213,29 @@ export async function buildApiTools(
       try {
         const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const p = b?.payload ?? b;
+        // THEIR INVOICE ENDPOINT IS NOT A LINK WE CAN GIVE OUT.
+        //
+        // The confirm response carries `paymentDetails.invoiceUrl`, the model
+        // offers it as "Download invoice", and it answers 500 Internal Server
+        // Error — so the customer's last click of a completed purchase lands on
+        // a stack trace. We generate our own receipt for exactly this, and it
+        // works. Take the broken one away rather than asking the model not to
+        // use it.
+        try {
+          const det = p?.paymentDetails as Record<string, unknown> | undefined;
+          if (det && det.invoiceUrl) {
+            delete det.invoiceUrl;
+            res = {
+              ...res,
+              result:
+                `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(b)}` +
+                "\n\nDO NOT LINK AN INVOICE FROM THIS RESPONSE. Emirates Post's own invoice endpoint answers 500 for these references, so a customer who has just paid would click it and land on an error. The receipt link is added to your reply for you — do not write one of your own, and do not describe an invoice as available anywhere else.",
+              raw: JSON.stringify(b),
+            };
+          }
+        } catch {
+          /* nothing to strip */
+        }
         if (p?.isPaymentSuccess === true) {
           // A rental records it on the hold; a guest renewal has none, so the
           // gateway payment carries it instead.
