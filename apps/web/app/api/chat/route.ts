@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
-import { Locale, type AgentDefinition, type CaseState } from "@dialog/config";
+import { Locale, tr, type AgentDefinition, type CaseState } from "@dialog/config";
 import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, adapterContext } from "@dialog/core";
 import { randomUUID } from "node:crypto";
 import { getDb, payments, documents as documentsTable, documentBlobs } from "@dialog/db";
@@ -21,13 +21,14 @@ import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { notifyEpglPayment } from "@/lib/epglPayment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
-import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId } from "@/lib/gsbLookup";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId, resolveIssuingEntityCode } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
 import { savedCards, describeCard } from "@/lib/epSavedCards";
 import { payFenceGuard } from "@/lib/payFence";
 import { internalIdFilter } from "@/lib/internalIds";
 import { summaryFeeGuard } from "@/lib/summaryFee";
+import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
@@ -1094,14 +1095,29 @@ export async function POST(req: NextRequest) {
               : "NO COMPANIES registered under that authority were returned. Ask the customer for their trade licence number instead.",
           };
         }
-        const found = await companyByLicence(
-          agent.id, env, String(input.entityCode ?? ""), String(input.licenceNo ?? ""), caller
-        );
+        // The authority CODE, resolved rather than recalled. The customer picks
+        // an authority by name and the lookup is keyed on its code; a code the
+        // model carried across wrongly returns an empty result, which reads to
+        // the customer as their own licence number being wrong.
+        const givenEntity = String(input.entityCode ?? input.entityName ?? input.issuingEntity ?? "").trim();
+        const entityCode = (await resolveIssuingEntityCode(agent.id, env, givenEntity, caller).catch(() => null)) ?? givenEntity;
+        let found: Awaited<ReturnType<typeof companyByLicence>> = null;
+        try {
+          found = await companyByLicence(agent.id, env, entityCode, String(input.licenceNo ?? ""), caller);
+        } catch (e) {
+          // A backend failure is NOT "no such licence". 5 Sep: the registry
+          // answered 500 and the customer was asked to check their own number.
+          return {
+            result:
+              `THE LICENCE REGISTRY DID NOT ANSWER: ${String((e as Error).message ?? e).slice(0, 300)}. This is a failure on the registry's side, NOT a wrong licence number and NOT the customer's mistake. Do NOT ask them to check the number and do NOT say it did not match. Say the licence check is unavailable at the moment, carry on with the uploaded licence document, and never present the licence as verified.`,
+            isError: true,
+          };
+        }
         if (found) rememberGsb([found.company]);
         if (!found) {
           return {
             result:
-              "NO MATCH for that trade licence number under that authority. Check the authority is right before concluding the licence does not exist, and fall back to the uploaded licence document.",
+              `NO MATCH for licence ${String(input.licenceNo ?? "")} under authority code ${entityCode}${entityCode !== givenEntity ? ` (resolved from "${givenEntity}")` : ""}. Before telling the customer their number is wrong, consider that the AUTHORITY may be: the registry answers an empty result for a licence that exists under a different one. Say the licence could not be confirmed against the registry, offer to try another authority, and fall back to the uploaded licence document.`,
           };
         }
         // The SIGNED-IN customer's Emirates ID, from Emirates Post's own
@@ -1548,6 +1564,17 @@ export async function POST(req: NextRequest) {
         const idFilter = internalIdFilter();
         // The registration fee, put INTO the pre-payment card rather than left in
         // a sentence beneath it.
+        // A file already in the case is not something to ask for again.
+        const docLabels = new Map<string, string>(
+          (findJourney(agent.definition, session.state.journeyKey)?.steps ?? [])
+            .flatMap((st) => st.documents)
+            .map((d) => [d.key, tr(d.label, body.locale)] as const)
+        );
+        const uploadGuard = collectedUploadGuard((key) => {
+          const d = liveState.documents.find((x) => x.key === key);
+          if (!d || (d.status !== "uploaded" && d.status !== "accepted")) return null;
+          return { label: docLabels.get(key) ?? key, fileName: d.fileName ?? null };
+        });
         const feeGuard = summaryFeeGuard(
           () => apiTools.getRegistrationFee(),
           // Only once the box is reserved: before that there is no total to
@@ -1591,14 +1618,17 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = idFilter.push(feeGuard.push(piped));
+            const out = idFilter.push(uploadGuard.push(feeGuard.push(piped)));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
             const held =
-              idFilter.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) + idFilter.flush();
+              idFilter.push(
+                uploadGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
+                  uploadGuard.flush()
+              ) + idFilter.flush();
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }

@@ -293,6 +293,48 @@ export async function companiesByEmiratesId(
  * This is the only call that returns Emirates IDs, and so the only one that can
  * answer "does this customer own this licence" — see `ownerMatch`.
  */
+/**
+ * The issuing authority's CODE, from whatever the model has to hand.
+ *
+ * `GetEntitiesByLicenseNo` is keyed on `entityCode` — Dubai Department of
+ * Economy & Tourism is `6` — and the customer picks the authority by NAME. The
+ * model is asked to carry the code across, and on 5 Sep it did not: licence
+ * 697670 came back with no company, the chat told the customer their licence
+ * number was wrong, and the same licence with `entityCode=6` returns YI FANG
+ * TAIWAN FRUIT TEA L.L.C. immediately.
+ *
+ * So the code is resolved rather than recalled: a real code is kept, and a name
+ * is looked up in the authority list the customer chose from.
+ */
+export async function resolveIssuingEntityCode(
+  agentId: string,
+  env: EnvKey,
+  given: string,
+  callerToken?: string
+): Promise<string | null> {
+  const raw = String(given ?? "").trim();
+  if (!raw) return null;
+  let entities: IssuingEntity[] = [];
+  try {
+    entities = await listIssuingEntities(agentId, env, callerToken);
+  } catch {
+    // No list means we cannot check; a numeric code is the best we have.
+    return ENTITY_CODE.test(raw) ? raw : null;
+  }
+  if (!entities.length) return ENTITY_CODE.test(raw) ? raw : null;
+  const codes = new Set(entities.map((e) => String(e.code)));
+  if (codes.has(raw)) return raw;
+  // Compared on letters and digits alone: "Dubai Department of Economy &
+  // Tourism" and "Dubai Department of Economy and Tourism" are one authority.
+  const key = (v: string) => v.toLowerCase().replace(/\band\b/g, "&").replace(/[^a-z0-9&]/g, "");
+  const want = key(raw);
+  const hit =
+    entities.find((e) => key(String(e.nameEn ?? "")) === want) ??
+    entities.find((e) => key(String(e.nameAr ?? "")) === want) ??
+    entities.find((e) => want.length > 6 && key(String(e.nameEn ?? "")).includes(want));
+  return hit ? String(hit.code) : null;
+}
+
 export async function companyByLicence(
   agentId: string,
   env: EnvKey,

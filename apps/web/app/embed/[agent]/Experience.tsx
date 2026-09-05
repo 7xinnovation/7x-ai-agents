@@ -1528,6 +1528,23 @@ export function Experience({
                         style={{ width: `${progress.pct}%` }}
                       />
                     </div>
+                    {/* The requirements themselves, not just the percentage. A bar
+                        says how far along they are; only the list says what is
+                        actually LEFT (FB-1437), and completed items stay ticked. */}
+                    {checklist.length ? (
+                      <div className="dlg-progress-checks">
+                        {checklist.map((m) => (
+                          <span
+                            className={`dlg-progress-check ${m.done ? "done" : "todo"}`}
+                            key={`${m.kind}:${m.key}`}
+                            title={labelMap.get(m.key) ?? m.key}
+                          >
+                            {m.done ? <CheckCircle size={12} weight="fill" /> : <Circle size={12} weight={iconWeight} />}
+                            {labelMap.get(m.key) ?? m.key}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 

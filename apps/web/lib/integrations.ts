@@ -741,6 +741,16 @@ export async function buildApiTools(
   let feeBook: Map<string, number> = new Map();
   /** The rental end dates Emirates Post offered for a bundle, exactly as written. */
   const expiryDatesByBundle = recallExpiryDates(opts.conversationId);
+  /**
+   * The renewal that was actually PRICED: its bundle id and expiry, as sent.
+   *
+   * 5 Sep: pricing ran for `newBundleId: "BR"` and came back AED 13,872; the
+   * save then went out as "PRE", and again as "PREMIUM", and Emirates Post
+   * answered 105 INVALID BUNDLE OR RENT TYPE both times. The chat told the
+   * customer it was "an issue with the bundle on the backend side". The bundle
+   * id was on the pricing call twenty seconds earlier.
+   */
+  let lastPriced: { bundleId: string; expiryDate: string; amount: number | null } | null = null;
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -976,6 +986,44 @@ export async function buildApiTools(
           result:
             `NOT ASKED YET. This order was created ${Math.round(age / 1000)} seconds ago and the customer is very likely still on the payment page — nobody types a card number in that time. Asking now would come back "not paid" for an order that has simply not been paid YET, and telling them that while their payment page is open is how a payment that was about to go through gets abandoned. Say you will confirm it the moment it lands, ask them to finish on the payment page, and check again in about ${wait} seconds. Do NOT say the payment failed, do NOT say it has not come through, and do NOT offer them a new payment link.`,
         };
+      }
+    }
+
+    // A RENEWAL IS SAVED AS WHAT IT WAS PRICED AS.
+    //
+    // The bundle id and the expiry are chosen by the customer, priced by
+    // Emirates Post, and then rewritten from memory on the save: "BR" was
+    // priced, "PRE" and "PREMIUM" were sent, and 105 INVALID BUNDLE OR RENT TYPE
+    // came back both times. Neither value was ever in doubt.
+    if (/(guest_renewal_save|renewal_save)$/i.test(toolName) && lastPriced) {
+      const body = (input?.body ?? {}) as Record<string, unknown>;
+      const fixes: string[] = [];
+      if (asStr(body.newBundleId) && asStr(body.newBundleId) !== lastPriced.bundleId) {
+        fixes.push(`newBundleId ${String(body.newBundleId)} -> ${lastPriced.bundleId}`);
+        body.newBundleId = lastPriced.bundleId;
+      }
+      if (asStr(body.expiryDate) && asStr(body.expiryDate) !== lastPriced.expiryDate) {
+        fixes.push(`expiryDate ${String(body.expiryDate)} -> ${lastPriced.expiryDate}`);
+        body.expiryDate = lastPriced.expiryDate;
+      }
+      if (lastPriced.amount !== null && body.totalAmount !== lastPriced.amount) {
+        fixes.push(`totalAmount ${String(body.totalAmount)} -> ${lastPriced.amount}`);
+        body.totalAmount = lastPriced.amount;
+      }
+      if (fixes.length) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "renewal_save_corrected",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: { fixes },
+            response: "The save was rewritten to match the renewal Emirates Post actually priced.",
+          },
+        }).catch(() => {});
       }
     }
 
@@ -2244,6 +2292,14 @@ export async function buildApiTools(
     // reference to quote to support. There was nothing to quote and nothing had
     // been charged. Telling someone they have paid when they have not is the
     // single worst thing this journey can say.
+    if (res.isError && /INVALID BUNDLE OR RENT TYPE|"105"/.test(res.result)) {
+      res = {
+        ...res,
+        result:
+          res.result +
+          "\n\n105 MEANS THE BUNDLE ID IS WRONG, not that anything is broken on Emirates Post's side. The only valid id is the one the PRICING call used — the same string, exactly — and a renewal cannot be saved as a bundle it was not priced as. Do not describe this to the customer as a backend problem with the bundle, do not send them to raise an enquiry over it, and do not try a different spelling of the name: re-read the bundle id from the pricing response and send that.",
+      };
+    }
     if (res.isError && /(rental_save|guest_renewal_save)$/i.test(toolName)) {
       res = {
         ...res,
@@ -2400,6 +2456,22 @@ export async function buildApiTools(
       } catch {
         /* an unreadable list just means the model's own date stands */
       }
+    }
+
+    // What the renewal was priced AS.
+    if (!res.isError && /renewal_pricing/i.test(toolName)) {
+      const b = ((input?.body ?? {}) as Record<string, unknown>);
+      const bundleId = asStr(b.newBundleId ?? b.bundleId);
+      const expiryDate = asStr(b.expiryDate);
+      let amount: number | null = null;
+      try {
+        const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const a = (parsed?.payload ?? parsed)?.poBoxPrice?.amount;
+        if (typeof a === "number") amount = a;
+      } catch {
+        /* the price is a bonus here; the bundle id is the point */
+      }
+      if (bundleId && expiryDate) lastPriced = { bundleId, expiryDate, amount };
     }
 
     // Which branch did they choose? Asking for the boxes at a hall IS choosing it.
