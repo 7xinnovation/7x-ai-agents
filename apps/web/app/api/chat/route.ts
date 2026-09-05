@@ -1792,6 +1792,54 @@ export async function POST(req: NextRequest) {
         // Completed transaction extras (feedback FB-1396): a paid, submitted case
         // always ends with a receipt download link (the model additionally offers
         // email via the send_confirmation_email tool).
+        // A PAYMENT TAKEN ON THE BACKEND'S GATEWAY IS STILL A PAYMENT WE OWE A
+        // RECEIPT FOR.
+        //
+        // The receipt is rendered from our own payments table, and a rental is
+        // paid on Emirates Post's N-Genius outlet — so nothing was ever written,
+        // the link was never offered, and the model filled the gap by announcing
+        // "your receipt is available via the download link above" with no link
+        // anywhere. We hold every fact the receipt needs; only the row was
+        // missing.
+        const settled = apiTools.getGatewayPayment();
+        if (settled?.paidAt && settled.reference) {
+          try {
+            await getDb()
+              .insert(payments)
+              .values({
+                caseId: session.caseId,
+                conversationId: session.conversationId,
+                agentId: agent.id,
+                reference: settled.reference,
+                amount: Math.round(settled.amount ?? apiTools.getLastHold()?.amount ?? 0),
+                currency: "AED",
+                status: "paid",
+                gatewayRef: settled.orderNo ?? null,
+              })
+              .onConflictDoUpdate({
+                target: payments.reference,
+                set: { status: "paid", updatedAt: new Date() },
+              });
+            finalState = {
+              ...finalState,
+              payment: {
+                ...finalState.payment,
+                status: "paid",
+                reference: settled.reference,
+                amount: settled.amount ?? finalState.payment.amount,
+                currency: "AED",
+              },
+            };
+          } catch (e) {
+            // A receipt row is worth having and never worth failing a confirmed
+            // purchase over.
+            log.error("receipt_row_failed", String((e as Error).message ?? e), {
+              agentId: agent.id,
+              conversationId: session.conversationId,
+            });
+          }
+        }
+
         // A PAID PURCHASE ALWAYS ENDS WITH A RECEIPT THEY CAN OPEN. This used to
         // wait for a submission reference from this turn, so a renewal confirmed
         // in a later turn got no link — and the model filled the gap with
