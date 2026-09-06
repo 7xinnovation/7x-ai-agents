@@ -1922,7 +1922,20 @@ export async function buildApiTools(
             (lastHold.agentIncludedPrice
               ? ` THE FIRST AUTHORISED AGENT COSTS THE CUSTOMER NOTHING. Emirates Post prices that line at AED ${lastHold.agentIncludedPrice.toFixed(2)} and marks it Inclusive, which means it is what a further agent would cost and NOT a charge on this rental — minimumAmount above is the rental plus the registration fee and nothing else. Write the row as \`- Authorised agent (their name): No charge — the first agent is included\`. Do NOT print ${lastHold.agentIncludedPrice.toFixed(2)} beside their name: a customer reads a figure next to a service as a fee, asks why it is there, and they are right to.`
               : "") +
-            (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}, and each of those IS added.` : "") +
+            (agentExtra
+              ? (() => {
+                  // The AGENT line is priced for the TERM, not per year: 50 for
+                  // one year, 150 for three, 250 for five. Emirates Post's own
+                  // page writes "AED 150 per year" on a three-year box, which is
+                  // the term total wearing the wrong label — so say both, and
+                  // say which is which.
+                  const yrs = lastHold.expiryDate ? yearsUntil(lastHold.expiryDate) : null;
+                  const perYear = yrs && yrs > 0 ? agentExtra / yrs : null;
+                  return ` EACH AGENT AFTER THE FIRST ADDS AED ${agentExtra.toFixed(2)}${
+                    yrs && perYear ? ` for the ${yrs === 1 ? "year" : `${yrs} years`} — AED ${perYear.toFixed(2)} a year` : ""
+                  }, and each of those IS added to the total. That figure already covers the whole term: do NOT multiply it by the years again.`;
+                })()
+              : "") +
             (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
             (opts.savedCard ? " If Emirates Post already holds a card for this customer it is sent with the order, so the payment page opens on that card — tell them which card it is and that they can change it there. Never say they have been charged, and never ask them for card details yourself." : "") +
             ` Show the breakdown from priceDetails if you like, but the TOTAL is that sum and nothing else. You do not need to send it — totalAmount is set for you from these figures.`,

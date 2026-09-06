@@ -66,5 +66,20 @@ eq("three agents add two fees",
 // 2085 + 70 = 2155, so the Inclusive agent line is not inside it either.
 eq("minimumAmount is rent + registration", 2085 + 70, 2155);
 
+console.log("\nThe extra agent is priced for the TERM");
+// Emirates Post returns the AGENT/A line already multiplied by the years, and
+// their own page labels a three-year figure "per year". Both readings of AED
+// 150 are in play, so the arithmetic has to be unambiguous.
+const extraFor = (years: number) => 50 * years;
+eq("one year", extraFor(1), 50);
+eq("three years", extraFor(3), 150);
+eq("five years", extraFor(5), 250);
+eq("a second agent on a three-year MyHome adds 150 once, not 450",
+  rentalTotal({ base: 2155, agentExtraPrice: 150 }, { agentCount: 2 }).total, 2305);
+eq("a third adds another 150",
+  rentalTotal({ base: 2155, agentExtraPrice: 150 }, { agentCount: 3 }).total, 2455);
+eq("and the first is still free",
+  rentalTotal({ base: 2155, agentExtraPrice: 150 }, { agentCount: 1 }).total, 2155);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

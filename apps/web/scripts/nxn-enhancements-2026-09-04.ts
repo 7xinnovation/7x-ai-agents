@@ -210,7 +210,13 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "The first agent is Inclusive — Emirates Post prices the line so you know what a SECOND agent would cost, " +
       "and the first one adds nothing. Its row reads `- Authorised agent (their name): No charge — the first " +
       "agent is included`. Never print the figure beside their name: a customer reads a number next to a service " +
-      "as a fee and asks why they are paying it. Agents beyond the first are charged and each gets its own row.\n" +
+      "as a fee and asks why they are paying it.\n" +
+      "AGENTS BEYOND THE FIRST ARE CHARGED, AND THE PRICE IS FOR THE WHOLE TERM. Emirates Post prices an extra " +
+      "agent at AED 50 a year, so the reservation returns 50 on a one-year box, 150 on a three-year one and 250 on " +
+      "five — already multiplied. Quote the figure the reservation gives and say what it covers (\"AED 150.00 for " +
+      "the three years\"); never multiply it by the years yourself, and never quote the annual rate as though it " +
+      "were the charge. Their own page writes \"AED 150 per year\" on a three-year box, which is the term total " +
+      "with the wrong label — do not copy that.\n" +
       "KEY COURIER DELIVERY DOES NOT EXIST ON MyHome OR MyHome Instant. Those boxes are delivered to the " +
       "customer's door and the key comes with them, so there is no KEY-DELIVERY line, no AED 30, and no choice to " +
       "offer. Ask about key collection ONLY on a bundle collected at a branch. Offering it on MyHome charged a " +
