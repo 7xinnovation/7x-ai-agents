@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { AgentDefinition, CaseState, Journey, LocalizedString } from "@dialog/config";
+import { tr, type AgentDefinition, type CaseState, type Journey, type LocalizedString, type Locale } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
 import { adapterContext } from "../adapters/registry";
 import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition } from "../case/engine";
@@ -380,7 +380,12 @@ export async function dispatchTool(
         }
       }
       if (journey.requiresAuth && !ctx.authenticated) {
-        events.push({ type: "auth_required", reason: `Starting ${journey.key} requires sign-in.` });
+        // The journey's TITLE, not its key. "Starting personal_po_box_rental
+        // requires sign-in" put a database identifier in front of a customer.
+        events.push({
+          type: "auth_required",
+          reason: `${tr(journey.title, ctx.locale as Locale)} requires sign-in.`,
+        });
         return { result: "This journey requires an authenticated user. Ask them to sign in.", state, events };
       }
       state = setJourney(agent, state, key);

@@ -10,7 +10,7 @@ import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
-import { registrationFees, observedRents, rememberFees, feesInSelectResponse, rentKey } from "./registrationFees";
+import { registrationFees, observedRents, rememberFees, feesInSelectResponse, rentInSelectResponse, rentKey } from "./registrationFees";
 import { gatewayOrderState } from "./gatewayOrder";
 import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
@@ -649,7 +649,7 @@ export async function buildApiTools(
     /** The gateway payment opened in an earlier turn; the confirm comes later. */
     initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null; paidAt?: string | null } | null;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
-    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
+    initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   } = {}
 ): Promise<{
   tools: Anthropic.Tool[];
@@ -663,7 +663,7 @@ export async function buildApiTools(
   /** The one-time registration fee, as Emirates Post has priced it. */
   getRegistrationFee: () => number | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
-  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
+  getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
   /** Normalised company keys GSB has returned in this case. */
@@ -718,7 +718,7 @@ export async function buildApiTools(
   const gsbCompanies = new Set(opts.gsbCompanies ?? []);
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
-  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
+  let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
 
@@ -1855,6 +1855,10 @@ export async function buildApiTools(
             // each further agent adds. Reading the wrong one is how a customer
             // was quoted 450 for a 400 rental.
             agentExtraPrice: priceOf(p?.priceDetails, "AGENT", "A"),
+            // What the FIRST agent is worth. It is already inside minimumAmount
+            // — its line comes back Inclusive — but "Included" with no figure
+            // beside it reads as a fee nobody will name.
+            agentIncludedPrice: priceOf(p?.priceDetails, "AGENT", "I"),
             keyDeliveryPrice: priceOf(p?.priceDetails, "KEY-DELIVERY"),
           };
         }
@@ -1901,7 +1905,10 @@ export async function buildApiTools(
                 "- Total: AED <the AMOUNT TO CHARGE given to you>\n```\n" +
                 "Their earlier summary could not name this amount because the box had not been reserved yet, so if it said the fee would be shown before payment, this is where that promise is kept. Never send them to the payment page without it."
               : " A one-time registration fee is inside that total. Its exact amount cannot be separated out for this rental, so say a one-time registration fee is included and do NOT state a figure for it.") +
-            (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}.` : "") +
+            (lastHold.agentIncludedPrice
+              ? ` THE FIRST AUTHORISED AGENT IS WORTH AED ${lastHold.agentIncludedPrice.toFixed(2)} AND IS ALREADY IN THAT TOTAL. When the customer has added one, its summary row states the figure and says it is included — \`- Authorised agent (their name): AED ${lastHold.agentIncludedPrice.toFixed(2)} (included)\` — because "Included" on its own reads as a charge nobody will name. Do NOT add it to the total.`
+              : "") +
+            (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}, and each of those IS added.` : "") +
             (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
             (opts.savedCard ? " If Emirates Post already holds a card for this customer it is sent with the order, so the payment page opens on that card — tell them which card it is and that they can change it there. Never say they have been charged, and never ask them for card details yourself." : "") +
             ` Show the breakdown from priceDetails if you like, but the TOTAL is that sum and nothing else. You do not need to send it — totalAmount is set for you from these figures.`,
@@ -2653,7 +2660,11 @@ export async function buildApiTools(
           ...(!res.isError && /rental_select$/i.test(toolName)
             ? (() => {
                 const f = feesInSelectResponse(res.result);
-                return f.size ? { fees: Object.fromEntries(f) } : {};
+                const r = rentInSelectResponse(res.result, new Date());
+                return {
+                  ...(f.size ? { fees: Object.fromEntries(f) } : {}),
+                  ...(r.size ? { rents: Object.fromEntries(r) } : {}),
+                };
               })()
             : {}),
         },

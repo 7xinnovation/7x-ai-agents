@@ -1978,6 +1978,7 @@ export async function POST(req: NextRequest) {
               bundleId: heldNow.bundleId ?? null,
               services: heldNow.services ?? [],
               agentExtraPrice: heldNow.agentExtraPrice ?? null,
+              agentIncludedPrice: heldNow.agentIncludedPrice ?? null,
               keyDeliveryPrice: heldNow.keyDeliveryPrice ?? null,
               paidAt: heldNow.paidAt ?? null,
               orderNo: heldNow.orderNo ?? null,

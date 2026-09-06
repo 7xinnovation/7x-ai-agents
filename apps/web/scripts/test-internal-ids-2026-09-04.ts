@@ -24,9 +24,11 @@ eq("inline pair", stripInternalIds("Naif Post Office, officeId: 214, is open."),
 eq("a real parenthetical survives",
   stripInternalIds("MyHome (delivered to your door) costs AED 695."),
   "MyHome (delivered to your door) costs AED 695.");
-eq("a mixed bracket survives",
+// A bracket that mixes real prose with an id keeps the prose and loses the id —
+// the customer has no more use for it there than anywhere else.
+eq("an id inside a mixed bracket still goes",
   stripInternalIds("Naif Post Office (open until 8pm, officeId 214)."),
-  "Naif Post Office (open until 8pm, officeId 214).");
+  "Naif Post Office (open until 8pm).");
 eq("box numbers are not ids", stripInternalIds("Box 902015 is reserved."), "Box 902015 is reserved.");
 eq("prices untouched", stripInternalIds("AED 765.00 (total)"), "AED 765.00 (total)");
 
@@ -38,6 +40,17 @@ eq("a cards block is untouched",
   stripInternalIds("```cards\n- title: MyBox\n  price: AED 300 / year\n  pricenote: + AED 70 one-time registration fee\n```"),
   "```cards\n- title: MyBox\n  price: AED 300 / year\n  pricenote: + AED 70 one-time registration fee\n```");
 eq("a pay block keeps its url", stripInternalIds("```pay\nurl: https://paypage.sandbox.ngenius-payments.com/v2?code=abc\n```"), "```pay\nurl: https://paypage.sandbox.ngenius-payments.com/v2?code=abc\n```");
+
+eq("officeId with no colon at all",
+  stripInternalIds("Dubai Central Post Office has officeId 201. Let me fetch the boxes."),
+  "Dubai Central Post Office has. Let me fetch the boxes.");
+eq("a backend error code is not shown",
+  stripInternalIds("I'm getting an error holding that box right now (ERROR_GETTING_RATE_TYPE_DETAILS). Let me retry."),
+  "I'm getting an error holding that box right now. Let me retry.");
+eq("BOX_NOT_FREE is a code too", stripInternalIds("That number is taken (BOX_NOT_FREE)."), "That number is taken.");
+eq("ordinary parenthetical prose is untouched",
+  stripInternalIds("MyHome (delivered weekly) costs AED 695."),
+  "MyHome (delivered weekly) costs AED 695.");
 
 console.log("\nStreaming, split every way");
 const cases: [string, string][] = [

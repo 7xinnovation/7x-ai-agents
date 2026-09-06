@@ -81,7 +81,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   const s = RECEIPT_STR[locale];
   const rtl = locale === "ar";
 
-  const brand = (agent?.definition as { theme?: { brandName?: string } } | null)?.theme?.brandName || agent?.name || s.subtitle;
+  const theme = (agent?.definition as { theme?: { brandName?: string; logoUrl?: string } } | null)?.theme;
+  const brand = theme?.brandName || agent?.name || s.subtitle;
+  // The LOGO where the name was. The receipt said "NXN" — an internal product
+  // name — to a customer who had just bought from Emirates Post.
+  const logoUrl = theme?.logoUrl ?? "";
   const primary =
     (agent?.definition as { theme?: { colors?: { primary?: string } } } | null)?.theme?.colors?.primary || "#2626a1";
   const journeyKey = state?.journeyKey ?? "";
@@ -108,6 +112,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   .card{max-width:520px;margin:0 auto;background:#fff;border:1px solid #e4e5f1;border-radius:14px;overflow:hidden}
   .head{background:${esc(primary)};color:#fff;padding:20px 24px}
   .head h1{margin:0;font-size:18px;font-weight:700}
+  /* White-on-brand: the supplied mark is dark, so it is knocked out to sit on
+     the header the way it does in the chat. */
+  .head .logo{display:block;height:30px;width:auto;max-width:220px;filter:brightness(0) invert(1)}
   .head p{margin:4px 0 0;font-size:12px;opacity:.85}
   .body{padding:20px 24px}
   .row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid #f0f1f7;font-size:13.5px}
@@ -120,7 +127,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   @media print{.print{display:none}body{background:#fff;padding:0}.card{border:none}}
 </style></head><body>
 <div class="card">
-  <div class="head"><h1>${esc(brand)}</h1><p>${esc(s.subtitle)}</p></div>
+  <div class="head">${
+    logoUrl
+      ? `<img class="logo" src="${esc(logoUrl)}" alt="${esc(brand)}">`
+      : `<h1>${esc(brand)}</h1>`
+  }<p>${esc(s.subtitle)}</p></div>
   <div class="body">
     ${rows.map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("")}
     <div class="total"><span>${esc(pay.status === "paid" ? s.totalPaid : s.totalDue)}</span><span>${esc(`${pay.amount} ${pay.currency}`)}</span></div>

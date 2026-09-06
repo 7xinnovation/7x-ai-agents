@@ -29,10 +29,14 @@ config({
       : resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"),
 });
 
-import { getDb, agents } from "@dialog/db";
+import { getDb, agents, auditLog } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import { listIntegrations } from "../lib/integrations";
 import { bundlePeriods, rentalTotal } from "../lib/rentalTotal";
+import { feesInSelectResponse, rentInSelectResponse } from "../lib/registrationFees";
+
+/** The same prefix buildApiTools gives a tool, so observations land in its scope. */
+const integrationPrefix = (name: string) => name.replace(/[^a-zA-Z0-9]/g, "").slice(0, 14).toLowerCase() || "api";
 
 const arg = (n: string) => {
   const i = process.argv.indexOf(n);
@@ -119,8 +123,32 @@ async function main() {
           physicalBoxRequired: !/^MYHOME/i.test(id),
         }),
       });
-      const j = await r.json().catch(() => null);
-      if (j?.payload?.subscriptionReferenceNumber) { hold = j.payload; break; }
+      const text = await r.text();
+      const j = (() => { try { return JSON.parse(text); } catch { return null; } })();
+      if (j?.payload?.subscriptionReferenceNumber) {
+        hold = j.payload;
+        // RECORD IT. Reading these prices back is the only way the duration
+        // cards can show a discounted term, and a reservation made by a script
+        // teaches us exactly as much as one made by a customer — so long as it
+        // is filed under its own action name and never mistaken for a rental.
+        const response = `HTTP ${r.status} ${r.statusText}\n${text}`;
+        await db.insert(auditLog).values({
+          agentId: row.id,
+          actor: "system",
+          action: "registration_fee_observed",
+          payload: {
+            tool: `${integrationPrefix(intg.name)}__post_api_Rental_Select`,
+            method: "POST",
+            path: "/api/Rental/Select",
+            input: { bundleId: id, poBoxExpiryDate: expiry },
+            response: response.slice(0, 4000),
+            fees: Object.fromEntries(feesInSelectResponse(response)),
+            rents: Object.fromEntries(rentInSelectResponse(response, new Date())),
+            note: "Reservation made by scripts/nxn-verify-all-bundles to price a term. Not a customer rental.",
+          },
+        });
+        break;
+      }
       if (r.status !== 400) console.log(`    (HTTP ${r.status})`);
     }
     if (!hold) { console.log("  SKIPPED — no box could be reserved"); continue; }

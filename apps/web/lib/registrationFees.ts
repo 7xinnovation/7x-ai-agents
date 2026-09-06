@@ -175,11 +175,11 @@ async function priceBook(agentId: string, selectToolName: string): Promise<{ fee
           // readable in the body. A long corporate response is truncated at 4000
           // characters and its NEW-REG line falls off the end, which is exactly
           // why the extracted copy exists.
-          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload}->>'response' like '%NEW-REG%' or ${auditLog.payload}->>'response' like '%"RENT"%')`
+          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload} ? 'rents' or ${auditLog.payload}->>'response' like '%NEW-REG%' or ${auditLog.payload}->>'response' like '%"RENT"%')`
         )
       )
       .orderBy(desc(auditLog.createdAt))
-      .limit(80);
+      .limit(200);
     // Oldest first, so a newer row overwrites an older one for the same bundle.
     for (const r of rows.reverse()) {
       const p = r.payload as { response?: string; fees?: Record<string, unknown> } | null;
@@ -194,7 +194,14 @@ async function priceBook(agentId: string, selectToolName: string): Promise<{ fee
       if (!took && p.response) for (const [b, amt] of feesInSelectResponse(p.response)) fees.set(b, amt);
       // The rent is read from the response either way: it is never extracted at
       // write time, and the term it was for is inside the response itself.
-      if (p.response) {
+      // The extracted copy first — the audit truncates a long response, and a
+      // corporate one loses its RENT line the same way it lost NEW-REG.
+      let tookRent = false;
+      for (const [k, v] of Object.entries((p as { rents?: Record<string, unknown> }).rents ?? {})) {
+        const n = Number(v);
+        if (k && Number.isFinite(n) && n > 0) { rents.set(k, n); tookRent = true; }
+      }
+      if (!tookRent && p.response) {
         const at = (r as { createdAt?: Date }).createdAt ?? new Date();
         for (const [k, amt] of rentInSelectResponse(p.response, at)) rents.set(k, amt);
       }

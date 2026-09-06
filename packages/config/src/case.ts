@@ -128,6 +128,8 @@ export const CaseState = z.object({
        * 450 for a 400 rental and the backend refused with MISMATCH_IN_AMOUNT.
        */
       agentExtraPrice: z.number().nullable().default(null),
+      /** What the FIRST agent is worth. Inside the minimum amount already. */
+      agentIncludedPrice: z.number().nullable().default(null),
       keyDeliveryPrice: z.number().nullable().default(null),
       /**
        * Set once the order exists. paymentRef is the BACKEND's payment reference

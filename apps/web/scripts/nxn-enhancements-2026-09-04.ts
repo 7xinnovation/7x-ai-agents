@@ -213,6 +213,19 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "priced row.",
   },
   {
+    marker: "A RENTAL IS ONE AMOUNT, NOT A SUM TO WORK OUT",
+    journeys: /rental/,
+    text:
+      "A RENTAL IS ONE AMOUNT, NOT A SUM TO WORK OUT. \"Rental: AED 695.00 x 3 years\" asks the customer to do the " +
+      "arithmetic, and the arithmetic is wrong anyway — Emirates Post DISCOUNTS the longer terms, so three years of " +
+      "MyHome is 2,085 and ten years is 4,000, not 6,950. Every money row is a single figure for the term they " +
+      "chose: `- Box rental (3 years): AED 2,085.00`. Never write a multiplication, never multiply an annual rate " +
+      "yourself, and take the figure from the duration list you were given or from the reservation.\n" +
+      "SHOW THE SAVING where there is one, on the duration card, as a badge (e.g. `badge: Save AED 2,950`) — " +
+      "Emirates Post asked for the multi-year discount to be visible, and it is the whole reason a customer picks " +
+      "a longer term.",
+  },
+  {
     marker: "A PENDING BOX CANNOT BE MANAGED YET",
     journeys: /manage_po_box|renewal/,
     text:

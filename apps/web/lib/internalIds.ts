@@ -26,11 +26,24 @@ const INTERNAL =
 const ONLY_IDS = new RegExp(`^\\(\\s*(?:${INTERNAL})\\s*[:=]?\\s*[\\w.-]+(?:\\s*[,;]\\s*(?:${INTERNAL})\\s*[:=]?\\s*[\\w.-]+)*\\s*\\)$`, "i");
 
 /**
+ * A backend error code is not a customer's business.
+ *
+ * "I'm getting an error holding that box right now
+ * (ERROR_GETTING_RATE_TYPE_DETAILS)" — they can do nothing with that, and it
+ * reads as the system coming apart. The retry that follows usually works; the
+ * code should never have been shown either way.
+ */
+const ERROR_CODE = /\s*[([]\s*(?:ERROR_[A-Z_]+|[A-Z]+_NOT_FREE|[A-Z]+_NOT_FOUND|INVALID_[A-Z_]+|MISMATCH_[A-Z_]+|[A-Z_]{6,}_DETAILS)\s*[)\]]/g;
+
+/**
  * The same pairs written inline, e.g. "Naif Post Office, officeId 214, is…".
  * Punctuation on both sides means the pair was an aside and both commas go;
  * otherwise a single space stands in for it, so the sentence still reads.
  */
-const INLINE = new RegExp(`[ \\t]*([,;]?)[ \\t]*\\b(?:${INTERNAL})\\b[ \\t]*[:=][ \\t]*[\\w.-]+[ \\t]*([,;]?)`, "gi");
+const INLINE = new RegExp(
+  `[ \\t]*([,;]?)[ \\t]*\\b(?:${INTERNAL})\\b[ \\t]*[:=]?[ \\t]*[\\w-]+(?:\\.[\\w-]+)*[ \\t]*([,;]?)`,
+  "gi"
+);
 
 /** Longest run a bracket may hold before we give up and let it through. */
 const MAX_HOLD = 160;
@@ -39,7 +52,12 @@ const MAX_HOLD = 160;
 export function stripInternalIds(text: string): string {
   return text
     .replace(new RegExp(`\\s*\\((?:[^()\\n]{0,${MAX_HOLD}})\\)`, "g"), (m) => (ONLY_IDS.test(m.trim()) ? "" : m))
-    .replace(INLINE, (_m, lead: string, trail: string) => (lead && trail ? "" : lead || trail || " "));
+    .replace(INLINE, (_m, lead: string, trail: string) => (lead && trail ? "" : lead || trail || " "))
+    // Removing the pair can leave the punctuation that framed it: "(open until
+    // 8pm,)" and "has . Let me". Tidy the seams rather than the sentence.
+    .replace(/([,;])\s*([)\]])/g, "$2")
+    .replace(/\s+([.,;:!?)\]])/g, "$1")
+    .replace(ERROR_CODE, "");
 }
 
 export function internalIdFilter() {
