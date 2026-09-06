@@ -99,11 +99,15 @@ async function main() {
     // its own 24/36/60/120-month prices where the personal bundles publish only
     // an annual rate, so a bundle that priced correctly for one year says
     // nothing about how it prices for three.
-    const terms = [dates.dates[0]!, dates.dates[2] ?? dates.dates[1]].filter(Boolean) as string[];
+    // --terms all walks every duration Emirates Post offers (1, 2, 3, 5, 10),
+    // which is the only way to know a bundle prices correctly at every length
+    // rather than at the two we happened to look at.
+    const wanted = arg("--terms") === "all" ? dates.dates : [dates.dates[0]!, dates.dates[2] ?? dates.dates[1]];
+    const terms = wanted.filter(Boolean) as string[];
     let boxAt = 0;
     for (const expiry of terms) {
     let hold: Record<string, any> | null = null;
-    for (const box of free.slice(boxAt, boxAt + 5)) {
+    for (const box of free.slice(boxAt, boxAt + 4)) {
       boxAt++;
       const r = await fetch(`${base}/api/Rental/Select`, {
         method: "POST",

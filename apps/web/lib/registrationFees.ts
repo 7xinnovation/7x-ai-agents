@@ -24,8 +24,33 @@ import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 /** bundleId → the fee Emirates Post charged for it, as last observed. */
 export type FeeBook = Map<string, number>;
 
+/**
+ * `bundleId|years` → the RENT Emirates Post actually charged for that term.
+ *
+ * The duration cards were computed as the annual rate times the years, because
+ * `Rental/Bundle` returns null for every multi-year field on the personal
+ * bundles. It turns out the pricing engine has those prices anyway, and they are
+ * DISCOUNTED — measured against real reservations on 6 Sep:
+ *
+ *   MyBox           1y 300   2y 600    5y 1200   (not 1500)
+ *   MyHome          1y 695   3y 2085   10y 4000  (not 6950)
+ *   MyHome Instant  1y 995   3y 2985   5y 4000   (not 4975)
+ *
+ * So the cards were overstating the longer terms — by AED 2,950 on a ten-year
+ * MyHome — and the multi-year discount Emirates Post asked us to show was not
+ * only missing, it was inverted. Corporate is unaffected: LI, BR and GO publish
+ * their own 24/36/60/120-month prices and those match to the fils.
+ *
+ * Same mechanism as the fee: read back from reservations this deployment has
+ * made, never computed, and absent rather than guessed.
+ */
+export type RentBook = Map<string, number>;
+
+/** The key a rent observation is filed under. */
+export const rentKey = (bundleId: string, years: number) => `${bundleId}|${years}`;
+
 const TTL_MS = 10 * 60 * 1000;
-const cache = new Map<string, { at: number; fees: FeeBook }>();
+const cache = new Map<string, { at: number; fees: FeeBook; rents: RentBook }>();
 
 /**
  * Pull the `NEW-REG` amount out of one Select response.
@@ -35,6 +60,37 @@ const cache = new Map<string, { at: number; fees: FeeBook }>();
  * reading the one line we need out of the text when it does not — a truncated
  * response still usually contains the whole `NEW-REG` object.
  */
+/**
+ * The RENT line and the term it was for, out of one Select response.
+ *
+ * The term comes from the response's own `poBoxExpiryDate` against the date the
+ * reservation was made, so the observation is self-contained.
+ */
+export function rentInSelectResponse(response: string, madeAt: Date): RentBook {
+  const out: RentBook = new Map();
+  const body = response.slice(response.indexOf("\n") + 1);
+  try {
+    const parsed = JSON.parse(body) as Record<string, any>;
+    const p = parsed?.payload ?? parsed;
+    const details = p?.priceDetails;
+    const expiry = p?.poBoxExpiryDate;
+    if (!Array.isArray(details) || !expiry) return out;
+    const t = new Date(String(expiry));
+    if (Number.isNaN(t.getTime())) return out;
+    const years = Math.round((t.getTime() - madeAt.getTime()) / (365.2425 * 24 * 60 * 60 * 1000));
+    if (years < 1 || years > 20) return out;
+    for (const d of details) {
+      if (String(d?.serviceType ?? "").toUpperCase() !== "RENT") continue;
+      const id = String(d?.bundleID ?? d?.bundleId ?? "").trim();
+      const amount = Number(d?.totalAmount);
+      if (id && Number.isFinite(amount) && amount > 0) out.set(rentKey(id, years), amount);
+    }
+  } catch {
+    /* a truncated body simply teaches us nothing about rent */
+  }
+  return out;
+}
+
 export function feesInSelectResponse(response: string): FeeBook {
   const out: FeeBook = new Map();
   const body = response.slice(response.indexOf("\n") + 1);
@@ -63,12 +119,15 @@ export function feesInSelectResponse(response: string): FeeBook {
 /** Remember a fee we have just seen, so it is on the card without a round trip. */
 export function rememberFees(toolName: string, response: string) {
   const fees = feesInSelectResponse(response);
-  if (!fees.size) return;
+  const rents = rentInSelectResponse(response, new Date());
+  if (!fees.size && !rents.size) return;
   const key = scope(toolName);
   const cur = cache.get(key);
-  const merged = new Map(cur?.fees ?? []);
-  for (const [k, v] of fees) merged.set(k, v);
-  cache.set(key, { at: cur?.at ?? Date.now(), fees: merged });
+  const mergedFees = new Map(cur?.fees ?? []);
+  for (const [k, v] of fees) mergedFees.set(k, v);
+  const mergedRents = new Map(cur?.rents ?? []);
+  for (const [k, v] of rents) mergedRents.set(k, v);
+  cache.set(key, { at: cur?.at ?? Date.now(), fees: mergedFees, rents: mergedRents });
 }
 
 /** Integration prefix — everything before the `__` in a tool name. */
@@ -84,13 +143,23 @@ function scope(toolName: string): string {
  * they have today, which is exactly what they said before this existed.
  */
 export async function registrationFees(agentId: string, selectToolName: string): Promise<FeeBook> {
+  return (await priceBook(agentId, selectToolName)).fees;
+}
+
+/** What each term of each bundle actually cost, as last observed. */
+export async function observedRents(agentId: string, selectToolName: string): Promise<RentBook> {
+  return (await priceBook(agentId, selectToolName)).rents;
+}
+
+async function priceBook(agentId: string, selectToolName: string): Promise<{ fees: FeeBook; rents: RentBook }> {
   const key = scope(selectToolName);
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.fees;
+  if (hit && Date.now() - hit.at < TTL_MS) return { fees: hit.fees, rents: hit.rents };
   const fees: FeeBook = new Map(hit?.fees ?? []);
+  const rents: RentBook = new Map(hit?.rents ?? []);
   try {
     const rows = await getDb()
-      .select({ payload: auditLog.payload })
+      .select({ payload: auditLog.payload, createdAt: auditLog.createdAt })
       .from(auditLog)
       .where(
         and(
@@ -106,7 +175,7 @@ export async function registrationFees(agentId: string, selectToolName: string):
           // readable in the body. A long corporate response is truncated at 4000
           // characters and its NEW-REG line falls off the end, which is exactly
           // why the extracted copy exists.
-          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload}->>'response' like '%NEW-REG%')`
+          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload}->>'response' like '%NEW-REG%' or ${auditLog.payload}->>'response' like '%"RENT"%')`
         )
       )
       .orderBy(desc(auditLog.createdAt))
@@ -123,10 +192,16 @@ export async function registrationFees(agentId: string, selectToolName: string):
         if (b && Number.isFinite(n) && n > 0) { fees.set(b, n); took = true; }
       }
       if (!took && p.response) for (const [b, amt] of feesInSelectResponse(p.response)) fees.set(b, amt);
+      // The rent is read from the response either way: it is never extracted at
+      // write time, and the term it was for is inside the response itself.
+      if (p.response) {
+        const at = (r as { createdAt?: Date }).createdAt ?? new Date();
+        for (const [k, amt] of rentInSelectResponse(p.response, at)) rents.set(k, amt);
+      }
     }
   } catch {
     /* diagnostics for pricing must never take down pricing */
   }
-  cache.set(key, { at: Date.now(), fees });
-  return fees;
+  cache.set(key, { at: Date.now(), fees, rents });
+  return { fees, rents };
 }

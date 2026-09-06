@@ -211,6 +211,29 @@ is AED 70 on all six bundles (IN, MYHOME3, MYHOMEF, LI, BR, GO). It is not in
 `Rental/Bundle`, so a customer cannot be shown the full price of a box until
 they have reserved one. **Could `Rental/Bundle` carry it?**
 
+## The personal bundles have multi-year prices that `Rental/Bundle` hides (6 Sep)
+
+`Rental/Bundle?request=P` returns `null` for `bundle24Month_Price`,
+`bundle36Month_Price`, `bundle60Month_Price` and `bundle120Month_Price` on all
+three personal bundles — so the only figure available is the annual rate. The
+pricing engine has the others, and they are **discounted**. Measured against real
+reservations:
+
+| Bundle | 1y | 2y | 3y | 5y | 10y | annual x years would say |
+|---|---|---|---|---|---|---|
+| MyBox (IN) | 300 | 600 | 900 | **1,200** | — | 1,500 at five years |
+| MyHome (MYHOME3) | 695 | — | 2,085 | — | **4,000** | 6,950 at ten years |
+| MyHome Instant (MYHOMEF) | 995 | — | 2,985 | **4,000** | — | 4,975 at five years |
+
+A ten-year MyHome is **AED 2,950 cheaper** than multiplying the annual rate.
+Corporate is unaffected — LI, BR and GO publish their own 24/36/60/120-month
+prices and every one matches the reservation to the fils.
+
+**Please populate the multi-year fields for `request=P`.** Until then a customer
+choosing a long term cannot be shown its price before reserving a box, and any
+system that multiplies the annual rate — as the website's own card would — is
+quoting more than you charge.
+
 *We previously raised `157 ERROR_GETTING_HOLD_DETAILS` with you. That was ours — an
 invented reference, a stale hold, and the partial `billingDetail` above. No action
 needed.*

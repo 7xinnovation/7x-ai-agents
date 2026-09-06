@@ -18,6 +18,9 @@ const cliArg = (n: string) => {
 };
 const HOST = (cliArg("--host") ?? "").replace(/\/$/, "");
 const VERBOSE = process.argv.includes("--verbose");
+/** Which bundle to walk. MyHome is delivered, so it exercises the address path. */
+const BUNDLE = cliArg("--bundle") ?? "MyBox";
+const KEY_COURIER = BUNDLE.toLowerCase().startsWith("mybox");
 const TOKEN = cliArg("--token");
 if (!HOST) throw new Error("--host <https://…> is required");
 if (!TOKEN) throw new Error("--token <the customer's Emirates Post session jwt> is required");
@@ -85,13 +88,13 @@ const REPLIES: { when: RegExp; say: string; once?: boolean }[] = [
   { when: /rent a new box|not renew or manage|add another one/i, say: "Yes, rent a new box.", once: true },
   { when: /saved visa|different card|how would you like to pay/i, say: "Pay with my saved Visa ending 1111." },
   { when: /```\s*toggles/i, say: "Save my card for future payments: Yes. Renew my box automatically next year: Yes. I accept the Terms and Conditions: Yes. Proceed to payment." },
-  { when: /which plan|bundle|mybox/i, say: "MyBox please.", once: true },
+  { when: /which plan|bundle|mybox/i, say: `${BUNDLE} please.`, once: true },
   { when: /which emirate|emirate of the/i, say: "Dubai.", once: true },
   { when: /branch|post office/i, say: "Al Barsha Post Office.", once: true },
   { when: /box number|pick (a|another) number|available box/i, say: "__BOX__", once: true },
-  { when: /how long|duration|rental period/i, say: "2 Years.", once: true },
+  { when: /how long|duration|rental period/i, say: cliArg("--years") ? `${cliArg("--years")} Years.` : "2 Years.", once: true },
   { when: /authoris?ed agent|add an agent/i, say: "No agent, thank you.", once: true },
-  { when: /key.*(collect|courier|deliver)/i, say: "Please deliver the key by courier.", once: true },
+  { when: /key.*(collect|courier|deliver)/i, say: KEY_COURIER ? "Please deliver the key by courier." : "Collect it at the branch, thanks.", once: true },
   { when: /area|address|street|villa|apartment/i, say: "Apt 2, 17d Street, Garhoud, Dubai. That area is correct.", once: true },
   { when: /phone|mobile|email/i, say: "0553708434 and emre.karayalcin@7x.ae.", once: true },
   { when: /does (that|everything) look|confirm|correct\?|proceed/i, say: "Yes, that is correct. Please proceed." },
@@ -103,7 +106,7 @@ function amounts(text: string): number[] {
 }
 
 async function main() {
-  console.log(`\n${HOST} · nxn-dialog · personal rental, driven end to end\n`);
+  console.log(`\n${HOST} · nxn-dialog · ${BUNDLE}, driven end to end\n`);
 
   const used = new Set<number>();
   const turns: string[] = [];
@@ -139,7 +142,8 @@ async function main() {
 
   console.log("\n  the journey");
   check("durations were priced, not just dated", /\d\s*year/i.test(all) && amounts(all).some((a) => a === 670 || a === 370));
-  check("the courier fee was shown", amounts(all).includes(30), "AED 30 never appeared");
+  if (KEY_COURIER) check("the courier fee was shown", amounts(all).includes(30), "AED 30 never appeared");
+  else check("no courier was charged on a delivered bundle", !/key (courier|delivery).*AED\s*30/i.test(all));
   check("the box was reserved", /reserv|held/i.test(all));
 
   console.log("\n  before payment");
@@ -155,7 +159,8 @@ async function main() {
   check("the summary total and the pay button are the same number",
     num(totalLine) !== null && num(totalLine) === num(payLine),
     `card ${num(totalLine)}, button ${num(payLine)}`);
-  check("that total covers rental + registration + courier", num(totalLine) === 700, `card total ${num(totalLine)}`);
+  const want = Number(cliArg("--expect") ?? (KEY_COURIER ? 700 : 0));
+  if (want) check(`that total is the expected AED ${want}`, num(totalLine) === want, `card total ${num(totalLine)}`);
 
   console.log("\n  what a customer must never see");
   check("no internal identifier", !/officeid|uniqueboxid|bundle_id|entcode/i.test(all));

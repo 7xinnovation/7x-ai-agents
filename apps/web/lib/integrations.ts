@@ -10,7 +10,7 @@ import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
-import { registrationFees, rememberFees, feesInSelectResponse } from "./registrationFees";
+import { registrationFees, observedRents, rememberFees, feesInSelectResponse, rentKey } from "./registrationFees";
 import { gatewayOrderState } from "./gatewayOrder";
 import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
@@ -372,6 +372,11 @@ export function dateForYears(dates: string[], years: number): string | null {
     if (Math.round(diff) === years) return d;
   }
   return null;
+}
+
+/** The reservation tool in a tool map, which scopes what we have observed. */
+function selectToolFor(map: Map<string, unknown>): string | undefined {
+  return [...map.keys()].find((t) => /rental_select$/i.test(t));
 }
 
 /** Whole years from today to an offered expiry date, or null if it is not readable. */
@@ -2507,6 +2512,21 @@ export async function buildApiTools(
           // the one-time registration fee is added once. MyBox two years is
           // 600 + 70 = 670, which is exactly what the reservation comes back at.
           const periods = bundlePriceBook.get(bundle) ?? [];
+          // MULTIPLYING THE ANNUAL RATE IS WRONG, and not by a little.
+          //
+          // Rental/Bundle returns null for every multi-year field on the
+          // personal bundles, so the cards were computed as the annual rate
+          // times the years. Emirates Post's pricing engine has those prices
+          // anyway and they are DISCOUNTED — measured 6 Sep against real
+          // reservations: MyBox five years is 1,200 not 1,500; MyHome ten years
+          // is 4,000 not 6,950. The cards were overstating by nearly three
+          // thousand dirhams, and the multi-year discount we were asked to show
+          // was inverted.
+          //
+          // So a term is priced from what Emirates Post has actually charged for
+          // it, or it carries no price at all. Corporate publishes its own
+          // multi-year prices and those are exact.
+          const rents = selectToolFor(map) ? await observedRents(agentId, selectToolFor(map)!) : new Map<string, number>();
           const annual = periods.find((p) => p.years === 1)?.price ?? null;
           // The fee book is loaded when the bundles are listed, which may have
           // been a different turn; a duration priced without the registration
@@ -2522,7 +2542,10 @@ export async function buildApiTools(
               const years = yearsUntil(d);
               if (years === null) return null;
               const published = periods.find((p) => p.years === years)?.price ?? null;
-              const rent = published ?? (annual !== null ? annual * years : null);
+              const observed = rents.get(rentKey(bundle, years)) ?? null;
+              // Published first (corporate states its own), then what we have
+              // seen charged, and for one year the annual rate IS the term.
+              const rent = published ?? observed ?? (years === 1 ? annual : null);
               if (rent === null) return null;
               const total = fee !== null ? rent + fee : rent;
               return (
@@ -2532,13 +2555,21 @@ export async function buildApiTools(
             })
             .filter(Boolean);
           if (lines.length) {
+            const unpriced = dates
+              .map(String)
+              .map((d) => yearsUntil(d))
+              .filter((y): y is number => y !== null)
+              .filter((y) => !periods.some((p) => p.years === y) && !rents.has(rentKey(bundle, y)) && y !== 1);
             res = {
               ...res,
               result:
                 res.result +
                 "\n\nWHAT EACH DURATION COSTS. This response carries dates and no prices, and a list of durations with no prices is not a choice. Put the amount on every duration card, exactly as given here, and never work one out yourself:\n" +
                 lines.join("\n") +
-                "\nThese totals already include the one-time registration fee, which is charged once however long the term is. Quote them verbatim; the reservation will come back at the same figure.",
+                "\nThese totals already include the one-time registration fee, which is charged once however long the term is. Quote them verbatim; the reservation will come back at the same figure." +
+                (unpriced.length
+                  ? `\nNO PRICE IS AVAILABLE for ${unpriced.map((y) => `${y} years`).join(", ")}. Emirates Post discounts the longer terms and does not publish those figures, so multiplying the annual rate OVERSTATES them — a ten-year MyHome is 4,000, not 6,950. Show those durations with "price confirmed when the box is reserved" and no figure, and if the customer picks one, reserve the box and quote the exact total from the reservation before anything else.`
+                  : ""),
             };
           }
         }
