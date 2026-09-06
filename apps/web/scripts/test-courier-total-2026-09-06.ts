@@ -84,6 +84,26 @@ check(
   )
 );
 
+// ── the footer, written as one more bullet ─────────────────────────────────
+// What the live run produced: "- Total: AED 1,300.00", which the old pattern
+// did not recognise at all, so the figure was the model's own.
+const BULLETED = [
+  "```summary",
+  "title: What you will pay",
+  "- Box rental (5 years): AED 1,200.00",
+  "- One-time registration fee: AED 70.00",
+  "- Key delivery by courier: AED 30.00",
+  "- Total: AED 1,270.00",
+  "```",
+].join("\n");
+const bulleted = run(
+  summaryFeeGuard(() => 70, (extras) => rentalTotal(hold, { agentCount: 1, keyDelivery: extras.keyDelivery }).total, () => true),
+  BULLETED
+);
+check("a bulleted total is corrected too", /- Total: AED 1300\.00/.test(bulleted), bulleted);
+check("...and stays a bullet", !/^total:/im.test(bulleted), bulleted);
+check("...and the fee is not added a second time", (bulleted.match(/registration fee/gi) ?? []).length === 1, bulleted);
+
 // ── nothing else moves ──────────────────────────────────────────────────────
 const before = summaryFeeGuard(() => 70, () => null, () => true);
 const pre = run(before, "```summary\n- Box rental: AED 400.00\n- Key courier delivery: AED 30.00\n```");

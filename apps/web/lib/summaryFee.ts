@@ -40,6 +40,16 @@ const PRICED_FEE = /^[ \t]*-[ \t]+[^\n:]*registration[^\n:]*:[^\n]*\d/im;
  * selling instead of the state being asked what it remembers.
  */
 const COURIER_ROW = /^[ \t]*-[ \t]+[^\n:]*\b(?:key[^\n:]*(?:courier|deliver)|courier[^\n:]*key)[^\n:]*:[^\n]*\d[^\n]*$/gim;
+/**
+ * The card's footer, written either way.
+ *
+ * The prompt asks for `total: AED x` and the model as often writes it as one
+ * more bullet, `- Total: AED 1,300.00`. Only the first form was recognised, so
+ * on a bulleted card the figure the customer reads was the model's arithmetic
+ * with nothing checking it — right on 6 September by luck, not by design.
+ */
+const TOTAL_ROW = /^[ \t]*(?:[-*][ \t]+)?total[ \t]*:.*$/im;
+
 /** The choice as a line of its own: "- Key delivery: Courier (AED 30 …)". */
 const COURIER_CHOICE = /^([ \t]*-[ \t]+[^\n:]*key[^\n:]*deliver[^\n:]*:[ \t]*)(.*)$/im;
 
@@ -88,8 +98,10 @@ export function insertRegistrationFee(block: string, fee: number): string {
   // Only a card that actually lists rows; a bare fenced word is not a summary.
   if (!/^[ \t]*-[ \t]+\S/m.test(body)) return block;
   const row = `\n- One-time registration fee: AED ${fee.toFixed(2)}`;
-  const total = /\n[ \t]*total[ \t]*:/i.exec(body);
-  const next = total ? body.slice(0, total.index) + row + body.slice(total.index) : body + row;
+  // TOTAL_ROW anchors at the start of the footer's own line, so the new row is
+  // spliced in ahead of it rather than glued onto its front.
+  const total = TOTAL_ROW.exec(body);
+  const next = total ? `${body.slice(0, total.index)}${row.slice(1)}\n${body.slice(total.index)}` : body + row;
   return OPEN + next + block.slice(close.index);
 }
 
@@ -99,8 +111,11 @@ export function correctTotal(block: string, total: number): string {
   if (!close) return block;
   const body = block.slice(OPEN.length, close.index);
   if (!/^[ \t]*-[ \t]+\S/m.test(body)) return block;
-  const line = `total: AED ${total.toFixed(2)}`;
-  const written = /^[ \t]*total[ \t]*:.*$/im.exec(body);
+  const written = TOTAL_ROW.exec(body);
+  // Keep the shape the card already uses: a bulleted footer stays bulleted, so
+  // correcting the figure does not reformat the card around it.
+  const bullet = /^[ \t]*([-*][ \t]+)/.exec(written?.[0] ?? "");
+  const line = `${bullet?.[1] ? `- ` : ""}${bullet ? "Total" : "total"}: AED ${total.toFixed(2)}`;
   // A card with no footer is left without one: adding a total to a summary that
   // deliberately has none (the pre-reservation one, where the figure is not yet
   // final) would state a number the journey is not ready to state.

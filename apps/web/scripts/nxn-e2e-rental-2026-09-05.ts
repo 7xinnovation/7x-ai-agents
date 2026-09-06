@@ -180,13 +180,26 @@ async function main() {
   check("a payment page was reached", /paypage\.|```\s*pay/i.test(last), last.slice(-400));
   // The card's footer against the button's figure — NOT every amount in the
   // reply, which legitimately includes each line of the breakdown.
-  const totalLine = /^[ \t]*total[ \t]*:[ \t]*AED\s*([\d,]+(?:\.\d{1,2})?)/im.exec(last);
+  // The model writes the footer as `total: …` or as one more bullet.
+  const inCard = (t: string) => /^[ \t]*(?:[-*][ \t]+)?total[ \t]*:[ \t]*AED\s*([\d,]+(?:\.\d{1,2})?)/im.exec(t);
+  // The card is often a turn or two before the payment block.
+  const totalLine = inCard(last) ?? inCard(all);
   const payLine = /^[ \t]*amount[ \t]*:[ \t]*AED\s*([\d,]+(?:\.\d{1,2})?)/im.exec(last);
   const num = (m: RegExpExecArray | null) => (m ? Number(m[1]!.replace(/,/g, "")) : null);
   check("the card carries a total", num(totalLine) !== null, last.slice(-400));
   check("the summary total and the pay button are the same number",
     num(totalLine) !== null && num(totalLine) === num(payLine),
     `card ${num(totalLine)}, button ${num(payLine)}`);
+  // 6 Sep: a card footed at 1,300 with a paragraph underneath saying "the
+  // confirmed total from Emirates Post is AED 1,270.00". Every total the
+  // customer can read must be the same total.
+  const stated = [...last.matchAll(/\b(?:total|you will pay|amount due|amount payable|will be charged)\b[^\n]{0,60}?AED[  ]*([\d,]+(?:\.\d{1,2})?)/gi)]
+    .map((m) => Number(m[1]!.replace(/,/g, "")));
+  check(
+    "no second total anywhere in the reply",
+    num(totalLine) === null || stated.every((v) => v === num(totalLine)),
+    `card ${num(totalLine)}, also stated: ${stated.join(", ")}`
+  );
   const want = Number(cliArg("--expect") ?? (KEY_COURIER ? 700 : 0));
   if (want) check(`that total is the expected AED ${want}`, num(totalLine) === want, `card total ${num(totalLine)}`);
 
