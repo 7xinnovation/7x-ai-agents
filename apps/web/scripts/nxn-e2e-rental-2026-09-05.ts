@@ -20,7 +20,10 @@ const HOST = (cliArg("--host") ?? "").replace(/\/$/, "");
 const VERBOSE = process.argv.includes("--verbose");
 /** Which bundle to walk. MyHome is delivered, so it exercises the address path. */
 const BUNDLE = cliArg("--bundle") ?? "MyBox";
+/** Only a branch-collected bundle sells key courier; MyHome's key travels with the box. */
 const KEY_COURIER = BUNDLE.toLowerCase().startsWith("mybox");
+/** Walk the add-an-agent path too, which is where today's price bugs were. */
+const WITH_AGENT = process.argv.includes("--agent");
 const TOKEN = cliArg("--token");
 if (!HOST) throw new Error("--host <https://…> is required");
 if (!TOKEN) throw new Error("--token <the customer's Emirates Post session jwt> is required");
@@ -93,7 +96,11 @@ const REPLIES: { when: RegExp; say: string; once?: boolean }[] = [
   { when: /branch|post office/i, say: "Al Barsha Post Office.", once: true },
   { when: /box number|pick (a|another) number|available box/i, say: "__BOX__", once: true },
   { when: /how long|duration|rental period/i, say: cliArg("--years") ? `${cliArg("--years")} Years.` : "2 Years.", once: true },
-  { when: /authoris?ed agent|add an agent/i, say: "No agent, thank you.", once: true },
+  { when: /authoris?ed agent|add an agent/i, say: WITH_AGENT ? "Yes, add an agent." : "No agent, thank you.", once: true },
+  { when: /agent'?s? (emirates id|details|name)|upload the agent/i, say: "The agent is Emre Karayalcin, Emirates ID 784-1999-8392642-1.", once: true },
+  { when: /expiry date|expires on|valid until/i, say: "It expires on 12-08-2030." },
+  { when: /nationality/i, say: "United Arab Emirates." },
+  { when: /agent'?s? (phone|mobile|email)/i, say: "0553708434 and emre.karayalcin@7x.ae." },
   { when: /key.*(collect|courier|deliver)/i, say: KEY_COURIER ? "Please deliver the key by courier." : "Collect it at the branch, thanks.", once: true },
   { when: /area|address|street|villa|apartment/i, say: "Apt 2, 17d Street, Garhoud, Dubai. That area is correct.", once: true },
   { when: /phone|mobile|email/i, say: "0553708434 and emre.karayalcin@7x.ae.", once: true },
@@ -141,9 +148,30 @@ async function main() {
   check("...with its amount, AED 70", amounts(cards).includes(70), `saw ${amounts(cards).join(", ") || "no amounts"}`);
 
   console.log("\n  the journey");
-  check("durations were priced, not just dated", /\d\s*year/i.test(all) && amounts(all).some((a) => a === 670 || a === 370));
-  if (KEY_COURIER) check("the courier fee was shown", amounts(all).includes(30), "AED 30 never appeared");
-  else check("no courier was charged on a delivered bundle", !/key (courier|delivery).*AED\s*30/i.test(all));
+  // The one-year total for each bundle, rental plus the AED 70 registration.
+  // A duration list that carries no price at all is the regression this catches.
+  const oneYear: Record<string, number> = { mybox: 370, myhome: 765, "myhome instant": 1065 };
+  const expectOneYear = oneYear[BUNDLE.toLowerCase()] ?? 0;
+  check(
+    "durations were priced, not just dated",
+    /\d\s*years?/i.test(all) && (expectOneYear ? amounts(all).includes(expectOneYear) : amounts(all).length > 3),
+    `looked for AED ${expectOneYear} among ${[...new Set(amounts(all))].join(", ")}`
+  );
+  if (KEY_COURIER) {
+    check("the courier fee was shown", amounts(all).includes(30), "AED 30 never appeared");
+  } else {
+    // MyHome has no KEY-DELIVERY line at all, so neither the choice nor the
+    // charge should ever appear — 6 Sep charged AED 30 for it.
+    check("no courier CHARGE on a delivered bundle", !/key (courier|delivery)[^\n]*AED\s*30/i.test(all),
+      (/[^\n]*key (courier|delivery)[^\n]*/i.exec(all) ?? [""])[0]);
+    check("no courier OFFER on a delivered bundle", !/deliver .*key.*\bAED\s*30\b/i.test(all));
+  }
+  if (WITH_AGENT) {
+    check("the agent is on the summary", /authoris?ed agent/i.test(all));
+    check("the first agent is stated as free, with no figure beside the name",
+      /authoris?ed agent[^\n]*(no charge|included)/i.test(all) && !/authoris?ed agent[^\n]*AED\s*\d/i.test(all),
+      (/[^\n]*authoris?ed agent[^\n]*/i.exec(all) ?? [""])[0]);
+  }
   check("the box was reserved", /reserv|held/i.test(all));
 
   console.log("\n  before payment");

@@ -1233,8 +1233,11 @@ export async function POST(req: NextRequest) {
     // is what issues the box, and it is also myHomeProfile.deliveryOfficeID,
     // without which the save is refused. Asking out of order does not merely
     // read oddly; it strands the journey.
-    if ((name === PIN_TOOL || name === AREAS_TOOL) && !str(session.state.data.branch)) {
-      const chosen = str(session.state.data.emirate);
+    // liveState, not the snapshot: the branch is often chosen in the same round
+    // as the address question that follows it, and refusing then would block the
+    // very ordering this exists to enforce.
+    if ((name === PIN_TOOL || name === AREAS_TOOL) && !str(liveState.data.branch)) {
+      const chosen = str(liveState.data.emirate);
       return {
         result:
           `NOT YET — THE BRANCH COMES FIRST. This customer has not chosen a branch, and a MyHome rental needs one: it issues the box and it is what the save sends as the delivery office. Ask ${chosen ? "which branch" : "which emirate, then which branch"} and only then come back to the address. Do NOT ask for their address, area, street or map pin before a branch is on the case. Call the branch-locations tool now.`,
