@@ -102,9 +102,15 @@ const REPLIES: { when: RegExp; say: string; once?: boolean }[] = [
   { when: /nationality/i, say: "United Arab Emirates." },
   { when: /agent'?s? (phone|mobile|email)/i, say: "0553708434 and emre.karayalcin@7x.ae." },
   { when: /key.*(collect|courier|deliver)/i, say: KEY_COURIER ? "Please deliver the key by courier." : "Collect it at the branch, thanks.", once: true },
+  // The courier address is collected a piece at a time, and each piece is asked
+  // for on its own; the one-shot answer above covers the first ask only.
+  { when: /building|villa name|tower|floor|landmark/i, say: "Garhoud Star building, second floor." },
   { when: /area|address|street|villa|apartment/i, say: "Apt 2, 17d Street, Garhoud, Dubai. That area is correct.", once: true },
   { when: /phone|mobile|email/i, say: "0553708434 and emre.karayalcin@7x.ae.", once: true },
   { when: /does (that|everything) look|confirm|correct\?|proceed/i, say: "Yes, that is correct. Please proceed." },
+  // Emirates Post's staging save answers 157 ERROR_GETTING_HOLD_DETAILS every so
+  // often and succeeds on the retry, so a run must be able to take the retry.
+  { when: /try again now|shall i try (that|it) again|system error/i, say: "Try again now." },
 ];
 
 /** Money as the customer reads it: "AED 1,234.00" or "AED 1234". */
@@ -123,7 +129,7 @@ async function main() {
   turns.push(t);
   if (VERBOSE) console.log(`\n  --- agent (opening) ---\n${t.trim().slice(0, 1200)}`);
 
-  for (let turn = 0; turn < 16; turn++) {
+  for (let turn = 0; turn < 20; turn++) {
     if (/paypage\.|```\s*pay/i.test(t)) break;
     const offered = [...t.matchAll(/\b([49]\d{5})\b/g)].map((m) => m[1]!);
     if (offered.length) box = offered[0]!;
