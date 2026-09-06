@@ -662,6 +662,13 @@ export async function buildApiTools(
   getChosenHall: () => { name: string; alternative: string } | null;
   /** The one-time registration fee, as Emirates Post has priced it. */
   getRegistrationFee: () => number | null;
+  /**
+   * What each rental term costs, for the bundle whose durations were last
+   * fetched. A term Emirates Post has never been seen to charge for is present
+   * with a null total — it has a date and no price, and must be shown that way
+   * rather than have one worked out for it.
+   */
+  getDurationPrices: () => { bundle: string; terms: { years: number; rent: number | null; fee: number | null; total: number | null }[] } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
@@ -736,6 +743,8 @@ export async function buildApiTools(
       ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null, paidAt: opts.initialGatewayPayment.paidAt ?? null }
       : null;
   let lastBranchQuery: { emirate: string; bundle: string } | null = null;
+  /** The duration ladder as last priced, for the guard that stamps the cards. */
+  let durationPrices: { bundle: string; terms: { years: number; rent: number | null; fee: number | null; total: number | null }[] } | null = null;
   // The branch a MyHome customer picked. Their boxes are listed by emirate, so the
   // officeId is dropped from that lookup -- but Rental/Save still wants it as
   // myHomeProfile.deliveryOfficeID, and nothing later in the flow carries it.
@@ -2583,6 +2592,22 @@ export async function buildApiTools(
             if (selTool) feeBook = await registrationFees(agentId, selTool);
           }
           const fee = feeBook.get(bundle) ?? null;
+          // The same ladder, kept as numbers, so the guard on the way out can
+          // hold the cards to it instead of trusting them to be copied.
+          durationPrices = {
+            bundle,
+            terms: dates
+              .map(String)
+              .map((d) => {
+                const years = yearsUntil(d);
+                if (years === null) return null;
+                const published = periods.find((p) => p.years === years)?.price ?? null;
+                const observed = rents.get(rentKey(bundle, years)) ?? null;
+                const rent = published ?? observed ?? (years === 1 ? annual : null);
+                return { years, rent, fee, total: rent !== null && fee !== null ? rent + fee : rent };
+              })
+              .filter((t): t is { years: number; rent: number | null; fee: number | null; total: number | null } => t !== null),
+          };
           const lines = dates
             .map(String)
             .map((d) => {
@@ -2745,6 +2770,7 @@ export async function buildApiTools(
       const vals = [...feeBook.values()];
       return vals.length && vals.every((v) => v === vals[0]) ? vals[0]! : null;
     },
+    getDurationPrices: () => durationPrices,
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
     getGatewayPayment: () => gatewayPayment,

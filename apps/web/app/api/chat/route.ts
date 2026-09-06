@@ -29,6 +29,7 @@ import { payFenceGuard } from "@/lib/payFence";
 import { internalIdFilter } from "@/lib/internalIds";
 import { summaryFeeGuard } from "@/lib/summaryFee";
 import { proseTotalGuard } from "@/lib/proseTotal";
+import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -1642,6 +1643,10 @@ export async function POST(req: NextRequest) {
         // And the total in the SENTENCE beside the card. The card's footer and
         // the pay button are stamped with the real charge; the paragraph under
         // them was still free to quote minimumAmount as "the confirmed total".
+        // And the duration cards, held to the ladder the tool actually priced:
+        // a term Emirates Post has never charged for gets no figure rather than
+        // the annual rate multiplied out.
+        const durationGuard = durationCardGuard(() => apiTools.getDurationPrices()?.terms ?? null);
         const totalGuard = proseTotalGuard(() => (apiTools.getLastHold() ? authoritativeAmount() : null));
         let citedThisTurn = false;
         let submittedRef: string | null = null;
@@ -1680,7 +1685,7 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = idFilter.push(uploadGuard.push(totalGuard.push(feeGuard.push(piped))));
+            const out = idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
@@ -1689,8 +1694,10 @@ export async function POST(req: NextRequest) {
             const held =
               idFilter.push(
                 uploadGuard.push(
-                  totalGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
-                    totalGuard.flush()
+                  totalGuard.push(
+                    durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
+                      durationGuard.flush()
+                  ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush();
             if (held) { send({ type: "text", delta: held }); finalText += held; }
@@ -1767,7 +1774,10 @@ export async function POST(req: NextRequest) {
         {
           const rest = idFilter.push(
             uploadGuard.push(
-              totalGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) + totalGuard.flush()
+              totalGuard.push(
+                durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
+                  durationGuard.flush()
+              ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
           ) + idFilter.flush();
