@@ -50,31 +50,42 @@ export type RentBook = Map<string, number>;
 export const rentKey = (bundleId: string, years: number) => `${bundleId}|${years}`;
 
 /**
- * bundleId → the services Emirates Post prices for it.
+ * `bundleId|years` → the services Emirates Post prices for that TERM.
  *
- * A bundle that carries no `KEY-DELIVERY` line does not offer key courier, and
- * sending one returns 223 INVALID_ADDITIONAL_SERVICE. MyHome is the case: the
- * box is delivered to the customer's door, so the key comes with it. On 6 Sep a
- * MyHome customer was offered courier delivery at AED 30 and charged for it,
- * for a service Emirates Post does not sell on that bundle.
+ * Keyed by term, not by bundle, because it varies by term. Measured 6 Sep:
+ * MyBox carries a KEY-DELIVERY line at one, two and three years and NONE at
+ * five or ten; MyHome and MyHome Instant carry none at any length, because
+ * those boxes are delivered to the door and the key travels with them.
+ *
+ * A service the reservation does not price cannot be sold: sending it returns
+ * 223 INVALID_ADDITIONAL_SERVICE, and charging for it takes money for something
+ * Emirates Post does not provide — which is what happened to a MyHome customer
+ * asked for AED 30 on 6 Sep.
  */
 export type ServiceBook = Map<string, string[]>;
 
-/** The services in one Select response, by bundle. */
-export function servicesInSelectResponse(response: string): ServiceBook {
+/** The services in one Select response, filed under bundle and term. */
+export function servicesInSelectResponse(response: string, madeAt: Date = new Date()): ServiceBook {
   const out: ServiceBook = new Map();
   const body = response.slice(response.indexOf("\n") + 1);
   try {
     const parsed = JSON.parse(body) as Record<string, any>;
-    const details = (parsed?.payload ?? parsed)?.priceDetails;
-    if (!Array.isArray(details)) return out;
+    const p = parsed?.payload ?? parsed;
+    const details = p?.priceDetails;
+    const expiry = p?.poBoxExpiryDate;
+    if (!Array.isArray(details) || !expiry) return out;
+    const t = new Date(String(expiry));
+    if (Number.isNaN(t.getTime())) return out;
+    const years = Math.round((t.getTime() - madeAt.getTime()) / (365.2425 * 24 * 60 * 60 * 1000));
+    if (years < 1 || years > 20) return out;
     for (const d of details) {
       const id = String(d?.bundleID ?? d?.bundleId ?? "").trim();
       const svc = String(d?.serviceType ?? "").trim().toUpperCase();
       if (!id || !svc) continue;
-      const cur = out.get(id) ?? [];
+      const key = rentKey(id, years);
+      const cur = out.get(key) ?? [];
       if (!cur.includes(svc)) cur.push(svc);
-      out.set(id, cur);
+      out.set(key, cur);
     }
   } catch {
     /* a truncated body teaches us nothing about services */
@@ -161,7 +172,7 @@ export function rememberFees(toolName: string, response: string) {
   const mergedRents = new Map(cur?.rents ?? []);
   for (const [k, v] of rents) mergedRents.set(k, v);
   const mergedServices = new Map(cur?.services ?? []);
-  for (const [k, v] of servicesInSelectResponse(response)) mergedServices.set(k, v);
+  for (const [k, v] of servicesInSelectResponse(response, new Date())) mergedServices.set(k, v);
   cache.set(key, { at: cur?.at ?? Date.now(), fees: mergedFees, rents: mergedRents, services: mergedServices });
 }
 
@@ -249,7 +260,10 @@ async function priceBook(
         const at = (r as { createdAt?: Date }).createdAt ?? new Date();
         for (const [k, amt] of rentInSelectResponse(p.response, at)) rents.set(k, amt);
       }
-      if (p.response) for (const [k, v] of servicesInSelectResponse(p.response)) services.set(k, v);
+      if (p.response) {
+        const at = (r as { createdAt?: Date }).createdAt ?? new Date();
+        for (const [k, v] of servicesInSelectResponse(p.response, at)) services.set(k, v);
+      }
     }
   } catch {
     /* diagnostics for pricing must never take down pricing */

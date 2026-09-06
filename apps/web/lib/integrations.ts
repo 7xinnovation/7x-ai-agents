@@ -2112,11 +2112,14 @@ export async function buildApiTools(
         .map((id) => (feeBook.has(id) ? `${id} = AED ${feeBook.get(id)!.toFixed(2)}` : null))
         .filter(Boolean);
       const svcBook = selectTool ? await observedServices(agentId, selectTool) : new Map<string, string[]>();
-      const courierBundles = idsThisCall.filter((id) => svcBook.get(id)?.includes("KEY-DELIVERY"));
-      const noCourier = idsThisCall.filter((id) => svcBook.has(id) && !svcBook.get(id)!.includes("KEY-DELIVERY"));
-      const courierNote = noCourier.length
-        ? `\n\nKEY COURIER DELIVERY IS NOT SOLD ON ${noCourier.join(", ")}. Emirates Post prices no KEY-DELIVERY line for those bundles because the box itself is delivered to the customer's door — the key comes with it. Do NOT offer the choice, do NOT put AED 30 on anything, and do NOT add it to a total: on 6 Sep a MyHome customer was offered courier delivery and charged 30 for a service that does not exist on that bundle.` +
-          (courierBundles.length ? ` It IS available on ${courierBundles.join(", ")}.` : "")
+      // Availability is per TERM, so a bundle only counts as "never" when every
+      // term we have seen for it lacks the line.
+      const termsSeen = (id: string) => [...svcBook.entries()].filter(([k]) => k.startsWith(`${id}|`));
+      const neverCourier = idsThisCall.filter(
+        (id) => termsSeen(id).length > 0 && termsSeen(id).every(([, v]) => !v.includes("KEY-DELIVERY"))
+      );
+      const courierNote = neverCourier.length
+        ? `\n\nKEY COURIER DELIVERY IS NOT SOLD ON ${neverCourier.join(", ")} AT ANY LENGTH. Those boxes are delivered to the customer's door and the key travels with them, so Emirates Post prices no KEY-DELIVERY line at all. Do NOT offer the choice, do NOT put AED 30 on anything and do NOT add it to a total — on 6 Sep a MyHome customer was offered courier delivery and charged 30 for a service that does not exist on that bundle. On the bundles that DO offer it, availability still varies by term, and the duration list will tell you which.`
         : "";
       const feeNote = known.length
         ? "\n\nTHE REGISTRATION FEE FOR THESE BUNDLES, from Emirates Post's own pricing: " +
@@ -2556,6 +2559,7 @@ export async function buildApiTools(
           // it, or it carries no price at all. Corporate publishes its own
           // multi-year prices and those are exact.
           const rents = selectToolFor(map) ? await observedRents(agentId, selectToolFor(map)!) : new Map<string, number>();
+          const svcTerms = selectToolFor(map) ? await observedServices(agentId, selectToolFor(map)!) : new Map<string, string[]>();
           const annual = periods.find((p) => p.years === 1)?.price ?? null;
           // The fee book is loaded when the bundles are listed, which may have
           // been a different turn; a duration priced without the registration
@@ -2584,6 +2588,16 @@ export async function buildApiTools(
             })
             .filter(Boolean);
           if (lines.length) {
+            const courierTerms = dates
+              .map(String)
+              .map((d) => yearsUntil(d))
+              .filter((y): y is number => y !== null)
+              .filter((y) => svcTerms.get(rentKey(bundle, y))?.includes("KEY-DELIVERY"));
+            const noCourierTerms = dates
+              .map(String)
+              .map((d) => yearsUntil(d))
+              .filter((y): y is number => y !== null)
+              .filter((y) => svcTerms.has(rentKey(bundle, y)) && !svcTerms.get(rentKey(bundle, y))!.includes("KEY-DELIVERY"));
             const unpriced = dates
               .map(String)
               .map((d) => yearsUntil(d))
@@ -2596,6 +2610,9 @@ export async function buildApiTools(
                 "\n\nWHAT EACH DURATION COSTS. This response carries dates and no prices, and a list of durations with no prices is not a choice. Put the amount on every duration card, exactly as given here, and never work one out yourself:\n" +
                 lines.join("\n") +
                 "\nThese totals already include the one-time registration fee, which is charged once however long the term is. Quote them verbatim; the reservation will come back at the same figure." +
+                (courierTerms.length || noCourierTerms.length
+                  ? `\nKEY COURIER DELIVERY: ${courierTerms.length ? `offered on ${courierTerms.map((y) => `${y} year${y === 1 ? "" : "s"}`).join(", ")}` : "not offered on any of these terms"}${noCourierTerms.length ? `, NOT offered on ${noCourierTerms.map((y) => `${y} year${y === 1 ? "" : "s"}`).join(", ")}` : ""}. It varies by TERM, not only by bundle — MyBox carries it at one, two and three years and not at five or ten. Offer the choice only on a term that has it, and never put AED 30 on one that does not.`
+                  : "") +
                 (unpriced.length
                   ? `\nNO PRICE IS AVAILABLE for ${unpriced.map((y) => `${y} years`).join(", ")}. Emirates Post discounts the longer terms and does not publish those figures, so multiplying the annual rate OVERSTATES them — a ten-year MyHome is 4,000, not 6,950. Show those durations with "price confirmed when the box is reserved" and no figure, and if the customer picks one, reserve the box and quote the exact total from the reservation before anything else.`
                   : ""),
