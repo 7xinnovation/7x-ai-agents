@@ -26,7 +26,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { agents, auditLog } from "@dialog/db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
-import { rentInSelectResponse, feesInSelectResponse } from "../lib/registrationFees";
+import { rentInSelectResponse, feesInSelectResponse, servicesInSelectResponse } from "../lib/registrationFees";
 
 const arg = (n: string) => { const i = process.argv.indexOf(n); return i !== -1 ? process.argv[i + 1] : undefined; };
 const FROM = arg("--from"), TO = arg("--to"), APPLY = process.argv.includes("--apply");
@@ -64,29 +64,50 @@ async function main() {
 
     // The newest observation for each bundle and term, and nothing else: one row
     // per price, so production's log gains a price book rather than a history.
-    const best = new Map<string, { payload: Record<string, unknown>; at: Date; rent: number }>();
+    // The EXTRACTED copy is the one that travels. The audit truncates a response
+    // at 4000 characters, and a five- or ten-year reservation carries so many
+    // per-year price rows that its RENT line falls off the end — re-parsing what
+    // was stored is exactly how a first attempt at this carried 8 of 28 terms.
+    const best = new Map<string, { payload: Record<string, unknown>; at: Date; rent: number; services: string[] }>();
     for (const r of rows) {
       const p = (r.payload ?? {}) as Record<string, unknown>;
+      const at = r.createdAt ?? new Date();
       const response = typeof p.response === "string" ? p.response : "";
-      if (!response) continue;
-      const rents = new Map<string, number>([
-        ...Object.entries((p.rents ?? {}) as Record<string, unknown>)
-          .map(([k, v]) => [k, Number(v)] as [string, number])
-          .filter(([, v]) => Number.isFinite(v) && v > 0),
-        ...rentInSelectResponse(response, r.createdAt ?? new Date()),
-      ]);
+      const extracted = Object.entries((p.rents ?? {}) as Record<string, unknown>)
+        .map(([k, v]) => [k, Number(v)] as [string, number])
+        .filter(([, v]) => Number.isFinite(v) && v > 0);
+      const rents = new Map<string, number>(extracted.length ? extracted : [...rentInSelectResponse(response, at)]);
+      const services = new Map<string, string[]>(
+        Object.entries((p.services ?? {}) as Record<string, unknown>)
+          .filter(([, v]) => Array.isArray(v) && v.length)
+          .map(([k, v]) => [k, (v as unknown[]).map(String)] as [string, string[]])
+      );
+      if (!services.size && response) for (const [k, v] of servicesInSelectResponse(response, at)) services.set(k, v);
       for (const [key, rent] of rents) {
         const seen = best.get(key);
-        if (!seen || (r.createdAt ?? new Date()) > seen.at) {
-          best.set(key, { payload: p, at: r.createdAt ?? new Date(), rent });
-        }
+        if (!seen || at > seen.at) best.set(key, { payload: p, at, rent, services: services.get(key) ?? [] });
       }
     }
 
     console.log(`${best.size} priced term(s) to carry across:\n`);
-    for (const [key, v] of [...best].sort()) console.log(`  ${key.padEnd(14)} rent ${v.rent}`);
+    for (const [key, v] of [...best].sort())
+      console.log(`  ${key.padEnd(14)} rent ${String(v.rent).padStart(6)}   ${v.services.join("/") || "(services unknown)"}`);
 
-    if (!APPLY) { console.log("\nDry run — nothing written. Add --apply."); return; }
+    // A re-run replaces its own previous seed rather than layering on top of it:
+    // the price book takes the newest row, and two seeds of the same term would
+    // leave the older one invisible but present.
+    const mine = and(
+      eq(auditLog.agentId, ta.id),
+      eq(auditLog.action, "registration_fee_observed"),
+      sql`${auditLog.payload}->>'note' like '%seed-price-book-2026-09-06%'`
+    );
+    if (!APPLY) {
+      const existing = await dst.db.select({ id: auditLog.id }).from(auditLog).where(mine);
+      console.log(`\nDry run — nothing written. ${existing.length} row(s) from a previous seed would be replaced. Add --apply.`);
+      return;
+    }
+    const gone = await dst.db.delete(auditLog).where(mine).returning({ id: auditLog.id });
+    console.log(`\n${gone.length} previously seeded row(s) removed.`);
     let written = 0;
     for (const [key, v] of best) {
       const p = v.payload;
@@ -100,8 +121,14 @@ async function main() {
           path: "/api/Rental/Select",
           input: p.input,
           response: p.response,
-          fees: Object.fromEntries(feesInSelectResponse(String(p.response ?? ""))),
-          rents: Object.fromEntries(rentInSelectResponse(String(p.response ?? ""), v.at)),
+          // One row, one price: exactly the fact this row exists to carry, so
+          // nothing has to be parsed back out of a truncated body.
+          fees: {
+            ...Object.fromEntries(feesInSelectResponse(String(p.response ?? ""))),
+            ...((p.fees ?? {}) as Record<string, unknown>),
+          },
+          rents: { [key]: v.rent },
+          services: v.services.length ? { [key]: v.services } : undefined,
           note:
             `Price observed on STAGING (${key}, rent ${v.rent}) on ${v.at.toISOString().slice(0, 10)} and seeded here by ` +
             "scripts/seed-price-book-2026-09-06 so the duration cards can price this term on day one. " +

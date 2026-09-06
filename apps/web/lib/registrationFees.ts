@@ -230,7 +230,7 @@ async function priceBook(
           // readable in the body. A long corporate response is truncated at 4000
           // characters and its NEW-REG line falls off the end, which is exactly
           // why the extracted copy exists.
-          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload} ? 'rents' or ${auditLog.payload}->>'response' like '%NEW-REG%' or ${auditLog.payload}->>'response' like '%"RENT"%')`
+          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload} ? 'rents' or ${auditLog.payload} ? 'services' or ${auditLog.payload}->>'response' like '%NEW-REG%' or ${auditLog.payload}->>'response' like '%"RENT"%')`
         )
       )
       .orderBy(desc(auditLog.createdAt))
@@ -260,7 +260,14 @@ async function priceBook(
         const at = (r as { createdAt?: Date }).createdAt ?? new Date();
         for (const [k, amt] of rentInSelectResponse(p.response, at)) rents.set(k, amt);
       }
-      if (p.response) {
+      // Which services a term prices, extracted first for the same reason the
+      // rent is: a long response is truncated at 4000 characters and its later
+      // service lines fall off the end.
+      let tookServices = false;
+      for (const [k, v] of Object.entries((p as { services?: Record<string, unknown> }).services ?? {})) {
+        if (k && Array.isArray(v) && v.length) { services.set(k, v.map(String)); tookServices = true; }
+      }
+      if (!tookServices && p.response) {
         const at = (r as { createdAt?: Date }).createdAt ?? new Date();
         for (const [k, v] of servicesInSelectResponse(p.response, at)) services.set(k, v);
       }
