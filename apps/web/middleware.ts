@@ -53,8 +53,12 @@ export async function middleware(req: NextRequest) {
   // editor or API, whatever it types in the address bar. The pages check this
   // against the database as well — the session's copy can be up to eight hours
   // old — but this stops it at the edge without a query.
+  // Only the APIs are stopped here. A PAGE outside the scope is left to render
+  // its own not-found: deny() would send it to the login screen, which reads as
+  // "sign in again" for someone who is already signed in and simply not
+  // entitled to that agent.
   const target = agentSlugIn(pathname);
-  if (target && !sessionCanSee(claims, target)) return deny(404);
+  if (target && pathname.startsWith("/api/") && !sessionCanSee(claims, target)) return deny(404);
 
   return NextResponse.next();
 }
