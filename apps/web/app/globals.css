@@ -4336,3 +4336,58 @@ body {
   opacity: 0.45;
   cursor: default;
 }
+
+/* ── A NARROW WIDGET IS ITS OWN LAYOUT ────────────────────────────────────────
+   The embedded widget can be ~340px wide inside a full-size window, so viewport
+   media queries never fire for it and everything was laid out as though there
+   were room. Container queries ask the right question: how wide is the CONVERSATION,
+   not how wide is the screen. */
+.dlg-messages {
+  container-type: inline-size;
+  container-name: dlgchat;
+}
+
+@container dlgchat (max-width: 460px) {
+  /* Two bundle cards side by side in 340px gave each about 150px, and the
+     description broke to two or three words a line with the price wrapping
+     after "AED 300 /". One card per row reads properly. */
+  .dlg-cards {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .dlg-card-opt {
+    padding: 12px 13px 11px;
+  }
+  /* A label and a long value on one line left the value a sliver — the
+     authorised-agent row rendered one character per line. Stack them. */
+  .dlg-summary-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+  }
+  .dlg-summary-v {
+    text-align: start;
+  }
+  /* The map's address and its button did not fit beside each other, so the
+     button sat half off the edge with the address ellipsised to nothing. */
+  .dlg-locate-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .dlg-locate-addr {
+    white-space: normal;
+    flex-basis: 100%;
+  }
+  .dlg-locate-confirm {
+    width: 100%;
+  }
+}
+
+/* The map itself never had a maximum: it took the width it was given and its
+   own aspect ratio decided the height, which pushed the confirm button below
+   the fold in a short widget. */
+.dlg-locate-map,
+.dlg-locate canvas,
+.dlg-locate .mapboxgl-map {
+  max-width: 100%;
+}

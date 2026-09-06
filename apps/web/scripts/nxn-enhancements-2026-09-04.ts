@@ -192,6 +192,27 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "limitation they were told about.",
   },
   {
+    marker: "DO NOT RE-ASK WHAT THEY JUST ANSWERED",
+    journeys: /rental|renewal/,
+    text:
+      "DO NOT RE-ASK WHAT THEY JUST ANSWERED. A reply that opens \"How long would you like your rental to be?\" " +
+      "immediately after the customer picked 3 Years reads as not having heard them, and it happens because the " +
+      "question was already half-written when their answer arrived. Open on what you are DOING with their answer " +
+      "(\"Three years, noted\") or on the next question, never on the one they have just closed. The same goes for " +
+      "the bundle, the branch, the box number and the emirate: once it is on the case, it is settled.",
+  },
+  {
+    marker: "AN INCLUDED AGENT IS WRITTEN AS INCLUDED",
+    journeys: /rental/,
+    text:
+      "AN INCLUDED AGENT IS WRITTEN AS INCLUDED. The FIRST authorised agent is already inside the reservation's " +
+      "total — its price line comes back marked Inclusive — so its summary row carries the word, not an empty " +
+      "space and not a paragraph: `- Authorised agent (Emre Karayalcin): Included`. Every row on that card is a " +
+      "SHORT value, two or three words at most; an explanation belongs in a sentence under the card, because a " +
+      "long value in a narrow column renders one character per line. Agents beyond the first each add their own " +
+      "priced row.",
+  },
+  {
     marker: "A PENDING BOX CANNOT BE MANAGED YET",
     journeys: /manage_po_box|renewal/,
     text:

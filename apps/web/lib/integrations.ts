@@ -281,6 +281,44 @@ function recallExpiryDates(conversationId: string | undefined): Map<string, stri
   return new Map(Object.entries(hit.byBundle));
 }
 
+/**
+ * Branch name to officeId, remembered across turns.
+ *
+ * `myHomeProfile.deliveryOfficeID` is the branch the customer picked, and the
+ * only place we ever learned it was a FreeBoxes call made with a numeric
+ * officeId. Teaching the model to ask for MyHome boxes by EMIRATE — which is
+ * correct, and is what makes the boxes appear at all — removed that. 6 Sep: a
+ * MyHome save went out with no deliveryOfficeID and Emirates Post answered 173
+ * MYHOME_ADDDRESS_NOT_FOUND, which names the address and not the missing field.
+ *
+ * The branch list carries both, so it is read from there instead.
+ */
+const branchDirectory = new Map<string, { at: number; byName: Record<string, string> }>();
+
+function rememberBranches(conversationId: string | undefined, rows: { officeId?: unknown; nameEn?: unknown }[]) {
+  if (!conversationId || !rows.length) return;
+  const cur = branchDirectory.get(conversationId)?.byName ?? {};
+  for (const r of rows) {
+    const id = String(r.officeId ?? "").trim();
+    const name = String(r.nameEn ?? "").trim();
+    if (id && name) cur[name.toLowerCase()] = id;
+  }
+  if (branchDirectory.size > 500) for (const [k, v] of branchDirectory) if (Date.now() - v.at > HALL_TTL_MS) branchDirectory.delete(k);
+  branchDirectory.set(conversationId, { at: Date.now(), byName: cur });
+}
+
+/** The officeId for a branch the customer named, however they cased it. */
+function officeIdForBranch(conversationId: string | undefined, branch: string | null | undefined): string | null {
+  const name = String(branch ?? "").trim().toLowerCase();
+  if (!conversationId || !name) return null;
+  const hit = branchDirectory.get(conversationId);
+  if (!hit || Date.now() - hit.at > HALL_TTL_MS) return null;
+  if (hit.byName[name]) return hit.byName[name]!;
+  // "Al Barsha" for "Al Barsha Post Office" — the customer rarely types the suffix.
+  const found = Object.entries(hit.byName).find(([k]) => k.startsWith(name) || name.startsWith(k));
+  return found ? found[1] : null;
+}
+
 const hallMemory = new Map<string, { at: number; halls: { officeId: string; name: string; alternative: string }[] }>();
 const HALL_TTL_MS = 2 * 60 * 60 * 1000;
 
@@ -589,6 +627,8 @@ export async function buildApiTools(
       keyDelivery?: boolean;
       /** Where that courier goes, assembled from the case. */
       keyDeliveryAddress?: Record<string, string> | null;
+      /** The branch they picked, which is also MyHome's delivery office. */
+      branch?: string | null;
     };
     /**
      * The card Emirates Post already holds for this signed-in customer.
@@ -1389,10 +1429,26 @@ export async function buildApiTools(
         // deliveryOfficeID is the branch the customer chose. The portal always
         // sends it; we only know it because the MyHome box lookup is asked for by
         // officeId before we rewrite it to an emirate.
-        if (lastMyHomeOfficeId && asStr(mh.deliveryOfficeID) !== lastMyHomeOfficeId) {
-          mh.deliveryOfficeID = lastMyHomeOfficeId;
+        const office = lastMyHomeOfficeId ?? officeIdForBranch(opts.conversationId, opts.rentalSaveFacts?.().branch);
+        if (office && asStr(mh.deliveryOfficeID) !== office) {
+          mh.deliveryOfficeID = office;
           body.myHomeProfile = mh;
           patched = true;
+        }
+        if (!asStr(mh.deliveryOfficeID)) {
+          void audit({
+            agentId,
+            conversationId: opts.conversationId,
+            actor: "system",
+            action: "myhome_delivery_office_missing",
+            payload: {
+              tool: toolName,
+              method: entry.op.method,
+              path: entry.op.path,
+              input: { branch: opts.rentalSaveFacts?.().branch ?? null },
+              response: "No deliveryOfficeID could be resolved; Emirates Post will answer 173 MYHOME_ADDDRESS_NOT_FOUND.",
+            },
+          }).catch(() => {});
         }
         if (!asStr(mh.emailID) && asStr(u.email)) { mh.emailID = u.email; body.myHomeProfile = mh; patched = true; }
         if (!asStr(mh.mobileNo) && asStr(u.mobileNumber)) { mh.mobileNo = u.mobileNumber; body.myHomeProfile = mh; patched = true; }
@@ -2103,6 +2159,7 @@ export async function buildApiTools(
             alternative: String(h.alternativeBranchEn ?? ""),
           }));
           rememberHalls(opts.conversationId, lastBranchHalls);
+          rememberBranches(opts.conversationId, rows as { officeId?: unknown; nameEn?: unknown }[]);
           if (annotated) {
             res = {
               ...res,
@@ -2315,6 +2372,15 @@ export async function buildApiTools(
     // reference to quote to support. There was nothing to quote and nothing had
     // been charged. Telling someone they have paid when they have not is the
     // single worst thing this journey can say.
+    // 173 names the address and means the delivery OFFICE.
+    if (res.isError && /MYHOME_ADDDRESS_NOT_FOUND|"173"/.test(res.result)) {
+      res = {
+        ...res,
+        result:
+          res.result +
+          "\n\n173 IS USUALLY THE DELIVERY OFFICE, NOT THE ADDRESS. myHomeProfile needs `deliveryOfficeID` — the officeId of the branch the customer chose — and every MyHome save that has ever succeeded carried one. It is filled in for you from the branch on the case; if it could not be resolved, ask the customer which branch they picked rather than asking them to re-enter their address. The other cause is `myHomeAddress.regionName`, which must hold the area CODE (\"DXB-94\"), never the area name. Do NOT tell the customer their address was not found until both of those are right — they will change a correct address to a wrong one trying to help.",
+      };
+    }
     if (res.isError && /INVALID BUNDLE OR RENT TYPE|"105"/.test(res.result)) {
       res = {
         ...res,
