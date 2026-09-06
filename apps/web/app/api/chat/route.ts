@@ -563,7 +563,8 @@ export async function POST(req: NextRequest) {
       boxNumber: str(liveState.data.box_number) ?? null,
       emirateCode: str(liveState.data.emirate) ?? null,
       bundleId: apiTools.getLastHold()?.bundleId ?? str(liveState.data.package) ?? null,
-      keyDelivery: wantsKeyDelivery(liveState.data.key_delivery ?? liveState.data.key_delivery_option),
+      keyDelivery:
+        wantsKeyDelivery(liveState.data.key_delivery ?? liveState.data.key_delivery_option) || courierSeen,
       keyDeliveryAddress: keyDeliveryAddressFrom(liveState.data as Record<string, unknown>),
       branch: str(liveState.data.branch) ?? null,
     }),
@@ -672,14 +673,32 @@ export async function POST(req: NextRequest) {
    * 700 and the order was created for 670.
    */
   let liveState = session.state;
-  const authoritativeAmount = () => {
+  /**
+   * The courier, as the customer was actually offered it.
+   *
+   * A rental's key delivery is chosen in conversation and shown in the summary
+   * card, and on 6 September it reached the case data neither time: a five-year
+   * MyBox card listed "Key courier delivery AED 30" over a total of 1,270, then
+   * the payment page asked for 1,300. The reservation was right and the card was
+   * wrong, because the card's figure was computed from a state that had never
+   * been told. Seeing it named in a card is being told.
+   */
+  let courierSeen = false;
+  const authoritativeAmount = (extras?: { keyDelivery?: boolean }) => {
     const hold = apiTools.getLastHold();
     if (!hold || typeof hold.amount !== "number") return null;
     const data = liveState.data as Record<string, unknown>;
+    const keyDelivery =
+      extras?.keyDelivery ?? (wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) || courierSeen);
     return rentalTotal(
       { base: hold.amount, agentExtraPrice: hold.agentExtraPrice, keyDeliveryPrice: hold.keyDeliveryPrice },
-      { agentCount: agentCountFrom(data), keyDelivery: wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) }
+      { agentCount: agentCountFrom(data), keyDelivery }
     ).total;
+  };
+  /** Did Emirates Post price key delivery on the reservation we are holding? */
+  const courierIsPriced = () => {
+    const hold = apiTools.getLastHold();
+    return !hold || typeof hold.keyDeliveryPrice === "number";
   };
   // Emirates Post records a rental against a reservation, so a payment taken
   // before one exists cannot be attached to anything. The journey is read live
@@ -1585,9 +1604,11 @@ export async function POST(req: NextRequest) {
         )
           ? payFenceGuard(
               () => apiTools.getGatewayPayment()?.url ?? apiTools.getLastHold()?.paymentUrl ?? null,
-              // The gateway's own figure first; the hold's total is the fallback
-              // for a backend that does not echo the order back.
-              () => apiTools.getGatewayPayment()?.amount ?? apiTools.getLastHold()?.amount ?? null
+              // The gateway's own figure first; the fallback is the reservation
+              // PLUS what the customer added to it — the bare minimumAmount is
+              // the box alone, and quoting it beside a courier they chose is how
+              // a 1,300 order came to be announced as 1,270.
+              () => apiTools.getGatewayPayment()?.amount ?? authoritativeAmount()
             )
           : null;
         const idFilter = internalIdFilter();
@@ -1608,7 +1629,14 @@ export async function POST(req: NextRequest) {
           () => apiTools.getRegistrationFee(),
           // Only once the box is reserved: before that there is no total to
           // state, and the card deliberately carries none.
-          () => (apiTools.getLastHold() ? authoritativeAmount() : null)
+          (extras) => {
+            if (!apiTools.getLastHold()) return null;
+            // The card names the courier, so from here on the save, the pay
+            // button and the case all know it was taken.
+            if (extras.keyDelivery && courierIsPriced()) courierSeen = true;
+            return authoritativeAmount(extras);
+          },
+          courierIsPriced
         );
         let citedThisTurn = false;
         let submittedRef: string | null = null;
@@ -2064,6 +2092,12 @@ export async function POST(req: NextRequest) {
             send({ type: "survey", token, locale: body.locale, sandbox: pulseIsSandbox() });
             await audit({ ...a, actor: "system", action: "survey_offered", payload: { service: pulseService, transactionId: String(purchase.reference) } });
           }
+        }
+        // The courier the card sold, written down. Without this the choice lives
+        // only inside the turn that made it, and the next turn prices the box
+        // again as though it had never been offered.
+        if (courierSeen && !finalState.data.key_delivery) {
+          finalState = { ...finalState, data: { ...finalState.data, key_delivery: "courier" } };
         }
         await saveCase(session.caseId, finalState);
         // Persist a BACKEND session token minted this turn (e.g. OTP login) for later

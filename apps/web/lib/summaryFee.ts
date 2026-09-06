@@ -30,6 +30,50 @@ function heldTail(s: string): number {
 /** A row that names the fee AND states an amount for it. */
 const PRICED_FEE = /^[ \t]*-[ \t]+[^\n:]*registration[^\n:]*:[^\n]*\d/im;
 
+/**
+ * A row charging for key delivery: "- Key courier delivery: AED 30.00".
+ *
+ * The customer's CHOICE lives here and, on 6 September, nowhere else. A MyBox
+ * rental listed the courier, listed its 30, and was footed at 1,270 — the bare
+ * reservation — because the choice had never been written into the case, so the
+ * figure the guard stamped knew nothing about it. The card is asked what it is
+ * selling instead of the state being asked what it remembers.
+ */
+const COURIER_ROW = /^[ \t]*-[ \t]+[^\n:]*\b(?:key[^\n:]*(?:courier|deliver)|courier[^\n:]*key)[^\n:]*:[^\n]*\d[^\n]*$/gim;
+/** The choice as a line of its own: "- Key delivery: Courier (AED 30 …)". */
+const COURIER_CHOICE = /^([ \t]*-[ \t]+[^\n:]*key[^\n:]*deliver[^\n:]*:[ \t]*)(.*)$/im;
+
+/** What the card says the customer is buying on top of the box. */
+export function extrasNamedIn(block: string): { keyDelivery: boolean } {
+  COURIER_ROW.lastIndex = 0;
+  if (COURIER_ROW.test(block)) return { keyDelivery: true };
+  const choice = COURIER_CHOICE.exec(block);
+  return { keyDelivery: Boolean(choice && /courier|deliver/i.test(choice[2] ?? "")) };
+}
+
+/**
+ * Take the courier back off a card that offered it on a reservation which does
+ * not price it.
+ *
+ * Emirates Post prices KEY-DELIVERY per bundle, per term AND per branch, so a
+ * service that exists on a three-year MyBox at one branch may not exist on a
+ * five-year one at another. Charging 30 for it anyway is money taken for
+ * nothing; leaving the row while the total excludes it is the card contradicting
+ * itself. Both are removed here.
+ */
+export function dropCourier(block: string): string {
+  // The stated choice first: rewriting it leaves no amount behind, so the sweep
+  // for priced rows below cannot then delete the line altogether and leave the
+  // customer with a card that never says how the key reaches them.
+  let out = block;
+  const choice = COURIER_CHOICE.exec(out);
+  if (choice && /courier|deliver/i.test(choice[2] ?? "")) {
+    out = out.replace(choice[0], `${choice[1]}Collect from the branch`);
+  }
+  COURIER_ROW.lastIndex = 0;
+  return out.replace(COURIER_ROW, "").replace(/\n{3,}/g, "\n\n");
+}
+
 export function insertRegistrationFee(block: string, fee: number): string {
   // Naming the fee is not stating it. "Registration fee and exact total:
   // confirmed when box is reserved" mentions the word and leaves the customer
@@ -64,7 +108,20 @@ export function correctTotal(block: string, total: number): string {
   return OPEN + body.replace(written[0], line) + block.slice(close.index);
 }
 
-export function summaryFeeGuard(fee: () => number | null, total: () => number | null = () => null) {
+export function summaryFeeGuard(
+  fee: () => number | null,
+  /**
+   * The real charge for the card as written — given what the card itself says
+   * the customer chose, because the model states the choice in the card several
+   * turns before it ever reaches the case.
+   */
+  total: (extras: { keyDelivery: boolean }) => number | null = () => null,
+  /**
+   * Whether the reservation prices key delivery at all. False removes the row;
+   * true (the default) leaves the card's own choice standing.
+   */
+  courierPriced: () => boolean = () => true
+) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
 
@@ -91,7 +148,9 @@ export function summaryFeeGuard(fee: () => number | null, total: () => number | 
       const block = buf.slice(0, end - trailing.length);
       const amount = fee();
       let fixed = amount !== null && Number.isFinite(amount) ? insertRegistrationFee(block, amount) : block;
-      const charge = total();
+      // Sold only if Emirates Post priced it on this reservation.
+      if (extrasNamedIn(fixed).keyDelivery && !courierPriced()) fixed = dropCourier(fixed);
+      const charge = total(extrasNamedIn(fixed));
       if (charge !== null && Number.isFinite(charge) && charge > 0) fixed = correctTotal(fixed, charge);
       out += fixed + trailing;
       buf = buf.slice(end);
