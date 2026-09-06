@@ -1938,7 +1938,8 @@ export async function buildApiTools(
               : "") +
             (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
             (opts.savedCard ? " If Emirates Post already holds a card for this customer it is sent with the order, so the payment page opens on that card — tell them which card it is and that they can change it there. Never say they have been charged, and never ask them for card details yourself." : "") +
-            ` Show the breakdown from priceDetails if you like, but the TOTAL is that sum and nothing else. You do not need to send it — totalAmount is set for you from these figures.`,
+            ` Show the breakdown from priceDetails if you like, but the TOTAL is that sum and nothing else. You do not need to send it — totalAmount is set for you from these figures.` +
+            ` AED ${lastHold.amount.toFixed(2)} IS NOT "THE CONFIRMED TOTAL". It is minimumAmount: the box before the customer adds anything to it. Once they have taken a courier or a second agent, the amount to charge is HIGHER than it, the summary card and the payment page will both say so, and a sentence quoting ${lastHold.amount.toFixed(2)} beside them reads as a correction of a card that was right. On 6 September a customer was shown a card footed at 1,300 and told underneath it that Emirates Post had confirmed 1,270. Do not describe this figure as confirmed, final, or the total, and never put a second total in prose next to a card that already carries one.`,
         };
       }
       // The hold expiry reaches the customer as a deadline, and the backend
