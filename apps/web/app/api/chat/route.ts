@@ -1225,6 +1225,21 @@ export async function POST(req: NextRequest) {
           "\n\nThey already have a card on file, so auto-renewal can be switched on without asking them to save anything.",
       };
     }
+    // THE ADDRESS COMES AFTER THE BRANCH, NOT INSTEAD OF IT.
+    //
+    // 6 Sep: the customer picked MyHome and was asked "which area should we
+    // deliver your mail to?" before the emirate, the branch or the box. MyHome
+    // is delivered, so the address feels like the next question — but the branch
+    // is what issues the box, and it is also myHomeProfile.deliveryOfficeID,
+    // without which the save is refused. Asking out of order does not merely
+    // read oddly; it strands the journey.
+    if ((name === PIN_TOOL || name === AREAS_TOOL) && !str(session.state.data.branch)) {
+      const chosen = str(session.state.data.emirate);
+      return {
+        result:
+          `NOT YET — THE BRANCH COMES FIRST. This customer has not chosen a branch, and a MyHome rental needs one: it issues the box and it is what the save sends as the delivery office. Ask ${chosen ? "which branch" : "which emirate, then which branch"} and only then come back to the address. Do NOT ask for their address, area, street or map pin before a branch is on the case. Call the branch-locations tool now.`,
+      };
+    }
     if (name === PIN_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
@@ -1234,9 +1249,19 @@ export async function POST(req: NextRequest) {
             "THE PIN COULD NOT BE LOOKED UP because the customer is not signed in with Emirates Post. Ask them for the area in words instead and use " + AREAS_TOOL + ".",
         };
       }
-      const found = await addressFromPin(
-        agent.id, env, Number(input.latitude), Number(input.longitude), caller, body.locale
-      ).catch(() => null);
+      // A PLACE NAME IS NOT A DEAD END. The customer typed "7x head office" and
+      // was told "I'm not able to look up a place by name — I need actual map
+      // coordinates", which is only true of THIS tool. The area search takes
+      // words, and it was sitting right there.
+      const lat = Number(input.latitude);
+      const lng = Number(input.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return {
+          result:
+            `NO COORDINATES IN THAT — but you do not need them. Whatever the customer typed is a place name, so search it with ${AREAS_TOOL} (their emirate plus their words) and offer the matches as CARDS. Do NOT tell them you cannot look up a place by name and do NOT ask them for latitude and longitude: nobody knows their own coordinates. The map is an easier alternative, not a requirement.`,
+        };
+      }
+      const found = await addressFromPin(agent.id, env, lat, lng, caller, body.locale).catch(() => null);
       if (!found) {
         return {
           result:

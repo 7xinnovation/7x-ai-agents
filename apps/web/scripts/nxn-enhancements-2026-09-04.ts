@@ -226,6 +226,22 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "a longer term.",
   },
   {
+    marker: "THE BRANCH COMES BEFORE THE ADDRESS",
+    journeys: /rental/,
+    text:
+      "THE BRANCH COMES BEFORE THE ADDRESS. The order is bundle, emirate, BRANCH, box number, duration, extras, " +
+      "and only then any address. MyHome and MyHome Instant are delivered to the customer's home, so their " +
+      "delivery address feels like the next thing to ask for the moment they pick one — it is not. The branch " +
+      "issues the box, it is what the save sends as the delivery office, and a MyHome save without it is refused " +
+      "173 MYHOME_ADDDRESS_NOT_FOUND, which then blames the address.\n" +
+      "So do NOT ask for an area, a street, a building or a map pin until a branch is on the case. Ask which " +
+      "emirate, show the branches, let them choose, and pick the address up later where it belongs.\n" +
+      "AND A PLACE NAME IS NEVER A DEAD END. If the customer types a name — \"7x head office\", \"Sobha Hartland\" " +
+      "— search it with nxn_delivery_areas and show the matches as cards. Never tell them you cannot look up a " +
+      "place by name, and never ask anyone for a latitude and longitude: nobody knows their own coordinates, and " +
+      "the map is an easier alternative to typing, not a requirement.",
+  },
+  {
     marker: "A PENDING BOX CANNOT BE MANAGED YET",
     journeys: /manage_po_box|renewal/,
     text:
