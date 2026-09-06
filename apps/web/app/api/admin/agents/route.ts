@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { currentScope, withinScope, denyAgent } from "@/lib/scope";
 import { z } from "zod";
 import { AgentDefinition } from "@dialog/config";
 import { getDb, agents, tenants } from "@dialog/db";
@@ -24,7 +25,7 @@ export async function GET() {
     .from(agents)
     .leftJoin(tenants, eq(agents.tenantId, tenants.id))
     .orderBy(agents.slug);
-  return NextResponse.json({ agents: rows });
+  return NextResponse.json({ agents: withinScope(rows, await currentScope()) });
 }
 
 const UpsertBody = z.object({
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { definition, status, tenantName } = parsed.data;
+  // Writing an agent is still acting on one: a scoped account may only write
+  // the agents it can see, and may not create new ones.
+  const denied = await denyAgent(definition.slug);
+  if (denied) return denied;
   const db = getDb();
 
   const [tenant] = await db

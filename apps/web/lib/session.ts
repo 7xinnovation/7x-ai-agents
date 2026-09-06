@@ -8,7 +8,23 @@ export interface SessionClaims {
   uid: string;
   email: string;
   role: "owner" | "admin" | "editor" | "viewer";
+  /**
+   * Agent SLUGS this session may see. Absent or empty means all of them.
+   *
+   * Carried in the session so the middleware can enforce it at the edge without
+   * a database read, and so a page can filter what it lists without asking who
+   * is looking twice.
+   */
+  scope?: string[];
   exp: number; // epoch seconds
+}
+
+/** May this session see this agent? Scope only ever narrows below admin. */
+export function sessionCanSee(claims: SessionClaims | null | undefined, slug: string): boolean {
+  if (!claims) return false;
+  if (claims.role === "owner" || claims.role === "admin") return true;
+  const scope = claims.scope ?? [];
+  return scope.length === 0 || scope.includes(slug);
 }
 
 const enc = new TextEncoder();

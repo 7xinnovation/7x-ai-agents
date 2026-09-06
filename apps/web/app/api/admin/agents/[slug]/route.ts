@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { denyAgent } from "@/lib/scope";
 import { getDb, agents, tenants } from "@dialog/db";
 import { eq } from "drizzle-orm";
 
@@ -7,6 +8,8 @@ export const runtime = "nodejs";
 /** Load one agent's full definition + status + tenant name for editing. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const db = getDb();
   const [row] = await db
     .select({

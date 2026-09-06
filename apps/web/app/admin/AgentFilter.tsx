@@ -8,11 +8,18 @@ import { ChevronDown } from "lucide-react";
  * removes it for "All agents") while preserving other query params, and lets the
  * server component re-render with the scoped data.
  */
-export function AgentFilter({ agents }: { agents: { slug: string; name: string }[] }) {
+export function AgentFilter({
+  agents,
+  allowAll = true,
+}: {
+  agents: { slug: string; name: string }[];
+  /** False for an account scoped to named agents: there is no "all" for them. */
+  allowAll?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const current = params.get("agent") ?? "";
+  const current = params.get("agent") ?? (allowAll ? "" : agents[0]?.slug ?? "");
 
   const onChange = (slug: string) => {
     const next = new URLSearchParams(params.toString());
@@ -30,7 +37,7 @@ export function AgentFilter({ agents }: { agents: { slug: string; name: string }
         aria-label="Filter by agent"
         className="h-9 cursor-pointer appearance-none rounded-lg border border-[var(--color-line)] bg-surface pl-3 pr-9 text-[13px] font-medium text-ink shadow-[var(--shadow-xs)] outline-none focus:border-[var(--color-brand)] focus:ring-4 focus:ring-[var(--color-ring)]"
       >
-        <option value="">All agents</option>
+        {allowAll && <option value="">All agents</option>}
         {agents.map((a) => (
           <option key={a.slug} value={a.slug}>{a.name}</option>
         ))}

@@ -14,13 +14,15 @@ export async function POST(req: NextRequest) {
   const { email, password } = await req.json().catch(() => ({ email: "", password: "" }));
   if (!password) return NextResponse.json({ error: "missing_password" }, { status: 400 });
 
-  let claims: { uid: string; email: string; role: "owner" | "admin" | "editor" | "viewer" } | null = null;
+  let claims:
+    | { uid: string; email: string; role: "owner" | "admin" | "editor" | "viewer"; scope?: string[] }
+    | null = null;
 
   if (email) {
     const user = await getUserByEmail(String(email));
     if (user && user.active && verifyPassword(String(password), user.passwordHash)) {
       await markLogin(user.id);
-      claims = { uid: user.id, email: user.email, role: user.role };
+      claims = { uid: user.id, email: user.email, role: user.role, scope: user.agentScope ?? [] };
     }
   } else if (process.env.ADMIN_PASSWORD && password === process.env.ADMIN_PASSWORD) {
     // Bootstrap: password-only login maps to the owner account (created on demand).

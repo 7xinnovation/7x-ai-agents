@@ -4,6 +4,29 @@ import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
 
 export type Role = "owner" | "admin" | "editor" | "viewer";
 
+/**
+ * Which agents an account may see.
+ *
+ * An empty scope is every agent — that is what every account has had until now,
+ * and what owners and admins keep. A non-empty scope is an allow-list of agent
+ * SLUGS, so a reviewer given Emirates Post cannot read EPGL's licence
+ * applications, and the other way round.
+ *
+ * Scoping applies to accounts BELOW admin. An owner or admin manages users and
+ * integrations, so restricting what they can read would be theatre: they can
+ * lift their own restriction.
+ */
+export function scopeApplies(role: Role): boolean {
+  return role === "viewer" || role === "editor";
+}
+
+/** May this account see this agent? */
+export function canSeeAgent(user: { role: Role; agentScope?: string[] | null }, slug: string): boolean {
+  if (!scopeApplies(user.role)) return true;
+  const scope = user.agentScope ?? [];
+  return scope.length === 0 || scope.includes(slug);
+}
+
 /** scrypt password hash, stored as "salt:hash" (hex). */
 export function hashPassword(plain: string): string {
   const salt = randomBytes(16);
@@ -31,12 +54,12 @@ export async function getUserByEmail(email: string) {
 
 export async function listUsers() {
   return getDb()
-    .select({ id: users.id, email: users.email, name: users.name, role: users.role, provider: users.provider, active: users.active, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt })
+    .select({ id: users.id, email: users.email, name: users.name, role: users.role, provider: users.provider, active: users.active, agentScope: users.agentScope, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt })
     .from(users)
     .orderBy(asc(users.createdAt));
 }
 
-export async function createUser(input: { email: string; name: string; password?: string; role: Role; provider?: "password" | "entra" }) {
+export async function createUser(input: { email: string; name: string; password?: string; role: Role; provider?: "password" | "entra"; agentScope?: string[] }) {
   const [u] = await getDb()
     .insert(users)
     .values({
@@ -45,14 +68,20 @@ export async function createUser(input: { email: string; name: string; password?
       passwordHash: input.password ? hashPassword(input.password) : null,
       role: input.role,
       provider: input.provider ?? "password",
+      agentScope: input.agentScope ?? [],
     })
     .returning();
   return u!;
 }
 
-export async function updateUser(id: string, patch: { role?: Role; active?: boolean; name?: string; password?: string }) {
+export async function updateUser(
+  id: string,
+  patch: { role?: Role; active?: boolean; name?: string; password?: string; agentScope?: string[] }
+) {
   const set: Record<string, unknown> = {};
   if (patch.role) set.role = patch.role;
+  // An empty list means every agent, which is what an unscoped account is.
+  if (patch.agentScope) set.agentScope = patch.agentScope;
   if (patch.active !== undefined) set.active = patch.active;
   if (patch.name) set.name = patch.name;
   if (patch.password) set.passwordHash = hashPassword(patch.password);
@@ -76,4 +105,22 @@ export async function ensureBootstrapOwner() {
   if (existing) return existing;
   const password = process.env.ADMIN_PASSWORD || "change-me";
   return createUser({ email, name: "Administrator", password, role: "owner" });
+}
+
+/**
+ * The agent scope of whoever is looking, read from the DATABASE rather than the
+ * session cookie.
+ *
+ * The cookie carries the scope too — the middleware needs it at the edge, where
+ * there is no database — but a cookie lasts eight hours, so an admin who
+ * narrows someone's access would otherwise not have narrowed anything until
+ * that person next signed in. The pages have a database; they should use it.
+ *
+ * Returns null for "every agent", or the allow-list of slugs.
+ */
+export async function scopeOf(claims: { uid?: string; role?: Role } | null | undefined): Promise<string[] | null> {
+  if (!claims?.uid || !claims.role || !scopeApplies(claims.role)) return null;
+  const [u] = await getDb().select({ scope: users.agentScope }).from(users).where(eq(users.id, claims.uid)).limit(1);
+  const scope = u?.scope ?? [];
+  return scope.length ? scope : null;
 }

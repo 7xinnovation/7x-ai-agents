@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb, conversations, agents, auditLog } from "@dialog/db";
 import { listAgentsForFilter } from "@/lib/metrics";
 import { AgentFilter } from "../AgentFilter";
+import { currentScope, selectAgent } from "@/lib/scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,8 @@ export default async function Activity({ searchParams }: { searchParams: Promise
   const db = getDb();
   const { agent } = await searchParams;
   const agentList = await listAgentsForFilter();
-  const selected = agent ? agentList.find((a) => a.slug === agent) : undefined;
+  const scope = await currentScope();
+  const selected = selectAgent(agentList, agent, scope);
 
   const convs = await db
     .select({
@@ -57,7 +59,7 @@ export default async function Activity({ searchParams }: { searchParams: Promise
           <h1>Activity</h1>
           <p>Conversations and audited actions{selected ? ` · ${selected.name}` : " across all agents"}.</p>
         </div>
-        <AgentFilter agents={agentList} />
+        <AgentFilter agents={agentList} allowAll={!scope} />
       </header>
 
       <div className="sa-cols">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { loadDashboards, listAgentsForFilter } from "@/lib/metrics";
 import { AgentFilter } from "../AgentFilter";
+import { currentScope, selectAgent } from "@/lib/scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +50,8 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const { days, agent } = await searchParams;
   const windowDays = RANGES.includes(Number(days)) ? Number(days) : 30;
   const agentList = await listAgentsForFilter();
-  const selected = agent ? agentList.find((a) => a.slug === agent) : undefined;
+  const scope = await currentScope();
+  const selected = selectAgent(agentList, agent, scope);
   const d = await loadDashboards(windowDays, selected?.id);
   const k = d.kpis;
   // Preserve the agent scope on the range links.
@@ -65,7 +67,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <AgentFilter agents={agentList} />
+          <AgentFilter agents={agentList} allowAll={!scope} />
           <div className="flex gap-1 rounded-lg border border-[var(--color-line)] bg-surface p-0.5">
             {RANGES.map((r) => (
               <Link key={r} href={rangeHref(r)} className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${r === windowDays ? "bg-[var(--color-line-soft)] text-ink" : "text-muted hover:text-ink"}`}>{r}d</Link>

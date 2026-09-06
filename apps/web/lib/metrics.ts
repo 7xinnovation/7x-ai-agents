@@ -1,4 +1,5 @@
 import { getDb } from "@dialog/db";
+import { currentScope, withinScope } from "@/lib/scope";
 import { sql } from "drizzle-orm";
 
 /**
@@ -41,11 +42,18 @@ async function rows<T = Record<string, unknown>>(q: ReturnType<typeof sql>): Pro
   return ((res as unknown as { rows?: T[] }).rows ?? (res as unknown as T[])) ?? [];
 }
 
-/** Agents available for the dashboard filter (id + label). */
+/**
+ * Agents available for the dashboard filter (id + label).
+ *
+ * Narrowed to the caller's agent scope, so a viewer limited to one agent is
+ * never offered another in the picker — and, because every dashboard derives
+ * its selection from this list, never reads one either.
+ */
 export async function listAgentsForFilter(): Promise<{ id: string; slug: string; name: string }[]> {
-  return rows<{ id: string; slug: string; name: string }>(
+  const all = await rows<{ id: string; slug: string; name: string }>(
     sql`SELECT id, slug, name FROM agents ORDER BY name`
   );
+  return withinScope(all, await currentScope());
 }
 
 export async function loadDashboards(windowDays = 30, agentId?: string | null): Promise<Dashboards> {

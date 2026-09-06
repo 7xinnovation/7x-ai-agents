@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { denyAgent } from "@/lib/scope";
 import { z } from "zod";
 import { getAgentBySlug } from "@/lib/agents";
 import { parseSpec } from "@/lib/openapi";
@@ -10,6 +11,8 @@ export const maxDuration = 60;
 /** List integrations with per-environment detail (auth secrets masked). */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const rows = await listIntegrations(agent.id);
@@ -45,6 +48,8 @@ const ImportBody = z.object({
 /** Import an OpenAPI/Swagger spec into one environment of an integration. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const parsed = ImportBody.safeParse(await req.json());
@@ -76,6 +81,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
 const PatchBody = z.object({ id: z.string(), enabled: z.boolean() });
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const parsed = PatchBody.safeParse(await req.json());
@@ -87,6 +94,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ sl
 /** Delete a whole integration (?id=) or a single environment (?id=&env=). */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const id = req.nextUrl.searchParams.get("id");

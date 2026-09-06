@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
   if (!user.active) return NextResponse.json({ error: "user_disabled" }, { status: 403 });
   await markLogin(user.id);
 
-  const token = await signSession({ uid: user.id, email: user.email, role: user.role });
+  const token = await signSession({ uid: user.id, email: user.email, role: user.role, scope: user.agentScope ?? [] });
   const res = NextResponse.redirect(`${req.nextUrl.origin}/admin`);
   res.cookies.set("dlg_admin", token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 8 });
   res.cookies.delete("dlg_sso_state");

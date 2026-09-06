@@ -1,14 +1,16 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb, agents, tenants } from "@dialog/db";
 import { AgentsTable, type AgentRow } from "./AgentsTable";
+import { currentScope, withinScope } from "@/lib/scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export default async function Agents() {
-  const rows = (await getDb()
+  const scope = await currentScope();
+  const rows = withinScope((await getDb()
     .select({ slug: agents.slug, name: agents.name, status: agents.status, updatedAt: agents.updatedAt, tenant: tenants.name, definition: agents.definition })
-    .from(agents).leftJoin(tenants, eq(agents.tenantId, tenants.id)).orderBy(desc(agents.updatedAt))) as any[];
+    .from(agents).leftJoin(tenants, eq(agents.tenantId, tenants.id)).orderBy(desc(agents.updatedAt))) as any[], scope);
 
   const data: AgentRow[] = rows.map((r) => ({
     slug: r.slug,

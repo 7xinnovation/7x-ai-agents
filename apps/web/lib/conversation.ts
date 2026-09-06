@@ -1,3 +1,4 @@
+import { currentScope } from "@/lib/scope";
 import { getDb, conversations, messages, cases, auditLog, agents } from "@dialog/db";
 import { emptyCase, type CaseState, type Locale } from "@dialog/config";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
@@ -409,6 +410,9 @@ export interface InboxItem {
 
 /** Conversation list for the Messenger-style admin inbox. */
 export async function listConversations(limit = 60): Promise<InboxItem[]> {
+  // Scoped accounts see the conversations of their own agents and no others.
+  const scope = await currentScope();
+  const only = scope ? sql`WHERE a.slug IN (${sql.join(scope.map((s) => sql`${s}`), sql`, `)})` : sql``;
   const res = await getDb().execute(sql`
     SELECT c.id, c.locale, c.authenticated, c.created_at AS "createdAt",
       a.name AS "agentName", a.slug AS "agentSlug",
@@ -417,6 +421,7 @@ export async function listConversations(limit = 60): Promise<InboxItem[]> {
       (SELECT m.role FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS "lastRole",
       (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id)::int AS "messageCount"
     FROM conversations c LEFT JOIN agents a ON a.id = c.agent_id
+    ${only}
     ORDER BY c.created_at DESC LIMIT ${limit}
   `);
   // drizzle neon-serverless returns { rows }
@@ -429,6 +434,10 @@ export async function adminConversationDetail(id: string) {
   const conv = await db.query.conversations.findFirst({ where: eq(conversations.id, id) });
   if (!conv) return null;
   const agent = conv.agentId ? await db.query.agents.findFirst({ where: eq(agents.id, conv.agentId) }) : null;
+  // A conversation reached by its id directly is still that agent's, so the
+  // scope decides here as it does in the list.
+  const scope = await currentScope();
+  if (scope && !(agent?.slug && scope.includes(agent.slug))) return null;
   const caseRow = await db.query.cases.findFirst({ where: eq(cases.conversationId, id) });
   const msgs = await db
     .select({ role: messages.role, content: messages.content, createdAt: messages.createdAt })

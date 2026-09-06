@@ -211,12 +211,12 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "and the first one adds nothing. Its row reads `- Authorised agent (their name): No charge — the first " +
       "agent is included`. Never print the figure beside their name: a customer reads a number next to a service " +
       "as a fee and asks why they are paying it.\n" +
-      "AGENTS BEYOND THE FIRST ARE CHARGED, AND THE PRICE IS FOR THE WHOLE TERM. Emirates Post prices an extra " +
-      "agent at AED 50 a year, so the reservation returns 50 on a one-year box, 150 on a three-year one and 250 on " +
-      "five — already multiplied. Quote the figure the reservation gives and say what it covers (\"AED 150.00 for " +
-      "the three years\"); never multiply it by the years yourself, and never quote the annual rate as though it " +
-      "were the charge. Their own page writes \"AED 150 per year\" on a three-year box, which is the term total " +
-      "with the wrong label — do not copy that.\n" +
+      "AGENTS BEYOND THE FIRST ARE CHARGED, AND THE PRICE IS FOR THE WHOLE TERM. The reservation returns the " +
+      "figure ALREADY MULTIPLIED by the years — and the annual rate is not the same on every bundle (personal " +
+      "boxes are cheaper per agent than corporate ones), so never state a rate from memory. Quote the figure the " +
+      "reservation gives and say what it covers (\"AED 150.00 for the three years\"); never multiply it yourself " +
+      "and never quote a per-year rate as though it were the charge. Emirates Post's own page writes \"AED 150 " +
+      "per year\" on a three-year box, which is the term total with the wrong label — do not copy that.\n" +
       "KEY COURIER DELIVERY DOES NOT EXIST ON MyHome OR MyHome Instant. Those boxes are delivered to the " +
       "customer's door and the key comes with them, so there is no KEY-DELIVERY line, no AED 30, and no choice to " +
       "offer. Ask about key collection ONLY on a bundle collected at a branch. Offering it on MyHome charged a " +
@@ -259,6 +259,23 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "one yourself, and do not describe where it is — \"your receipt is available via the download link above\" " +
       "points at nothing, because the link comes after your words. Say the receipt is ready and leave it at that, " +
       "or say nothing about it at all: the link speaks for itself.",
+  },
+  {
+    marker: "WHAT A CORPORATE BOX INCLUDES, AND WHAT IT DOES NOT",
+    journeys: /corporate/,
+    text:
+      "WHAT A CORPORATE BOX INCLUDES, AND WHAT IT DOES NOT. A corporate reservation prices services the personal " +
+      "bundles do not, and each is on the response so none of it has to be recalled:\n" +
+      "- BAG — a mail bag, marked Inclusive. It costs the customer nothing and is worth saying so when they ask " +
+      "what they get: it is a real part of the bundle, not an upsell.\n" +
+      "- TIJARI — a Tijari licence link, marked Additional, and CHARGED if it is taken. Do not add it to any total " +
+      "unless the customer has actually asked for it, and do not quote its price as part of the box.\n" +
+      "- AGENT — the first is Inclusive as it is on a personal box, but the RATE is different. Read it off the " +
+      "reservation; never carry a figure across from a personal rental.\n" +
+      "- KEY-DELIVERY — a flat charge for the whole term, not per year, unlike the agent lines beside it.\n" +
+      "The total to charge is minimumAmount plus the Additional services the customer chose, and nothing else. An " +
+      "Inclusive line is never added: it is what that service would cost, shown so the customer can see the value " +
+      "of what is already theirs.",
   },
   {
     marker: "A PENDING BOX CANNOT BE MANAGED YET",

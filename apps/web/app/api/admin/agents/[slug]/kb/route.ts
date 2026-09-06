@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { denyAgent } from "@/lib/scope";
 import { z } from "zod";
 import { transcribeDocumentToText, KB_IMPORT_EXTENSIONS } from "@dialog/core";
 import { getAgentBySlug } from "@/lib/agents";
@@ -22,6 +23,8 @@ const IMPORT_ERRORS: Record<string, string> = {
 /** List the agent's knowledge-base documents. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const docs = await listKbDocuments(agent.id);
@@ -47,6 +50,8 @@ const CreateBody = z.object({
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
@@ -90,6 +95,8 @@ const PatchBody = z.object({ id: z.string(), status: z.enum(["draft", "published
 /** Change a document's publishing status. */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const parsed = PatchBody.safeParse(await req.json());
@@ -101,6 +108,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ sl
 /** Delete a knowledge-base document by id (?id=). */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const denied = await denyAgent(slug);
+  if (denied) return denied;
   const agent = await getAgentBySlug(slug);
   if (!agent) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const id = req.nextUrl.searchParams.get("id");

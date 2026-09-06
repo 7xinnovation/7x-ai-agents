@@ -1,3 +1,4 @@
+import { currentScope, withinScope } from "@/lib/scope";
 import Link from "next/link";
 import { sql, desc, eq } from "drizzle-orm";
 import { getDb, agents, tenants, conversations, messages, kbChunks, escalations, auditLog, analyticsEvents } from "@dialog/db";
@@ -29,12 +30,16 @@ export default async function Overview() {
   for (const r of evRows) ev[r.type] = r.c;
   const rate = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
 
-  const liveAgents = (await db
+  const scope = await currentScope();
+  const liveAgents = withinScope((await db
     .select({ slug: agents.slug, name: agents.name, status: agents.status, tenant: tenants.name, definition: agents.definition })
-    .from(agents).leftJoin(tenants, eq(agents.tenantId, tenants.id)).orderBy(desc(agents.updatedAt)).limit(6)) as any[];
+    .from(agents).leftJoin(tenants, eq(agents.tenantId, tenants.id)).orderBy(desc(agents.updatedAt)).limit(6)) as any[], scope);
   const recent = (await db
-    .select({ action: auditLog.action, actor: auditLog.actor, createdAt: auditLog.createdAt, agentName: agents.name })
+    .select({ action: auditLog.action, actor: auditLog.actor, createdAt: auditLog.createdAt, agentName: agents.name, agentSlug: agents.slug })
     .from(auditLog).leftJoin(agents, eq(auditLog.agentId, agents.id)).orderBy(desc(auditLog.createdAt)).limit(7)) as any[];
+  // An event belonging to an agent outside the scope is not shown, and neither
+  // is an event belonging to no agent — a scoped account is here for its agents.
+  const feed: any[] = scope ? recent.filter((r) => r.agentSlug && scope.includes(r.agentSlug)) : recent;
 
   const stats = [
     { label: "Agents", value: String(nA), hint: `across ${nT} tenants` },
@@ -120,7 +125,7 @@ export default async function Overview() {
         <Card>
           <CardHeader><CardTitle>Recent activity</CardTitle></CardHeader>
           <CardContent className="py-2">
-            {recent.length === 0 ? <p className="py-2 text-sm text-muted">No activity yet.</p> : recent.map((r, i) => (
+            {feed.length === 0 ? <p className="py-2 text-sm text-muted">No activity yet.</p> : feed.map((r, i) => (
               <div key={i} className="flex items-center gap-3 py-2.5">
                 <span className={dot(r.action)} />
                 <span className="min-w-0 flex-1">

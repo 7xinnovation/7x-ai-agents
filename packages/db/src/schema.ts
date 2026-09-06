@@ -320,6 +320,16 @@ export const users = pgTable(
     // Identity provider: "password" or "entra" (Microsoft SSO).
     provider: text("provider", { enum: ["password", "entra"] }).default("password").notNull(),
     active: boolean("active").default(true).notNull(),
+    /**
+     * Which agents this account may see. Empty means ALL of them, which is what
+     * every existing account has and what every owner and admin should keep.
+     *
+     * A read-only account is often read-only over one product: someone reviewing
+     * Emirates Post transactions has no business in EPGL's licence applications,
+     * and vice versa. Scoping is per USER rather than per role because the answer
+     * differs from person to person.
+     */
+    agentScope: jsonb("agent_scope").$type<string[]>().default([]).notNull(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     createdAt: ts(),
   },

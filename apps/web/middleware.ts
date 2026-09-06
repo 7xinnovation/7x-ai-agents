@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { verifySession, atLeast } from "@/lib/session";
+import { verifySession, atLeast, sessionCanSee } from "@/lib/session";
 
 /**
  * Gate the admin console and its APIs behind a signed RBAC session (PRD: User
@@ -48,7 +48,29 @@ export async function middleware(req: NextRequest) {
   if (!atLeast(claims.role, required)) {
     return pathname.startsWith("/api/") ? deny(403) : NextResponse.next();
   }
+
+  // Agent scope: an account limited to named agents cannot reach another's
+  // editor or API, whatever it types in the address bar. The pages check this
+  // against the database as well — the session's copy can be up to eight hours
+  // old — but this stops it at the edge without a query.
+  const target = agentSlugIn(pathname);
+  if (target && !sessionCanSee(claims, target)) return deny(404);
+
   return NextResponse.next();
+}
+
+/**
+ * The agent a console path acts on, if it names one: `/admin/<slug>` and
+ * `/api/admin/agents/<slug>/...`. Console pages that are not an agent editor
+ * (`/admin/users`, `/admin/inbox`, …) are listed here so their names are never
+ * mistaken for a slug.
+ */
+const CONSOLE_PAGES = new Set(["login", "users", "agents", "inbox", "analytics", "activity", "conversations", "readiness"]);
+function agentSlugIn(pathname: string): string | null {
+  const p = pathname.split("/").filter(Boolean);
+  if (p[0] === "api" && p[1] === "admin" && p[2] === "agents" && p[3]) return decodeURIComponent(p[3]);
+  if (p[0] === "admin" && p[1] && p.length === 2 && !CONSOLE_PAGES.has(p[1])) return decodeURIComponent(p[1]);
+  return null;
 }
 
 /**

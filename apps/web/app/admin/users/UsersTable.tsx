@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { UserPlus, ShieldCheck } from "lucide-react";
+import { UserPlus, ShieldCheck, ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/field";
 
 export interface UserRow {
@@ -13,14 +13,29 @@ export interface UserRow {
   active: boolean;
   lastLoginAt: string | Date | null;
   createdAt: string | Date;
+  /** Agent slugs this account may see. Empty means all of them. */
+  agentScope?: string[] | null;
 }
+
+export interface AgentOption { slug: string; name: string }
 
 const ROLES = ["owner", "admin", "editor", "viewer"] as const;
 const roleTone: Record<string, "brand" | "live" | "muted" | "draft"> = { owner: "brand", admin: "live", editor: "muted", viewer: "draft" };
+/** Owners and admins can lift any restriction themselves, so scoping them is theatre. */
+const scoped = (r: UserRow["role"]) => r === "viewer" || r === "editor";
+/** What the picker button reads when it is shut. */
+function scopeLabel(u: UserRow, agents: AgentOption[]): string {
+  const scope = u.agentScope ?? [];
+  if (!scope.length) return "All agents";
+  if (scope.length === 1) return agents.find((a) => a.slug === scope[0])?.name ?? scope[0]!;
+  return `${scope.length} agents`;
+}
 
-export function UsersTable({ initial }: { initial: UserRow[] }) {
+export function UsersTable({ initial, agents = [] }: { initial: UserRow[]; agents?: AgentOption[] }) {
   const [rows, setRows] = useState(initial);
   const [open, setOpen] = useState(false);
+  /** Which row has its agent picker open. */
+  const [picking, setPicking] = useState<string | null>(null);
   const [form, setForm] = useState({ email: "", name: "", password: "", role: "viewer" as UserRow["role"] });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -80,6 +95,7 @@ export function UsersTable({ initial }: { initial: UserRow[] }) {
             <tr>
               <th className="px-5 py-3 font-semibold">User</th>
               <th className="px-5 py-3 font-semibold">Role</th>
+              <th className="px-5 py-3 font-semibold">Agents</th>
               <th className="px-5 py-3 font-semibold">Provider</th>
               <th className="px-5 py-3 font-semibold">Status</th>
               <th className="px-5 py-3 font-semibold">Last login</th>
@@ -96,6 +112,50 @@ export function UsersTable({ initial }: { initial: UserRow[] }) {
                   <select value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })} className="rounded-md border border-[var(--color-line)] bg-surface px-2 py-1 text-[12.5px] font-medium outline-none focus:border-[var(--color-brand)]">
                     {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
+                </td>
+                <td className="px-5 py-3">
+                  {!scoped(u.role) ? (
+                    <span className="text-[12.5px] text-muted">All agents</span>
+                  ) : (
+                    <div className="relative">
+                      <button
+                        onClick={() => setPicking((v) => (v === u.id ? null : u.id))}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line)] px-2 py-1 text-[12.5px] font-medium hover:bg-[var(--color-line-soft)]"
+                      >
+                        {scopeLabel(u, agents)}
+                        <ChevronDown className="h-3.5 w-3.5 text-muted" />
+                      </button>
+                      {picking === u.id && (
+                        <div className="absolute left-0 z-20 mt-1 w-[248px] rounded-lg border border-[var(--color-line)] bg-surface p-1.5 shadow-[var(--shadow-md)]">
+                          <button
+                            onClick={() => { void patch(u.id, { agentScope: [] }); setPicking(null); }}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-[var(--color-line-soft)]"
+                          >
+                            <input type="checkbox" readOnly checked={(u.agentScope ?? []).length === 0} className="h-3.5 w-3.5" />
+                            <span className="font-medium">All agents</span>
+                          </button>
+                          <div className="my-1 border-t border-[var(--color-line-soft)]" />
+                          {agents.map((a) => {
+                            const on = (u.agentScope ?? []).includes(a.slug);
+                            return (
+                              <button
+                                key={a.slug}
+                                onClick={() => {
+                                  const cur = u.agentScope ?? [];
+                                  void patch(u.id, { agentScope: on ? cur.filter((x) => x !== a.slug) : [...cur, a.slug] });
+                                }}
+                                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-[var(--color-line-soft)]"
+                              >
+                                <input type="checkbox" readOnly checked={on} className="h-3.5 w-3.5" />
+                                <span className="truncate">{a.name}</span>
+                              </button>
+                            );
+                          })}
+                          {!agents.length && <p className="px-2 py-1.5 text-[12.5px] text-muted">No agents yet.</p>}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td className="px-5 py-3"><Badge tone={u.provider === "entra" ? "brand" : "muted"}>{u.provider === "entra" ? "Microsoft SSO" : "Password"}</Badge></td>
                 <td className="px-5 py-3">
