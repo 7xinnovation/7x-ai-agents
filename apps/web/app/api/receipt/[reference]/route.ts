@@ -8,6 +8,10 @@ export const runtime = "nodejs";
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** Money the way every other screen writes it: "AED 2,155.00", not "2155 AED". */
+const money = (amount: number, currency: string) =>
+  `${currency} ${amount.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /** Customer-facing date format, DD-MM-YYYY (FB-1439). */
 const fmtDate = (d: Date | null | undefined): string => {
   if (!d) return "";
@@ -134,7 +138,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   }<p>${esc(s.subtitle)}</p></div>
   <div class="body">
     ${rows.map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("")}
-    <div class="total"><span>${esc(pay.status === "paid" ? s.totalPaid : s.totalDue)}</span><span>${esc(`${pay.amount} ${pay.currency}`)}</span></div>
+    <div class="total"><span>${esc(pay.status === "paid" ? s.totalPaid : s.totalDue)}</span><span>${esc(money(pay.amount, pay.currency))}</span></div>
     <button class="print" onclick="window.print()">${esc(s.print)}</button>
   </div>
   <div class="foot">${esc(s.foot)}</div>

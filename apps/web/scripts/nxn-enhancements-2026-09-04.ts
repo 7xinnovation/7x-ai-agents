@@ -246,6 +246,15 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
       "the map is an easier alternative to typing, not a requirement.",
   },
   {
+    marker: "THE RECEIPT LINK IS ADDED FOR YOU",
+    journeys: /rental|renewal/,
+    text:
+      "THE RECEIPT LINK IS ADDED FOR YOU, at the END of your reply, once the payment is confirmed. So do not write " +
+      "one yourself, and do not describe where it is — \"your receipt is available via the download link above\" " +
+      "points at nothing, because the link comes after your words. Say the receipt is ready and leave it at that, " +
+      "or say nothing about it at all: the link speaks for itself.",
+  },
+  {
     marker: "A PENDING BOX CANNOT BE MANAGED YET",
     journeys: /manage_po_box|renewal/,
     text:

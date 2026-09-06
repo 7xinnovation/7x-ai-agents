@@ -94,7 +94,7 @@ const REPLIES: { when: RegExp; say: string; once?: boolean }[] = [
   { when: /which plan|bundle|mybox/i, say: `${BUNDLE} please.`, once: true },
   { when: /which emirate|emirate of the/i, say: "Dubai.", once: true },
   { when: /branch|post office/i, say: "Al Barsha Post Office.", once: true },
-  { when: /box number|pick (a|another) number|available box/i, say: "__BOX__", once: true },
+  { when: /which number|box number|pick (a|another) number|available box|choose (a|another) number/i, say: "__BOX__", once: true },
   { when: /how long|duration|rental period/i, say: cliArg("--years") ? `${cliArg("--years")} Years.` : "2 Years.", once: true },
   { when: /authoris?ed agent|add an agent/i, say: WITH_AGENT ? "Yes, add an agent." : "No agent, thank you.", once: true },
   { when: /agent'?s? (emirates id|details|name)|upload the agent/i, say: "The agent is Emre Karayalcin, Emirates ID 784-1999-8392642-1.", once: true },
