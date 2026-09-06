@@ -49,8 +49,41 @@ export type RentBook = Map<string, number>;
 /** The key a rent observation is filed under. */
 export const rentKey = (bundleId: string, years: number) => `${bundleId}|${years}`;
 
+/**
+ * bundleId → the services Emirates Post prices for it.
+ *
+ * A bundle that carries no `KEY-DELIVERY` line does not offer key courier, and
+ * sending one returns 223 INVALID_ADDITIONAL_SERVICE. MyHome is the case: the
+ * box is delivered to the customer's door, so the key comes with it. On 6 Sep a
+ * MyHome customer was offered courier delivery at AED 30 and charged for it,
+ * for a service Emirates Post does not sell on that bundle.
+ */
+export type ServiceBook = Map<string, string[]>;
+
+/** The services in one Select response, by bundle. */
+export function servicesInSelectResponse(response: string): ServiceBook {
+  const out: ServiceBook = new Map();
+  const body = response.slice(response.indexOf("\n") + 1);
+  try {
+    const parsed = JSON.parse(body) as Record<string, any>;
+    const details = (parsed?.payload ?? parsed)?.priceDetails;
+    if (!Array.isArray(details)) return out;
+    for (const d of details) {
+      const id = String(d?.bundleID ?? d?.bundleId ?? "").trim();
+      const svc = String(d?.serviceType ?? "").trim().toUpperCase();
+      if (!id || !svc) continue;
+      const cur = out.get(id) ?? [];
+      if (!cur.includes(svc)) cur.push(svc);
+      out.set(id, cur);
+    }
+  } catch {
+    /* a truncated body teaches us nothing about services */
+  }
+  return out;
+}
+
 const TTL_MS = 10 * 60 * 1000;
-const cache = new Map<string, { at: number; fees: FeeBook; rents: RentBook }>();
+const cache = new Map<string, { at: number; fees: FeeBook; rents: RentBook; services: ServiceBook }>();
 
 /**
  * Pull the `NEW-REG` amount out of one Select response.
@@ -127,7 +160,9 @@ export function rememberFees(toolName: string, response: string) {
   for (const [k, v] of fees) mergedFees.set(k, v);
   const mergedRents = new Map(cur?.rents ?? []);
   for (const [k, v] of rents) mergedRents.set(k, v);
-  cache.set(key, { at: cur?.at ?? Date.now(), fees: mergedFees, rents: mergedRents });
+  const mergedServices = new Map(cur?.services ?? []);
+  for (const [k, v] of servicesInSelectResponse(response)) mergedServices.set(k, v);
+  cache.set(key, { at: cur?.at ?? Date.now(), fees: mergedFees, rents: mergedRents, services: mergedServices });
 }
 
 /** Integration prefix — everything before the `__` in a tool name. */
@@ -151,12 +186,21 @@ export async function observedRents(agentId: string, selectToolName: string): Pr
   return (await priceBook(agentId, selectToolName)).rents;
 }
 
-async function priceBook(agentId: string, selectToolName: string): Promise<{ fees: FeeBook; rents: RentBook }> {
+/** Which services each bundle prices, as last observed. */
+export async function observedServices(agentId: string, selectToolName: string): Promise<ServiceBook> {
+  return (await priceBook(agentId, selectToolName)).services;
+}
+
+async function priceBook(
+  agentId: string,
+  selectToolName: string
+): Promise<{ fees: FeeBook; rents: RentBook; services: ServiceBook }> {
   const key = scope(selectToolName);
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return { fees: hit.fees, rents: hit.rents };
+  if (hit && Date.now() - hit.at < TTL_MS) return { fees: hit.fees, rents: hit.rents, services: hit.services };
   const fees: FeeBook = new Map(hit?.fees ?? []);
   const rents: RentBook = new Map(hit?.rents ?? []);
+  const services: ServiceBook = new Map(hit?.services ?? []);
   try {
     const rows = await getDb()
       .select({ payload: auditLog.payload, createdAt: auditLog.createdAt })
@@ -205,10 +249,11 @@ async function priceBook(agentId: string, selectToolName: string): Promise<{ fee
         const at = (r as { createdAt?: Date }).createdAt ?? new Date();
         for (const [k, amt] of rentInSelectResponse(p.response, at)) rents.set(k, amt);
       }
+      if (p.response) for (const [k, v] of servicesInSelectResponse(p.response)) services.set(k, v);
     }
   } catch {
     /* diagnostics for pricing must never take down pricing */
   }
-  cache.set(key, { at: Date.now(), fees, rents });
-  return { fees, rents };
+  cache.set(key, { at: Date.now(), fees, rents, services });
+  return { fees, rents, services };
 }

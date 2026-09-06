@@ -205,12 +205,16 @@ const BLOCKS: { marker: string; journeys: RegExp; text: string }[] = [
     marker: "AN INCLUDED AGENT IS WRITTEN AS INCLUDED",
     journeys: /rental/,
     text:
-      "AN INCLUDED AGENT IS WRITTEN AS INCLUDED. The FIRST authorised agent is already inside the reservation's " +
-      "total — its price line comes back marked Inclusive — so its summary row carries the word, not an empty " +
-      "space and not a paragraph: `- Authorised agent (Emre Karayalcin): Included`. Every row on that card is a " +
-      "SHORT value, two or three words at most; an explanation belongs in a sentence under the card, because a " +
-      "long value in a narrow column renders one character per line. Agents beyond the first each add their own " +
-      "priced row.",
+      "THE FIRST AUTHORISED AGENT IS FREE, AND KEY COURIER IS NOT SOLD ON EVERY BUNDLE. Two extras, one rule: an " +
+      "extra exists only if the RESERVATION prices it, and it is charged only if it is not marked Inclusive.\n" +
+      "The first agent is Inclusive — Emirates Post prices the line so you know what a SECOND agent would cost, " +
+      "and the first one adds nothing. Its row reads `- Authorised agent (their name): No charge — the first " +
+      "agent is included`. Never print the figure beside their name: a customer reads a number next to a service " +
+      "as a fee and asks why they are paying it. Agents beyond the first are charged and each gets its own row.\n" +
+      "KEY COURIER DELIVERY DOES NOT EXIST ON MyHome OR MyHome Instant. Those boxes are delivered to the " +
+      "customer's door and the key comes with them, so there is no KEY-DELIVERY line, no AED 30, and no choice to " +
+      "offer. Ask about key collection ONLY on a bundle collected at a branch. Offering it on MyHome charged a " +
+      "customer for a service Emirates Post does not sell.",
   },
   {
     marker: "A RENTAL IS ONE AMOUNT, NOT A SUM TO WORK OUT",

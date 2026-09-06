@@ -10,7 +10,7 @@ import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
-import { registrationFees, observedRents, rememberFees, feesInSelectResponse, rentInSelectResponse, rentKey } from "./registrationFees";
+import { registrationFees, observedRents, observedServices, rememberFees, feesInSelectResponse, rentInSelectResponse, rentKey } from "./registrationFees";
 import { gatewayOrderState } from "./gatewayOrder";
 import { renewalChoices, type RenewalBundle } from "./renewalBundles";
 
@@ -1115,10 +1115,24 @@ export async function buildApiTools(
       const services = Array.isArray(body.additionalServiceDetailList)
         ? (body.additionalServiceDetailList as Record<string, unknown>[])
         : [];
+      // Only if Emirates Post PRICED it on this reservation. A KEY-DELIVERY
+      // line sent for a bundle that has none returns 223
+      // INVALID_ADDITIONAL_SERVICE and takes the whole rental with it — and
+      // charging for it would be charging for a service they do not sell.
+      const courierOffered = (lastHold.services ?? []).some((sv) => /key[-_ ]?delivery/i.test(sv));
       const courierAsked =
-        services.some((sv) => /key[-_ ]?delivery/i.test(String(sv?.serviceType ?? ""))) ||
-        Boolean(body.keyDeliveryAddress) ||
-        Boolean(facts?.keyDelivery);
+        courierOffered &&
+        (services.some((sv) => /key[-_ ]?delivery/i.test(String(sv?.serviceType ?? ""))) ||
+          Boolean(body.keyDeliveryAddress) ||
+          Boolean(facts?.keyDelivery));
+      // Asked for on a bundle that cannot provide it: drop it rather than fail.
+      if (!courierOffered && (services.length || body.keyDeliveryAddress)) {
+        body.additionalServiceDetailList = services.filter(
+          (sv) => !/key[-_ ]?delivery/i.test(String(sv?.serviceType ?? ""))
+        );
+        delete body.keyDeliveryAddress;
+        patched = true;
+      }
       // The customer asked for it and the payload forgot to request it: a
       // courier they chose, paid for and never receive is the worse half of this.
       if (courierAsked && !services.some((sv) => /key[-_ ]?delivery/i.test(String(sv?.serviceType ?? "")))) {
@@ -1906,7 +1920,7 @@ export async function buildApiTools(
                 "Their earlier summary could not name this amount because the box had not been reserved yet, so if it said the fee would be shown before payment, this is where that promise is kept. Never send them to the payment page without it."
               : " A one-time registration fee is inside that total. Its exact amount cannot be separated out for this rental, so say a one-time registration fee is included and do NOT state a figure for it.") +
             (lastHold.agentIncludedPrice
-              ? ` THE FIRST AUTHORISED AGENT IS WORTH AED ${lastHold.agentIncludedPrice.toFixed(2)} AND IS ALREADY IN THAT TOTAL. When the customer has added one, its summary row states the figure and says it is included — \`- Authorised agent (their name): AED ${lastHold.agentIncludedPrice.toFixed(2)} (included)\` — because "Included" on its own reads as a charge nobody will name. Do NOT add it to the total.`
+              ? ` THE FIRST AUTHORISED AGENT COSTS THE CUSTOMER NOTHING. Emirates Post prices that line at AED ${lastHold.agentIncludedPrice.toFixed(2)} and marks it Inclusive, which means it is what a further agent would cost and NOT a charge on this rental — minimumAmount above is the rental plus the registration fee and nothing else. Write the row as \`- Authorised agent (their name): No charge — the first agent is included\`. Do NOT print ${lastHold.agentIncludedPrice.toFixed(2)} beside their name: a customer reads a figure next to a service as a fee, asks why it is there, and they are right to.`
               : "") +
             (agentExtra ? ` Each agent AFTER the first adds AED ${agentExtra.toFixed(2)}, and each of those IS added.` : "") +
             (courier ? ` Key courier delivery adds AED ${courier.toFixed(2)} if the customer chooses it.` : " Key courier delivery is not offered for this bundle.") +
@@ -2097,6 +2111,13 @@ export async function buildApiTools(
       const known = idsThisCall
         .map((id) => (feeBook.has(id) ? `${id} = AED ${feeBook.get(id)!.toFixed(2)}` : null))
         .filter(Boolean);
+      const svcBook = selectTool ? await observedServices(agentId, selectTool) : new Map<string, string[]>();
+      const courierBundles = idsThisCall.filter((id) => svcBook.get(id)?.includes("KEY-DELIVERY"));
+      const noCourier = idsThisCall.filter((id) => svcBook.has(id) && !svcBook.get(id)!.includes("KEY-DELIVERY"));
+      const courierNote = noCourier.length
+        ? `\n\nKEY COURIER DELIVERY IS NOT SOLD ON ${noCourier.join(", ")}. Emirates Post prices no KEY-DELIVERY line for those bundles because the box itself is delivered to the customer's door — the key comes with it. Do NOT offer the choice, do NOT put AED 30 on anything, and do NOT add it to a total: on 6 Sep a MyHome customer was offered courier delivery and charged 30 for a service that does not exist on that bundle.` +
+          (courierBundles.length ? ` It IS available on ${courierBundles.join(", ")}.` : "")
+        : "";
       const feeNote = known.length
         ? "\n\nTHE REGISTRATION FEE FOR THESE BUNDLES, from Emirates Post's own pricing: " +
           known.join(", ") +
@@ -2110,7 +2131,8 @@ export async function buildApiTools(
           "\n\nbundle_Price is the TWELVE-MONTH RENTAL ONLY. Every new rental also carries a one-time registration fee, which is not in this response. Put the rental in `price` and the fee in `pricenote`, which renders as small print DIRECTLY UNDER the price where it belongs:\n" +
           "```cards\n- title: MyBox\n  price: AED 300 / year\n  pricenote: + AED 70 one-time registration fee\n  desc: Dedicated mailbox at an Emirates Post branch.\n```\n" +
           "Do NOT put it in `badge` — that renders as a large pill above the product name, which shouts a footnote louder than the price it qualifies. Do NOT put it in `desc`, which is for what the bundle IS. Do NOT add the fee to the price: the price line is the rental, the fee is its own line, and the pre-payment summary itemises both. Never leave it unmentioned — the customer would otherwise meet a total higher than the card with no warning." +
-          feeNote,
+          feeNote +
+          courierNote,
       };
     }
     // Tell the customer which branches actually have boxes.
