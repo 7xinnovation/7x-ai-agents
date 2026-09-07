@@ -13,6 +13,7 @@ import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSav
 import { registrationFees, observedRents, observedServices, rememberFees, feesInSelectResponse, rentInSelectResponse, rentKey } from "./registrationFees";
 import { gatewayOrderState } from "./gatewayOrder";
 import { renewalChoices, upgradesAmong, describeBundle, type RenewalBundle } from "./renewalBundles";
+import { isManagementPath, boxNumberIn, mayManage } from "./boxOwnership";
 
 export type EnvKey = "staging" | "production";
 
@@ -680,6 +681,14 @@ export async function buildApiTools(
      * call and only the save needs it.
      */
     savedCard?: () => Promise<{ cardToken?: string; maskedPan?: string; expiry?: string; scheme?: string; cardholderName?: string } | null>;
+    /**
+     * The PO Boxes this customer actually holds, for the ownership gate.
+     *
+     * Resolved lazily and only when a management call is about to run. Returning
+     * null means "could not establish", and that REFUSES the call — see
+     * lib/boxOwnership.
+     */
+    ownedBoxes?: () => Promise<string[] | null>;
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** The gateway payment opened in an earlier turn; the confirm comes later. */
@@ -927,6 +936,39 @@ export async function buildApiTools(
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
+
+    // A BOX YOU DO NOT HOLD IS NOT YOURS TO MANAGE.
+    //
+    // The manage journey requires a signed-in customer and stopped there — it
+    // never checked that the box they NAMED was one of theirs. Signed in as
+    // yourself, you could type a stranger's box number and add an authorised
+    // agent to it, change its lock, or change where its mail goes. Reported on
+    // production, 7 September.
+    //
+    // Renewing is deliberately not gated: Emirates Post's own guest flow renews
+    // any box from its number and emirate, and paying to extend someone's
+    // subscription takes nothing from them.
+    if (isManagementPath(entry.op.path, entry.op.method)) {
+      const asked = boxNumberIn(input);
+      const owned = opts.ownedBoxes ? await opts.ownedBoxes().catch(() => null) : null;
+      const verdict = mayManage(owned, asked);
+      if (!verdict.ok) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "box_management_refused",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: { askedBox: asked ?? null, ownsBoxes: owned?.length ?? null },
+            response: verdict.reason ?? "refused",
+          },
+        }).catch(() => {});
+        return { result: verdict.reason!, isError: true };
+      }
+    }
 
     // Renewal pricing: force the target expiry onto the box's own anniversary.
     // The box's expiry is normally learned from the Details call earlier in the

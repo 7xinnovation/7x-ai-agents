@@ -32,6 +32,7 @@ import { proseTotalGuard } from "@/lib/proseTotal";
 import { shouldOfferReceipt, exactAmount } from "@/lib/receiptFacts";
 import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
+import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
@@ -581,7 +582,41 @@ export async function POST(req: NextRequest) {
         // journeys, where a save before payment really is a record written too soon.
         .filter((j) => j.submission?.requiresPayment && j.submission?.apiFlow?.saveTool && !j.submission?.apiFlow?.confirmTool)
         .map((j) => j.submission!.apiFlow!.saveTool as string);
+  /**
+   * The boxes this customer actually holds, for the ownership gate.
+   *
+   * Read from Emirates Post against the VERIFIED Emirates ID — never one the
+   * customer typed, which would let anyone claim anyone's boxes. Cached for the
+   * turn: a management call is rare, and asking twice would double a round trip
+   * for no gain. null means "could not establish", which REFUSES the call.
+   */
+  let ownedBoxesCache: { at: number; boxes: string[] | null } | null = null;
+  const ownedBoxes = async (): Promise<string[] | null> => {
+    if (ownedBoxesCache) return ownedBoxesCache.boxes;
+    const eid = verifiedEmiratesId ?? str(session.state.data[VERIFIED_EID_KEY]);
+    const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
+    let boxes: string[] | null = null;
+    if (eid && caller && agent.definition.tenantSlug === "nxn") {
+      try {
+        const rows = await poBoxesByEmiratesId(
+          agent.id,
+          agent.definition.activeEnvironment ?? "production",
+          eid,
+          caller
+        );
+        boxes = rows.map((b) => String(b.boxNumber ?? "")).filter(Boolean);
+      } catch (e) {
+        // A lookup that could not run is NOT proof of ownership.
+        log.warn("owned_boxes_lookup_failed", { agentId: agent.id, conversationId: session.conversationId, reason: String((e as Error).message ?? e) });
+        boxes = null;
+      }
+    }
+    ownedBoxesCache = { at: Date.now(), boxes };
+    return boxes;
+  };
+
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
+    ownedBoxes,
     blockUnpaidSaves: unpaidSaveTools.length ? { toolSuffixes: unpaidSaveTools, paid: paidAlready } : undefined,
     // So a backend refusal is recoverable afterwards, not only in this turn's context.
     conversationId: session.conversationId,
@@ -1268,6 +1303,15 @@ export async function POST(req: NextRequest) {
           result:
             "AUTO-RENEWAL CANNOT BE SET without the customer's signed-in session. Do not describe this as a failure of the rental — the box is rented. Tell them auto-renewal can be switched on from their PO Box page in the portal.",
         };
+      }
+      // Auto-renewal charges a saved card on a schedule. Switching it on for
+      // someone else's box is management, and goes through the same gate as
+      // adding an agent to it.
+      const askedBox = boxNumberIn(input);
+      const verdict = mayManage(await ownedBoxes(), askedBox);
+      if (!verdict.ok) {
+        await audit({ ...a, actor: "system", action: "box_management_refused", payload: { tool: AUTORENEW_TOOL, input: { askedBox: askedBox ?? null }, response: verdict.reason } }).catch(() => {});
+        return { result: verdict.reason! };
       }
       try {
         const r = await setAutoRenew(
