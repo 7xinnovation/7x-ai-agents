@@ -324,6 +324,51 @@ const hallMemory = new Map<string, { at: number; halls: { officeId: string; name
 const HALL_TTL_MS = 2 * 60 * 60 * 1000;
 
 /**
+ * Which box numbers a customer has already been shown, per branch.
+ *
+ * Rental/FreeBoxes takes a bundle and a location and NOTHING ELSE — no page, no
+ * offset, no cursor — so every call returns the same list. The journey shows ten
+ * at a time with a "Refresh" for the next ten, and "the next ten" was left to
+ * the model to work out from a payload identical to the one before it. Dubai
+ * Central has 41 free boxes; a customer pressing Refresh could be shown the same
+ * ten again and reasonably conclude the rest never load.
+ *
+ * So the pages are counted here. Keyed by conversation, bundle and branch, and
+ * kept for the life of a conversation.
+ */
+const offeredBoxMemory = new Map<string, { at: number; shown: string[] }>();
+const OFFERED_TTL_MS = 2 * 60 * 60 * 1000;
+
+/** How many box numbers a customer is shown at once. Emirates Post asked for ten. */
+export const BOXES_PER_PAGE = 10;
+
+export function nextBoxPage(
+  conversationId: string | undefined,
+  bundleId: string,
+  locationId: string,
+  all: string[]
+): { page: string[]; shownBefore: number; remaining: number; exhausted: boolean } {
+  const key = `${conversationId ?? "-"}|${bundleId}|${locationId}`;
+  if (offeredBoxMemory.size > 500) {
+    for (const [k, v] of offeredBoxMemory) if (Date.now() - v.at > OFFERED_TTL_MS) offeredBoxMemory.delete(k);
+  }
+  const seen = offeredBoxMemory.get(key)?.shown ?? [];
+  const fresh = all.filter((b) => !seen.includes(b));
+  // Every one has been offered already: start again rather than show nothing —
+  // the customer is still looking for a box, and the list may itself have moved.
+  const exhausted = fresh.length === 0 && all.length > 0;
+  const source = exhausted ? all : fresh;
+  const page = source.slice(0, BOXES_PER_PAGE);
+  offeredBoxMemory.set(key, { at: Date.now(), shown: exhausted ? [...page] : [...seen, ...page] });
+  return {
+    page,
+    shownBefore: seen.length,
+    remaining: Math.max(0, source.length - page.length),
+    exhausted,
+  };
+}
+
+/**
  * The upgrades a renewal may offer, by bundle id.
  *
  * Renewing is the moment a customer is already thinking about the box, so it is
@@ -2120,6 +2165,42 @@ export async function buildApiTools(
             .map((x: Record<string, unknown>) => String(x?.uniqueBoxId ?? ""))
             .filter(Boolean)
             .slice(0, 400);
+
+          // WHICH TEN TO SHOW, decided here rather than remembered.
+          //
+          // FreeBoxes takes a bundle and a location and nothing else, so every
+          // call — including the one behind "Refresh" — returns the same list.
+          // Working out which ten had not been shown yet was left to the model,
+          // across turns, from an identical payload. Dubai Central has 41 free
+          // boxes and a customer pressing Refresh could be handed the same ten
+          // again, which reads as the rest never loading.
+          const inp = (input ?? {}) as Record<string, unknown>;
+          const bundleId = asStr(inp.BundleId ?? inp.bundleId ?? inp.bundle_Id) ?? "";
+          const locationId = asStr(inp.LocationId ?? inp.locationId ?? inp.OfficeId ?? inp.officeId) ?? "";
+          const numbers = rows
+            .map((x: Record<string, unknown>) => String(x?.boxId ?? x?.boxNumber ?? x?.uniqueBoxId ?? ""))
+            .filter(Boolean);
+          const { page, shownBefore, remaining, exhausted } = nextBoxPage(
+            opts.conversationId,
+            bundleId,
+            locationId,
+            numbers
+          );
+          if (page.length) {
+            res = {
+              ...res,
+              result:
+                res.result +
+                `\n\nSHOW EXACTLY THESE ${page.length} BOX NUMBERS, and no others from the list above: ${page.join(", ")}.` +
+                ` This branch has ${numbers.length} free box${numbers.length === 1 ? "" : "es"} in total.` +
+                (exhausted
+                  ? ` The customer has now been shown every one of them, so this set repeats from the beginning — say plainly that these are all the numbers this branch has, and offer a different branch if none suits.`
+                  : shownBefore
+                    ? ` ${shownBefore} were already shown earlier in this conversation and must NOT be repeated; ${remaining} remain after this set.`
+                    : ` ${remaining} more are available if they ask for different numbers.`) +
+                ` This call takes no page parameter — every call returns the same list — so "Refresh" means calling it again and showing the set named here, which is worked out for you. Never re-show a number the customer has already seen, and never invent one that is not in the response.`,
+            };
+          }
         }
       } catch {
         /* an unreadable list leaves the previous ids in place */
