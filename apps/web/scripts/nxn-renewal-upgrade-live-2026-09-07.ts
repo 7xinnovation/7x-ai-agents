@@ -11,6 +11,7 @@
  * Run from apps/web:
  *   npx tsx scripts/nxn-renewal-upgrade-live-2026-09-07.ts --host <url> --token <jwt> --box 911933
  */
+export {}; // a module, so its locals do not collide with the other scripts
 const arg = (n: string) => { const i = process.argv.indexOf(n); return i !== -1 ? process.argv[i + 1] : undefined; };
 const HOST = (arg("--host") ?? "").replace(/\/$/, "");
 const TOKEN = arg("--token")!;
