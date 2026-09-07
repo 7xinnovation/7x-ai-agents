@@ -421,10 +421,37 @@ const BOX_STATUS: Record<string, string> = {
  * described as "status 2" — or, worse, be quietly left out of a list because
  * there was nothing sensible to say about it.
  */
+/**
+ * The same statuses as their spec SPELLS them.
+ *
+ * BoxStatus is declared a string enum and the API returns integers, so both
+ * arrive in practice depending on the endpoint. These are their words, turned
+ * into a customer's: "Suspended" is the one a lapsed box is most likely to be
+ * wearing, and on its own it tells the customer nothing about why.
+ */
+const BOX_STATUS_WORDS: Record<string, string> = {
+  free: "Free",
+  virtualfree: "Free",
+  rented: "Active",
+  blocked: "Blocked",
+  reserved: "Reserved",
+  ecomreserved: "Reserved",
+  ecombooked: "Reserved",
+  ceoreserved: "Reserved",
+  suspended: "Suspended",
+  pendingapproval: "Pending approval",
+  rentingrejected: "Rejected",
+};
+
 function statusInWords(raw: unknown): string | undefined {
   const code = String(raw ?? "").trim();
   if (!code) return undefined;
-  return BOX_STATUS[code] ?? (/^\d+$/.test(code) ? `Status ${code} (Emirates Post does not publish a name for this one)` : code);
+  if (BOX_STATUS[code]) return BOX_STATUS[code];
+  const word = BOX_STATUS_WORDS[code.toLowerCase().replace(/[^a-z]/g, "")];
+  if (word) return word;
+  // Not a number we have seen and not a word they document: say so, rather than
+  // handing the customer a bare code or letting the box fall out of the list.
+  return /^\d+$/.test(code) ? `Status ${code} (Emirates Post does not publish a name for this one)` : code;
 }
 
 /**

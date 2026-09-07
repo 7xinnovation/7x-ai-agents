@@ -53,6 +53,26 @@ check("known statuses read as words", mapped[0]!.status === "Active" && mapped[2
 check("an unknown one is not a bare number", mapped[3]!.status !== "7" && !/^\d+$/.test(String(mapped[3]!.status)), mapped[3]!.status);
 check("...and says so plainly", /Status 7/.test(String(mapped[3]!.status)), mapped[3]!.status);
 
+// ── the status Emirates Post actually uses for a lapsed box ─────────────────
+// Their spec declares BoxStatus a string enum and the API returns integers, so
+// both shapes turn up. A lapsed box most likely wears "Suspended".
+const words = mapCustomerPoBoxes([
+  { boxNumber: 1, status: "Suspended", expiryDate: past },
+  { boxNumber: 2, status: "Rented", expiryDate: future },
+  { boxNumber: 3, status: "PendingApproval", expiryDate: future },
+  { boxNumber: 4, status: "RentingRejected", expiryDate: future },
+  { boxNumber: 5, status: "VirtualFree", expiryDate: future },
+  { boxNumber: 6, status: "Blocked", expiryDate: past },
+]);
+check("Suspended is named as Suspended", words[0]!.status === "Suspended", words[0]);
+check("...and is still seen as expired from its date", words[0]!.expired === true);
+check("Rented reads as Active", words[1]!.status === "Active");
+check("PendingApproval reads as Pending approval", words[2]!.status === "Pending approval");
+check("RentingRejected reads as Rejected", words[3]!.status === "Rejected");
+check("VirtualFree reads as Free", words[4]!.status === "Free");
+check("Blocked is named, not swallowed", words[5]!.status === "Blocked" && words[5]!.expired === true);
+check("every one of them is returned", words.length === 6);
+
 // ── the rest of the record still maps ───────────────────────────────────────
 check("the emirate CODE comes from cityCode", mapped[0]!.emirateCode === "DXB");
 check("the emirate NAME is kept apart from it", mapped[0]!.emirateName === "Dubai");

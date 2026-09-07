@@ -1167,6 +1167,9 @@ export async function POST(req: NextRequest) {
             result: boxes.length
               ? JSON.stringify(boxes) +
                 `\n\nEVERY ONE OF THESE ${boxes.length} BOXES IS THEIRS AND EVERY ONE MUST BE LISTED — including any that are expired, on hold, pending or rejected. Do not leave a box out because its status is unfamiliar or because it looks inactive; if you cannot describe a status, say the box is there and that its state is not one you can name.` +
+                (boxes.some((b) => /suspended|blocked|on hold/i.test(String(b.status ?? "")))
+                  ? `\n\nA SUSPENDED, BLOCKED OR ON-HOLD BOX IS STILL THEIRS. Emirates Post has no status meaning "expired", so a box that has lapsed usually wears one of these instead — say what the status is, say when it expired if the date has passed, and do NOT tell the customer the box is gone or that it is not on their account. Whether it can be renewed is for the renewal lookup to answer, not you: offer to check.`
+                  : "") +
                 (lapsed.length
                   ? `\n\n${lapsed.length} OF THEM HAS EXPIRED: ${lapsed
                       .map((b) => `${b.boxNumber}${b.emirateName ? ` (${b.emirateName})` : ""} — expired ${String(b.expiryDate ?? "").slice(0, 10)}`)
