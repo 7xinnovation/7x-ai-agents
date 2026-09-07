@@ -7,7 +7,7 @@
  * Run from apps/web:
  *   npx tsx scripts/test-security-audit-2026-09-07.ts
  */
-import { safeReturnTo } from "@/lib/uaepass";
+import { safeReturnTo, requestOrigin } from "@/lib/uaepass";
 import { sameSitePath } from "@/app/admin/login/LoginClient";
 import { isPaymentUrl } from "@/app/embed/[agent]/Markdown";
 import { isPrivateAddress, checkOutboundUrl } from "@/lib/outboundUrl";
@@ -77,6 +77,36 @@ check("localhost by name is refused", !verdicts[2]!.ok);
 check("file:// is refused", !verdicts[3]!.ok);
 check("credentials in the URL are refused", !verdicts[4]!.ok);
 check("nonsense is refused", !verdicts[5]!.ok);
+
+// ── the origin the sign-in round trip is built on ───────────────────────────
+// It becomes the redirect target and the UAE PASS redirect_uri, so a header
+// anyone can set must not be able to choose it. The second scan still flagged
+// the login route for this after the returnTo fix.
+const req = (headers: Record<string, string>, origin = "https://internal.local") => ({
+  headers: { get: (n: string) => headers[n.toLowerCase()] ?? null },
+  nextUrl: { origin, protocol: "https:" },
+});
+const noPin = { ...process.env };
+delete process.env.PUBLIC_APP_URL;
+delete process.env.NEXT_PUBLIC_DIALOG_HOST;
+check(
+  "a forwarded host that matches the arriving host is honoured",
+  requestOrigin(req({ host: "agent.7x.ae", "x-forwarded-host": "agent.7x.ae", "x-forwarded-proto": "https" })) === "https://agent.7x.ae"
+);
+check(
+  "a SPOOFED forwarded host is not",
+  requestOrigin(req({ host: "agent.7x.ae", "x-forwarded-host": "evil.example", "x-forwarded-proto": "https" })) === "https://agent.7x.ae"
+);
+check(
+  "with no forwarded header the arriving host stands",
+  requestOrigin(req({ host: "agent.7x.ae", "x-forwarded-proto": "https" })) === "https://agent.7x.ae"
+);
+process.env.PUBLIC_APP_URL = "https://agent.7x.ae";
+check(
+  "a configured public origin beats any header",
+  requestOrigin(req({ host: "evil.example", "x-forwarded-host": "evil.example" })) === "https://agent.7x.ae"
+);
+Object.assign(process.env, noPin);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

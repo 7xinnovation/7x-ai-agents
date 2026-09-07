@@ -20,8 +20,7 @@
  * Run from apps/web:
  *   npx tsx scripts/seed-price-book-2026-09-06.ts --from <env> --to <env> [--apply]
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { databaseUrlFrom } from "./lib/envFile";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { agents, auditLog } from "@dialog/db";
@@ -32,13 +31,8 @@ const arg = (n: string) => { const i = process.argv.indexOf(n); return i !== -1 
 const FROM = arg("--from"), TO = arg("--to"), APPLY = process.argv.includes("--apply");
 if (!FROM || !TO) throw new Error("--from <envfile> and --to <envfile> are both required");
 
-const urlFrom = (f: string) => {
-  const m = /^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m.exec(readFileSync(resolve(f), "utf8"));
-  if (!m) throw new Error(`no DATABASE_URL in ${f}`);
-  return m[1]!;
-};
 const connect = (f: string) => {
-  const pool = new pg.Pool({ connectionString: urlFrom(f) });
+  const pool = new pg.Pool({ connectionString: databaseUrlFrom(f) });
   return { db: drizzle(pool, { schema: { agents, auditLog } }), pool };
 };
 

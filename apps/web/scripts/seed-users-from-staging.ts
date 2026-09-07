@@ -16,9 +16,7 @@
  * Run from apps/web:
  *   npx tsx scripts/seed-users-from-staging.ts --from <src.env> --to <dst.env> [--dry-run]
  */
-import { config } from "dotenv";
-import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
+import { databaseUrlFrom } from "./lib/envFile";
 import { Pool } from "pg";
 
 const arg = (name: string) => {
@@ -28,12 +26,7 @@ const arg = (name: string) => {
 const dryRun = process.argv.includes("--dry-run");
 
 /** Read DATABASE_URL out of an env file without disturbing process.env. */
-function dbUrl(file: string): string {
-  const parsed = config({ path: resolve(file), processEnv: {} });
-  const url = parsed.parsed?.DATABASE_URL;
-  if (!url) throw new Error(`no DATABASE_URL in ${file}`);
-  return url;
-}
+const dbUrl = databaseUrlFrom;
 
 interface UserRow {
   id: string;
@@ -49,10 +42,6 @@ async function main() {
   const from = arg("--from");
   const to = arg("--to");
   if (!from || !to) throw new Error("usage: --from <src.env> --to <dst.env> [--dry-run]");
-  // Touch readFileSync so a missing file fails here with a clear message.
-  readFileSync(resolve(from));
-  readFileSync(resolve(to));
-
   const src = new Pool({ connectionString: dbUrl(from) });
   const dst = new Pool({ connectionString: dbUrl(to) });
 

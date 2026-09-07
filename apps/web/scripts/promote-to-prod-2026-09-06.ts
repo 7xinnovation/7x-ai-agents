@@ -30,8 +30,7 @@
  * Run from apps/web:
  *   npx tsx scripts/promote-to-prod-2026-09-06.ts --from <env> --to <env> [--apply]
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { databaseUrlFrom } from "./lib/envFile";
 
 const arg = (n: string) => {
   const i = process.argv.indexOf(n);
@@ -48,14 +47,8 @@ import pg from "pg";
 import { agents, kbDocuments, kbChunks } from "@dialog/db";
 import { eq } from "drizzle-orm";
 
-function urlFrom(file: string): string {
-  const txt = readFileSync(resolve(file), "utf8");
-  const m = /^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m.exec(txt);
-  if (!m) throw new Error(`no DATABASE_URL in ${file}`);
-  return m[1]!;
-}
 const connect = (file: string) => {
-  const pool = new pg.Pool({ connectionString: urlFrom(file) });
+  const pool = new pg.Pool({ connectionString: databaseUrlFrom(file) });
   return { db: drizzle(pool, { schema: { agents, kbDocuments, kbChunks } }), pool };
 };
 

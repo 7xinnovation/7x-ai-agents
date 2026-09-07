@@ -45,10 +45,18 @@ export function requestOrigin(req: {
   nextUrl: { origin: string; protocol: string };
 }): string {
   // An explicit override wins (single fixed public domain deployments).
-  const pin = process.env.PUBLIC_APP_URL;
+  const pin = process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_DIALOG_HOST;
   if (pin && /^https?:\/\//i.test(pin)) { try { return new URL(pin).origin; } catch { /* ignore */ } }
   const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || req.nextUrl.protocol.replace(/:$/, "");
-  const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || req.headers.get("host");
+  // x-forwarded-host is written by whatever is in front of us, and anyone can
+  // put one on a request. This origin becomes the sign-in redirect target and
+  // the UAE PASS redirect_uri, so a spoofed header here is an open redirect on
+  // our own domain — which is what the audit found. It is honoured only when it
+  // agrees with the host the request actually arrived on, which makes it a
+  // spelling of the same place rather than a destination someone chose for us.
+  const arrived = req.headers.get("host")?.trim();
+  const forwarded = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwarded && (!arrived || forwarded === arrived) ? forwarded : arrived;
   return host ? `${proto}://${host}` : req.nextUrl.origin;
 }
 

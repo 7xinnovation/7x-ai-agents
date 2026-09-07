@@ -27,11 +27,15 @@ const eq = (name: string, got: unknown, want: unknown) => {
   else { fail++; console.log(`  FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`); }
 };
 
-// Exactly what nxn_saved_cards returns for the staging test customer.
+// The shape nxn_saved_cards returns, with a stand-in for the token.
+//
+// This test is about which five fields travel and which are dropped, so the
+// value only has to be a value. A real sandbox token committed here reads to any
+// scanner as a leaked credential — and did, twice.
 const fromLookup = {
   expiry: "2030-12",
   scheme: "VISA",
-  cardToken: "dG9rZW5pemVkUGFuLy92MS8vU0hPV19OT05FLy8xMTExMTExNDExMTExMTEx",
+  cardToken: "EXAMPLE-CARD-TOKEN-NOT-A-REAL-ONE",
   isDefault: true,
   isExpired: false,
   maskedPan: "*****1111",

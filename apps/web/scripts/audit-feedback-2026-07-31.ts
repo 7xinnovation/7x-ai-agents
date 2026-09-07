@@ -17,7 +17,7 @@
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
 import { getDb, agents, kbDocuments } from "@dialog/db";
@@ -51,7 +51,11 @@ interface Comment {
 }
 
 function readExport(path: string): { round: string; comments: Comment[] }[] {
-  const raw = JSON.parse(readFileSync(path, "utf8"));
+  // Named on the command line by whoever runs this, so the same rule as the env
+  // files: resolve it, and insist it is a regular file before reading it.
+  const p = resolve(path);
+  if (!existsSync(p) || !statSync(p).isFile()) throw new Error(`feedback export missing: ${path}`);
+  const raw = JSON.parse(readFileSync(p, "utf8"));
   return raw.rounds.map((r: { title: string; comments: Comment[] }) => ({ round: r.title, comments: r.comments }));
 }
 
