@@ -62,3 +62,15 @@ export function renewalChoices(
 
   return { bundles: kept, dropped: possible.length - kept.length };
 }
+
+/** The bundles above the customer's own, in the order Emirates Post listed them. */
+export function upgradesAmong(kept: RenewalBundle[], current: RenewalBundle | undefined): RenewalBundle[] {
+  return kept.filter((b) => !sameBundle(b, current));
+}
+
+/** "MyHome Instant (AED 995 a year)" — a name a customer can be offered. */
+export function describeBundle(b: RenewalBundle): string {
+  const name = String(b.bundleName ?? b.bundleId ?? "").trim();
+  const p = price(b);
+  return p !== null ? `${name} (AED ${p} a year)` : name;
+}

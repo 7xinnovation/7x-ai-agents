@@ -12,7 +12,7 @@ import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
 import { registrationFees, observedRents, observedServices, rememberFees, feesInSelectResponse, rentInSelectResponse, rentKey } from "./registrationFees";
 import { gatewayOrderState } from "./gatewayOrder";
-import { renewalChoices, type RenewalBundle } from "./renewalBundles";
+import { renewalChoices, upgradesAmong, describeBundle, type RenewalBundle } from "./renewalBundles";
 
 export type EnvKey = "staging" | "production";
 
@@ -321,6 +321,21 @@ function officeIdForBranch(conversationId: string | undefined, branch: string | 
 
 const hallMemory = new Map<string, { at: number; halls: { officeId: string; name: string; alternative: string }[] }>();
 const HALL_TTL_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * The upgrades a renewal may offer, by bundle id.
+ *
+ * Renewing is the moment a customer is already thinking about the box, so it is
+ * the moment to ask whether they want a better one — Emirates Post asked for the
+ * MyHome customer to be offered MyHome Instant at that point, and their own
+ * backend supports it: Renewal/Pricing takes a `newBundleId` with
+ * `isBundleChanged: true` and prices the new bundle for the same term.
+ *
+ * Only moves Emirates Post has confirmed belong here. MyBox to MyHome is not one
+ * of them: it turns a box collected at a branch into one delivered to a door,
+ * which needs an address and a delivery office, and a renewal has neither.
+ */
+const RENEWAL_UPGRADES: Record<string, string> = { MYHOME3: "MYHOMEF" };
 
 function rememberHalls(conversationId: string | undefined, halls: { officeId: string; name: string; alternative: string }[]) {
   if (!conversationId) return;
@@ -805,6 +820,12 @@ export async function buildApiTools(
    * id was on the pricing call twenty seconds earlier.
    */
   let lastPriced: { bundleId: string; expiryDate: string; amount: number | null } | null = null;
+  /**
+   * The bundle the box is on TODAY, read from the renewal details Emirates Post
+   * returned — never from the conversation. It decides whether an upgrade is
+   * possible, and it is what `isBundleChanged` is compared against.
+   */
+  let currentBundleId: string | null = null;
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -2058,15 +2079,31 @@ export async function buildApiTools(
           | undefined;
         const possible = sub?.listPossibleBundles;
         if (sub && Array.isArray(possible) && possible.length) {
-          const { bundles, dropped } = renewalChoices(possible as RenewalBundle[], sub.currentBundle as RenewalBundle);
-          if (dropped > 0) {
+          const current = sub.currentBundle as RenewalBundle | undefined;
+          const { bundles, dropped } = renewalChoices(possible as RenewalBundle[], current);
+          const up = upgradesAmong(bundles, current);
+          // The annotation used to be written ONLY when a lower tier had been
+          // filtered out, so a MyHome customer — who has nothing below them and
+          // MyHome Instant above — got no instruction at all, and the upgrade
+          // Emirates Post asked to be offered was never mentioned. The list being
+          // present is what matters, not whether anything was removed from it.
+          if (dropped > 0 || up.length) {
             sub.listPossibleBundles = bundles;
+            const currentName = String(current?.bundleName ?? current?.bundleId ?? "their current bundle").trim();
             res = {
               ...res,
               raw: JSON.stringify(parsed),
               result:
                 `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(parsed)}` +
-                `\n\nlistPossibleBundles has already been filtered to the customer's CURRENT bundle and the tiers above it; ${dropped} lower tier(s) were removed because a renewal cannot downgrade. Offer exactly what is left and do not mention the ones that are missing. If the customer asks to move to a cheaper bundle, say plainly that a renewal keeps their current bundle or upgrades it, and that changing down is done through Emirates Post directly.`,
+                (up.length
+                  ? `\n\nTHIS BOX CAN BE UPGRADED, AND THE RENEWAL IS WHERE TO SAY SO. The customer is on ${currentName}; Emirates Post also offers ${up
+                      .map((b) => describeBundle(b))
+                      .join(", ")} on this renewal. When you present the renewal, offer the upgrade as a plain choice beside renewing on ${currentName} — one line each, with the price — and let them pick. Do not talk them into it and do not pre-select it.\n` +
+                    `To price an upgrade, call renewal pricing again with newBundleId set to the chosen bundle's bundleId from the list above and isBundleChanged true; the total on the summary must then be the one that pricing returned, never the old bundle's. If they stay where they are, price it as ${currentName} with isBundleChanged false.`
+                  : "") +
+                (dropped > 0
+                  ? `\n\nlistPossibleBundles has already been filtered to the customer's CURRENT bundle and the tiers above it; ${dropped} lower tier(s) were removed because a renewal cannot downgrade. Offer exactly what is left and do not mention the ones that are missing. If the customer asks to move to a cheaper bundle, say plainly that a renewal keeps their current bundle or upgrades it, and that changing down is done through Emirates Post directly.`
+                  : ""),
             };
           }
         }
@@ -2830,7 +2867,19 @@ export function correctPricingInputs(
   const bundleKey = find("newbundleid") ?? find("bundleid");
   const changedKey = find("isbundlechanged");
   const isChanging = changedKey ? body[changedKey] === true || String(body[changedKey]).toLowerCase() === "true" : false;
-  if (bundleKey && known.bundle && !isChanging && String(body[bundleKey] ?? "") !== known.bundle) {
+  const asked = bundleKey ? String(body[bundleKey] ?? "") : "";
+  // An UPGRADE is a different bundle asked for deliberately. Emirates Post only
+  // prices one when `isBundleChanged` is true, and without that flag the
+  // correction below would quietly put the old bundle back — so the customer
+  // would be told MyHome Instant's price and charged MyHome's, or the reverse.
+  // A move we recognise sets the flag; anything else is still treated as the
+  // model having mistyped the current bundle.
+  const upgrading = Boolean(known.bundle && asked && RENEWAL_UPGRADES[known.bundle] === asked);
+  if (upgrading && !isChanging) {
+    nextBody[changedKey ?? "isBundleChanged"] = true;
+    changed = true;
+  }
+  if (bundleKey && known.bundle && !isChanging && !upgrading && asked !== known.bundle) {
     nextBody[bundleKey] = known.bundle;
     changed = true;
   }

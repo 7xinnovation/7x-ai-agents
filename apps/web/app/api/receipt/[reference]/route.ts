@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb, payments, cases, agents, conversations } from "@dialog/db";
 import { and, eq } from "drizzle-orm";
 import type { CaseState } from "@dialog/config";
+import { receiptFacts } from "@/lib/receiptFacts";
 
 export const runtime = "nodejs";
 
@@ -28,6 +29,7 @@ const RECEIPT_STR = {
   en: {
     subtitle: "Payment receipt", receiptNo: "Receipt no.", date: "Date", service: "Service",
     poBox: "PO Box", caseRef: "Case reference", status: "Status",
+    customer: "Subscriber", bundle: "Bundle", expiry: "Valid until", branch: "Branch", orderNo: "Order no.",
     totalPaid: "Total paid", totalDue: "Total due", print: "Print / Save as PDF",
     foot: "This receipt was generated for the payment referenced above. Keep it for your records.",
     statuses: { paid: "Paid", failed: "Failed", initiated: "Initiated" } as Record<string, string>,
@@ -35,6 +37,7 @@ const RECEIPT_STR = {
   ar: {
     subtitle: "إيصال الدفع", receiptNo: "رقم الإيصال", date: "التاريخ", service: "الخدمة",
     poBox: "صندوق البريد", caseRef: "الرقم المرجعي للطلب", status: "الحالة",
+    customer: "المشترك", bundle: "الباقة", expiry: "صالح حتى", branch: "الفرع", orderNo: "رقم الطلب",
     totalPaid: "الإجمالي المدفوع", totalDue: "الإجمالي المستحق", print: "طباعة / حفظ كملف PDF",
     foot: "تم إنشاء هذا الإيصال للدفعة المذكورة أعلاه. يُرجى الاحتفاظ به في سجلاتك.",
     statuses: { paid: "مدفوع", failed: "فشل", initiated: "قيد التنفيذ" } as Record<string, string>,
@@ -92,18 +95,44 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   const logoUrl = theme?.logoUrl ?? "";
   const primary =
     (agent?.definition as { theme?: { colors?: { primary?: string } } } | null)?.theme?.colors?.primary || "#2626a1";
+  // What Emirates Post's own responses said happened, read back from the audit
+  // log. A renewal begun from "manage my PO Box" stays under the manage journey,
+  // so the journey key alone called it "PO Box management" on the receipt for a
+  // renewal — and the case, which keeps only a box number and a period, could
+  // name neither the subscriber, the bundle, nor the date the box now runs to.
+  const facts = await receiptFacts(conversationId, pay.agentId ?? null);
+
   const journeyKey = state?.journeyKey ?? "";
-  const journey = SERVICE_NAMES[journeyKey]?.[locale] ?? (journeyKey ? journeyKey.replace(/_/g, " ") : s.service);
+  // The operation performed wins over the journey it was started from. Only a
+  // renewal and a rental are distinguishable this way; anything else keeps the
+  // journey's own name.
+  const corporate = /corporate/i.test(journeyKey);
+  const performed =
+    facts.operation === "renewal"
+      ? corporate ? "corporate_po_box_renewal" : "personal_po_box_renewal"
+      : facts.operation === "rental"
+        ? corporate ? "corporate_po_box_rental" : "personal_po_box_rental"
+        : journeyKey;
+  const journey = SERVICE_NAMES[performed]?.[locale] ?? (performed ? performed.replace(/_/g, " ") : s.service);
   const paidAt = fmtDate(pay.updatedAt ?? pay.createdAt);
-  const box = [data.box_number, data.po_box_number].map((v) => (v ? String(v) : "")).find(Boolean) ?? "";
-  const emirate = data.emirate ? String(data.emirate) : "";
+  const box = facts.poBox ?? [data.box_number, data.po_box_number].map((v) => (v ? String(v) : "")).find(Boolean) ?? "";
+  const emirate = facts.emirate ?? (data.emirate ? String(data.emirate) : "");
   const status = s.statuses[pay.status] ?? pay.status;
+  // The name Emirates Post has on the subscription, not one we assembled.
+  const customer = facts.customerName ?? "";
+  const expiry = facts.expiry ? fmtDate(new Date(`${facts.expiry}T00:00:00Z`)) : "";
+  const row = (k: string, v: string): [string, string][] => (v ? [[k, v]] : []);
 
   const rows: [string, string][] = [
     [s.receiptNo, pay.reference],
     [s.date, paidAt],
     [s.service, journey],
+    ...row(s.customer, customer),
     ...(box ? ([[s.poBox, box + (emirate ? `, ${emirate}` : "")]] as [string, string][]) : []),
+    ...row(s.bundle, facts.bundle ?? ""),
+    ...row(s.expiry, expiry),
+    ...row(s.branch, facts.branch ?? ""),
+    ...row(s.orderNo, facts.orderNo ?? ""),
     ...(state?.reference ? ([[s.caseRef, state.reference]] as [string, string][]) : []),
     [s.status, status],
   ];

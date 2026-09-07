@@ -1923,7 +1923,23 @@ export async function POST(req: NextRequest) {
         // wait for a submission reference from this turn, so a renewal confirmed
         // in a later turn got no link — and the model filled the gap with
         // Emirates Post's own invoice URL, which answers 500.
-        if (finalState.payment.status === "paid" && finalState.payment.reference && !finalText.includes("/api/receipt/")) {
+        //
+        // ONCE, though. The condition was "this conversation has a paid payment",
+        // which is true of every reply for the rest of the conversation — so a
+        // customer who paid for one thing and moved on to another was handed
+        // "Download your receipt" under an answer about issuing authorities,
+        // under a question about their trade licence, under everything. It reads
+        // as a receipt for whatever was just said, and for a customer mid-way
+        // through a second application it reads as a payment they have not made.
+        //
+        // So it appears on the turn the payment ARRIVES, and when they ask for
+        // it. The application panel carries a permanent link either way, which
+        // is where "I want it again" is properly answered.
+        const paidThisTurn =
+          finalState.payment.status === "paid" &&
+          (session.state.payment.status !== "paid" || session.state.payment.reference !== finalState.payment.reference);
+        const askedForReceipt = /\b(receipt|invoice)\b|إيصال|فاتورة/i.test(effectiveMessage ?? "");
+        if ((paidThisTurn || askedForReceipt) && finalState.payment.status === "paid" && finalState.payment.reference && !finalText.includes("/api/receipt/")) {
           const receiptUrl = `/api/receipt/${encodeURIComponent(finalState.payment.reference)}?c=${encodeURIComponent(session.conversationId)}`;
           const receiptLine =
             body.locale === "ar" ? `\n\n[تنزيل الإيصال](${receiptUrl})` : `\n\n[Download your receipt](${receiptUrl})`;
