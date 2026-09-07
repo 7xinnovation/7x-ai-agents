@@ -12,7 +12,7 @@
  */
 import { renewalChoices, upgradesAmong, describeBundle, type RenewalBundle } from "@/lib/renewalBundles";
 import { correctPricingInputs } from "@/lib/integrations";
-import { factsFromRows, firstJsonObject } from "@/lib/receiptFacts";
+import { factsFromRows, firstJsonObject, shouldOfferReceipt } from "@/lib/receiptFacts";
 
 let pass = 0, fail = 0;
 const check = (l: string, ok: boolean, extra?: unknown) => {
@@ -130,6 +130,20 @@ check("...and its name comes from userProfile", rental.customerName === "Emre Ka
 
 const nothing = factsFromRows([]);
 check("with no calls, nothing is invented", Object.keys(nothing).length === 0, nothing);
+
+// ── 3. the link that would not go away ──────────────────────────────────────
+const PAID = { status: "paid", reference: "pay-1" };
+const NONE = { status: "none", reference: null };
+check("the turn the payment arrives", shouldOfferReceipt(NONE, PAID, "I have paid"));
+check("a settled payment after an initiated one", shouldOfferReceipt({ status: "initiated", reference: "pay-1" }, PAID, "done"));
+check("the NEXT reply does not carry it", !shouldOfferReceipt(PAID, PAID, "Yes, show me the list"));
+check("nor the one after that", !shouldOfferReceipt(PAID, PAID, "I know my authority"));
+check("...but asking for it brings it back", shouldOfferReceipt(PAID, PAID, "can I have my receipt again?"));
+check("...in Arabic too", shouldOfferReceipt(PAID, PAID, "أريد الإيصال من فضلك"));
+check("a SECOND payment in the same conversation carries its own", shouldOfferReceipt(PAID, { status: "paid", reference: "pay-2" }, "paid again"));
+check("an unpaid conversation never carries one", !shouldOfferReceipt(NONE, NONE, "receipt"));
+check("paid with no reference is not offerable", !shouldOfferReceipt(NONE, { status: "paid", reference: null }, "hi"));
+check("'receipts of the trade licence' is still a request for one", shouldOfferReceipt(PAID, PAID, "receipt"));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -179,3 +179,27 @@ export async function receiptFacts(conversationId: string, agentId: string | nul
     return {};
   }
 }
+
+/**
+ * Should this reply carry the receipt link?
+ *
+ * The old rule was "this conversation has a paid payment", which is true of
+ * every reply for the rest of the conversation — so a customer who paid for one
+ * thing and moved on to another read "Download your receipt" under an answer
+ * about issuing authorities, under a question about their trade licence, under
+ * everything. Mid-way through a second application it reads as a payment they
+ * have not made.
+ *
+ * So: on the turn the payment arrives, and whenever they ask. The application
+ * panel carries a permanent link either way, which is where "I want it again"
+ * is properly answered.
+ */
+export function shouldOfferReceipt(
+  before: { status?: string; reference?: string | null } | null | undefined,
+  after: { status?: string; reference?: string | null } | null | undefined,
+  userMessage?: string | null
+): boolean {
+  if (after?.status !== "paid" || !after.reference) return false;
+  const justArrived = before?.status !== "paid" || before.reference !== after.reference;
+  return justArrived || /\b(receipt|invoice)\b|إيصال|فاتورة/i.test(userMessage ?? "");
+}

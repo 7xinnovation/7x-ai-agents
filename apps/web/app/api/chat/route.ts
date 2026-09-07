@@ -29,6 +29,7 @@ import { payFenceGuard } from "@/lib/payFence";
 import { internalIdFilter } from "@/lib/internalIds";
 import { summaryFeeGuard } from "@/lib/summaryFee";
 import { proseTotalGuard } from "@/lib/proseTotal";
+import { shouldOfferReceipt } from "@/lib/receiptFacts";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
@@ -1935,12 +1936,8 @@ export async function POST(req: NextRequest) {
         // So it appears on the turn the payment ARRIVES, and when they ask for
         // it. The application panel carries a permanent link either way, which
         // is where "I want it again" is properly answered.
-        const paidThisTurn =
-          finalState.payment.status === "paid" &&
-          (session.state.payment.status !== "paid" || session.state.payment.reference !== finalState.payment.reference);
-        const askedForReceipt = /\b(receipt|invoice)\b|إيصال|فاتورة/i.test(effectiveMessage ?? "");
-        if ((paidThisTurn || askedForReceipt) && finalState.payment.status === "paid" && finalState.payment.reference && !finalText.includes("/api/receipt/")) {
-          const receiptUrl = `/api/receipt/${encodeURIComponent(finalState.payment.reference)}?c=${encodeURIComponent(session.conversationId)}`;
+        if (shouldOfferReceipt(session.state.payment, finalState.payment, effectiveMessage) && !finalText.includes("/api/receipt/")) {
+          const receiptUrl = `/api/receipt/${encodeURIComponent(finalState.payment.reference ?? "")}?c=${encodeURIComponent(session.conversationId)}`;
           const receiptLine =
             body.locale === "ar" ? `\n\n[تنزيل الإيصال](${receiptUrl})` : `\n\n[Download your receipt](${receiptUrl})`;
           send({ type: "text", delta: receiptLine });
