@@ -37,6 +37,43 @@ const str = (v: unknown): string | undefined => {
   return s ? s : undefined;
 };
 
+/**
+ * The first complete JSON object in a stored response.
+ *
+ * An audited response is not JSON: it is "HTTP 200 OK", then the body, then
+ * whatever guidance was appended for the model ("DO NOT LINK AN INVOICE FROM
+ * THIS RESPONSE…"). Parsing from the first brace to the end therefore fails on
+ * every response that carries a note — which is most of the ones worth reading —
+ * so the object's own closing brace has to be found. Braces inside strings do
+ * not count, and an escaped quote does not end a string.
+ */
+export function firstJsonObject(text: string): unknown {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) {
+      try {
+        return JSON.parse(text.slice(start, i + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 /** "12/20/2034 00:00:00" and "2034-12-20T00:00:00" both mean the same day. */
 function isoDay(v: unknown): string | undefined {
   const s = str(v);
@@ -97,9 +134,9 @@ export function factsFromRows(rows: AuditedCall[]): ReceiptFacts {
     // The confirmation is the authority on what the subscription now IS, so it
     // is allowed to overwrite what the request asked for.
     if (p.response && /confirmpayment|updatepayment/i.test(path)) {
-      try {
-        const parsed = JSON.parse(p.response.slice(p.response.indexOf("{")));
-        const payload = parsed?.payload ?? parsed;
+      const parsed = firstJsonObject(p.response) as { payload?: Record<string, unknown> } | null;
+      if (parsed) {
+        const payload = (parsed.payload ?? parsed) as Record<string, unknown>;
         const t = payload?.transactionDetails as Record<string, unknown> | undefined;
         const order = str(payload?.orderNumber);
         if (order) facts.orderNo ??= order;
@@ -110,8 +147,6 @@ export function factsFromRows(rows: AuditedCall[]): ReceiptFacts {
           facts.bundle = str(t.bundleDesc) ?? facts.bundle;
           facts.expiry = isoDay(t.boxExpiryDate) ?? facts.expiry;
         }
-      } catch {
-        /* an unreadable confirmation leaves the request's own figures standing */
       }
     }
   }

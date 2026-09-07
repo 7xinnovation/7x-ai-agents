@@ -12,7 +12,7 @@
  */
 import { renewalChoices, upgradesAmong, describeBundle, type RenewalBundle } from "@/lib/renewalBundles";
 import { correctPricingInputs } from "@/lib/integrations";
-import { factsFromRows } from "@/lib/receiptFacts";
+import { factsFromRows, firstJsonObject } from "@/lib/receiptFacts";
 
 let pass = 0, fail = 0;
 const check = (l: string, ok: boolean, extra?: unknown) => {
@@ -100,8 +100,18 @@ const SAVE_BODY = {
   customerKYC: { firstName: "Ahmed", lastName: "Al Mansoori", email: "a@b.ae" },
 };
 
+// The stored response is NOT bare JSON: it is a status line, the body, then the
+// guidance appended for the model. Parsing from the first brace to the end of
+// the string fails on every one of them, which is how the first version of this
+// read a live receipt and came back with no bundle and no branch.
+const STORED = `HTTP 200 OK\n${CONFIRM}\n\nDO NOT LINK AN INVOICE FROM THIS RESPONSE. Emirates Post's own invoice endpoint answers 500.`;
+check("a note after the body does not stop it being read", Boolean(firstJsonObject(STORED)), STORED.slice(0, 40));
+check("a brace inside a string does not end the object", (firstJsonObject('{"a":"}{","b":2}') as { b?: number })?.b === 2);
+check("an escaped quote does not end the string", (firstJsonObject('{"a":"say \\"hi\\" }","b":3}') as { b?: number })?.b === 3);
+check("nothing parseable yields null", firstJsonObject("HTTP 500\nnot json at all") === null);
+
 const facts = factsFromRows([
-  { path: "/api/Guest/Renewal/ConfirmPayment", response: `HTTP 200 OK\n${CONFIRM}` },
+  { path: "/api/Guest/Renewal/ConfirmPayment", response: STORED },
   { path: "/api/Guest/Renewal/Save", input: { body: SAVE_BODY } },
 ]);
 check("the subscriber is named", facts.customerName === "Ahmed Al Mansoori", facts.customerName);
