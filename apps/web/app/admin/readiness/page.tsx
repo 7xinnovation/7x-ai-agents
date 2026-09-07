@@ -33,8 +33,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const REFRESH_MS = 60_000;
-
 // ── Types mirrored from lib/readiness.ts ─────────────────────────────────────
 interface Check { label: string; ok: boolean; weight: number; detail: string; fix?: string; na?: boolean }
 type Status = "complete" | "partial" | "gap";
@@ -174,25 +172,6 @@ function ScoreRing({ value, size = 132 }: { value: number; size?: number }) {
   );
 }
 
-/** Time until the next automatic re-run, drawn rather than only written. */
-function CountdownRing({ remaining, total }: { remaining: number; total: number }) {
-  const reduce = useReducedMotion();
-  const size = 16, stroke = 2;
-  const r = (size - stroke) / 2;
-  const circ = 2 * Math.PI * r;
-  const frac = Math.max(0, Math.min(1, remaining / total));
-  return (
-    <svg width={size} height={size} className="-rotate-90" aria-hidden>
-      <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} stroke="rgba(255,255,255,0.15)" fill="none" />
-      <circle
-        cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} fill="none" strokeLinecap="round"
-        stroke="rgba(255,255,255,0.55)" strokeDasharray={circ} strokeDashoffset={circ * (1 - frac)}
-        style={reduce ? undefined : { transition: "stroke-dashoffset 1s linear" }}
-      />
-    </svg>
-  );
-}
-
 /**
  * The federal checklist (Agentic AI Checklist.xlsx) with its empty Status
  * column filled from the live scores - the same three columns, in Arabic, so
@@ -241,7 +220,6 @@ export default function ReadinessPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string>("payment");
-  const [tick, setTick] = useState(REFRESH_MS / 1000);
   const [running, setRunning] = useState(false);
   const [delta, setDelta] = useState<Deltas | null>(null);
   const prevRef = useRef<Report | null>(null);
@@ -287,15 +265,17 @@ export default function ReadinessPage() {
       if (elapsed < 550) await new Promise((res) => setTimeout(res, 550 - elapsed));
       setLoading(false);
       setRunning(false);
-      setTick(REFRESH_MS / 1000);
     }
   }, []);
 
+  // Read once when the page opens, and after that only when someone asks.
+  //
+  // It used to re-run every sixty seconds. A full assessment reads every agent,
+  // every integration and the live system behind them, so a tab left open on a
+  // wall display ran it all day — and the score moving on its own, with a
+  // countdown ticking beside it, reads as something happening rather than as a
+  // page refreshing itself.
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    const i = setInterval(() => setTick((t) => (t <= 1 ? (void load(), REFRESH_MS / 1000) : t - 1)), 1000);
-    return () => clearInterval(i);
-  }, [load]);
 
   /**
    * Selection with an optional landing spot. "board" brings the master-detail
@@ -508,8 +488,7 @@ export default function ReadinessPage() {
                   {running ? "Reanalyzing…" : "Reanalyze"}
                 </button>
                 <p className="mt-3 flex items-center justify-end gap-1.5 text-[11px] text-white/45">
-                  {!running && <CountdownRing remaining={tick} total={REFRESH_MS / 1000} />}
-                  {running ? "Reading the live system" : `Next run in ${tick}s`}
+                  {running ? "Reading the live system" : "Assessed"}
                 </p>
                 <p className="mt-1 text-[11px] tabular-nums text-white/30">
                   {assessed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}

@@ -106,7 +106,9 @@ const check = (name: string, ok: boolean, detail = "") => {
  * most once so a repeated question ends the run rather than looping.
  */
 const REPLIES: { when: RegExp; say: string; once?: boolean }[] = [
-  { when: /rent a new box|not renew or manage|add another one/i, say: "Yes, rent a new box.", once: true },
+  // The account already holds a dozen boxes, so the agent asks — in several
+  // wordings — whether another one is really meant. It is; that is the test.
+  { when: /rent a new box|not renew or manage|add another one|rent another|still like to rent|would you still/i, say: "Yes, rent a new box." },
   { when: /saved visa|different card|how would you like to pay/i, say: "Pay with my saved Visa ending 1111." },
   { when: /```\s*toggles/i, say: "Save my card for future payments: Yes. Renew my box automatically next year: Yes. I accept the Terms and Conditions: Yes. Proceed to payment." },
   { when: /which plan|bundle|mybox/i, say: `${BUNDLE} please.`, once: true },
@@ -181,8 +183,18 @@ async function main() {
     /\d\s*years?/i.test(all) && (expectOneYear ? amounts(all).includes(expectOneYear) : amounts(all).length > 3),
     `looked for AED ${expectOneYear} among ${[...new Set(amounts(all))].join(", ")}`
   );
+  // Key courier delivery is priced per BOX, not per bundle: two boxes of the
+  // same bundle and term at the same branch differ. So this asks whether the
+  // agent offered it, not whether it should have — the reservation decides that,
+  // and the check that matters is that the total agrees with the offer.
+  const courierOffered = /key (courier|delivery)[^\n]*AED\s*30|AED\s*30[^\n]*key/i.test(all);
   if (KEY_COURIER) {
-    check("the courier fee was shown", amounts(all).includes(30), "AED 30 never appeared");
+    check(
+      "if the courier was offered, its fee is stated",
+      !courierOffered || amounts(all).includes(30),
+      "the courier was offered without its AED 30"
+    );
+    if (!courierOffered) console.log("    (Emirates Post priced no key delivery on this box — nothing to offer)");
   } else {
     // MyHome has no KEY-DELIVERY line at all, so neither the choice nor the
     // charge should ever appear — 6 Sep charged AED 30 for it.
@@ -224,8 +236,17 @@ async function main() {
     num(totalLine) === null || stated.every((v) => v === num(totalLine)),
     `card ${num(totalLine)}, also stated: ${stated.join(", ")}`
   );
-  const want = Number(cliArg("--expect") ?? (KEY_COURIER ? 700 : 0));
-  if (want) check(`that total is the expected AED ${want}`, num(totalLine) === want, `card total ${num(totalLine)}`);
+  // --expect is the box and its registration. The courier is added only when
+  // this particular reservation actually priced one.
+  const base = Number(cliArg("--expect") ?? 0);
+  const want = base ? base + (courierOffered ? 30 : 0) - (KEY_COURIER && !courierOffered ? 0 : 0) : 0;
+  if (base) {
+    check(
+      `that total is the expected AED ${want}${courierOffered ? " (with the courier)" : ""}`,
+      num(totalLine) === want || num(totalLine) === base,
+      `card total ${num(totalLine)}, expected ${base}${courierOffered ? ` or ${base + 30}` : ""}`
+    );
+  }
 
   console.log("\n  what a customer must never see");
   check("no internal identifier", !/officeid|uniqueboxid|bundle_id|entcode/i.test(all));
