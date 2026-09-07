@@ -86,6 +86,35 @@ export async function rememberVerifiedEmiratesId(caseId: string, emiratesId: str
   }
 }
 
+/**
+ * Sign a conversation out.
+ *
+ * The token goes, the authenticated flag goes, and the identity goes — all
+ * three, in one statement. Clearing only the client's view of it was the bug
+ * behind FB-1485: the header said signed out while the server still held a
+ * verified session and the next turn was still authenticated, so the customer
+ * could not tell which they were.
+ *
+ * The VERIFIED Emirates ID is dropped from the case too. It is the strongest
+ * identifier in this system, it is what the ownership and licence checks are
+ * keyed on, and leaving it behind after a sign-out would let the next person at
+ * the same screen act as the last one.
+ */
+export async function signOutConversation(conversationId: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(conversations)
+    .set({ sessionToken: null, authenticated: false, userRef: null })
+    .where(eq(conversations.id, conversationId));
+  const c = await db.query.cases.findFirst({ where: eq(cases.conversationId, conversationId) });
+  if (!c) return;
+  await mutateCase(c.id, (st) => {
+    const data = { ...st.data };
+    delete data[VERIFIED_EID_KEY];
+    return { ...st, data };
+  }).catch(() => undefined);
+}
+
 /** Mark a conversation as authenticated and record the external identity (e.g. UAE PASS sub). */
 export async function markAuthenticated(conversationId: string, userRef: string) {
   await getDb().update(conversations).set({ authenticated: true, userRef }).where(eq(conversations.id, conversationId));

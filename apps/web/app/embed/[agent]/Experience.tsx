@@ -65,6 +65,8 @@ const STR = {
     receipt: "Download receipt",
     signIn: "Sign in",
     signedIn: "Signed in",
+    signOut: "Sign out",
+    signedOut: "You are signed out.",
     expand: "Expand",
     collapse: "Collapse",
     reset: "New chat",
@@ -113,6 +115,8 @@ const STR = {
     receipt: "تحميل الإيصال",
     signIn: "تسجيل الدخول",
     signedIn: "تم الدخول",
+    signOut: "تسجيل الخروج",
+    signedOut: "تم تسجيل خروجك.",
     expand: "توسيع",
     collapse: "تصغير",
     reset: "محادثة جديدة",
@@ -417,6 +421,14 @@ export function Experience({
   // Resume completion + a one-shot flag to fire the account pulse after sign-in.
   const [resumed, setResumed] = useState(false);
   const [signedInPulse, setSignedInPulse] = useState(false);
+  /**
+   * The customer signed out and has not asked to sign in again.
+   *
+   * The host page keeps its own copy of the token and re-offers it — the loader
+   * re-posts it on a timer and on any storage change — so without this, signing
+   * out would last until the next tick. It is lifted only by an explicit sign-in.
+   */
+  const signedOut = useRef(false);
   /** Latches the post-sign-in pulse to one per conversation. */
   const pulsed = useRef(false);
   // One-shot flag: the in-chat payment card saw the webhook settle → have the
@@ -721,6 +733,9 @@ export function Experience({
       const m = e.data as { source?: string; uaePassToken?: string };
       if (m?.source !== "dialog-host" || typeof m.uaePassToken !== "string") return;
       if (!permitted.has(e.origin)) return;
+      // They signed out. The host page does not know that and will keep offering
+      // its token; taking it would sign them back in without them asking.
+      if (signedOut.current) return;
       const token = m.uaePassToken;
       uaePass.current = token;
       // Reflect the sign-in now rather than at the next message. The token is
@@ -795,7 +810,7 @@ export function Experience({
       return;
     }
     const token = nativeToken();
-    if (!token || uaePass.current) return;
+    if (!token || uaePass.current || signedOut.current) return;
     uaePass.current = token;
     void (async () => {
       try {
@@ -895,7 +910,39 @@ export function Experience({
   // UAE PASS forbids being framed, so from the embedded widget it opens in a
   // centered popup; the callback posts the result back and the chat continues in
   // place. Falls back to a full redirect if the popup is blocked.
+  /**
+   * Sign out: the server's session, this widget's copy of the token, and the
+   * header, in that order.
+   *
+   * The server first, because that is the one that decides whether the next turn
+   * is authenticated. Clearing only the client's view of it was FB-1485 — the
+   * header said signed out while the session was still live.
+   */
+  const signOut = useCallback(async () => {
+    signedOut.current = true;
+    uaePass.current = undefined;
+    setAuthenticated(false);
+    setAuthReason(null);
+    try {
+      if (convId.current) {
+        await fetch("/api/embed/signout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversationId: convId.current, agentSlug: agent.slug }),
+        });
+      }
+      // Tell the host page too, so its own header can follow and it can drop the
+      // token it is holding. It may not be listening; that is its business.
+      window.parent?.postMessage({ source: "dialog", action: "signed-out" }, "*");
+      postNative({ source: "dialog-native", action: "signed-out" });
+    } catch {
+      /* the widget is signed out either way — never leave it saying otherwise */
+    }
+  }, [agent.slug]);
+
   const signIn = useCallback(() => {
+    // Asking to sign in is what lifts a sign-out.
+    signedOut.current = false;
     // The host portal owns sign-in (its own UAE PASS client, its own registered
     // callback). Opening it in a POPUP rather than navigating keeps the
     // conversation alive; the token then arrives from the embed loader, which sees
@@ -1255,16 +1302,19 @@ export function Experience({
               <span className="dlg-chip-tag">{locale === "ar" ? "EN" : "عربي"}</span>
             </button>
           ) : null}
-          {/* Once signed in this is a STATUS indicator, not a toggle (FB-1485): a
-              single tap used to flip the client back to guest while the server kept
-              the verified session, so the customer was told to sign in again
-              mid-conversation. Starting a new chat is how a session is dropped. */}
+          {/* Signed in, this signs them OUT — and it does so properly.
+              It was a status indicator only, because a single tap used to flip
+              the client back to guest while the server kept the verified session
+              (FB-1485), leaving the customer told to sign in again mid-
+              conversation. That was a reason to make sign-out real, not a reason
+              to have none: on a shared or public screen, an account with its
+              addresses and its agents stayed one tap away for whoever sat down
+              next. The server session is cleared first; the header follows it. */}
           <button
             className={`dlg-chip icon-only ${authenticated ? "is-on" : ""}`}
-            onClick={() => { if (!authenticated) signIn(); }}
-            aria-disabled={authenticated || undefined}
-            aria-label={authenticated ? t.signedIn : t.signIn}
-            title={authenticated ? t.signedIn : t.signIn}
+            onClick={() => { if (authenticated) void signOut(); else signIn(); }}
+            aria-label={authenticated ? t.signOut : t.signIn}
+            title={authenticated ? `${t.signedIn} — ${t.signOut}` : t.signIn}
           >
             {authenticated ? <UserCircleCheck size={17} weight="fill" /> : <SignIn size={16} weight={iconWeight} />}
           </button>
