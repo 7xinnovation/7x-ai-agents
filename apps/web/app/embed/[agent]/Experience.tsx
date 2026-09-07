@@ -1325,25 +1325,11 @@ export function Experience({
                   style={{ width: `${progress.pct}%` }}
                 />
               </div>
-              {/* The requirements themselves, beside the bar rather than in the
-                  side panel. A percentage says how far along they are; only the
-                  list says what is actually LEFT, and that was the half they had
-                  to leave the conversation to read. Completed items stay and stay
-                  ticked (FB-1437) — the list is the whole set, not the remainder. */}
-              {checklist.length ? (
-                <div className="dlg-progress-checks">
-                  {checklist.map((m) => (
-                    <span
-                      className={`dlg-progress-check ${m.done ? "done" : "todo"}`}
-                      key={`${m.kind}:${m.key}`}
-                      title={labelMap.get(m.key) ?? m.key}
-                    >
-                      {m.done ? <CheckCircle size={12} weight="fill" /> : <Circle size={12} weight={iconWeight} />}
-                      {labelMap.get(m.key) ?? m.key}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+              {/* The bar only. The full checklist used to sit here too, and above
+                  a conversation it read as clutter — seven pills of things not
+                  done yet, in front of someone who has only just started. The
+                  list is still in the application panel, where it is one tap away
+                  and has room to be read. */}
             </div>
           ) : null}
           <div className="dlg-messages" ref={scrollRef}>

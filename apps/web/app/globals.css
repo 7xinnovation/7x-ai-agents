@@ -1825,11 +1825,14 @@ body {
   margin: 0 5px;
   opacity: 0.5;
 }
-/* The requirements, as chips beside the bar. Wraps rather than scrolls: a row
-   the customer has to drag sideways hides the very items it exists to show. */
-/* Seven requirements set 8px apart read as one long run-on line — Emirates Post
-   called it cluttered, and they were right. Each one is now a pill with its own
-   edges, so the eye can find where one ends and the next begins. */
+/* The requirements, as chips in the application panel. Wraps rather than
+   scrolls: a row the customer has to drag sideways hides the very items it
+   exists to show.
+
+   They used to sit under the bar above the conversation as well. Seven pills of
+   things not yet done, in front of someone who has only just started, read as
+   clutter however they were spaced — so above the chat it is now the bar alone,
+   and the list lives here, one tap away, with room to be read. */
 .dlg-progress-checks {
   display: flex;
   flex-wrap: wrap;
