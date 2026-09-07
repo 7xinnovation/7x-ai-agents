@@ -373,6 +373,8 @@ export interface CustomerPoBox {
   bundleId?: string;
   expiryDate?: string;
   status?: string;
+  /** True when the expiry date has passed. Emirates Post has no status for it. */
+  expired?: boolean;
   isOwner?: boolean;
   /**
    * Whose name the box is in. For a CORPORATE box this is the COMPANY, and it is
@@ -391,6 +393,19 @@ export interface CustomerPoBox {
  * Emirates Post reviews the trade licence, which is neither active nor a failure
  * -- and a bare "14" told the customer nothing.
  */
+/**
+ * Emirates Post's box statuses, as their responses actually number them.
+ *
+ * Their own spec declares BoxStatus as a string enum — Free, Rented, Blocked,
+ * Reserved, EcomReserved, EcomBooked, VirtualFree, Suspended, PendingApproval,
+ * RentingRejected, CeoReserved — and the API returns integers that do not line
+ * up with that list's order. So these are observed, not derived, and the list is
+ * incomplete by definition.
+ *
+ * NOTE: there is no "Expired" among their statuses at all. A box past its expiry
+ * date keeps whichever status it had, so expiry is read from the DATE — see
+ * mapCustomerPoBoxes.
+ */
 const BOX_STATUS: Record<string, string> = {
   "0": "Free", "5": "Free",
   "1": "Active", "10": "Active", "12": "Active", "13": "Active",
@@ -398,6 +413,19 @@ const BOX_STATUS: Record<string, string> = {
   "14": "Pending approval",
   "15": "Rejected",
 };
+
+/**
+ * A status we have no word for, said in a way that cannot be mistaken for one.
+ *
+ * It used to fall through as the bare number, so a box could reach the customer
+ * described as "status 2" — or, worse, be quietly left out of a list because
+ * there was nothing sensible to say about it.
+ */
+function statusInWords(raw: unknown): string | undefined {
+  const code = String(raw ?? "").trim();
+  if (!code) return undefined;
+  return BOX_STATUS[code] ?? (/^\d+$/.test(code) ? `Status ${code} (Emirates Post does not publish a name for this one)` : code);
+}
 
 /**
  * The PO Boxes already held under a customer's Emirates ID.
@@ -462,7 +490,19 @@ export function mapCustomerPoBoxes(rows: Record<string, any>[]): CustomerPoBox[]
     branch: r.assignedBranchName ?? r.officeName ?? r.branchName ?? undefined,
     bundleId: r.bundleId ?? r.bundle_Id ?? undefined,
     expiryDate: r.expiryDate ?? r.currentExpiryDate ?? undefined,
-    status: BOX_STATUS[String(r.status ?? r.boxStatus ?? "")] ?? (r.status ?? r.boxStatus ?? undefined),
+    status: statusInWords(r.status ?? r.boxStatus),
+    /**
+     * Past its expiry date, whatever its status says.
+     *
+     * Emirates Post has no "Expired" status — a lapsed box keeps whichever one
+     * it had — so the only reliable way to know is the date. A customer signing
+     * in and not seeing a box they know they have is the worst version of this,
+     * and it is the renewal they most need offering.
+     */
+    expired: (() => {
+      const t = Date.parse(String(r.expiryDate ?? r.currentExpiryDate ?? ""));
+      return Number.isFinite(t) ? t < Date.now() : undefined;
+    })(),
     // boxRelation: 0 = Owner, 1 = Agent. An agent cannot renew on their own
     // account, so "who holds this" is not cosmetic.
     isOwner:

@@ -108,7 +108,7 @@ const check = (name: string, ok: boolean, detail = "") => {
 const REPLIES: { when: RegExp; say: string; once?: boolean }[] = [
   // The account already holds a dozen boxes, so the agent asks — in several
   // wordings — whether another one is really meant. It is; that is the test.
-  { when: /rent a new box|not renew or manage|add another one|rent another|still like to rent|would you still/i, say: "Yes, rent a new box." },
+  { when: /rent a new box|not renew or manage|add another|rent another|still like to rent|would you still|did you want to/i, say: "Yes, rent a new box." },
   { when: /saved visa|different card|how would you like to pay/i, say: "Pay with my saved Visa ending 1111." },
   { when: /```\s*toggles/i, say: "Save my card for future payments: Yes. Renew my box automatically next year: Yes. I accept the Terms and Conditions: Yes. Proceed to payment." },
   { when: /which plan|bundle|mybox/i, say: `${BUNDLE} please.`, once: true },

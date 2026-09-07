@@ -76,7 +76,9 @@ const PULSE_DIRECTIVE =
   "(System: the customer just signed in via UAE PASS. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
   "1) Greet them warmly (use their name once you have it from account data). " +
   "2) Use your tools to pull everything you can about their account. " +
-  "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. If completed requests are on file (see the known customer record), add a short \"Recent activity\" list with each reference and date. " +
+  "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
+  "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
+  "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. If completed requests are on file (see the known customer record), add a short \"Recent activity\" list with each reference and date. " +
   "4) Only if NO PO Box is on file: welcome them, explain their account isn't linked to a PO Box yet, and offer — not require — to link one (\"if you have a box, tell me its number and emirate and I'll add it to your account\"). Never present the box number as a prerequisite for the pulse. " +
   "Use ONLY real data returned by tools — never invent boxes, dates, or fees.)";
 
@@ -1155,9 +1157,21 @@ export async function POST(req: NextRequest) {
         }
         if (name === MYBOXES_TOOL) {
           const boxes = await poBoxesByEmiratesId(agent.id, env, String(input.emiratesId ?? ""), caller);
+          // An EXPIRED box is the one the customer most needs to be told about,
+          // and the easiest to lose: Emirates Post has no "Expired" status — a
+          // lapsed box keeps whichever one it had — so nothing in the payload
+          // draws attention to it, and a list that quietly drops it leaves
+          // someone believing they still hold a box they no longer do.
+          const lapsed = boxes.filter((b) => b.expired);
           return {
             result: boxes.length
               ? JSON.stringify(boxes) +
+                `\n\nEVERY ONE OF THESE ${boxes.length} BOXES IS THEIRS AND EVERY ONE MUST BE LISTED — including any that are expired, on hold, pending or rejected. Do not leave a box out because its status is unfamiliar or because it looks inactive; if you cannot describe a status, say the box is there and that its state is not one you can name.` +
+                (lapsed.length
+                  ? `\n\n${lapsed.length} OF THEM HAS EXPIRED: ${lapsed
+                      .map((b) => `${b.boxNumber}${b.emirateName ? ` (${b.emirateName})` : ""} — expired ${String(b.expiryDate ?? "").slice(0, 10)}`)
+                      .join("; ")}. "expired: true" is worked out from the DATE, because Emirates Post has no status that says so. Say plainly that it has expired and when, put it FIRST as the thing needing attention, and offer to renew it. Never describe an expired box as active, and never omit it.`
+                  : "") +
                 "\n\nrentType says whether a box is Personal or Corporate, and on a Corporate box holderName is the COMPANY it belongs to — name it when you list that box, and treat it as one of the customer's companies. status is already in words: \"Pending approval\" means Emirates Post is still reviewing the trade licence, which is a normal stage of a corporate rental and NOT a failure or a payment problem." +
                 "\n\nemirateCode is the EMIRATE THIS BOX IS ACTUALLY IN. Send it VERBATIM as EmirateCode on every renewal call for that box, and never assume Dubai because most boxes are: a box looked up under the wrong emirate comes back BOX NOT FOUND, and the customer is then told their own box does not exist. If a box has no emirateCode, ASK the customer which emirate it is in before looking it up. emirateName is for showing them, never for sending. isOwner:false means they hold the box as an AGENT and cannot renew it on their own account."
               : "NO PO BOXES are held under this Emirates ID. Say so plainly and continue — it is a normal answer for a first-time customer, not an error.",
