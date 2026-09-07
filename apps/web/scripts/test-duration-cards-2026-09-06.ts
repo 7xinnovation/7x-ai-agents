@@ -98,6 +98,54 @@ const kept = run(SAVING, [{ years: 5, rent: 4200, fee: 70, total: 4270 }]);
 check("a badge with its own words keeps them", /badge: Save/.test(kept), kept);
 check("...without a second set of figures", (kept.match(/AED 4,200/g) ?? []).length === 1, kept);
 
+// ── every card the same shape ───────────────────────────────────────────────
+// UAT, corporate Basic Box, box 450791: the model gave 2, 3, 5 and 10 years a
+// highlighted pill carrying the breakdown and gave 1 year none, so the block
+// came out uneven. The guard used to touch only lines that already carried
+// money, which preserved exactly that.
+const UNEVEN = [
+  "```cards",
+  "- title: 1 year",
+  "  desc: Expires 06-09-2027",
+  "  price: AED 1,065.00",
+  "- title: 2 years",
+  "  badge: Rental AED 1,595.00 + registration AED 70.00",
+  "  desc: Expires 06-09-2028",
+  "  price: AED 1,665.00",
+  "- title: 10 years",
+  "  badge: Rental AED 7,500.00 + registration AED 70.00",
+  "  desc: Expires 06-09-2036",
+  "  price: AED 7,570.00",
+  "```",
+].join("\n");
+const BASIC: Term[] = [
+  { years: 1, rent: 995, fee: 70, total: 1065 },
+  { years: 2, rent: 1595, fee: 70, total: 1665 },
+  { years: 10, rent: 7500, fee: 70, total: 7570 },
+];
+const even = run(UNEVEN, BASIC);
+check("no card keeps a pill repeating the breakdown", !/badge:.*[Rr]ental/.test(even), even);
+check("every card states its breakdown", (even.match(/Rental AED/g) ?? []).length === 3, even);
+check("...each exactly once", !/Rental AED[^\n]*Rental AED/.test(even), even);
+check("the one-year card gains the breakdown it never had", /1 year\n\s*desc: Rental AED 995\.00 \+ registration AED 70\.00/.test(even), even);
+check("the expiry survives beside it", /Expires 06-09-2027/.test(even) && /Expires 06-09-2036/.test(even), even);
+check("the prices are untouched", /AED 1,065\.00/.test(even) && /AED 7,570\.00/.test(even));
+check("no blank rows left behind", !/^\s*(?:badge|desc|note):\s*$/m.test(even), even);
+check("...and no gap where the pill was", !/- title:[^\n]*\n[ \t]*\n/.test(even), even);
+check(
+  "a blank line BETWEEN cards is left alone",
+  /price: AED 1,665\.00\n\n- title: 10 years/.test(
+    run(UNEVEN.replace("- title: 10 years", "\n- title: 10 years"), BASIC)
+  ),
+  run(UNEVEN.replace("- title: 10 years", "\n- title: 10 years"), BASIC)
+);
+
+// A badge that is not a breakdown is not a duplicate of anything.
+const OWN = "```cards\n- title: 5 years\n  badge: Most popular\n  desc: Expires 06-09-2031\n  price: AED 4,270.00\n```";
+const ownKept = run(OWN, [{ years: 5, rent: 4200, fee: 70, total: 4270 }]);
+check("a badge with its own words is kept", /badge: Most popular/.test(ownKept), ownKept);
+check("...and the breakdown still lands in the body", /desc: Rental AED 4,200\.00 \+ registration AED 70\.00 · Expires/.test(ownKept), ownKept);
+
 // ── a term nobody has ever been charged for ─────────────────────────────────
 const UNPRICED: Term[] = [
   { years: 1, rent: 995, fee: 70, total: 1065 },

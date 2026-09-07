@@ -50,6 +50,16 @@ const stripMoney = (body: string): string =>
     .replace(/^[\s+·|,\-–—]+|[\s+·|,\-–—]+$/g, "")
     .trim();
 
+/**
+ * A line that is only a price breakdown — "Rental AED 1,595.00 + registration
+ * AED 70.00" — as opposed to one that says something of its own.
+ */
+function isBreakdown(body: string): boolean {
+  if (!/AED/i.test(body)) return false;
+  if (/rental/i.test(body) && /registration/i.test(body)) return true;
+  return stripMoney(body) === "";
+}
+
 /** Rewrite one card's money to the term's real figures. */
 function stampCard(card: string, term: Term): string {
   let out = card;
@@ -58,46 +68,54 @@ function stampCard(card: string, term: Term): string {
   out = out.replace(/^([ \t]*price[ \t]*:[ \t]*).*$/im, (_m, head: string) =>
     priced ? `${head}AED ${money(term.total!)}` : `${head}Confirmed when the box is reserved`
   );
-  // The breakdown, ONCE.
+
+  // THE BREAKDOWN, ONCE, AND IN THE SAME PLACE ON EVERY CARD.
   //
-  // Every money-carrying line used to be rewritten to the same sentence, so a
-  // card the model gave both a `desc:` and a `badge:` ended up stating "Rental
-  // AED 1,595.00 + registration AED 70.00" twice — once in the body and once in
-  // a highlighted pill directly above it. The 1-year and 10-year cards escaped
-  // only because the model had not given them a badge.
+  // The model writes these cards inconsistently: some get a `badge:` carrying
+  // the breakdown, some get only a `desc:` with the expiry, and the guard used
+  // to touch only the lines that already carried money — so it preserved that
+  // inconsistency exactly. In the same five-card block, 2, 3, 5 and 10 years
+  // wore a highlighted pill and 1 year did not.
   //
-  // So the FIRST breakdown line carries the figures and the rest lose theirs.
+  // So the breakdown always ends up in `desc`, beside whatever that line already
+  // said (the expiry, usually), and any OTHER line that was purely a breakdown
+  // goes. A badge that says something of its own — "Most popular", a saving — is
+  // left exactly as it was; it is not a duplicate of anything.
   const BREAKDOWN = /^([ \t]*(desc|badge|note|pricenote)[ \t]*:[ \t]*)(.*)$/gim;
-  // `desc` is the card's body and the natural place for it; a badge is a pill
-  // and belongs to whatever it says of its own. So the breakdown goes in the
-  // desc when there is one, and otherwise in the first line that carries money.
+  // What the card's own body line says besides money — the expiry, usually. It
+  // is folded in beside the breakdown so the card keeps it. Only `desc` is
+  // folded: a badge is a pill of its own and stays one.
   BREAKDOWN.lastIndex = 0;
-  const carriers = [...out.matchAll(BREAKDOWN)].filter((m) => /AED/i.test(m[3] ?? ""));
-  const carrier = carriers.find((m) => (m[2] ?? "").toLowerCase() === "desc") ?? carriers[0];
-  let stated = false;
+  const descLine = [...out.matchAll(BREAKDOWN)].find((m) => (m[2] ?? "").toLowerCase() === "desc");
+  const kept = descLine && !isBreakdown(descLine[3] ?? "") ? stripMoney(descLine[3] ?? "") : "";
+
+  const line =
+    priced && term.rent !== null && term.fee !== null
+      ? [`Rental AED ${money(term.rent)} + registration AED ${money(term.fee)}`, kept].filter(Boolean).join(" · ")
+      : [kept, "Price confirmed when the box is reserved"].filter(Boolean).join(" · ");
+
+  let placed = false;
   BREAKDOWN.lastIndex = 0;
   out = out.replace(BREAKDOWN, (_m, head: string, field: string, body: string) => {
-    void field;
-    const isCarrier = carrier !== undefined && _m === carrier[0] && !stated;
-    if (!/AED/i.test(body)) return `${head}${body}`;
-    if (!priced) {
-      // A breakdown for a price we do not have is a price we do not have.
-      const cleaned = stripMoney(body);
-      return cleaned ? `${head}${cleaned}` : `${head}Price confirmed when the box is reserved`;
+    if ((field ?? "").toLowerCase() === "desc" && !placed) {
+      placed = true;
+      return `${head}${line}`;
     }
-    if (term.rent === null || term.fee === null) return `${head}${body}`;
-    if (!isCarrier) {
-      // A second line saying the same thing is not emphasis, it is noise. What
-      // is left of it after the figures come out is kept only if it says
-      // something of its own.
-      const rest = stripMoney(body);
-      return rest ? `${head}${rest}` : "";
-    }
-    stated = true;
-    return `${head}Rental AED ${money(term.rent)} + registration AED ${money(term.fee)}`;
+    // Any OTHER line that was only a price breakdown is the duplicate; a line
+    // saying something of its own is not, and is left exactly as written.
+    return isBreakdown(body) ? "" : `${head}${body}`;
   });
-  // Emptied lines leave a blank row behind; take the whole line with them.
-  return out.replace(/^[ \t]*(?:desc|badge|note|pricenote)[ \t]*:[ \t]*$\n?/gim, "");
+
+  // No desc at all: give the card one, under its title.
+  if (!placed) {
+    out = out.replace(/^([ \t]*-[ \t]+title[ \t]*:[ \t]*.*)$/im, (m) => `${m}\n  desc: ${line}`);
+  }
+  // A removed line leaves its newline behind, and a blank row in the middle of
+  // a card renders as a gap under the title. Take the whole line with it —
+  // but only inside a card, so the blank lines BETWEEN cards are left alone.
+  return out
+    .replace(/^[ \t]*(?:desc|badge|note|pricenote)[ \t]*:[ \t]*$\n?/gim, "")
+    .replace(/^[ \t]*\n(?=[ \t]+[A-Za-z]+[ \t]*:)/gm, "");
 }
 
 /** Stamp every duration card in one ```cards block. */
