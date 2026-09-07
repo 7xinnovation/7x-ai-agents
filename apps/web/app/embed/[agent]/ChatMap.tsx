@@ -60,13 +60,43 @@ export function loadMapbox(): Promise<any> {
   return mapboxLoader;
 }
 
+/**
+ * Every word this component says, in both languages.
+ *
+ * It had none: the button read "Browse nearby branches on a map" inside an
+ * otherwise fully Arabic conversation, which is the one thing on that screen a
+ * customer reading Arabic could not read.
+ */
+const MAP_STR = {
+  en: {
+    browse: "Browse nearby branches on a map",
+    finding: "Finding branches near you…",
+    failed: "Couldn't load the map. You can still pick a branch from the list above.",
+    nearest: "Nearest branches to you",
+    branches: "Branches",
+    metres: (n: number) => `${n} m`,
+    km: (n: string) => `${n} km`,
+  },
+  ar: {
+    browse: "تصفّح الفروع القريبة على الخريطة",
+    finding: "جارٍ البحث عن الفروع القريبة منك…",
+    failed: "تعذّر تحميل الخريطة. لا يزال بإمكانك اختيار فرع من القائمة أعلاه.",
+    nearest: "أقرب الفروع إليك",
+    branches: "الفروع",
+    metres: (n: number) => `${n} متر`,
+    km: (n: string) => `${n} كم`,
+  },
+} as const;
+
 export function ChatMap({
-  emirate, bundle, onSelect,
+  emirate, bundle, onSelect, locale,
 }: {
   emirate: string;
   bundle: string;
   onSelect: (text: string) => void;
+  locale?: string;
 }) {
+  const t = MAP_STR[locale === "ar" ? "ar" : "en"];
   // The embed always lives at /embed/<slug>; derive it rather than thread a prop.
   const agentSlug = React.useMemo(
     () => (typeof window !== "undefined" ? window.location.pathname.match(/\/embed\/([^/?#]+)/)?.[1] : "") || "nxn-dialog",
@@ -171,7 +201,7 @@ export function ChatMap({
       <div className="dlg-map">
         <button type="button" className="dlg-map-cta" onClick={browse}>
           <NavigationArrow size={16} weight="fill" />
-          Browse nearby branches on a map
+          {t.browse}
         </button>
       </div>
     );
@@ -182,7 +212,7 @@ export function ChatMap({
       <div className="dlg-map">
         <div className="dlg-map-status">
           <ArrowClockwise size={15} weight="bold" className="spin" />
-          Finding branches near you…
+          {t.finding}
         </div>
       </div>
     );
@@ -193,7 +223,7 @@ export function ChatMap({
       <div className="dlg-map">
         <div className="dlg-map-status is-error">
           <Warning size={15} weight="fill" />
-          Couldn&apos;t load the map. You can still pick a branch from the list above.
+          {t.failed}
         </div>
       </div>
     );
@@ -205,7 +235,7 @@ export function ChatMap({
     <div className="dlg-map is-ready">
       {mapboxRef.current ? <div ref={mapEl} className="dlg-map-canvas" /> : null}
       <div className="dlg-map-head">
-        {userLoc ? "Nearest branches to you" : "Branches"}
+        {userLoc ? t.nearest : t.branches}
       </div>
       <div className="dlg-map-list">
         {topN.map((b) => (
@@ -221,7 +251,7 @@ export function ChatMap({
               <span className="dlg-map-name">{b.name}</span>
               {b.hours ? <span className="dlg-map-hours">{b.hours}</span> : null}
             </span>
-            {typeof b.dist === "number" ? <span className="dlg-map-dist">{b.dist < 1 ? `${Math.round(b.dist * 1000)} m` : `${b.dist.toFixed(1)} km`}</span> : null}
+            {typeof b.dist === "number" ? <span className="dlg-map-dist">{b.dist < 1 ? t.metres(Math.round(b.dist * 1000)) : t.km(b.dist.toFixed(1))}</span> : null}
           </button>
         ))}
       </div>

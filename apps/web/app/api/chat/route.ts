@@ -142,6 +142,38 @@ const DOCUMENT_UPLOADED_DIRECTIVE =
   "3) If all required documents are in, move on: show a brief cards summary of the captured details for confirmation, or continue the journey. " +
   "Never re-list all the documents, never ask the customer to use a side panel, and never mention this system message.)";
 
+/**
+ * Which document just arrived, by name.
+ *
+ * The directive above said "confirm the document was received" and never said
+ * WHICH — so the model chose, and on 7 September a customer who had just
+ * uploaded "Agent Emirates ID (front)" was told "Agent Emirates ID back
+ * received." The two slots sit next to each other in the same journey and the
+ * distinction is the whole point of having two.
+ *
+ * The newest uploaded or accepted document is the one that just landed; naming
+ * it removes the guess.
+ */
+function uploadedDirective(state: CaseState, definition: AgentDefinition, locale: Locale): string {
+  const labels = new Map<string, string>(
+    (definition.journeys ?? [])
+      .flatMap((j) => j.steps ?? [])
+      .flatMap((st) => st.documents ?? [])
+      .map((d) => [d.key, tr(d.label, locale)] as const)
+  );
+  const landed = [...(state.documents ?? [])]
+    .reverse()
+    .find((d) => d.status === "uploaded" || d.status === "accepted" || d.status === "rejected");
+  if (!landed) return DOCUMENT_UPLOADED_DIRECTIVE;
+  const label = labels.get(landed.key) ?? landed.key;
+  return (
+    `${DOCUMENT_UPLOADED_DIRECTIVE}\n(System: the document that just arrived is "${label}"` +
+    `${landed.fileName ? ` (${landed.fileName})` : ""}, and its status is ${landed.status}. ` +
+    `Name THAT document when you confirm it — not the one before it and not the one you are about to ask for. ` +
+    `A customer who uploaded the front of an Emirates ID and was told the back had been received has no way to tell whether we have what we need.)`
+  );
+}
+
 function sse(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
@@ -846,7 +878,7 @@ export async function POST(req: NextRequest) {
     : isPaymentSettled
       ? paymentSettledDirective(agent.definition, session.state.journeyKey)
       : isDocumentUploaded
-        ? DOCUMENT_UPLOADED_DIRECTIVE
+        ? uploadedDirective(session.state, agent.definition, body.locale)
         : body.userMessage;
 
   const a = { agentId: agent.id, conversationId: session.conversationId };

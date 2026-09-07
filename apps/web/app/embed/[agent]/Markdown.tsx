@@ -986,7 +986,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
           if (m && /^emirate$/i.test(m[1]!)) mEmirate = m[2]!.trim().toUpperCase();
           else if (m) mBundle = m[2]!.trim();
         }
-        if (onSelect && mEmirate && mBundle) nodes.push(<ChatMap key={k++} emirate={mEmirate} bundle={mBundle} onSelect={onSelect} />);
+        if (onSelect && mEmirate && mBundle) nodes.push(<ChatMap key={k++} emirate={mEmirate} bundle={mBundle} onSelect={onSelect} locale={uploadCtx?.locale} />);
         continue;
       }
       if (isCards) {

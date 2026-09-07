@@ -174,7 +174,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
     body{background:#fff;padding:0}
     .card{border:none;max-width:none}
     .head{background:#fff;color:#13132e;border-bottom:2px solid ${esc(primary)};padding-bottom:14px}
-    .head .logo{filter:none}
+    /* Not filter:none — the mark's own colours are a pale blue meant to sit on
+       the brand band, and on white paper they print as a ghost. brightness(0)
+       makes every opaque pixel of it black, which is what a printed receipt
+       wants and what a photocopier would have done anyway. */
+    .head .logo{filter:brightness(0)}
     .head h1{color:${esc(primary)}}
     .head p{opacity:1;color:#5B6478}
   }

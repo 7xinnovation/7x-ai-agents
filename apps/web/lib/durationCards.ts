@@ -42,6 +42,14 @@ export function yearsInTitle(title: string): number | null {
 
 const money = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** What a line says once its figures are taken out, or nothing. */
+const stripMoney = (body: string): string =>
+  body
+    .replace(/\bAED[  ]*[\d,]+(?:\.\d{1,2})?/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s+·|,\-–—]+|[\s+·|,\-–—]+$/g, "")
+    .trim();
+
 /** Rewrite one card's money to the term's real figures. */
 function stampCard(card: string, term: Term): string {
   let out = card;
@@ -50,18 +58,46 @@ function stampCard(card: string, term: Term): string {
   out = out.replace(/^([ \t]*price[ \t]*:[ \t]*).*$/im, (_m, head: string) =>
     priced ? `${head}AED ${money(term.total!)}` : `${head}Confirmed when the box is reserved`
   );
-  // Any breakdown beside it — desc, badge, note — restated or emptied of money.
-  out = out.replace(/^([ \t]*(?:desc|badge|note|pricenote)[ \t]*:[ \t]*)(.*)$/gim, (_m, head: string, body: string) => {
+  // The breakdown, ONCE.
+  //
+  // Every money-carrying line used to be rewritten to the same sentence, so a
+  // card the model gave both a `desc:` and a `badge:` ended up stating "Rental
+  // AED 1,595.00 + registration AED 70.00" twice — once in the body and once in
+  // a highlighted pill directly above it. The 1-year and 10-year cards escaped
+  // only because the model had not given them a badge.
+  //
+  // So the FIRST breakdown line carries the figures and the rest lose theirs.
+  const BREAKDOWN = /^([ \t]*(desc|badge|note|pricenote)[ \t]*:[ \t]*)(.*)$/gim;
+  // `desc` is the card's body and the natural place for it; a badge is a pill
+  // and belongs to whatever it says of its own. So the breakdown goes in the
+  // desc when there is one, and otherwise in the first line that carries money.
+  BREAKDOWN.lastIndex = 0;
+  const carriers = [...out.matchAll(BREAKDOWN)].filter((m) => /AED/i.test(m[3] ?? ""));
+  const carrier = carriers.find((m) => (m[2] ?? "").toLowerCase() === "desc") ?? carriers[0];
+  let stated = false;
+  BREAKDOWN.lastIndex = 0;
+  out = out.replace(BREAKDOWN, (_m, head: string, field: string, body: string) => {
+    void field;
+    const isCarrier = carrier !== undefined && _m === carrier[0] && !stated;
     if (!/AED/i.test(body)) return `${head}${body}`;
     if (!priced) {
       // A breakdown for a price we do not have is a price we do not have.
-      const cleaned = body.replace(/\bAED[  ]*[\d,]+(?:\.\d{1,2})?/gi, "").replace(/\s{2,}/g, " ").replace(/^[\s+·|,-]+|[\s+·|,-]+$/g, "");
+      const cleaned = stripMoney(body);
       return cleaned ? `${head}${cleaned}` : `${head}Price confirmed when the box is reserved`;
     }
     if (term.rent === null || term.fee === null) return `${head}${body}`;
+    if (!isCarrier) {
+      // A second line saying the same thing is not emphasis, it is noise. What
+      // is left of it after the figures come out is kept only if it says
+      // something of its own.
+      const rest = stripMoney(body);
+      return rest ? `${head}${rest}` : "";
+    }
+    stated = true;
     return `${head}Rental AED ${money(term.rent)} + registration AED ${money(term.fee)}`;
   });
-  return out;
+  // Emptied lines leave a blank row behind; take the whole line with them.
+  return out.replace(/^[ \t]*(?:desc|badge|note|pricenote)[ \t]*:[ \t]*$\n?/gim, "");
 }
 
 /** Stamp every duration card in one ```cards block. */

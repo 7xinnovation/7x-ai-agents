@@ -337,6 +337,27 @@ const HALL_TTL_MS = 2 * 60 * 60 * 1000;
  */
 const RENEWAL_UPGRADES: Record<string, string> = { MYHOME3: "MYHOMEF" };
 
+/**
+ * Who is renewing the box, in English.
+ *
+ * Emirates Post returns these options in Arabic only — [{key:"19147",
+ * value:"المالك"}, …] — so an English conversation had the model translating
+ * them itself and, on 7 September, saying out loud: "'Company employee' maps to
+ * key 19150." The customer has no use for that sentence and the key is not
+ * theirs to see.
+ *
+ * The keys are Emirates Post's and are sent on the save unchanged. This is only
+ * how each one is READ OUT, and a key that is not listed here keeps whatever
+ * Emirates Post called it.
+ */
+const RENEWED_BY_EN: Record<string, string> = {
+  "19147": "The owner",
+  "19148": "A family member",
+  "19149": "An authorised agent",
+  "19150": "A company employee",
+  "19151": "Someone else",
+};
+
 function rememberHalls(conversationId: string | undefined, halls: { officeId: string; name: string; alternative: string }[]) {
   if (!conversationId) return;
   if (hallMemory.size > 500) for (const [k, v] of hallMemory) if (Date.now() - v.at > HALL_TTL_MS) hallMemory.delete(k);
@@ -834,6 +855,8 @@ export async function buildApiTools(
    * possible, and it is what `isBundleChanged` is compared against.
    */
   let currentBundleId: string | null = null;
+  /** Emirates Post's renewed-by options, key to label, as last read. */
+  let renewedByOptions = new Map<string, string>();
 
   /**
    * The bundle's per-term prices, re-fetching if this turn has not seen them.
@@ -1069,6 +1092,46 @@ export async function buildApiTools(
           result:
             `NOT ASKED YET. This order was created ${Math.round(age / 1000)} seconds ago and the customer is very likely still on the payment page — nobody types a card number in that time. Asking now would come back "not paid" for an order that has simply not been paid YET, and telling them that while their payment page is open is how a payment that was about to go through gets abandoned. Say you will confirm it the moment it lands, ask them to finish on the payment page, and check again in about ${wait} seconds. Do NOT say the payment failed, do NOT say it has not come through, and do NOT offer them a new payment link.`,
         };
+      }
+    }
+
+    // WHO IS RENEWING: the words the customer chose, turned back into Emirates
+    // Post's key here rather than carried through the conversation as a number.
+    // If the options have not been read this turn, read them — the same cache
+    // usually makes that free — rather than sending a label the backend will
+    // refuse.
+    if (/(guest_renewal_save|renewal_save)$/i.test(toolName)) {
+      const body = (input?.body ?? {}) as Record<string, unknown>;
+      const kyc = (body.customerKYC ?? {}) as Record<string, unknown>;
+      const asked = asStr(body.renewedBy) ?? asStr(kyc.renewalUserCapacity) ?? "";
+      if (asked && !/^\d+$/.test(asked)) {
+        if (!renewedByOptions.size) {
+          const optionsTool = [...map.keys()].find((t) => /renewedbyoptions/i.test(t));
+          if (optionsTool) await exec(optionsTool, {}).catch(() => null);
+        }
+        const want = asked.trim().toLowerCase();
+        const key =
+          [...renewedByOptions].find(([, v]) => v.trim().toLowerCase() === want)?.[0] ??
+          Object.entries(RENEWED_BY_EN).find(([, v]) => v.trim().toLowerCase() === want)?.[0] ??
+          // "Owner" for "The owner", "company employee" for "A company employee".
+          Object.entries(RENEWED_BY_EN).find(([, v]) => v.toLowerCase().includes(want) || want.includes(v.toLowerCase().replace(/^(the|a|an) /, "")))?.[0];
+        if (key) {
+          body.renewedBy = key;
+          if (kyc.renewalUserCapacity !== undefined) (body.customerKYC as Record<string, unknown>).renewalUserCapacity = key;
+          void audit({
+            agentId,
+            conversationId: opts.conversationId,
+            actor: "system",
+            action: "renewed_by_resolved",
+            payload: {
+              tool: toolName,
+              method: entry.op.method,
+              path: entry.op.path,
+              input: { asked },
+              response: `"${asked}" is Emirates Post's option ${key}; the key was substituted for the save.`,
+            },
+          }).catch(() => {});
+        }
       }
     }
 
@@ -2079,6 +2142,40 @@ export async function buildApiTools(
     // below. Emirates Post does not support downgrading here, so a cheaper
     // bundle on the list is a choice that cannot complete -- and the customer
     // only discovers that after picking it.
+    // WHO IS RENEWING, as a person would say it.
+    //
+    // The options come back in Arabic only and keyed by number, and the model
+    // was left to translate them and to carry the key across — so it announced
+    // the mapping to the customer and the case recorded "19147" under "Who is
+    // renewing this box". The key is Emirates Post's business; the customer
+    // chooses between names.
+    if (!res.isError && /renewedbyoptions/i.test(toolName)) {
+      try {
+        const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const list = (Array.isArray(parsed) ? parsed : parsed?.payload) as { key?: unknown; value?: unknown }[] | undefined;
+        if (Array.isArray(list) && list.length) {
+          renewedByOptions = new Map(
+            list
+              .map((o) => [String(o?.key ?? ""), String(o?.value ?? "")] as [string, string])
+              .filter(([k, v]) => k && v)
+          );
+          const shown = [...renewedByOptions].map(([k, v]) => `${RENEWED_BY_EN[k] ?? v}`);
+          res = {
+            ...res,
+            result:
+              res.result +
+              `\n\nASK THIS ONE, AND ASK IT IN WORDS. Offer exactly these choices as buttons: ${shown.join(" · ")}.` +
+              ` Emirates Post returns them in Arabic and keyed by number; the numbers are internal and are sent on the save FOR you.` +
+              ` Record what the customer picked as the words above — never the number — and NEVER say a number, a key, or a mapping between them out loud.` +
+              ` On 7 September a customer read "'Company employee' maps to key 19150." in their own chat, and their application panel then showed "Who is renewing this box: 19147".` +
+              ` If you are speaking Arabic, use Emirates Post's own wording: ${[...renewedByOptions.values()].join(" · ")}.`,
+          };
+        }
+      } catch {
+        /* an unreadable list leaves the options exactly as they arrived */
+      }
+    }
+
     if (!res.isError && /renewal_details/i.test(toolName)) {
       try {
         const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
@@ -2621,7 +2718,16 @@ export async function buildApiTools(
           // price, one that does not is the annual rate for that many years, and
           // the one-time registration fee is added once. MyBox two years is
           // 600 + 70 = 670, which is exactly what the reservation comes back at.
-          const periods = bundlePriceBook.get(bundle) ?? [];
+          // NOT the raw book: it is filled when Rental/Bundle is read, and that
+          // is usually several turns earlier — the customer picks a bundle, then
+          // an emirate, then a branch, then a box, and only then a duration. By
+          // the time the durations are priced the book is empty, so the PUBLISHED
+          // prices are gone and only the terms someone has been seen to be
+          // charged for survive. That is why a corporate ten-year card read
+          // "price confirmed when the box is reserved" while Emirates Post's own
+          // page showed AED 7,500 beside it: 120 months is published, and nobody
+          // had happened to reserve one. bundlePricesFor re-reads the catalogue.
+          const periods = await bundlePricesFor(bundle);
           // MULTIPLYING THE ANNUAL RATE IS WRONG, and not by a little.
           //
           // Rental/Bundle returns null for every multi-year field on the

@@ -1337,7 +1337,7 @@ export function Experience({
               <span className="dlg-orb" aria-hidden="true" />
               {/* Greeting gets onSelect so a ```buttons service list in it is
                   tappable (feedback FB-1434: structured options, not prose). */}
-              <div className="dlg-bubble"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} /></div>
+              <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} /></div>
             </div>
             {messages.length === 0 && starters.length > 0 && !greetingHasButtons ? (
               <div className="dlg-starters">
@@ -1363,7 +1363,18 @@ export function Experience({
                 {m.role === "assistant" ? (
                   <span className="dlg-orb" aria-hidden="true" />
                 ) : null}
-                <div className="dlg-bubble">
+                {/* EACH BUBBLE DECIDES ITS OWN DIRECTION.
+                    The panel is right-to-left for an Arabic session, and an
+                    English sentence rendered inside it has its trailing
+                    punctuation pushed to the front: "Which bundle suits your
+                    company?" appeared as "?Which bundle suits your company".
+                    That is the bidirectional algorithm doing exactly what it is
+                    told — the paragraph direction was RTL and the sentence was
+                    not. It happens whenever the conversation changes language
+                    mid-flow, because the replies already on screen do not.
+                    dir="auto" lets each message be read in the direction of the
+                    language it is actually written in. */}
+                <div className="dlg-bubble" dir="auto">
                   {m.content ? (
                     m.role === "assistant" ? (
                       <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={uploadCtx} />

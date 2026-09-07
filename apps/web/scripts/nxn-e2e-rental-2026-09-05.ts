@@ -34,7 +34,25 @@ let fail = 0;
 const failures: string[] = [];
 
 /** One turn. Returns everything the customer would have seen. */
-async function say(userMessage: string, extra: Record<string, unknown> = {}): Promise<string> {
+/**
+ * One turn, with a retry on a transient platform error.
+ *
+ * The model endpoint answers "Something went wrong on our side" now and then —
+ * an overloaded upstream, an Azure deployment restarting mid-push. The customer
+ * is told to send it again, and does. A driver that instead reports ten failures
+ * for one blip is a driver nobody reads, so it does what the customer does.
+ */
+async function say(userMessage: string, extra: Record<string, unknown> = {}, attempt = 0): Promise<string> {
+  const text = await once(userMessage, extra);
+  if (/\[ERROR\]/.test(text) && attempt < 2) {
+    console.log(`  (transient error; asking again in 15s)`);
+    await new Promise((r) => setTimeout(r, 15_000));
+    return say(userMessage, extra, attempt + 1);
+  }
+  return text;
+}
+
+async function once(userMessage: string, extra: Record<string, unknown> = {}): Promise<string> {
   const res = await fetch(`${HOST}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

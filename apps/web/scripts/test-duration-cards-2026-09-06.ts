@@ -66,6 +66,38 @@ check("a term that was already right is unchanged", /- title: 3 Years\n  price: 
 check("4,975 is gone", !/4,975/.test(fixed));
 check("9,950 is gone", !/9,950/.test(fixed));
 
+// ── the breakdown is stated ONCE ────────────────────────────────────────────
+// UAT, corporate Basic Box: the 2, 3 and 5-year cards each carried a highlighted
+// pill repeating the sentence already in the card body. 1 and 10 years did not,
+// because the model had not given those a badge. Every money-carrying line was
+// being rewritten to the same text.
+const TWICE = [
+  "```cards",
+  "- title: 2 Years",
+  "  badge: Rental AED 1,595.00 + registration AED 70.00",
+  "  desc: Rental AED 1,595.00 + registration AED 70.00",
+  "  price: AED 1,665.00",
+  "- title: 3 Years",
+  "  desc: Rental AED 2,095.00 + registration AED 70.00",
+  "  price: AED 2,165.00",
+  "```",
+].join("\n");
+const CORPORATE: Term[] = [
+  { years: 2, rent: 1595, fee: 70, total: 1665 },
+  { years: 3, rent: 2095, fee: 70, total: 2165 },
+];
+const once = run(TWICE, CORPORATE);
+check("the breakdown appears once, not twice", (once.match(/Rental AED 1,595\.00/g) ?? []).length === 1, once);
+check("...and the empty line it left is gone", !/^\s*badge:\s*$/m.test(once), once);
+check("the card keeps its price", /price: AED 1,665\.00/.test(once));
+check("a card with only one breakdown is unaffected", (once.match(/Rental AED 2,095\.00/g) ?? []).length === 1, once);
+
+// A badge that says something of its OWN survives, minus the figures.
+const SAVING = "```cards\n- title: 5 Years\n  badge: Save AED 1,305 vs 5 x 1-year\n  desc: Rental AED 4,200.00 + registration AED 70.00\n  price: AED 4,270.00\n```";
+const kept = run(SAVING, [{ years: 5, rent: 4200, fee: 70, total: 4270 }]);
+check("a badge with its own words keeps them", /badge: Save/.test(kept), kept);
+check("...without a second set of figures", (kept.match(/AED 4,200/g) ?? []).length === 1, kept);
+
 // ── a term nobody has ever been charged for ─────────────────────────────────
 const UNPRICED: Term[] = [
   { years: 1, rent: 995, fee: 70, total: 1065 },
