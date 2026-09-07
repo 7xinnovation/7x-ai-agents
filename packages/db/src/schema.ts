@@ -330,10 +330,23 @@ export const users = pgTable(
      * differs from person to person.
      */
     agentScope: jsonb("agent_scope").$type<string[]>().default([]).notNull(),
+    /**
+     * An open invitation: the SHA-256 of the single-use token in the link, never
+     * the token itself, so a copy of this table is not a set of working links.
+     *
+     * An account with no password hash and a live invite has been invited and
+     * has not accepted. Accepting sets the password and clears all three.
+     */
+    inviteTokenHash: text("invite_token_hash"),
+    inviteExpiresAt: timestamp("invite_expires_at", { withTimezone: true }),
+    invitedBy: text("invited_by"),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     createdAt: ts(),
   },
-  (t) => ({ emailIdx: index("users_email_idx").on(t.email) })
+  (t) => ({
+    emailIdx: index("users_email_idx").on(t.email),
+    inviteIdx: index("users_invite_token_idx").on(t.inviteTokenHash),
+  })
 );
 
 // Ensure the pgvector extension exists (applied via raw SQL in push/seed).

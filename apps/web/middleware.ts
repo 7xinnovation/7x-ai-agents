@@ -17,11 +17,15 @@ export async function middleware(req: NextRequest) {
     return embedCsp(req);
   }
 
-  // Always allow the login + SSO surfaces themselves.
+  // Always allow the login + SSO surfaces themselves, and the invitation: the
+  // person accepting one has no account yet, and the token in the link is what
+  // stands in for a session until they have set a password.
   if (
     pathname === "/admin/login" ||
     pathname === "/api/admin/login" ||
-    pathname.startsWith("/api/admin/sso/")
+    pathname.startsWith("/api/admin/sso/") ||
+    pathname.startsWith("/admin/invite/") ||
+    pathname === "/api/admin/invite"
   ) {
     return NextResponse.next();
   }
@@ -69,7 +73,7 @@ export async function middleware(req: NextRequest) {
  * (`/admin/users`, `/admin/inbox`, …) are listed here so their names are never
  * mistaken for a slug.
  */
-const CONSOLE_PAGES = new Set(["login", "users", "agents", "inbox", "analytics", "activity", "conversations", "readiness"]);
+const CONSOLE_PAGES = new Set(["login", "invite", "users", "agents", "inbox", "analytics", "activity", "conversations", "readiness"]);
 function agentSlugIn(pathname: string): string | null {
   const p = pathname.split("/").filter(Boolean);
   if (p[0] === "api" && p[1] === "admin" && p[2] === "agents" && p[3]) return decodeURIComponent(p[3]);

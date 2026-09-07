@@ -1,6 +1,6 @@
 import { getDb, users } from "@dialog/db";
-import { eq, asc } from "drizzle-orm";
-import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { eq, asc, and, gt, sql } from "drizzle-orm";
+import { scryptSync, randomBytes, timingSafeEqual, createHash } from "node:crypto";
 
 export type Role = "owner" | "admin" | "editor" | "viewer";
 
@@ -47,6 +47,59 @@ export function verifyPassword(plain: string, stored: string | null): boolean {
   }
 }
 
+/**
+ * An invitation to the console.
+ *
+ * The link carries a 32-byte random token; only its SHA-256 is stored, so an
+ * invitation cannot be replayed from a database dump or a log line the way a
+ * stored token could. It is single use — accepting clears it — and it expires,
+ * because an invitation left open is a password reset left open.
+ */
+export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function newInviteToken(): { token: string; hash: string; expiresAt: Date } {
+  const token = randomBytes(32).toString("base64url");
+  return { token, hash: hashInviteToken(token), expiresAt: new Date(Date.now() + INVITE_TTL_MS) };
+}
+
+export function hashInviteToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/** The account an unexpired invitation belongs to, if the token is one. */
+export async function userByInviteToken(token: string) {
+  if (!token || token.length < 20) return null;
+  const [u] = await getDb().select().from(users).where(eq(users.inviteTokenHash, hashInviteToken(token))).limit(1);
+  if (!u || !u.inviteExpiresAt || u.inviteExpiresAt.getTime() < Date.now()) return null;
+  return u;
+}
+
+/** Open (or reopen) an invitation, returning the token for the link. */
+export async function inviteUser(id: string, invitedBy?: string | null): Promise<string> {
+  const { token, hash, expiresAt } = newInviteToken();
+  await getDb()
+    .update(users)
+    .set({ inviteTokenHash: hash, inviteExpiresAt: expiresAt, invitedBy: invitedBy ?? null, active: true })
+    .where(eq(users.id, id));
+  return token;
+}
+
+/**
+ * Accept an invitation: the password is set and the invitation is spent.
+ *
+ * Written as one conditional statement so a token can only ever be redeemed
+ * once, whatever arrives at the same moment.
+ */
+export async function acceptInvite(token: string, password: string) {
+  const hash = hashInviteToken(token);
+  const [u] = await getDb()
+    .update(users)
+    .set({ passwordHash: hashPassword(password), inviteTokenHash: null, inviteExpiresAt: null, active: true })
+    .where(and(eq(users.inviteTokenHash, hash), gt(users.inviteExpiresAt, new Date())))
+    .returning();
+  return u ?? null;
+}
+
 export async function getUserByEmail(email: string) {
   const [u] = await getDb().select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
   return u ?? null;
@@ -54,7 +107,20 @@ export async function getUserByEmail(email: string) {
 
 export async function listUsers() {
   return getDb()
-    .select({ id: users.id, email: users.email, name: users.name, role: users.role, provider: users.provider, active: users.active, agentScope: users.agentScope, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt })
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      provider: users.provider,
+      active: users.active,
+      agentScope: users.agentScope,
+      // Whether an invitation is still open, never the token that would open it.
+      invited: sql<boolean>`(${users.passwordHash} is null and ${users.inviteTokenHash} is not null)`,
+      inviteExpiresAt: users.inviteExpiresAt,
+      lastLoginAt: users.lastLoginAt,
+      createdAt: users.createdAt,
+    })
     .from(users)
     .orderBy(asc(users.createdAt));
 }
