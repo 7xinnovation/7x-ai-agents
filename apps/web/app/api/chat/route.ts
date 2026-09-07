@@ -21,7 +21,7 @@ import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { notifyEpglPayment } from "@/lib/epglPayment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
-import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, poBoxesByEmiratesId, companiesByEmiratesId, resolveIssuingEntityCode } from "@/lib/gsbLookup";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
 import { savedCards, describeCard } from "@/lib/epSavedCards";
@@ -598,7 +598,7 @@ export async function POST(req: NextRequest) {
     let boxes: string[] | null = null;
     if (eid && caller && agent.definition.tenantSlug === "nxn") {
       try {
-        const rows = await poBoxesByEmiratesId(
+        const rows = await customerPoBoxes(
           agent.id,
           agent.definition.activeEnvironment ?? "production",
           eid,
@@ -1166,7 +1166,7 @@ export async function POST(req: NextRequest) {
           const eid = String(input.emiratesId ?? "");
           const [registry, boxes] = await Promise.all([
             companiesByEmiratesId(agent.id, env, eid, caller).catch(() => []),
-            poBoxesByEmiratesId(agent.id, env, eid, caller).catch(() => []),
+            customerPoBoxes(agent.id, env, eid, caller).catch(() => []),
           ]);
           rememberGsb(registry);
           const onBoxes = boxes.filter((b) => b.rentType === "Corporate" && b.holderName);
@@ -1191,7 +1191,12 @@ export async function POST(req: NextRequest) {
           };
         }
         if (name === MYBOXES_TOOL) {
-          const boxes = await poBoxesByEmiratesId(agent.id, env, String(input.emiratesId ?? ""), caller);
+          // BOTH sources. The Emirates ID lookup has been measured returning 20
+          // boxes where the session list returned the same 20 and ten more —
+          // whatever links a box to an Emirates ID is not set on every record.
+          // A customer signing in and not finding their own box is what that
+          // looks like from their side.
+          const boxes = await customerPoBoxes(agent.id, env, String(input.emiratesId ?? ""), caller);
           // An EXPIRED box is the one the customer most needs to be told about,
           // and the easiest to lose: Emirates Post has no "Expired" status — a
           // lapsed box keeps whichever one it had — so nothing in the payload

@@ -505,6 +505,79 @@ export async function poBoxesByEmiratesId(
 }
 
 /**
+ * The PO Boxes on the signed-in customer's own account.
+ *
+ * GET /api/v1/PoBoxes takes no arguments at all: it answers for whoever the
+ * bearer token belongs to. That turns out to matter enormously.
+ *
+ * Measured on one account, same token, same minute: the Emirates ID lookup
+ * returned 20 boxes and this returned 30 — the same 20 plus ten more. Whatever
+ * links a box to an Emirates ID is not set on every record, so a customer can
+ * hold a box that the Emirates ID lookup does not know about. That is exactly
+ * what "I signed in and my box is not there, but it says the box is mine when I
+ * type the number" looks like from the customer's side.
+ *
+ * Returns null — not an empty list — when it cannot be called, so a failure is
+ * never mistaken for "they have no boxes".
+ */
+export async function poBoxesForSession(
+  agentId: string,
+  env: EnvKey,
+  callerToken?: string
+): Promise<CustomerPoBox[] | null> {
+  if (!callerToken) return null;
+  const c = await creds(agentId, env);
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (c.apiKey) headers["X-API-KEY"] = c.apiKey;
+  headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
+  try {
+    const res = await fetch(`${c.baseUrl.replace(/\/$/, "")}/users/api/v1/PoBoxes`, { headers });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { payload?: unknown };
+    const rows = Array.isArray(json?.payload) ? (json.payload as Record<string, any>[]) : [];
+    return mapCustomerPoBoxes(rows);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Everything the customer holds, from BOTH sources.
+ *
+ * Neither is complete on its own: the session list has been seen to carry boxes
+ * the Emirates ID lookup omits, and the Emirates ID lookup is the only one that
+ * works when we hold an Emirates ID but no usable customer session. A box is the
+ * customer's if EITHER says so, which is the safe direction — this list decides
+ * what they are shown AND what they are allowed to manage, so a box missing from
+ * it is a box its owner cannot touch.
+ */
+export async function customerPoBoxes(
+  agentId: string,
+  env: EnvKey,
+  emiratesId: string | undefined,
+  callerToken?: string
+): Promise<CustomerPoBox[]> {
+  const [session, byEid] = await Promise.all([
+    poBoxesForSession(agentId, env, callerToken),
+    emiratesId
+      ? poBoxesByEmiratesId(agentId, env, emiratesId, callerToken).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const merged = new Map<string, CustomerPoBox>();
+  for (const list of [session ?? [], byEid ?? []]) {
+    for (const b of list) {
+      const key = String(b.boxNumber ?? "").replace(/\D/g, "");
+      if (!key) continue;
+      // The first source to mention a box wins its details; the second only
+      // fills in what the first left blank.
+      const had = merged.get(key);
+      merged.set(key, had ? { ...b, ...Object.fromEntries(Object.entries(had).filter(([, v]) => v !== undefined)) } : b);
+    }
+  }
+  return [...merged.values()];
+}
+
+/**
  * Map RetailApp's box rows. Exported so the field names can be tested against
  * their documented payload without a credential -- the emirate went missing
  * precisely because nothing checked the names against the source.
