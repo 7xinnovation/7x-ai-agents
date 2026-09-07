@@ -12,7 +12,7 @@
  */
 import { renewalChoices, upgradesAmong, describeBundle, type RenewalBundle } from "@/lib/renewalBundles";
 import { correctPricingInputs } from "@/lib/integrations";
-import { factsFromRows, firstJsonObject, shouldOfferReceipt } from "@/lib/receiptFacts";
+import { factsFromRows, firstJsonObject, shouldOfferReceipt, exactAmount } from "@/lib/receiptFacts";
 
 let pass = 0, fail = 0;
 const check = (l: string, ok: boolean, extra?: unknown) => {
@@ -82,6 +82,42 @@ const staying = correctPricingInputs(
 );
 check("renewing on the same bundle is left alone", !staying || (staying.body as Record<string, unknown>).newBundleId === "MYHOME3", staying);
 
+// ── upgrading without extending ─────────────────────────────────────────────
+// Measured on staging, box 911933 (MyHome, expiring 05-09-2027):
+//   keep the expiry, change the bundle  → AED   299.25
+//   change the bundle and add a year    → AED 1,294.25
+// Emirates Post prices both; their portal leads with the first and never asks
+// for a rental period. The pricing call is the same one either way, and the
+// only difference is the expiry date it is given — so the correction that
+// forces the expiry forward must leave the CURRENT one alone.
+const keepExpiry = correctPricingInputs(
+  { body: { boxNumber: "911933", emirateCode: "DXB", expiryDate: "2027-09-05T00:00:00", newBundleId: "MYHOMEF", isBundleChanged: true } },
+  { box: "911933", iso: "2027-09-05", bundle: "MYHOME3" },
+  new Date("2026-09-07T00:00:00Z")
+);
+check(
+  "changing bundle at the CURRENT expiry is left exactly as asked",
+  keepExpiry === null || (keepExpiry.body as Record<string, unknown>).expiryDate === "2027-09-05T00:00:00",
+  keepExpiry
+);
+check(
+  "...and stays marked as a bundle change",
+  keepExpiry === null || (keepExpiry.body as Record<string, unknown>).isBundleChanged === true,
+  keepExpiry
+);
+// An expiry in the PAST is still pushed into the future — that guard is what
+// stops a renewal being priced for a date that has already been and gone.
+const stale = correctPricingInputs(
+  { body: { boxNumber: "911933", emirateCode: "DXB", expiryDate: "2025-09-05T00:00:00", newBundleId: "MYHOMEF", isBundleChanged: true } },
+  { box: "911933", iso: "2025-09-05", bundle: "MYHOME3" },
+  new Date("2026-09-07T00:00:00Z")
+);
+check(
+  "an expiry that has already passed is still moved forward",
+  String((stale?.body as Record<string, unknown>)?.expiryDate ?? "") > "2026-09-07",
+  stale
+);
+
 // ── 2. what the receipt can now say ─────────────────────────────────────────
 // Verbatim shapes from staging: the confirmation carries the box, the emirate,
 // the branch, the bundle and the new expiry; the save carries the name.
@@ -130,6 +166,26 @@ check("...and its name comes from userProfile", rental.customerName === "Emre Ka
 
 const nothing = factsFromRows([]);
 check("with no calls, nothing is invented", Object.keys(nothing).length === 0, nothing);
+
+// ── 3. the amount that was actually taken ───────────────────────────────────
+// A renewal upgrade of AED 1,290.25 was recorded as AED 0.00: the payment is
+// opened in one turn and confirmed in a later one, and the amount was not among
+// the fields carried between them. Their confirmation states it, so the receipt
+// reads it back rather than trusting our row.
+const paidFacts = factsFromRows([
+  {
+    path: "/api/Guest/Renewal/ConfirmPayment",
+    response: `HTTP 200 OK\n${JSON.stringify({
+      payload: { orderNumber: "260972905", paymentDetails: { paymentRefNo: "1665c206", amountPaid: 1290.25 } },
+    })}`,
+  },
+]);
+check("the amount paid is read from the confirmation", paidFacts.amountPaid === 1290.25, paidFacts.amountPaid);
+check("the fils survive", String(paidFacts.amountPaid).endsWith(".25"));
+check("exactAmount keeps two decimals", exactAmount(1290.25) === 1290.25);
+check("...and does not round to the dirham", exactAmount(670.5) === 670.5);
+check("a missing amount is not a zero charge dressed up", exactAmount(undefined) === 0 && exactAmount(null) === 0);
+check("a negative amount is refused", exactAmount(-5) === 0);
 
 // ── 3. the link that would not go away ──────────────────────────────────────
 const PAID = { status: "paid", reference: "pay-1" };

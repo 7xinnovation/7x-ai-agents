@@ -662,7 +662,7 @@ export async function buildApiTools(
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** The gateway payment opened in an earlier turn; the confirm comes later. */
-    initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null; paidAt?: string | null } | null;
+    initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null; paidAt?: string | null; amount?: number | null } | null;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
     initialHold?: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   } = {}
@@ -755,7 +755,15 @@ export async function buildApiTools(
    */
   let gatewayPayment: { url: string; reference: string; orderNo: string | null; amount?: number | null; openedAt?: string | null; gatewayOrderId?: string | null; paidAt?: string | null } | null =
     opts.initialGatewayPayment
-      ? { url: opts.initialGatewayPayment.url, reference: opts.initialGatewayPayment.reference, orderNo: opts.initialGatewayPayment.orderNo ?? null, paidAt: opts.initialGatewayPayment.paidAt ?? null }
+      ? {
+          url: opts.initialGatewayPayment.url,
+          reference: opts.initialGatewayPayment.reference,
+          orderNo: opts.initialGatewayPayment.orderNo ?? null,
+          paidAt: opts.initialGatewayPayment.paidAt ?? null,
+          // Without this the confirm turn knows the payment happened and not
+          // what it was for.
+          amount: opts.initialGatewayPayment.amount ?? null,
+        }
       : null;
   let lastBranchQuery: { emirate: string; bundle: string } | null = null;
   /** The duration ladder as last priced, for the guard that stamps the cards. */
@@ -2090,6 +2098,10 @@ export async function buildApiTools(
           if (dropped > 0 || up.length) {
             sub.listPossibleBundles = bundles;
             const currentName = String(current?.bundleName ?? current?.bundleId ?? "their current bundle").trim();
+            // The date the box runs to TODAY. Changing bundle without extending
+            // is priced against it, and it is the option Emirates Post's own
+            // portal leads with.
+            const currentExpiry = String(sub.currentExpiryDate ?? "").slice(0, 10);
             res = {
               ...res,
               raw: JSON.stringify(parsed),
@@ -2098,8 +2110,14 @@ export async function buildApiTools(
                 (up.length
                   ? `\n\nTHIS BOX CAN BE UPGRADED, AND THE RENEWAL IS WHERE TO SAY SO. The customer is on ${currentName}; Emirates Post also offers ${up
                       .map((b) => describeBundle(b))
-                      .join(", ")} on this renewal. When you present the renewal, offer the upgrade as a plain choice beside renewing on ${currentName} — one line each, with the price — and let them pick. Do not talk them into it and do not pre-select it.\n` +
-                    `To price an upgrade, call renewal pricing again with newBundleId set to the chosen bundle's bundleId from the list above and isBundleChanged true; the total on the summary must then be the one that pricing returned, never the old bundle's. If they stay where they are, price it as ${currentName} with isBundleChanged false.`
+                      .join(", ")} on this box. When you present the renewal, offer the upgrade as a plain choice beside renewing on ${currentName} — one line each, with the price — and let them pick. Do not talk them into it and do not pre-select it.\n` +
+                    `CHANGING BUNDLE AND EXTENDING THE TERM ARE TWO DIFFERENT THINGS, and a customer upgrading usually wants the first. Do NOT ask for a rental period before you have offered both:\n` +
+                    (currentExpiry
+                      ? `  1. UPGRADE ONLY — the box keeps its expiry of ${currentExpiry} and they pay the difference for the time remaining on it. Price it by calling renewal pricing with expiryDate ${currentExpiry}T00:00:00, the chosen bundleId, and isBundleChanged true. This is what Emirates Post's own portal offers as "Change Subscription", and it is the cheaper answer: a MyHome box with a year left came to AED 299.25 this way against AED 1,294.25 to upgrade and add a year.\n`
+                      : "  1. UPGRADE ONLY — the box keeps its current expiry and they pay the difference for the time remaining. Price it by calling renewal pricing with the box's CURRENT expiry date, the chosen bundleId, and isBundleChanged true.\n") +
+                    `  2. UPGRADE AND EXTEND — a longer term on the new bundle. Only then are the durations relevant, and each one must be priced with isBundleChanged true.\n` +
+                    `Offer 1 first, say plainly what each one means, and let them choose. Quote ONLY the figure the pricing call returned for the option they picked — never the other one, and never a difference you worked out yourself.\n` +
+                    `If they stay on ${currentName}, that is an ordinary renewal: price it as ${currentName} with isBundleChanged false and ask for the term as usual.`
                   : "") +
                 (dropped > 0
                   ? `\n\nlistPossibleBundles has already been filtered to the customer's CURRENT bundle and the tiers above it; ${dropped} lower tier(s) were removed because a renewal cannot downgrade. Offer exactly what is left and do not mention the ones that are missing. If the customer asks to move to a cheaper bundle, say plainly that a renewal keeps their current bundle or upgrades it, and that changing down is done through Emirates Post directly.`

@@ -92,6 +92,16 @@ export const CaseState = z.object({
       openedAt: z.string().nullable().default(null),
       /** When Emirates Post confirmed the money arrived. */
       paidAt: z.string().nullable().default(null),
+      /**
+       * What the gateway will actually ask for, in AED.
+       *
+       * The payment is opened in one turn and confirmed in a later one, and this
+       * schema STRIPS what it does not name — so the amount was read off the
+       * save, used for that turn's pay button, and then thrown away. The receipt
+       * row is written on the confirming turn, found nothing, and recorded a
+       * renewal of AED 1,290.25 as AED 0.00.
+       */
+      amount: z.number().nullable().default(null),
     })
     .nullable()
     .default(null),

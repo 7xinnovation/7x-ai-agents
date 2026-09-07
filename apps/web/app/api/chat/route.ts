@@ -29,7 +29,7 @@ import { payFenceGuard } from "@/lib/payFence";
 import { internalIdFilter } from "@/lib/internalIds";
 import { summaryFeeGuard } from "@/lib/summaryFee";
 import { proseTotalGuard } from "@/lib/proseTotal";
-import { shouldOfferReceipt } from "@/lib/receiptFacts";
+import { shouldOfferReceipt, exactAmount } from "@/lib/receiptFacts";
 import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { durationCardGuard } from "@/lib/durationCards";
@@ -1913,7 +1913,14 @@ export async function POST(req: NextRequest) {
                 conversationId: session.conversationId,
                 agentId: agent.id,
                 reference: settled.reference,
-                amount: Math.round(settled.amount ?? apiTools.getLastHold()?.amount ?? 0),
+                // To the fils, not to the dirham: a renewal upgrade is priced
+                // at 1,290.25 and Math.round made it 1,290. Sourced in order of
+                // how close each is to what the gateway actually asked for —
+                // the gateway's own figure, then the case's copy of it, then
+                // the rental hold. Never a guess.
+                amount: exactAmount(
+                  settled.amount ?? finalState.gatewayPayment?.amount ?? apiTools.getLastHold()?.amount ?? null
+                ),
                 currency: "AED",
                 status: "paid",
                 gatewayRef: settled.orderNo ?? null,
@@ -2097,6 +2104,10 @@ export async function POST(req: NextRequest) {
               // the customer has plausibly had time to finish on it.
               openedAt: payNow.openedAt ?? null,
               paidAt: payNow.paidAt ?? null,
+              // Carried so the confirming turn — which may be minutes later and
+              // is certainly a different request — can write the receipt for the
+              // amount the gateway actually took.
+              amount: payNow.amount ?? finalState.gatewayPayment?.amount ?? null,
             },
           };
         }

@@ -30,6 +30,14 @@ export interface ReceiptFacts {
   orderNo?: string;
   /** What was actually done, whatever journey the customer started in. */
   operation?: "renewal" | "rental";
+  /**
+   * What Emirates Post says was PAID, in AED.
+   *
+   * Their confirmation states it, so the receipt does not have to depend on our
+   * own payment row being right — and for every renewal confirmed before this,
+   * that row says 0.00. Their figure wins wherever it exists.
+   */
+  amountPaid?: number;
 }
 
 const str = (v: unknown): string | undefined => {
@@ -140,6 +148,8 @@ export function factsFromRows(rows: AuditedCall[]): ReceiptFacts {
         const t = payload?.transactionDetails as Record<string, unknown> | undefined;
         const order = str(payload?.orderNumber);
         if (order) facts.orderNo ??= order;
+        const paid = Number((payload?.paymentDetails as Record<string, unknown> | undefined)?.amountPaid);
+        if (Number.isFinite(paid) && paid > 0) facts.amountPaid ??= Math.round(paid * 100) / 100;
         if (t) {
           facts.poBox = str(t.poBox) ?? facts.poBox;
           facts.emirate = str(t.emirateName) ?? facts.emirate;
@@ -202,4 +212,17 @@ export function shouldOfferReceipt(
   if (after?.status !== "paid" || !after.reference) return false;
   const justArrived = before?.status !== "paid" || before.reference !== after.reference;
   return justArrived || /\b(receipt|invoice)\b|إيصال|فاتورة/i.test(userMessage ?? "");
+}
+
+/**
+ * An amount as money, to the fils.
+ *
+ * The payment row used to be rounded to whole dirhams, so a renewal upgrade
+ * priced at AED 1,290.25 was recorded — and shown on the receipt — as 1,290.
+ * Two decimal places, and nothing at all when there is no figure to record:
+ * zero is a number, and "AED 0.00" on a receipt for a payment that happened is
+ * worse than no receipt.
+ */
+export function exactAmount(v: number | null | undefined): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0;
 }

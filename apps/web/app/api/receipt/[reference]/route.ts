@@ -122,6 +122,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   const customer = facts.customerName ?? "";
   const expiry = facts.expiry ? fmtDate(new Date(`${facts.expiry}T00:00:00Z`)) : "";
   const row = (k: string, v: string): [string, string][] => (v ? [[k, v]] : []);
+  // What Emirates Post says was paid, ahead of our own row. The row was an
+  // integer column written from a figure the confirming turn no longer had, so
+  // every renewal confirmed before 7 September recorded 0.00 for a payment that
+  // certainly happened. Their confirmation carries the real number.
+  const charged = facts.amountPaid ?? pay.amount;
 
   const rows: [string, string][] = [
     [s.receiptNo, pay.reference],
@@ -185,7 +190,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   }<p>${esc(s.subtitle)}</p></div>
   <div class="body">
     ${rows.map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("")}
-    <div class="total"><span>${esc(pay.status === "paid" ? s.totalPaid : s.totalDue)}</span><span>${esc(money(pay.amount, pay.currency))}</span></div>
+    <div class="total"><span>${esc(pay.status === "paid" ? s.totalPaid : s.totalDue)}</span><span>${esc(money(charged, pay.currency))}</span></div>
     <button class="print" onclick="window.print()">${esc(s.print)}</button>
   </div>
   <div class="foot">${esc(s.foot)}</div>

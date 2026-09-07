@@ -6,6 +6,7 @@ import {
   boolean,
   timestamp,
   integer,
+  doublePrecision,
   index,
   customType,
 } from "drizzle-orm/pg-core";
@@ -239,7 +240,16 @@ export const payments = pgTable(
     conversationId: uuid("conversation_id"),
     agentId: uuid("agent_id"),
     reference: text("reference").notNull().unique(),
-    amount: integer("amount").notNull(), // minor units or whole AED; demo uses whole
+    /**
+     * What was charged, in AED.
+     *
+     * It was an integer, and a renewal is not: an upgrade priced at 1,290.25
+     * became 1,290 on the way in, and the fils were gone from the receipt. The
+     * authoritative record is Emirates Post's and the gateway's; this is what
+     * the customer's receipt renders, so it has to be able to hold what they
+     * were actually asked for.
+     */
+    amount: doublePrecision("amount").notNull(),
     currency: text("currency").default("AED").notNull(),
     status: text("status", { enum: ["initiated", "paid", "failed"] }).default("initiated").notNull(),
     gatewayRef: text("gateway_ref"),
