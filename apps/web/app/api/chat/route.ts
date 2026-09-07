@@ -8,7 +8,7 @@ import { getDb, payments, documents as documentsTable, documentBlobs } from "@di
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug, getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, VERIFIED_EID_KEY } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, VERIFIED_EID_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
@@ -31,6 +31,7 @@ import { summaryFeeGuard } from "@/lib/summaryFee";
 import { proseTotalGuard } from "@/lib/proseTotal";
 import { shouldOfferReceipt } from "@/lib/receiptFacts";
 import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
+import { contactSeed } from "@/lib/knownContact";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
@@ -465,7 +466,7 @@ export async function POST(req: NextRequest) {
   let hostToken: string | undefined;
   let verifiedEmiratesId: string | undefined;
   /** Name and mobile from the same verified introspection, for the survey. */
-  let verifiedIdentity: { name?: string; mobile?: string } | undefined;
+  let verifiedIdentity: { name?: string; mobile?: string; email?: string } | undefined;
   if (body.uaePassToken) {
     // Two shapes, decided by what the token IS rather than by configuration:
     // a signed JWS is verified against a key; Emirates Post's identity-service
@@ -487,7 +488,7 @@ export async function POST(req: NextRequest) {
         if (v.ok) {
           sub = v.identity.sub;
           verifiedEmiratesId = v.identity.emiratesId;
-          verifiedIdentity = { name: v.identity.name, mobile: v.identity.mobileNumber };
+          verifiedIdentity = { name: v.identity.name, mobile: v.identity.mobileNumber, email: v.identity.email };
         } else reason = v.reason;
       }
     }
@@ -499,6 +500,26 @@ export async function POST(req: NextRequest) {
         await markAuthenticated(session.conversationId, sub);
         session.authenticated = true;
         session.userRef = sub;
+      }
+      // THE DETAILS THEY HAVE ALREADY GIVEN EMIRATES POST. Signing in hands us
+      // the mobile and email on their account, and the journey then asked for
+      // both again from someone who had just proved who they were. Seeded into
+      // the case so the summary can SHOW them for confirmation — never
+      // overwriting an answer already given in this conversation.
+      const seed = verifiedIdentity ? contactSeed(session.state, verifiedIdentity) : {};
+      if (Object.keys(seed).length) {
+        try {
+          session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, ...seed } }));
+          await audit({
+            agentId: agent.id,
+            conversationId: session.conversationId,
+            actor: "system",
+            action: "contact_prefilled_from_account",
+            payload: { fields: Object.keys(seed) },
+          });
+        } catch {
+          /* the sign-in has already succeeded; never fail it for a convenience */
+        }
       }
     } else {
       log.warn("host_token_rejected", {

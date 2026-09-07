@@ -76,6 +76,12 @@ export interface EpIdentity {
   sub: string;
   emiratesId?: string;
   mobileNumber?: string;
+  /**
+   * The address Emirates Post already holds. Read defensively: their account
+   * record is not ours to define, and a field arriving under a different name is
+   * an absent email, never a wrong one.
+   */
+  email?: string;
   name?: string;
   /** Emirates Post's own numeric user id. */
   epUserId?: number;
@@ -128,6 +134,9 @@ export async function introspectEmiratesPostToken(
     sub,
     emiratesId: typeof u.emiratesId === "string" ? u.emiratesId : undefined,
     mobileNumber: typeof u.mobileNumber === "string" ? u.mobileNumber : undefined,
+    email: ["email", "emailAddress", "emailId", "userEmail"]
+      .map((k) => (u as Record<string, unknown>)[k])
+      .find((v): v is string => typeof v === "string" && v.includes("@")),
     name: [u.firstNameEN, u.lastNameEN].filter((x) => typeof x === "string" && x).join(" ").trim() || undefined,
     epUserId: typeof u.id === "number" ? u.id : undefined,
   };

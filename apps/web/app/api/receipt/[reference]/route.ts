@@ -157,7 +157,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   .total{display:flex;justify-content:space-between;margin-top:14px;padding:14px 16px;background:#f4f5fb;border-radius:10px;font-size:15px;font-weight:700}
   .foot{padding:14px 24px 20px;font-size:11.5px;color:#5B6478}
   .print{display:block;width:100%;margin:16px 0 0;padding:11px;border:0;border-radius:10px;background:${esc(primary)};color:#fff;font-size:14px;font-weight:600;cursor:pointer}
-  @media print{.print{display:none}body{background:#fff;padding:0}.card{border:none}}
+  /* PRINTED, the header keeps its logo.
+     A browser does not print background colours unless the person ticks
+     "Background graphics", so the blue band goes white — and the logo, which is
+     knocked out to WHITE to sit on that band, disappears with it. The customer
+     got a receipt with a blank rectangle where the sender should be.
+     So print does not depend on the background at all: white band, the logo in
+     its own colours, and a brand rule under it to keep the header a header. */
+  @media print{
+    .print{display:none}
+    body{background:#fff;padding:0}
+    .card{border:none;max-width:none}
+    .head{background:#fff;color:#13132e;border-bottom:2px solid ${esc(primary)};padding-bottom:14px}
+    .head .logo{filter:none}
+    .head h1{color:${esc(primary)}}
+    .head p{opacity:1;color:#5B6478}
+  }
+  /* And where backgrounds ARE printed, keep the colours we chose rather than
+     the browser's approximation of them. */
+  @media print{.total{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style></head><body>
 <div class="card">
   <div class="head">${
