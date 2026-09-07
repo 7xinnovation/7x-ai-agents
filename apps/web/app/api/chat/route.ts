@@ -30,6 +30,7 @@ import { internalIdFilter } from "@/lib/internalIds";
 import { summaryFeeGuard } from "@/lib/summaryFee";
 import { proseTotalGuard } from "@/lib/proseTotal";
 import { shouldOfferReceipt } from "@/lib/receiptFacts";
+import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
@@ -1942,6 +1943,24 @@ export async function POST(req: NextRequest) {
             body.locale === "ar" ? `\n\n[تنزيل الإيصال](${receiptUrl})` : `\n\n[Download your receipt](${receiptUrl})`;
           send({ type: "text", delta: receiptLine });
           finalText += receiptLine;
+        }
+
+        // AND WHERE TO GO WITH A QUESTION. Emirates Post asked for their FAQ to
+        // close a completed PO Box journey: at that point the chat has nothing
+        // left to do for the customer, and they may still have questions nobody
+        // thought to answer. Their agent only — EPGL answers its own.
+        if (
+          agent.definition.tenantSlug === "nxn" &&
+          journeyJustCompleted({
+            submittedThisTurn: Boolean(submittedRef),
+            paymentBefore: session.state.payment,
+            paymentAfter: finalState.payment,
+          }) &&
+          !mentionsFaq(finalText)
+        ) {
+          const line = faqLine(body.locale);
+          send({ type: "text", delta: line });
+          finalText += line;
         }
 
         // Back-office coordination (feedback FB-1391/FB-1392): key-delivery and
