@@ -6,6 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 
+/**
+ * A path on this console, or the console's front page.
+ *
+ * "/admin/inbox" is fine. "https://evil.example" is not, and neither is
+ * "//evil.example" — which a browser reads as a protocol-relative URL to
+ * another host, and which a naive "must start with /" check lets straight
+ * through.
+ */
+export function sameSitePath(next: string | null | undefined): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/admin";
+  return next;
+}
+
 export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,8 +41,11 @@ export function LoginClient({ ssoEnabled }: { ssoEnabled: boolean }) {
         setError(res.status === 429 ? "Too many attempts. Wait a moment and try again." : "Incorrect email or password.");
         return;
       }
-      const params = new URLSearchParams(window.location.search);
-      window.location.href = params.get("next") || "/admin";
+      // `?next=` decides where a successful sign-in lands, and it comes from
+      // the address bar — so it is a path on this console or it is ignored.
+      // Anything else turns our own login page into a way to send someone
+      // somewhere else with the credibility of having just signed in.
+      window.location.assign(sameSitePath(new URLSearchParams(window.location.search).get("next")));
     } catch {
       setError("Something went wrong. Check your connection and try again.");
     } finally {

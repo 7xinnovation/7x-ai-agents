@@ -53,6 +53,48 @@ export function requestOrigin(req: {
 }
 
 /**
+ * Where the sign-in flow is allowed to send the customer afterwards.
+ *
+ * `returnTo` arrives in the query string, is carried through UAE PASS in the
+ * flow cookie, and is redirected to at the end — so left unchecked it is an open
+ * redirect that also hands the destination the conversation id, and, in popup
+ * mode, names the origin postMessage is sent to. Someone could mail a link to
+ * our own sign-in and have a customer arrive on their page mid-flow, already
+ * signed in.
+ *
+ * So a return address is only honoured when it belongs to us or to a site the
+ * agent is configured to be embedded on — the same allowedOrigins list that
+ * decides who may frame the widget. Anything else falls back to the embed on our
+ * own origin, which is where the customer was going anyway.
+ */
+export function safeReturnTo(
+  returnTo: string | null | undefined,
+  origin: string,
+  allowedOrigins: string[] = []
+): string | null {
+  if (!returnTo) return null;
+  let url: URL;
+  try {
+    // Relative paths are ours by definition, and resolving against our own
+    // origin is what makes "//evil.example" fail here rather than later.
+    url = new URL(returnTo, origin);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const permitted = new Set<string>();
+  const add = (v: string | undefined | null) => {
+    if (!v) return;
+    try { permitted.add(new URL(v).origin); } catch { /* not an origin we can use */ }
+  };
+  add(origin);
+  add(process.env.PUBLIC_APP_URL);
+  add(process.env.NEXT_PUBLIC_DIALOG_HOST);
+  for (const o of allowedOrigins) add(o);
+  return permitted.has(url.origin) ? url.toString() : null;
+}
+
+/**
  * The redirect/callback URL sent to UAE PASS. It stays on the SAME origin the
  * customer is on (from requestOrigin), so the flow cookie and the return both
  * work; that exact URL MUST be registered with UAE PASS for this client, or it

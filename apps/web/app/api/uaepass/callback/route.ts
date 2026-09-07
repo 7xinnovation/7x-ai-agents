@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, uaePassMockAllowed, exchangeCode, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMockAllowed, exchangeCode, resolveRedirectUri, requestOrigin, safeReturnTo } from "@/lib/uaepass";
 import { saveSessionToken, markAuthenticated, getOrCreateSession, rememberVerifiedEmiratesId } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
 import { MOCK_PERSONA_SUB, MOCK_PERSONA_NAME } from "@/lib/mockPersona";
@@ -24,7 +24,15 @@ export async function GET(req: NextRequest) {
   // The code was issued to the tenant's OWN UAE PASS client at login, so it can
   // only be redeemed with that tenant's credentials. Reading them from the flow
   // cookie's agent keeps both halves of the round trip on the same client.
-  const flowTenant = flow.agent ? (await getAgentBySlug(flow.agent))?.definition.tenantSlug : undefined;
+  const flowAgent = flow.agent ? await getAgentBySlug(flow.agent) : undefined;
+  const flowTenant = flowAgent?.definition.tenantSlug;
+  // The cookie was written by our own login route, which already refused an
+  // address we do not trust — but a cookie is client-side storage, so the
+  // destination is checked again here rather than assumed. Anything that does
+  // not pass is treated as absent, and the customer lands on the embed.
+  const home = `${requestOrigin(req)}/embed/${flow.agent ?? ""}`;
+  const returnTo =
+    safeReturnTo(flow.returnTo, requestOrigin(req), flowAgent?.definition.allowedOrigins ?? []) ?? home;
   if (!uaePassConfigured(flowTenant)) return NextResponse.json({ error: "uaepass_not_configured" }, { status: 501 });
 
   const back = (params: Record<string, string>, cid: string | undefined = flow.cid) => {
@@ -35,7 +43,7 @@ export async function GET(req: NextRequest) {
       // postMessage must target the OPENER's origin (the embed), not this request's
       // internal origin (localhost behind the proxy) or the message is dropped.
       let targetOrigin = requestOrigin(req);
-      try { if (flow.returnTo) targetOrigin = new URL(flow.returnTo).origin; } catch { /* keep default */ }
+      try { targetOrigin = new URL(returnTo).origin; } catch { /* keep default */ }
       const origin = JSON.stringify(targetOrigin);
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in complete</title></head>
 <body style="font-family:-apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#5b6478">
@@ -46,7 +54,7 @@ export async function GET(req: NextRequest) {
       res.cookies.delete("uaepass_flow");
       return res;
     }
-    const url = new URL(flow.returnTo || `${requestOrigin(req)}/embed/${flow.agent ?? ""}`);
+    const url = new URL(returnTo);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     if (cid) url.searchParams.set("cid", cid);
     const res = NextResponse.redirect(url.toString());

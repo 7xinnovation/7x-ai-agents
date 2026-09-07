@@ -96,6 +96,14 @@ export function openExternal(
   url: string,
   opts: { name: string; width?: number; height?: number; kind?: string } = { name: "dlg-external" }
 ): ExternalWindow | null {
+  // Only ever http(s), and never javascript: or data: — this opens a window on
+  // whatever it is handed, including inside the native app's web view.
+  try {
+    const u = new URL(url, window.location.href);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  } catch {
+    return null;
+  }
   if (isNative()) {
     const handle = { closed: false, close() { this.closed = true; } };
     open.add(handle);

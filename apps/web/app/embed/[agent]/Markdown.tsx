@@ -183,6 +183,31 @@ function ChatButtons({ labels, onSelect }: { labels: string[]; onSelect: (text: 
  * — but the customer should still get a button that opens a popup over the chat,
  * not a bare link that throws them into a new tab and loses the conversation.
  */
+/**
+ * The hosts a pay button may open.
+ *
+ * The URL inside a ```pay block is rewritten server-side to the one the payment
+ * gateway issued for THIS order (lib/payFence), so in the flows that take money
+ * it is never the model's to choose. This is the second lock: a button that
+ * navigates the customer somewhere is worth constraining at the point it
+ * navigates, not only at the point it was written.
+ *
+ * A new gateway goes here. Refusing to open an unknown host is the failure we
+ * want — a payment page that does not open is recoverable, a customer sent to
+ * someone else's is not.
+ */
+const PAY_HOSTS = ["ngenius-payments.com", "network.ae"];
+
+export function isPaymentUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:") return false;
+    return PAY_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
+}
+
 function ChatPay({
   url,
   amount,
@@ -261,10 +286,13 @@ function ChatPay({
   );
 
   const open = () => {
+    // Checked again here: everything below navigates the customer away, and a
+    // URL that is not a payment page has no business doing that.
+    if (!isPaymentUrl(url)) return;
     const opened = openExternal(url, { name: "dlg-extpay", kind: "payment" });
     // Nothing opened: a same-tab navigation still gets them there, which beats a
     // button that silently does nothing.
-    if (!opened) window.location.href = url;
+    if (!opened) window.location.assign(url);
     else {
       win.current = opened;
       setOpened(true);
@@ -833,7 +861,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         const external = (u: string) => {
           try { return new URL(u).origin !== window.location.origin; } catch { return false; }
         };
-        if (purl && /^https:\/\//i.test(purl) && external(purl))
+        if (purl && external(purl) && isPaymentUrl(purl))
           nodes.push(<ChatPay key={k++} url={purl} amount={get("amount")} label={get("label")} onSelect={onSelect} />);
         continue;
       }

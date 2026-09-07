@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uaePassConfigured, uaePassMock, uaePassMockAllowed, buildAuthorizeUrl, resolveRedirectUri, requestOrigin } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassMock, uaePassMockAllowed, buildAuthorizeUrl, resolveRedirectUri, requestOrigin, safeReturnTo } from "@/lib/uaepass";
 import { getAgentBySlug } from "@/lib/agents";
 
 export const runtime = "nodejs";
@@ -16,14 +16,20 @@ export async function GET(req: NextRequest) {
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
   // Each tenant registers its own UAE PASS client, so which credentials apply
   // depends on which agent is signing in — see cfg() in lib/uaepass.
-  const tenant = agent ? (await getAgentBySlug(agent))?.definition.tenantSlug : undefined;
+  const known = agent ? await getAgentBySlug(agent) : undefined;
+  const tenant = known?.definition.tenantSlug;
   if (!uaePassConfigured(tenant)) {
     return NextResponse.json(
       { error: "uaepass_not_configured", hint: `Set UAEPASS_CLIENT_ID/SECRET/BASE${tenant ? ` or the ${tenant.toUpperCase()}-scoped variants` : ""}.` },
       { status: 501 }
     );
   }
-  const returnTo = req.nextUrl.searchParams.get("returnTo") || `${origin}/embed/${agent}`;
+  // Checked HERE rather than at the callback, so a return address we would not
+  // honour is refused before the customer is sent to UAE PASS at all — and so
+  // the address that travels in the flow cookie is already one we trust.
+  const returnTo =
+    safeReturnTo(req.nextUrl.searchParams.get("returnTo"), origin, known?.definition.allowedOrigins ?? []) ||
+    `${origin}/embed/${agent}`;
   // Popup mode: the embed opened this flow in a popup window (it can't redirect
   // its own iframe to UAE PASS — frame-ancestors forbids it). The callback then
   // notifies the opener via postMessage and closes instead of redirecting.

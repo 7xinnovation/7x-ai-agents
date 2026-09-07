@@ -51,6 +51,18 @@ const LOC_STR = {
   },
 } as const;
 
+/**
+ * A coordinate, as a number and nothing else.
+ *
+ * These are interpolated straight into a URL path, which is the one part of that
+ * string that is not a fixed constant. Six decimal places is roughly a tenth of
+ * a metre — more than a doorstep needs.
+ */
+const coord = (n: unknown): string => {
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toFixed(6) : "0";
+};
+
 export function ChatLocate({
   label, locale = "en", onSelect,
 }: {
@@ -83,7 +95,11 @@ export function ChatLocate({
     if (!tokenRef.current) return;
     try {
       const r = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${p.lng},${p.lat}.json?access_token=${encodeURIComponent(tokenRef.current)}&limit=1&language=${locale === "ar" ? "ar" : "en"}`
+        // Coordinates go in as numbers, formatted here rather than interpolated
+        // as whatever they happen to be — the path segment is the one part of
+        // this URL that is not a fixed string.
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${coord(p.lng)},${coord(p.lat)}.json` +
+          `?access_token=${encodeURIComponent(tokenRef.current)}&limit=1&language=${locale === "ar" ? "ar" : "en"}`
       );
       const j = (await r.json()) as { features?: { place_name?: string }[] };
       setAddress(j.features?.[0]?.place_name ?? "");
@@ -124,7 +140,7 @@ export function ChatLocate({
       const r = await fetch(
         `https://api.mapbox.com/search/searchbox/v1/suggest?q=${encodeURIComponent(q)}` +
           `&access_token=${encodeURIComponent(token)}&session_token=${encodeURIComponent(sessionRef.current)}` +
-          `&country=ae&limit=5&proximity=${lng},${lat}&language=${lang}`
+          `&country=ae&limit=5&proximity=${coord(lng)},${coord(lat)}&language=${lang}`
       );
       const j = (await r.json()) as {
         suggestions?: { name?: string; place_formatted?: string; full_address?: string; mapbox_id?: string }[];
@@ -140,7 +156,7 @@ export function ChatLocate({
       // stays as the fallback rather than the first choice.
       const r2 = await fetch(
         `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json` +
-          `?access_token=${encodeURIComponent(token)}&country=ae&limit=5&proximity=${lng},${lat}&language=${lang}`
+          `?access_token=${encodeURIComponent(token)}&country=ae&limit=5&proximity=${coord(lng)},${coord(lat)}&language=${lang}`
       );
       const j2 = (await r2.json()) as { features?: { place_name?: string; center?: [number, number] }[] };
       setResults(

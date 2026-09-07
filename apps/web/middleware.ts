@@ -90,26 +90,54 @@ async function embedCsp(req: NextRequest) {
   const slug = req.nextUrl.pathname.split("/")[2] ?? "";
   let ancestors = "*";
   let diag = "not-attempted";
-  try {
-    // Behind a reverse proxy (Azure App Service, Railway) req.nextUrl.origin is
-    // the INTERNAL origin, so fetching our own API through it fails and the catch
-    // below quietly served frame-ancestors * — an agent with configured origins
-    // was embeddable from anywhere, which is the opposite of what setting them
-    // means. Derive the public origin from the proxy's forwarded headers, the
-    // same way lib/uaepass does for the sign-in round trip.
-    const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || req.nextUrl.protocol.replace(/:$/, "");
-    const host = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || req.headers.get("host");
-    const base = host ? `${proto}://${host}` : req.nextUrl.origin;
-    const r = await fetch(new URL(`/api/agents/${encodeURIComponent(slug)}`, base));
-    diag = `base=${base} status=${r.status}`;
-    if (r.ok) {
+  // Behind a reverse proxy (Azure App Service, Railway) req.nextUrl.origin is
+  // the INTERNAL origin, so fetching our own API through it fails and the catch
+  // below quietly served frame-ancestors * — an agent with configured origins was
+  // embeddable from anywhere, which is the opposite of what setting them means.
+  //
+  // The origin is NOT taken from x-forwarded-host alone. That header is written
+  // by whoever is in front of us and anyone can put one on a request; this line
+  // makes the server fetch a URL, so an unchecked header here is a way to make it
+  // fetch someone else's. Only three origins are ever tried: the one this
+  // deployment is configured as, the host the request actually arrived on, and
+  // our own internal origin. They are tried in turn because a misconfigured
+  // public URL must not leave us serving frame-ancestors * — the failure this
+  // whole function exists to prevent.
+  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || req.nextUrl.protocol.replace(/:$/, "");
+  const forwarded = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = req.headers.get("host")?.trim();
+  const pinned = process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_DIALOG_HOST;
+  const candidates: string[] = [];
+  const addBase = (v: string | undefined | null) => {
+    if (!v) return;
+    try {
+      const o = new URL(v).origin;
+      if (!candidates.includes(o)) candidates.push(o);
+    } catch {
+      /* not a usable origin */
+    }
+  };
+  if (pinned && /^https?:\/\//i.test(pinned)) addBase(pinned);
+  // The forwarded host is trusted only when it agrees with the host the request
+  // arrived on, which is what makes it a spelling of the same place rather than
+  // a destination someone chose for us.
+  if (forwarded && (!host || forwarded === host)) addBase(`${proto}://${forwarded}`);
+  if (host) addBase(`${proto}://${host}`);
+  addBase(req.nextUrl.origin);
+
+  for (const base of candidates) {
+    try {
+      const r = await fetch(new URL(`/api/agents/${encodeURIComponent(slug)}`, base));
+      diag = `base=${base} status=${r.status}`;
+      if (!r.ok) continue;
       const cfg = await r.json();
       const origins: string[] = Array.isArray(cfg.allowedOrigins) ? cfg.allowedOrigins : [];
       diag += ` origins=${origins.length}`;
       if (origins.length) ancestors = ["'self'", ...origins].join(" ");
+      break;
+    } catch (e) {
+      diag = `fetch-failed base=${base}: ${e instanceof Error ? e.message : "unknown"}`;
     }
-  } catch (e) {
-    diag = `fetch-failed: ${e instanceof Error ? e.message : "unknown"}`;
   }
   const res = NextResponse.next();
   res.headers.set("Content-Security-Policy", `frame-ancestors ${ancestors}`);

@@ -1,4 +1,5 @@
 import { load as yamlLoad } from "js-yaml";
+import { safeFetch } from "./outboundUrl";
 
 /**
  * Minimal OpenAPI 3 / Swagger 2 parser. Fetches a spec and converts each
@@ -222,7 +223,10 @@ function conventionUrls(specUrl: string): string[] {
 }
 
 async function loadSpec(specUrl: string): Promise<{ spec: any; resolvedUrl: string }> {
-  const res = await fetch(specUrl, { headers: { Accept: "application/json, application/yaml;q=0.9, */*;q=0.5" } });
+  // Fetched on an admin's instruction, so the URL is checked before it is
+  // reached: the address that matters is 169.254.169.254, which answers only
+  // from inside the host and hands out its credentials. See lib/outboundUrl.
+  const res = await safeFetch(specUrl, { headers: { Accept: "application/json, application/yaml;q=0.9, */*;q=0.5" } });
   if (!res.ok) throw new Error(`Could not fetch the URL (HTTP ${res.status}).`);
   const text = await res.text();
   const direct = tryJson(text);
@@ -239,7 +243,7 @@ async function loadSpec(specUrl: string): Promise<{ spec: any; resolvedUrl: stri
     const u = resolve(s, specUrl);
     if (!u) continue;
     try {
-      const r = await fetch(u);
+      const r = await safeFetch(u);
       if (r.ok) refsIn(await r.text(), u).forEach((c) => candidates.add(c));
     } catch {
       /* ignore */
@@ -251,7 +255,7 @@ async function loadSpec(specUrl: string): Promise<{ spec: any; resolvedUrl: stri
   for (const cand of candidates) {
     if (cand === specUrl || n++ >= 14) continue;
     try {
-      const r = await fetch(cand, { headers: { Accept: "application/json, */*;q=0.5" } });
+      const r = await safeFetch(cand, { headers: { Accept: "application/json, */*;q=0.5" } });
       if (!r.ok) continue;
       const j = tryJson(await r.text());
       if (isSpec(j)) return { spec: j, resolvedUrl: cand };
