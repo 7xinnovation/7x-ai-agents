@@ -857,6 +857,14 @@ export async function buildApiTools(
   // anniversaryExpiry) and the model kept substituting 31 December, so the date
   // is corrected here rather than left to prompting.
   let knownExpiry: { box: string; iso: string; bundle?: string } | null = null;
+  /**
+   * Whether the box being managed is Personal or Corporate.
+   *
+   * A trade licence belongs to a CORPORATE box. The manage menu offered "Link
+   * trade license" on a personal one because the menu was the same list every
+   * time, whatever the box was.
+   */
+  let knownRentType: "Personal" | "Corporate" | null = null;
 
   /**
    * Per-term prices for each bundle, learned when the bundle list is read.
@@ -947,6 +955,8 @@ export async function buildApiTools(
     // The bundle id is quoted straight after it in poBoxSubscriptionDetails and
     // is what pricing must be asked for when the bundle is not being changed.
     const bundle = r.result.match(/"bundle"\s*:\s*"([^"]+)"/)?.[1];
+    const rent = r.result.match(/"rentType"\s*:\s*"([^"]+)"/)?.[1];
+    if (rent) knownRentType = /^c/i.test(rent) ? "Corporate" : "Personal";
     knownExpiry = { box: box ?? "", iso, bundle };
   };
 
@@ -993,6 +1003,28 @@ export async function buildApiTools(
     // Renewing is deliberately not gated: Emirates Post's own guest flow renews
     // any box from its number and emirate, and paying to extend someone's
     // subscription takes nothing from them.
+    // A TRADE LICENCE BELONGS TO A CORPORATE BOX.
+    //
+    // The manage menu offered "Link trade license" on a personal box because the
+    // menu was the same list every time. Tijari is the corporate licence link;
+    // on a personal subscription there is nothing for it to attach to, and the
+    // customer is sent down a path that cannot finish.
+    if (/tijari/i.test(entry.op.path) && knownRentType === "Personal") {
+      void audit({
+        agentId,
+        conversationId: opts.conversationId,
+        actor: "system",
+        action: "tijari_on_personal_box_refused",
+        payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: input ?? {},
+          response: "A trade licence link was attempted on a Personal box." },
+      }).catch(() => {});
+      return {
+        result:
+          "REFUSED: this is a PERSONAL PO Box, and a trade licence belongs to a CORPORATE one. There is nothing on a personal subscription for a licence to attach to. Tell the customer plainly that linking a trade licence applies to corporate boxes, do NOT offer it again for this box, and do not describe this as an error — it is simply not one of the things this box can do.",
+        isError: true,
+      };
+    }
+
     if (isManagementPath(entry.op.path, entry.op.method)) {
       const asked = boxNumberIn(input);
       const owned = opts.ownedBoxes ? await opts.ownedBoxes().catch(() => null) : null;
@@ -2299,6 +2331,25 @@ export async function buildApiTools(
       }
     }
 
+    // WHAT THIS PARTICULAR BOX CAN DO.
+    //
+    // The manage menu was a fixed list — add an agent, remove an agent,
+    // auto-renewal, link a trade licence, link an existing box — offered
+    // whatever the box was. A personal MyHome box was offered a trade licence
+    // link, which belongs to a corporate subscription and cannot complete.
+    if (!res.isError && /renewal_details/i.test(toolName) && knownRentType) {
+      const personal = knownRentType === "Personal";
+      res = {
+        ...res,
+        result:
+          res.result +
+          `\n\nTHIS IS A ${knownRentType.toUpperCase()} PO BOX, and the manage options are not the same for both.` +
+          (personal
+            ? ` Offer ONLY: renew it, add or remove an authorised agent, auto-renewal, and linking another box to the account.` +
+              ` Do NOT offer to link a trade licence — that belongs to a corporate subscription and there is nothing on a personal box for it to attach to. Do not list it and then explain why it is unavailable; simply do not offer it.`
+            : ` A trade licence link (Tijari) applies here as well as the personal options: renewal, authorised agents, auto-renewal, and linking another box.`),
+      };
+    }
     if (!res.isError && /renewal_details/i.test(toolName)) {
       try {
         const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));

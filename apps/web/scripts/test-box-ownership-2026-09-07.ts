@@ -82,5 +82,16 @@ check("ownership unknown REFUSES", !mayManage(null, "450735").ok);
 check("...and asks them to sign in rather than blaming the system", /sign in with UAE PASS/.test(mayManage(null, "450735").reason ?? ""));
 check("no box number at all REFUSES", !mayManage(mine, undefined).ok);
 
+// ── a trade licence belongs to a corporate box ──────────────────────────────
+// Reported: a PERSONAL MyHome box was offered "Link trade license". The Tijari
+// paths are management, so they pass the ownership gate too — but on a personal
+// box they are refused before ownership even comes into it.
+check("SaveTijari is a management path", isManagementPath("/api/Renewal/SaveTijari", "POST"));
+check("ProcessPaymentTijari is too", isManagementPath("/api/Renewal/ProcessPaymentTijari", "POST"));
+check(
+  "...so a stranger's box is refused for it as well",
+  !mayManage(["450735"], "999999").ok
+);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
