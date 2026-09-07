@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uaePassConfigured, uaePassMockAllowed, exchangeCode, resolveRedirectUri, requestOrigin, safeReturnTo } from "@/lib/uaepass";
-import { saveSessionToken, markAuthenticated, getOrCreateSession, rememberVerifiedEmiratesId } from "@/lib/conversation";
+import { saveSessionToken, markAuthenticated, getOrCreateSession, rememberVerifiedEmiratesId, mutateCase } from "@/lib/conversation";
+import { contactSeed } from "@/lib/knownContact";
 import { getAgentBySlug } from "@/lib/agents";
 import { MOCK_PERSONA_SUB, MOCK_PERSONA_NAME } from "@/lib/mockPersona";
 import { log } from "@/lib/logger";
@@ -106,6 +107,19 @@ export async function GET(req: NextRequest) {
       // The Emirates ID UAE PASS just verified. EPGL's licence registry accepts
       // nothing else, so a sign-in that drops it leaves the lookup with no input.
       if (caseId && id.emiratesId) await rememberVerifiedEmiratesId(caseId, id.emiratesId);
+      // The mobile and email on their profile, so the journey can show them for
+      // confirmation instead of asking someone who has just signed in to type
+      // out what we were handed. Never overwrites an answer already given.
+      if (caseId && (id.mobile || id.email)) {
+        try {
+          await mutateCase(caseId, (st) => {
+            const seed = contactSeed(st, { mobile: id.mobile, email: id.email });
+            return Object.keys(seed).length ? { ...st, data: { ...st.data, ...seed } } : st;
+          });
+        } catch {
+          /* the sign-in has already succeeded; never fail it for a convenience */
+        }
+      }
     }
     return back({ uaepass: "ok" }, cid);
   } catch (e) {

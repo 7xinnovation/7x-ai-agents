@@ -207,6 +207,15 @@ export interface UaePassIdentity {
    * visitor-level account, for instance -- which is a normal answer, not a fault.
    */
   emiratesId?: string;
+  /**
+   * The mobile and email on their UAE PASS profile.
+   *
+   * Read defensively — UAE PASS spells these differently between tenants and a
+   * missing one is a normal profile, not a fault. They are used to SHOW the
+   * customer what we already know so they can confirm rather than retype it.
+   */
+  mobile?: string;
+  email?: string;
 }
 
 /** 15 digits, however UAE PASS punctuated them. */
@@ -232,8 +241,14 @@ export async function exchangeCode(code: string, redirectUri: string, tenant?: s
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   });
   if (!userRes.ok) throw new Error(`UAE PASS userinfo failed: ${userRes.status}`);
-  const u = (await userRes.json()) as { sub?: string; uuid?: string; idn?: string; fullnameEN?: string; firstnameEN?: string; lastnameEN?: string };
+  const u = (await userRes.json()) as Record<string, unknown> & {
+    sub?: string; uuid?: string; idn?: string; fullnameEN?: string; firstnameEN?: string; lastnameEN?: string;
+  };
+  const first = (...keys: string[]): string | undefined =>
+    keys.map((k) => u[k]).find((v): v is string => typeof v === "string" && v.trim() !== "")?.trim();
   return {
+    mobile: first("mobile", "mobileNumber", "phone_number", "phoneNumber"),
+    email: first("email", "emailAddress", "mail"),
     // UAE PASS returns the Emirates ID as `idn`. It was only ever read as a
     // FALLBACK for the subject and then discarded -- which left EPGL's licence
     // lookup with nothing to look up, since an Emirates ID is its only input.
