@@ -79,5 +79,17 @@ check("the size is written with important", /setProperty\(prop, `\$\{px\}px`, "i
 check("there is a diagnose() for when it still does not fit", /dlg\.diagnose = diagnose/.test(src));
 check("...which names a transformed ancestor breaking position:fixed", /fixedPositioningBrokenBy/.test(src));
 
+console.log("\nA clipped panel becomes a usable one");
+check("there is a visibility enforcement", /function enforceVisible\(\)/.test(src));
+check("it triggers on any edge outside the viewport", /r\.top < 0 \|\| r\.left < 0 \|\| r\.bottom > window\.innerHeight \+ 4 \|\| r\.right > window\.innerWidth \+ 4/.test(src));
+check("...and not on a panel that fits", /if \(!outside\) return;/.test(src));
+check("...nor before layout has happened", /if \(!r\.width \|\| !r\.height\) return;/.test(src));
+check("it goes full-screen against the WINDOW", /\["position", "fixed"\][\s\S]{0,200}?\["height", "100dvh"\]/.test(src));
+check("written important, so host CSS cannot undo it", /frame\.style\.setProperty\(prop, value, "important"\)/.test(src));
+check("it measures after layout, not before", /requestAnimationFrame\(enforceVisible\)/.test(src));
+check("it says so once, rather than silently", /switched to full screen/.test(src));
+check("full-screen mode and small screens are left to the CSS", /if \(mode !== "widget" \|\| window\.matchMedia\(COMPACT\)\.matches\) return;/.test(src));
+check("diagnose still reports the likely culprit", /fixedPositioningBrokenBy/.test(src));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

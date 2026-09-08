@@ -56,7 +56,7 @@ interface BootConfig {
 
 const STYLE_ID = "dialog-embed-style";
 /** Bumped whenever the loader changes, so a host page can say what it is running. */
-const VERSION = "2026-09-08d";
+const VERSION = "2026-09-08e";
 
 /** The locales the app actually has. Anything else falls back to English. */
 const LOCALES = ["en", "ar"] as const;
@@ -465,10 +465,13 @@ function boot() {
     launcher.style.display = next === "full" ? "none" : "flex";
     document.documentElement.style.overflow = next === "full" ? "hidden" : "";
     fit();
+    // Measured after the browser has laid the new mode out, not before.
+    requestAnimationFrame(enforceVisible);
   }
 
-  addEventListener("resize", fit);
-  window.visualViewport?.addEventListener("resize", fit);
+  const refit = () => { fit(); requestAnimationFrame(enforceVisible); };
+  addEventListener("resize", refit);
+  window.visualViewport?.addEventListener("resize", refit);
 
   /**
    * KEEP the size, rather than setting it once and hoping.
@@ -500,8 +503,49 @@ function boot() {
     });
     ro.observe(frame);
   }
+  /**
+   * IF THE PANEL DOES NOT FIT, MAKE IT FILL THE SCREEN.
+   *
+   * Three rounds of this now. The panel is sized against the window and written
+   * inline with `important`, and on emiratespost.ae it still comes out clipped
+   * with its header above the top of the viewport -- so something on that page
+   * is deciding the geometry in a way our stylesheet cannot reach. The usual
+   * suspect is an ancestor with a transform, filter or perspective, which makes
+   * the browser resolve position:fixed against THAT element instead of the
+   * window; diagnose() names it if so.
+   *
+   * Whatever the cause, a clipped panel is unusable and a full-screen one is
+   * not. So rather than keep insisting on a size the page will not give us, we
+   * check what we actually got: if the frame has landed outside the viewport on
+   * any edge, it goes full-screen, which needs no cooperation from the host --
+   * inset 0 against the window, written inline and important.
+   *
+   * Deliberately narrow. Being a few pixels off is not this; being off the edge
+   * of the screen is. A panel that fits is never touched.
+   */
+  let enforced = false;
+  function enforceVisible() {
+    if (mode !== "widget" || window.matchMedia(COMPACT).matches) return;
+    const r = frame.getBoundingClientRect();
+    if (!r.width || !r.height) return; // not laid out yet
+    const outside = r.top < 0 || r.left < 0 || r.bottom > window.innerHeight + 4 || r.right > window.innerWidth + 4;
+    if (!outside) return;
+    for (const [prop, value] of [
+      ["position", "fixed"], ["top", "0px"], ["left", "0px"], ["right", "0px"], ["bottom", "0px"],
+      ["width", "100vw"], ["height", "100dvh"], ["max-width", "none"], ["max-height", "none"], ["border-radius", "0"],
+    ] as const) {
+      frame.style.setProperty(prop, value, "important");
+    }
+    // Say so once, so this shows up as a diagnosis rather than as a mystery.
+    if (!enforced) {
+      enforced = true;
+      // eslint-disable-next-line no-console
+      console.warn("[dialog] panel was clipped by the page; switched to full screen. window.Dialog.diagnose() for details.");
+    }
+  }
+
   // The app inside can change the layout as it loads; size it again once it has.
-  frame.addEventListener("load", fit);
+  frame.addEventListener("load", () => { fit(); requestAnimationFrame(enforceVisible); });
   fit();
 
   launcher.addEventListener("click", () => setMode(mode === "closed" ? "widget" : "closed"));
