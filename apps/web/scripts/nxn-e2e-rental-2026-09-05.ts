@@ -8,7 +8,7 @@
  * order it leaves behind is real and unpaid, so run it on staging only.
  *
  * Run from apps/web:
- *   npx tsx scripts/nxn-e2e-rental-2026-09-05.ts --host <url> --token <ep jwt> [--journey personal|corporate]
+ *   npx tsx scripts/nxn-e2e-rental-2026-09-05.ts --host <url> --token <ep jwt> [--branch <name>] [--journey personal|corporate]
  */
 export {}; // a module, so its locals do not collide with the other scripts
 
@@ -24,6 +24,15 @@ const BUNDLE = cliArg("--bundle") ?? "MyBox";
 const KEY_COURIER = BUNDLE.toLowerCase().startsWith("mybox");
 /** Walk the add-an-agent path too, which is where today's price bugs were. */
 const WITH_AGENT = process.argv.includes("--agent");
+/**
+ * Which branch to rent at.
+ *
+ * Hardcoded to Al Barsha, which is fine on staging and useless on production:
+ * a branch with no free boxes ends the walk at the box list, and every later
+ * check then fails for a reason that has nothing to do with what is being
+ * tested. Pick one that actually has stock in the environment being driven.
+ */
+const BRANCH = cliArg("--branch") ?? "Al Barsha Post Office";
 const TOKEN = cliArg("--token");
 if (!HOST) throw new Error("--host <https://…> is required");
 if (!TOKEN) throw new Error("--token <the customer's Emirates Post session jwt> is required");
@@ -113,7 +122,7 @@ const REPLIES: { when: RegExp; say: string; once?: boolean }[] = [
   { when: /```\s*toggles/i, say: "Save my card for future payments: Yes. Renew my box automatically next year: Yes. I accept the Terms and Conditions: Yes. Proceed to payment." },
   { when: /which plan|bundle|mybox/i, say: `${BUNDLE} please.`, once: true },
   { when: /which emirate|emirate of the/i, say: "Dubai.", once: true },
-  { when: /branch|post office/i, say: "Al Barsha Post Office.", once: true },
+  { when: /branch|post office/i, say: `${BRANCH}.`, once: true },
   { when: /which number|box number|pick (a|another) number|available box|choose (a|another) number/i, say: "__BOX__", once: true },
   { when: /how long|duration|rental period/i, say: cliArg("--years") ? `${cliArg("--years")} Years.` : "2 Years.", once: true },
   { when: /authoris?ed agent|add an agent/i, say: WITH_AGENT ? "Yes, add an agent." : "No agent, thank you.", once: true },

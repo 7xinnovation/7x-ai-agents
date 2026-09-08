@@ -295,18 +295,31 @@ function recallExpiryDates(conversationId: string | undefined): Map<string, stri
  *
  * The branch list carries both, so it is read from there instead.
  */
-const branchDirectory = new Map<string, { at: number; byName: Record<string, string> }>();
+const branchDirectory = new Map<string, { at: number; byName: Record<string, string>; byId: Record<string, string> }>();
 
 function rememberBranches(conversationId: string | undefined, rows: { officeId?: unknown; nameEn?: unknown }[]) {
   if (!conversationId || !rows.length) return;
-  const cur = branchDirectory.get(conversationId)?.byName ?? {};
+  const prev = branchDirectory.get(conversationId);
+  const cur = prev?.byName ?? {};
+  const ids = prev?.byId ?? {};
   for (const r of rows) {
     const id = String(r.officeId ?? "").trim();
     const name = String(r.nameEn ?? "").trim();
-    if (id && name) cur[name.toLowerCase()] = id;
+    if (id && name) {
+      cur[name.toLowerCase()] = id;
+      ids[id] = name;
+    }
   }
   if (branchDirectory.size > 500) for (const [k, v] of branchDirectory) if (Date.now() - v.at > HALL_TTL_MS) branchDirectory.delete(k);
-  branchDirectory.set(conversationId, { at: Date.now(), byName: cur });
+  branchDirectory.set(conversationId, { at: Date.now(), byName: cur, byId: ids });
+}
+
+/** The branches this conversation was actually shown, as officeId -> name. */
+function branchesShown(conversationId: string | undefined): Record<string, string> {
+  if (!conversationId) return {};
+  const hit = branchDirectory.get(conversationId);
+  if (!hit || Date.now() - hit.at > HALL_TTL_MS) return {};
+  return hit.byId;
 }
 
 /** The officeId for a branch the customer named, however they cased it. */
@@ -1974,6 +1987,54 @@ export async function buildApiTools(
           inp.LocationId = emirate;
           delete inp.locationId;
           input = inp;
+        }
+      }
+
+      // A BRANCH THAT WAS NEVER ON THE LIST.
+      //
+      // For MyBox the LocationId is an officeId, and it has to be one of the
+      // officeIds the branch list actually returned. Production, 8 September, in
+      // three separate conversations: Dubai listed 201 and 202, and the model
+      // asked for boxes at 212, at 209 and — having counted down the list rather
+      // than read it — at 1. Every one of those returns `{"payload":[]}`, which
+      // is indistinguishable from a branch with nothing free, so the customer was
+      // told their box had just been taken and the rental could go no further.
+      //
+      // The list is in hand, so this does not need to be guessed at. Resolve the
+      // branch the customer actually chose; failing that, refuse rather than ask
+      // Emirates Post a question about a branch nobody mentioned, because an
+      // empty answer to the wrong question reads exactly like bad news.
+      const known = branchesShown(opts.conversationId);
+      const valid = Object.keys(known);
+      if (!/^MYHOME/.test(bundle) && loc && valid.length && !valid.includes(loc)) {
+        const chosen = officeIdForBranch(opts.conversationId, opts.rentalSaveFacts?.().branch);
+        if (chosen && valid.includes(chosen)) {
+          void audit({
+            agentId,
+            conversationId: opts.conversationId,
+            actor: "system",
+            action: "integration_input_corrected",
+            payload: { tool: toolName, field: "LocationId", was: loc, now: chosen, reason: "not a branch in this conversation's list" },
+          }).catch(() => {});
+          inp.LocationId = chosen;
+          delete inp.locationId;
+          input = inp;
+        } else {
+          void audit({
+            agentId,
+            conversationId: opts.conversationId,
+            actor: "system",
+            action: "integration_call_failed",
+            payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: input ?? {}, response: `REFUSED LOCALLY: LocationId ${loc} is not a branch in this emirate's list` },
+          }).catch(() => {});
+          return {
+            result:
+              `LocationId ${loc} is not one of the branches in this emirate. It was not in the list you were given, so asking for its boxes returns an empty list that means nothing — it does NOT mean the customer's box was taken, and you must not tell them it was. ` +
+              `Use the officeId from the branch list, exactly as it appears there — never the position of a branch in the list, and never an id you remember from elsewhere. ` +
+              `The branches in this conversation are: ${valid.map((id) => `${id} = ${known[id]}`).join("; ")}. ` +
+              `Call this again with the officeId of the branch the customer chose.`,
+            isError: true,
+          };
         }
       }
     }
