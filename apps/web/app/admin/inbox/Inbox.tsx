@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Paperclip, SendHorizontal, Sparkles, ExternalLink, Lock, ArrowLeft } from "lucide-react";
+import { Search, Paperclip, SendHorizontal, Sparkles, ExternalLink, Lock, ArrowLeft, ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +28,18 @@ const day = (d: string) => {
 export function Inbox({ initial }: { initial: Item[] }) {
   const [items] = useState<Item[]>(initial);
   const [q, setQ] = useState("");
+  /**
+   * Which agent's conversations to show.
+   *
+   * The inbox is one list across every agent, and with two of them live it reads
+   * as one stream of unrelated work — an EPGL licence application between two PO
+   * Box rentals. The search box could be typed into to narrow it, but only if you
+   * knew the agent's name and thought to.
+   *
+   * The list is what is on the page, so this filters what the page already has
+   * rather than fetching again.
+   */
+  const [agentFilter, setAgentFilter] = useState("");
   const [selected, setSelected] = useState<string | null>(initial[0]?.id ?? null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -46,7 +58,15 @@ export function Inbox({ initial }: { initial: Item[] }) {
   useEffect(() => { if (selected) void load(selected); }, [selected, load]);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [detail]);
 
-  const filtered = items.filter((i) => `${i.agentName} ${i.lastMessage}`.toLowerCase().includes(q.toLowerCase()));
+  /** Every agent that actually has a conversation here, in name order. */
+  const agentsInList = [...new Map(items.filter((i) => i.agentSlug).map((i) => [i.agentSlug!, i.agentName ?? i.agentSlug!])).entries()].sort(
+    (a, b) => a[1].localeCompare(b[1])
+  );
+  const filtered = items.filter(
+    (i) =>
+      (!agentFilter || i.agentSlug === agentFilter) &&
+      `${i.agentName} ${i.lastMessage}`.toLowerCase().includes(q.toLowerCase())
+  );
   const a = detail?.agent;
   const customer = detail?.authenticated ? detail?.userRef || "Authenticated customer" : "Guest";
 
@@ -57,13 +77,41 @@ export function Inbox({ initial }: { initial: Item[] }) {
       <div className={cn("w-full shrink-0 flex-col border-r border-[var(--color-line)] md:flex md:w-[310px]", selected ? "hidden md:flex" : "flex")}>
         <div className="flex items-center justify-between px-4 pt-5 pb-3">
           <h1 className="text-[20px] font-bold tracking-tight">Inbox</h1>
-          <Badge tone="brand">{items.length}</Badge>
+          {/* The count follows the filter: "12" beside a list of three is the
+              header contradicting the page. */}
+          <Badge tone="brand">{filtered.length}</Badge>
         </div>
-        <div className="px-3 pb-3">
+        <div className="flex flex-col gap-2 px-3 pb-3">
           <div className="flex h-9 items-center gap-2 rounded-lg border border-[#d0d5dd] bg-surface px-3 shadow-[var(--shadow-xs)] focus-within:border-[var(--color-brand)] focus-within:ring-4 focus-within:ring-[var(--color-ring)]">
             <Search className="h-4 w-4 text-muted" />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search conversations" className="w-full bg-transparent text-sm outline-none placeholder:text-muted" />
           </div>
+          {/* Only worth showing when there is more than one agent to choose
+              between; on a single-agent console it is a control with one option. */}
+          {agentsInList.length > 1 && (
+            <div className="relative">
+              <select
+                value={agentFilter}
+                onChange={(e) => {
+                  setAgentFilter(e.target.value);
+                  // The open thread may belong to an agent that is no longer
+                  // listed; leaving it open beside an empty list reads as broken.
+                  const still = items.find((i) => i.id === selected && (!e.target.value || i.agentSlug === e.target.value));
+                  if (!still) setSelected(null);
+                }}
+                aria-label="Filter by agent"
+                className="h-9 w-full cursor-pointer appearance-none rounded-lg border border-[#d0d5dd] bg-surface pl-3 pr-8 text-[13px] font-medium text-ink outline-none focus:border-[var(--color-brand)] focus:ring-4 focus:ring-[var(--color-ring)]"
+              >
+                <option value="">All agents</option>
+                {agentsInList.map(([slug, name]) => (
+                  <option key={slug} value={slug}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            </div>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-3">
           {filtered.map((it) => (

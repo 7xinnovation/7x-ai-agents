@@ -157,10 +157,23 @@ function injectStyles(cfg: BootConfig) {
     box-shadow:0 0 0 1px rgba(16,24,40,.07),0 30px 80px rgba(16,24,40,.28),0 8px 24px rgba(16,24,40,.16);
     opacity:0;visibility:hidden;transform:translateY(14px) scale(.98);transform-origin:bottom ${left ? "left" : "right"};
     transition:opacity .3s cubic-bezier(.16,1,.3,1),transform .3s cubic-bezier(.16,1,.3,1),visibility .3s,width .3s ease,height .3s ease,border-radius .3s ease}
-  .dlg-frame.widget{bottom:calc(var(--dlg-bottom) + 72px);left:var(--dlg-left);right:var(--dlg-right);width:404px;height:640px;max-height:calc(100vh - 120px)}
-  .dlg-frame.full{inset:0;width:100vw;height:100vh;border-radius:0;transform-origin:center}
+  /* The panel never exceeds the window it is sitting in.
+     404x640 is the size it WANTS; the max-* are the size it may have. Without
+     them a browser window narrower than about 470px — or shorter than the panel
+     plus the launcher — put part of the conversation off-screen, and the host
+     page cannot correct that from its side. dvh where it is understood, so a
+     mobile address bar sliding away does not leave a gap. */
+  .dlg-frame.widget{bottom:calc(var(--dlg-bottom) + 72px);left:var(--dlg-left);right:var(--dlg-right);
+    width:404px;height:640px;
+    max-width:calc(100vw - 32px);
+    max-height:calc(100vh - var(--dlg-bottom) - 88px);max-height:calc(100dvh - var(--dlg-bottom) - 88px)}
+  .dlg-frame.full{inset:0;width:100vw;height:100vh;height:100dvh;border-radius:0;transform-origin:center}
   .dlg-frame.open{opacity:1;visibility:visible;transform:none}
-  @media (max-width:640px){.dlg-frame.widget{inset:0;width:100vw;height:100vh;border-radius:0}}
+  /* Narrow OR short: a landscape phone is 720px wide and 360px tall, and a
+     panel that has to fit above a launcher in 360px is not a panel. */
+  @media (max-width:640px),(max-height:520px){
+    .dlg-frame.widget{inset:0;width:100vw;height:100vh;height:100dvh;max-width:none;max-height:none;border-radius:0}
+  }
   @media (prefers-reduced-motion:reduce){.dlg-launcher{animation:none}.dlg-launcher::before{animation:none}.dlg-launcher,.dlg-launcher svg,.dlg-frame{transition:opacity .15s linear}}
   @keyframes dlg-pop{from{opacity:0;transform:translateY(10px) scale(.8)}to{opacity:1;transform:none}}
   @keyframes dlg-breathe{0%,100%{transform:scale(1);opacity:.45}50%{transform:scale(1.14);opacity:.75}}

@@ -1,0 +1,14 @@
+import { readFileSync } from "node:fs";
+import pg from "pg";
+const c = new pg.Client({ connectionString: /^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m.exec(readFileSync(process.argv[2], "utf8"))[1] });
+await c.connect();
+const r = await c.query(`SELECT definition FROM agents WHERE slug='nxn-dialog'`);
+const d = r.rows[0].definition;
+console.log("intents:", (d.intents ?? []).map(i => i.key).join(", "));
+const ship = (d.intents ?? []).find(i => /shipment|track/i.test(i.key));
+console.log("\nshipment intent:", JSON.stringify(ship));
+console.log("\njourneys:", (d.journeys ?? []).map(j => j.key).join(", "));
+const hay = JSON.stringify(d);
+console.log("\nmentions of tracking in persona/guardrails:");
+for (const line of [d.persona ?? "", d.guardrails ?? ""].join("\n").split("\n")) if (/track|shipment/i.test(line)) console.log("  •", line.trim().slice(0, 220));
+await c.end();

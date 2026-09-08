@@ -1,0 +1,14 @@
+import { readFileSync } from "node:fs";
+import pg from "pg";
+const c = new pg.Client({ connectionString: /^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m.exec(readFileSync(process.argv[2], "utf8"))[1] });
+await c.connect();
+const r = await c.query(`SELECT name, definition FROM agents WHERE slug='nxn-dialog'`);
+const d = r.rows[0].definition;
+console.log("agents.name:", r.rows[0].name);
+console.log("definition.name:", d.name, "| theme.brandName:", d.theme?.brandName);
+console.log("greeting:", JSON.stringify(d.greeting).slice(0, 260));
+const hay = JSON.stringify(d);
+const hits = [...hay.matchAll(/.{70}NXN.{70}/g)].map(m => m[0]).slice(0, 8);
+console.log(`\n"NXN" appears ${(hay.match(/NXN/g) ?? []).length} times in the definition. Customer-facing candidates:`);
+for (const h of hits) console.log("  …" + h.replace(/\\n/g, " ") + "…");
+await c.end();

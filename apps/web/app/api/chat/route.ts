@@ -2001,6 +2001,41 @@ export async function POST(req: NextRequest) {
         // "your receipt is available via the download link above" with no link
         // anywhere. We hold every fact the receipt needs; only the row was
         // missing.
+        // THE DASHBOARD ONLY KNOWS WHAT IS EMITTED.
+        //
+        // payment.initiated and payment.completed were emitted for the INTERNAL
+        // checkout alone, and Emirates Post's journeys do not use it: their save
+        // opens a payment on their own gateway and their confirm settles it. So
+        // real money moved and the KPI read "0/0 paid" — an analytics screen
+        // reporting nothing happened on a day two people paid.
+        //
+        // Emitted from the same facts the receipt row is written from, so the two
+        // can never disagree.
+        const gateway = apiTools.getGatewayPayment();
+        const evStd = {
+          ...a,
+          customerType: (authenticated ? "authenticated" : "guest") as "authenticated" | "guest",
+          language: body.locale,
+          journeyType: finalState.journeyKey ?? undefined,
+        };
+        if (gateway?.reference && !session.state.gatewayPayment?.reference) {
+          await emitEvent({
+            type: "payment.initiated",
+            ...evStd,
+            referenceId: gateway.reference,
+            attributes: { reference: gateway.reference, amount: gateway.amount ?? null, via: "backend_gateway" },
+          });
+        }
+        if (gateway?.paidAt && !session.state.gatewayPayment?.paidAt) {
+          await emitEvent({
+            type: "payment.completed",
+            ...evStd,
+            outcome: "completed",
+            referenceId: gateway.reference,
+            attributes: { reference: gateway.reference, amount: gateway.amount ?? null, via: "backend_gateway" },
+          });
+        }
+
         const settled = apiTools.getGatewayPayment();
         if (settled?.paidAt && settled.reference) {
           try {

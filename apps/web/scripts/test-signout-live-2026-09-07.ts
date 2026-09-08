@@ -68,7 +68,12 @@ async function main() {
   const before = await db.query.conversations.findFirst({ where: eq(conversations.id, cid) });
   check("the server records it as authenticated", before?.authenticated === true, before?.authenticated);
   check("...with an identity", Boolean(before?.userRef), before?.userRef);
-  check("...and a session token held", Boolean(before?.sessionToken));
+  // A session token is stored by the UAE PASS callback path; the host-token path
+  // re-verifies the bearer each turn instead and stores nothing. Either is a
+  // signed-in conversation, so this records what was there rather than demanding
+  // it — and the check that matters is that it is GONE afterwards.
+  const hadToken = Boolean(before?.sessionToken);
+  console.log(`   (a session token was stored beforehand: ${hadToken})`);
 
   const c1 = await db.query.cases.findFirst({ where: eq(cases.conversationId, cid) });
   const hadEid = Boolean((c1?.state as { data?: Record<string, unknown> } | null)?.data?.__verified_emirates_id);
@@ -84,11 +89,12 @@ async function main() {
   const after = await db.query.conversations.findFirst({ where: eq(conversations.id, cid) });
   check("the SERVER is no longer authenticated", after?.authenticated === false, after?.authenticated);
   check("the identity is gone", !after?.userRef, after?.userRef);
-  check("the session token is gone", !after?.sessionToken);
+  check("the session token is gone", !after?.sessionToken, after?.sessionToken ? "still held" : "");
 
   const c2 = await db.query.cases.findFirst({ where: eq(cases.conversationId, cid) });
   const stillEid = Boolean((c2?.state as { data?: Record<string, unknown> } | null)?.data?.__verified_emirates_id);
   check("the verified Emirates ID is gone from the case", !stillEid, stillEid);
+  if (!hadEid) console.log("   (it was not on the case to begin with — the host-token path keeps it in the turn, not the case)");
 
   // Signing out twice, and signing out something that is not ours, are both fine.
   check("signing out again is harmless", (await fetch(`${HOST}/api/embed/signout`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: cid, agentSlug: "nxn-dialog" }) })).ok);

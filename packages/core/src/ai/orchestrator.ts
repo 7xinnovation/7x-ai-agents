@@ -13,8 +13,31 @@ import { findJourney } from "../case/engine";
  * Returns a reference id (first Salesforce-style record id) when successful.
  */
 export function submissionReference(result: string): string | null {
+  // "IsSuccess": false is Emirates Post's way of saying it; "success": false is
+  // Salesforce's. Neither is a submission, whatever else the body carries.
+  if (/"(?:is)?success"\s*:\s*false/i.test(result) || /rolled back/i.test(result)) return null;
+
+  // EMIRATES POST DOES NOT SAY "success".
+  //
+  // This test was written for EPGL's Salesforce composite, whose response says
+  // so outright. Emirates Post's Rental/Save and Guest/Renewal/Save answer with
+  // {"payload":{"orderNo":"260972889", …}} and no such field — so every rental
+  // and every renewal failed the very first line of this function, no submission
+  // was ever surfaced, and everything hanging off one was silently absent:
+  // case_submitted, journey.completed, the completion rate on the dashboard, and
+  // the ops emails to the branch and the EMX team.
+  //
+  // Measured on production on 8 September: 20 journeys started, one payment of
+  // AED 695 taken and recorded, and zero submissions.
+  //
+  // Their order number IS the reference — it is what the customer is given and
+  // what Emirates Post files the rental under.
+  // Quoted or bare, but never null: a refused save carries "orderNo": null, and
+  // reading that as a reference would report a submission that did not happen.
+  const order = /"order(?:No|Number)"\s*:\s*"?([A-Za-z0-9-]{4,40})"?/i.exec(result)?.[1];
+  if (order && !/^null$/i.test(order)) return order;
+
   if (!/"success"\s*:\s*true/i.test(result)) return null;
-  if (/"success"\s*:\s*false/i.test(result) || /rolled back/i.test(result)) return null;
 
   // Take the LICENCE REQUEST's own id, not an incidental one (Account, Contact,
   // a document…). Everything downstream hangs off this: the reference shown to
