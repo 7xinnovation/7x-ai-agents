@@ -59,12 +59,36 @@ async function main() {
     changes.push("persona: no longer offers shipment tracking");
   }
 
-  // The guardrails are read on every turn, whatever journey is running — which is
-  // where a question nobody has a journey for has to be answered.
-  const g = String(def.guardrails ?? "");
-  if (!g.includes(MARKER)) {
-    def.guardrails = `${g.split(/\n{2,}/).filter((p: string) => !p.includes(MARKER)).join("\n\n").trim()}\n\n${TEXT}`.trim();
-    changes.push(`guardrails: ${MARKER} added`);
+  // NOT guardrails. That field is a CONFIG OBJECT — refusalTopics,
+  // intentThresholds, confidenceThreshold and the rest — and an earlier version
+  // of this script treated it as prose, wrote String(object) into it, and took
+  // staging down for fifteen minutes: the definition failed its zod validation
+  // and every page that loads the agent answered 500.
+  //
+  // Prose belongs in a journey's guidance, which is where every other block
+  // added to this agent lives.
+  for (const j of def.journeys ?? []) {
+    const without = String(j.guidance ?? "").split(/\n{2,}/).filter((p: string) => !p.includes(MARKER)).join("\n\n").trim();
+    const next = `${without}\n\n${TEXT}`.trim();
+    if (next === j.guidance) continue;
+    j.guidance = next;
+    changes.push(`${j.key}.guidance: ${MARKER}`);
+  }
+
+  // And the greeting, which offers it before anyone has asked.
+  for (const lang of ["en", "ar"] as const) {
+    const g = def.greeting?.[lang];
+    if (typeof g !== "string") continue;
+    const cleaned = g
+      .replace(/,?\s*(?:or\s+)?track(?:ing)?\s+(?:a\s+)?shipment[s]?/gi, "")
+      .replace(/[،,]?\s*(?:أو\s+)?تتبع\s+شحنة/g, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s+([,.،؟?])/g, "$1")
+      .replace(/,\s*\./g, ".");
+    if (cleaned !== g) {
+      def.greeting[lang] = cleaned;
+      changes.push(`greeting.${lang}: no longer offers shipment tracking`);
+    }
   }
 
   // The intent stays: knowing how often it is asked is worth more than hiding it,
