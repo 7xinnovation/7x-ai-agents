@@ -1,0 +1,33 @@
+name: Reconcile stuck payments (staging)
+
+# journey.abandoned and sla_breach_detected are emitted by /api/payments/reconcile
+# and by nothing else, and nothing was calling it — so Abandonment and SLA
+# breaches read 0 on the dashboard whatever happened, which is not the same as
+# nothing having happened.
+#
+# It is idempotent: each event is guarded by whether one already exists for that
+# payment or escalation, so running it often is safe and missing a run costs
+# only lateness.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask staging to reconcile
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET_STAGING }}
+        run: |
+          code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST \
+            "https://app-7xil-agents-stg-gzdxeng6cba9byac.uaenorth-01.azurewebsites.net/api/payments/reconcile" \
+            -H "x-cron-secret: ${CRON_SECRET}" --max-time 60)
+          echo "HTTP $code"; cat /tmp/out.json; echo
+          # A failed run is worth seeing, but it must not fail the repository's
+          # checks — this is housekeeping, not a build.
+          [ "$code" = "200" ] || echo "::warning::reconcile returned $code"

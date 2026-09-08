@@ -110,7 +110,26 @@ export async function loadDashboards(windowDays = 30, agentId?: string | null): 
       paymentSuccessRate: payInit ? Math.round((payDone / payInit) * 100) : 0,
       selfServiceRate: conversations ? Math.round(((conversations - callbacks) / conversations) * 100) : 0,
       knowledgeRetrievals: c("knowledge.retrieved"),
-      shipmentLookups: c("shipment.lookup"),
+      // ASKED FOR, not looked up.
+      //
+      // shipment.lookup is emitted by a tool that does not exist, so this card
+      // read 0 for ever while shipment tracking was the SECOND most common thing
+      // anyone asked — 42 of thirty days' intents on production. A KPI that
+      // cannot move is worse than no KPI: it says nothing is happening in the
+      // one place that shows something is.
+      //
+      // The count is now the demand: how many people came here wanting a parcel
+      // tracked. If a tracking tool is ever added, its lookups are added here
+      // beside them.
+      shipmentLookups:
+        c("shipment.lookup") +
+        Number(
+          (
+            await rows<{ n: number }>(
+              sql`SELECT count(*)::int AS n FROM analytics_events WHERE type = 'intent.identified' AND attributes->>'intent' = 'shipment_tracking' AND created_at >= ${since} ${evAgent}`
+            )
+          )[0]?.n ?? 0
+        ),
       intentsClassified: c("intent.identified"),
     },
     intents: intents.map((r) => ({ intent: r.intent, count: Number(r.count) })),

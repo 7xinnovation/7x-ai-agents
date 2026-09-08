@@ -84,7 +84,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <Stat label="Self-service rate" value={`${k.selfServiceRate}%`} sub={`${d.escalations.total} callbacks`} tone={k.selfServiceRate >= 70 ? "pos" : undefined} />
         <Stat label="Abandonment" value={`${k.abandonmentRate}%`} sub="of started journeys" tone={k.abandonmentRate > 20 ? "warn" : undefined} />
         <Stat label="Knowledge hits" value={String(k.knowledgeRetrievals)} sub="grounded answers" />
-        <Stat label="Shipment lookups" value={String(k.shipmentLookups)} sub="tracking requests" />
+        {/* Demand, not activity: we do not track shipments, and this is how many
+            people came here wanting one tracked. */}
+        <Stat label="Tracking asked for" value={String(k.shipmentLookups)} sub="not a service we offer" />
         <Stat label="SLA breaches" value={String(d.sla.total)} sub={`${d.sla.payment} payment · ${d.sla.callback} callback`} tone={d.sla.total > 0 ? "warn" : "pos"} />
       </div>
 
