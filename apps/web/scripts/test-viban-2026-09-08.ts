@@ -129,5 +129,17 @@ console.log("\nThe duplicate check is called once, not five times");
   check("an undecided case still runs the check", /const decided = opts\.duplicateDecision\?\.\(\);\s*if \(decided\)/.test(blk));
 }
 
+console.log("\nThe two payment gates must not deadlock each other");
+{
+  const { readFileSync } = await import("node:fs");
+  const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  // request_payment refuses until the submission exists; blockUnpaidSaves used to
+  // refuse the submission until the payment existed. Neither could go first, and
+  // the assistant said so before giving the customer a phone number.
+  check("a submit-first journey is exempt from blockUnpaidSaves", /!j\.submission\?\.apiFlow\?\.submitBeforePayment/.test(route));
+  check("backend-gateway journeys keep their existing exemption", /!j\.submission\?\.apiFlow\?\.confirmTool/.test(route));
+  check("internal-checkout journeys keep the gate", /j\.submission\?\.requiresPayment &&\s*j\.submission\?\.apiFlow\?\.saveTool/.test(route));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

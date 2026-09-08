@@ -92,9 +92,30 @@ export async function loadDashboards(windowDays = 30, agentId?: string | null): 
   const journeysStarted = c("journey.started");
   const journeysCompleted = c("journey.completed");
   const abandoned = c("journey.abandoned");
-  const payInit = c("payment.initiated");
-  const payDone = c("payment.completed");
-  const payFail = c("payment.failed");
+  /**
+   * PAYMENTS COME FROM THE PAYMENTS TABLE, NOT THE EVENT STREAM.
+   *
+   * payment.completed is emitted by our own checkout's webhook. A journey that
+   * pays on the BACKEND's gateway -- which is every Emirates Post renewal --
+   * never goes through it, so the event was never written. Production on
+   * 8 September: one settled payment of AED 695 in the payments table, and zero
+   * payment.completed events. The card read "0 paid" for a rental somebody had
+   * genuinely paid for.
+   *
+   * The payments table records both paths and is what the receipt is rendered
+   * from, so it is the honest source. Counting it also repairs the figure
+   * retroactively, which re-emitting events could not do without inventing
+   * history that did not happen.
+   */
+  const payRows = await rows<{ status: string; n: number }>(
+    sql`SELECT status, count(*)::int AS n FROM payments WHERE created_at >= ${since} ${evAgent} GROUP BY status`
+  );
+  const payByStatus: Record<string, number> = {};
+  for (const r of payRows) payByStatus[r.status] = Number(r.n);
+  const payDone = payByStatus.paid ?? 0;
+  const payFail = payByStatus.failed ?? 0;
+  // Every payment started, whatever became of it — a paid one was initiated too.
+  const payInit = (payByStatus.initiated ?? 0) + payDone + payFail;
   const callbacks = c("callback.requested");
 
   return {

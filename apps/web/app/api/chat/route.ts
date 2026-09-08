@@ -580,7 +580,22 @@ export async function POST(req: NextRequest) {
         // before any money moves. Blocking it until paid would deadlock the journey
         // it was written to protect. The gate stays on for internal-checkout
         // journeys, where a save before payment really is a record written too soon.
-        .filter((j) => j.submission?.requiresPayment && j.submission?.apiFlow?.saveTool && !j.submission?.apiFlow?.confirmTool)
+        //
+        // submitBeforePayment is the same argument from the other end, and I built
+        // the deadlock it describes before spotting that. EPGL records its payment
+        // against the licence request's Salesforce id, so request_payment refuses
+        // until the submission exists -- and this gate refused the submission until
+        // the payment existed. The assistant worked it out and said so: "the
+        // submission tool won't accept the application until payment is made, and
+        // the payment tool won't charge until a submission reference exists.
+        // Neither will go first." It was right, and it had nowhere to go.
+        .filter(
+          (j) =>
+            j.submission?.requiresPayment &&
+            j.submission?.apiFlow?.saveTool &&
+            !j.submission?.apiFlow?.confirmTool &&
+            !j.submission?.apiFlow?.submitBeforePayment
+        )
         .map((j) => j.submission!.apiFlow!.saveTool as string);
   /**
    * The boxes this customer actually holds, for the ownership gate.

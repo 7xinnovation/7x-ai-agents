@@ -56,7 +56,7 @@ interface BootConfig {
 
 const STYLE_ID = "dialog-embed-style";
 /** Bumped whenever the loader changes, so a host page can say what it is running. */
-const VERSION = "2026-09-08c";
+const VERSION = "2026-09-08d";
 
 /** The locales the app actually has. Anything else falls back to English. */
 const LOCALES = ["en", "ar"] as const;
@@ -469,6 +469,39 @@ function boot() {
 
   addEventListener("resize", fit);
   window.visualViewport?.addEventListener("resize", fit);
+
+  /**
+   * KEEP the size, rather than setting it once and hoping.
+   *
+   * fit() runs at boot, and a host stylesheet that finishes loading afterwards
+   * can still take the panel over -- the sizing was correct for the moment it
+   * was applied and wrong a tick later, which is indistinguishable from never
+   * having worked. Reported three times from emiratespost.ae, with the panel
+   * taller than the window and its header clipped off the top.
+   *
+   * So the panel is watched, and any drift from what fit() intends is put back.
+   * Tolerance of 2px because subpixel layout is not drift, and only while the
+   * panel is open and not full-screen, where the size is deliberately the CSS's.
+   */
+  if (typeof ResizeObserver !== "undefined") {
+    let correcting = false;
+    const ro = new ResizeObserver(() => {
+      if (correcting || mode !== "widget" || window.matchMedia(COMPACT).matches) return;
+      const r = frame.getBoundingClientRect();
+      const wantW = Math.min(WANT_W, Math.max(0, Math.round(window.visualViewport?.width ?? window.innerWidth) - 32));
+      const bottom = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--dlg-bottom"), 10) || 24;
+      const wantH = Math.min(WANT_H, Math.max(0, Math.round(window.visualViewport?.height ?? window.innerHeight) - bottom - 88));
+      if (Math.abs(r.width - wantW) <= 2 && Math.abs(r.height - wantH) <= 2) return;
+      correcting = true;
+      fit();
+      // Let the browser settle before listening again, so re-applying the size
+      // cannot feed itself.
+      requestAnimationFrame(() => { correcting = false; });
+    });
+    ro.observe(frame);
+  }
+  // The app inside can change the layout as it loads; size it again once it has.
+  frame.addEventListener("load", fit);
   fit();
 
   launcher.addEventListener("click", () => setMode(mode === "closed" ? "widget" : "closed"));
