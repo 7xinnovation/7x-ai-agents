@@ -392,7 +392,7 @@ function ChatCardSelect({
   const available = cards.filter((c) => !c.disabled).length;
 
   return (
-    <div className="dlg-cardselect" ref={boxRef}>
+    <div className={`dlg-cardselect${open ? " is-open" : ""}`} ref={boxRef}>
       <button type="button" className="dlg-cardselect-trigger" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span>{t.count(available)}</span>
         <CaretDown size={14} weight="bold" className={open ? "is-open" : ""} />

@@ -35,6 +35,8 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
+import { promisesMapWithout, locateBlock } from "@/lib/locateGuard";
+import { narrationGuard } from "@/lib/narrationGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
@@ -1752,6 +1754,8 @@ export async function POST(req: NextRequest) {
             )
           : null;
         const idFilter = internalIdFilter();
+        // The model talking to itself, kept out of the customer's chat.
+        const narration = narrationGuard();
         // The registration fee, put INTO the pre-payment card rather than left in
         // a sentence beneath it.
         // A file already in the case is not something to ask for again.
@@ -1823,13 +1827,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))));
+            const out = narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held =
+            const held = narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -1837,7 +1841,8 @@ export async function POST(req: NextRequest) {
                       durationGuard.flush()
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
-              ) + idFilter.flush();
+              ) + idFilter.flush()
+            );
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -1910,7 +1915,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = idFilter.push(
+          const rest = narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -1918,7 +1923,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush();
+          ) + idFilter.flush()) + narration.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 
@@ -1932,6 +1937,22 @@ export async function POST(req: NextRequest) {
           const mapBlock = `\n\n\`\`\`map\nemirate: ${branchQuery.emirate}\nbundle: ${branchQuery.bundle}\n\`\`\`\n`;
           send({ type: "text", delta: mapBlock });
           finalText += mapBlock;
+        }
+
+        // A MAP THE ASSISTANT OFFERS HAS TO BE A MAP THE CUSTOMER CAN USE.
+        //
+        // Same failure as the branch map above, on the other control. "You can
+        // share your address or pin your location on the map" — and then, after
+        // the customer answered "Pin", "Please go ahead and drop a pin on the
+        // map." No map either time: the ```locate block exists and the guidance
+        // names it, but nothing made the offer and the block arrive together, so
+        // the customer was sent to look for a control that was not there.
+        {
+          const add = promisesMapWithout(finalText) ? locateBlock(body.locale) : "";
+          if (add) {
+            send({ type: "text", delta: add });
+            finalText += add;
+          }
         }
 
         // The PO Box hall notice, rendered by US.

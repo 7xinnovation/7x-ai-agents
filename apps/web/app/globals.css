@@ -670,7 +670,19 @@ body {
     0 8px 20px -14px color-mix(in srgb, var(--c-primary) 30%, rgba(16, 24, 40, 0.2));
 }
 /* Cards ease in with a light, short stagger when a reply presents choices. */
+/* An open picker has to outrank whatever comes AFTER it.
+
+   The dropdown is absolutely positioned with z-index 20, which only ever meant
+   "above its own bubble" -- so the assistant's next message, later in the DOM,
+   painted straight over the open list. Reported 8 September: a customer opening
+   "29 to choose from" had half the boxes covered by the reply that followed.
+
+   Raising the picker's own stacking context lifts the panel with it, and only
+   while it is open, so a closed picker still stacks in document order. */
 .dlg-cardselect { position: relative; margin: 8px 0 4px; }
+.dlg-cardselect.is-open { z-index: 40; }
+/* The bubble it sits in has to participate, or the ancestor's own order wins. */
+.dlg-msg:has(.dlg-cardselect.is-open) { position: relative; z-index: 40; }
 .dlg-cardselect-trigger {
   display: flex;
   align-items: center;

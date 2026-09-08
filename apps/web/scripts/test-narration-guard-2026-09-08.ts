@@ -1,0 +1,90 @@
+/**
+ * The assistant thinking out loud in front of the customer (UAT, 8 September).
+ *
+ * Run from apps/web:  npx tsx scripts/test-narration-guard-2026-09-08.ts
+ */
+import { stripInternalNarration, isInternalNarration, narrationGuard } from "../lib/narrationGuard";
+
+let pass = 0;
+let fail = 0;
+function check(name: string, ok: boolean, got?: unknown) {
+  if (ok) { pass++; console.log(`  ok   ${name}`); }
+  else { fail++; console.log(`  FAIL ${name}${got === undefined ? "" : ` — got ${JSON.stringify(got)}`}`); }
+}
+
+console.log("\nThe reported sentences");
+const reported = "The customer chose MyHome. I need to price both options: upgrade only (keeping current expiry 2031-09-05) and also prepare for upgrade + extend. Let me price the upgrade-only option first, and also fetch the renewed-by options.";
+{
+  const out = stripInternalNarration(`How long would you like to renew for?\n\n${reported}\n\nGreat news. Since you're upgrading to MyHome, here are your two options:`);
+  check("the third-person customer goes", !/The customer chose/.test(out), out);
+  check("the plan goes", !/I need to price both options/.test(out), out);
+  check("the tool name goes", !/renewed-by options/.test(out), out);
+  check("the question to the customer stays", /How long would you like to renew for\?/.test(out), out);
+  check("and so does the good news", /Great news\./.test(out), out);
+}
+{
+  const out = stripInternalNarration("Let me fetch the exact pricing for the upgrade.\n\nThe upgrade-only price for MyHome (keeping your current expiry of 05-09-2031) is AED 1,973.00. Let me get the pricing confirmed and the renewed-by options.");
+  check("the price the customer needs survives", /AED 1,973\.00/.test(out), out);
+  check("the second tool-name sentence goes", !/renewed-by options/.test(out), out);
+  check("a plain progress note survives", /Let me fetch the exact pricing/.test(out), out);
+}
+
+console.log("\nWhat must never be touched");
+check("a summary block is untouched", stripInternalNarration("```summary\n- The customer: x\ntotal: AED 5\n```").includes("- The customer: x"));
+check("card titles are untouched", stripInternalNarration("```cards\n- title: The customer plan\n```").includes("The customer plan"));
+check("a pay block is untouched", stripInternalNarration("```pay\nurl: https://x/y\namount: AED 370.00\n```").includes("url: https://x/y"));
+check("list rows are left alone", stripInternalNarration("- The customer reference is 12345").includes("The customer reference"));
+
+console.log("\nOrdinary replies are not rewritten");
+for (const t of [
+  "Your box is reserved. Here is your total: AED 370.00.",
+  "Let me fetch the branches for you.",
+  "I'll bring up the payment now.",
+  "Which plan would you like?",
+  "That pin is in Dubai, but your box is in Abu Dhabi.",
+]) check(`"${t.slice(0, 42)}…"`, stripInternalNarration(t) === t, stripInternalNarration(t));
+
+console.log("\nThe sentence test");
+check("third person about the reader", isInternalNarration("The customer chose MyHome."));
+check("...unless it is addressed to them", !isInternalNarration("The customer service team will call you back."));
+check("our own tool names", isInternalNarration("Let me get the renewed-by options."));
+check("planning aloud", isInternalNarration("I need to fetch the pricing first and also prepare the summary."));
+check("a normal sentence is not", !isInternalNarration("Your renewal is confirmed."));
+
+console.log("\nIt never empties a reply");
+check("a reply that is ALL narration is kept as-is", stripInternalNarration(reported).trim().length > 0);
+check("empty in, empty out", stripInternalNarration("") === "");
+
+console.log("\nStreaming, which is the only way it helps");
+/** Feed a reply through in awkward chunks, as a model actually emits it. */
+const stream = (text: string, size = 7) => {
+  const g = narrationGuard();
+  let out = "";
+  for (let i = 0; i < text.length; i += size) out += g.push(text.slice(i, i + size));
+  return out + g.flush();
+};
+{
+  const full = `How long would you like to renew for?\n\n${reported}\n\nGreat news. Here are your two options:`;
+  const out = stream(full);
+  check("the narration never reaches the customer", !/The customer chose|I need to price|renewed-by options/.test(out), out);
+  check("the question does", /How long would you like to renew for\?/.test(out), out);
+  check("and the good news does", /Great news\./.test(out), out);
+}
+{
+  const withCards = "Here are your plans.\n\n```cards\n- title: MyBox\n  price: AED 300\n```\n\nWhich would you like?";
+  check("a fenced block survives streaming intact", stream(withCards).includes("- title: MyBox"), stream(withCards));
+  check("...with its price", stream(withCards).includes("price: AED 300"));
+  check("and the prose around it", /Which would you like\?/.test(stream(withCards)));
+}
+{
+  const plain = "Your box is reserved. Here is your total: AED 370.00.";
+  check("an ordinary reply streams through unchanged", stream(plain) === plain, stream(plain));
+  check("...at any chunk size", stream(plain, 1) === plain && stream(plain, 999) === plain);
+}
+{
+  const pay = "All set.\n\n```pay\nurl: https://paypage.example/v2?code=abc\namount: AED 370.00\n```";
+  check("a pay block is never held back or altered", stream(pay).includes("url: https://paypage.example/v2?code=abc"), stream(pay));
+}
+
+console.log(`\n${pass} passed, ${fail} failed\n`);
+process.exit(fail ? 1 : 0);

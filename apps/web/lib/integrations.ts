@@ -2512,7 +2512,7 @@ export async function buildApiTools(
     // the mapping to the customer and the case recorded "19147" under "Who is
     // renewing this box". The key is Emirates Post's business; the customer
     // chooses between names.
-    if (!res.isError && /renewedbyoptions/i.test(toolName)) {
+    renewedBy: if (!res.isError && /renewedbyoptions/i.test(toolName)) {
       try {
         const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         const list = (Array.isArray(parsed) ? parsed : parsed?.payload) as { key?: unknown; value?: unknown }[] | undefined;
@@ -2523,6 +2523,46 @@ export async function buildApiTools(
               .filter(([k, v]) => k && v)
           );
           const shown = [...renewedByOptions].map(([k, v]) => `${RENEWED_BY_EN[k] ?? v}`);
+
+          /**
+           * DO NOT ASK SOMEBODY WHO THEY ARE WHEN YOU ALREADY KNOW.
+           *
+           * A customer signed in with UAE PASS, renewing a box that is on their
+           * own account, was asked "Who is renewing this box?" and offered five
+           * answers — one of which was "The owner", which we already knew they
+           * were. Reported 8 September. The question is a real one for a guest
+           * renewing on somebody's behalf; it is noise for the holder.
+           *
+           * Owned boxes come from their signed-in profile, so this cannot be
+           * spoofed by typing a box number: it is the same list the management
+           * gate uses.
+           */
+          const askedBox = boxNumberIn(input);
+          const owned = opts.ownedBoxes ? await opts.ownedBoxes().catch(() => null) : null;
+          const theirs =
+            Boolean(opts.authenticated) &&
+            Boolean(askedBox) &&
+            Array.isArray(owned) &&
+            owned.some((b) => String(b).replace(/\D/g, "") === String(askedBox).replace(/\D/g, ""));
+          if (theirs) {
+            void audit({
+              agentId,
+              conversationId: opts.conversationId,
+              actor: "system",
+              action: "renewed_by_assumed_owner",
+              payload: { tool: toolName, box: askedBox },
+            }).catch(() => {});
+            res = {
+              ...res,
+              result:
+                res.result +
+                `\n\nDO NOT ASK WHO IS RENEWING. This customer is signed in and box ${askedBox} is on their own account, so they are the owner and you already know the answer.` +
+                ` Record it as "${RENEWED_BY_EN["19147"]}" and carry on — asking a person to choose between five descriptions of themselves, one of which is the one you can already see, reads as not having looked.` +
+                ` The number behind it is sent on the save for you; never say it.`,
+            };
+            break renewedBy;
+          }
+
           res = {
             ...res,
             result:
@@ -3274,6 +3314,30 @@ export async function buildApiTools(
           // A write gets more room -- a composite response names an item per
           // record and the interesting one is rarely first.
           response: res.result.slice(0, isWriteCall ? 4000 : 600),
+          // WHICH BUNDLES CAME BACK, before the truncation hides them.
+          //
+          // A read is stored to 600 characters, and MyBox's English and Arabic
+          // descriptions alone are longer than that -- so an audited bundle list
+          // can never show more than its first entry. A tester reported MyHome
+          // Instant missing from the plans on 8 September and the log could not
+          // say whether Emirates Post had returned it, which is the one thing
+          // worth knowing. Ids and names are small; they go in whole.
+          ...(!res.isError && /rental_bundle$/i.test(toolName)
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+                  const list = (parsed?.payload ?? parsed) as Record<string, unknown>[];
+                  if (!Array.isArray(list)) return {};
+                  return {
+                    bundles: list
+                      .map((bn) => `${asStr(bn.bundle_Id)}:${asStr(bn.name_En)}`)
+                      .filter((x) => x !== ":"),
+                  };
+                } catch {
+                  return {};
+                }
+              })()
+            : {}),
           // The registration fee, extracted before that truncation can lose it.
           // A corporate reservation prices seven services and its NEW-REG line
           // sits past 4000 characters, so the row that was meant to remember the
