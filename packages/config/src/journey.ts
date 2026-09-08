@@ -123,6 +123,21 @@ export const Journey = z.object({
           // pricing tool. Lets a demo finish end-to-end while the real write is
           // pending; remove once the backend write is live.
           fallbackToInternalPayment: z.boolean().default(false),
+          /**
+           * The record must EXIST before any money is taken.
+           *
+           * EPGL's payment notification keys on notifyPayment.salesforceId --
+           * the licence request's id -- which does not exist until the composite
+           * has been submitted. Pay first and the money settles against nothing:
+           * no application on their side, no id to attach it to, and a customer
+           * who has been charged for a licence nobody has heard of.
+           *
+           * The ordering has lived in prose since 3 September and has now drifted
+           * twice, so request_payment enforces it. Not the same thing as a
+           * hold-backed save (Emirates Post rentals), which needs a reservation
+           * rather than a completed submission.
+           */
+          submitBeforePayment: z.boolean().default(false),
           // Free-text field-mapping hints appended to the rendered flow.
           notes: z.string().optional(),
         })

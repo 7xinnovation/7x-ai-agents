@@ -111,6 +111,14 @@ async function main() {
         sub.amount = FEE;
       }
 
+      // The licence request must exist before the money moves: the payment
+      // notification keys on its Salesforce id. Carried in prose since
+      // 3 September and drifted twice, so request_payment enforces it now.
+      if (sub.apiFlow && sub.apiFlow.submitBeforePayment !== true) {
+        sub.apiFlow.submitBeforePayment = true;
+        changes.push(`${j.key}.apiFlow.submitBeforePayment -> true`);
+      }
+
       const g = String(j.guidance ?? "");
       if (g.includes(STALE_RULE)) {
         j.guidance = g.replace(STALE_RULE, "");

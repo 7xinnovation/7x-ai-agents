@@ -612,6 +612,28 @@ export async function dispatchTool(
         events.push({ type: "auth_required", reason: "Payment requires sign-in." });
         return { result: "User must authenticate before payment.", state, events };
       }
+      // NOTHING TO ATTACH THE MONEY TO.
+      //
+      // EPGL's payment notification keys on the licence request's Salesforce id,
+      // and that id does not exist until the composite has been submitted. The
+      // order -- duplicate check, submit, then pay -- has been carried in the
+      // journey's guidance since 3 September, in competition with a second rule
+      // further down the same text, and on 8 September a full run through the
+      // journey took payment with the case reference still null: an application
+      // nobody had submitted, and AED 1,000 about to settle against it.
+      //
+      // Prose has now lost this argument twice, so it is decided here.
+      if (sub.apiFlow?.submitBeforePayment && !state.reference) {
+        return {
+          result:
+            `PAYMENT BLOCKED: this application has not been submitted yet, so there is nothing for the payment to attach to. ` +
+            `Call ${sub.apiFlow.saveTool ?? "the submission tool"} FIRST and keep the reference it returns, then request payment. ` +
+            `NOTHING has been charged and nothing has gone wrong — do not tell the customer a payment failed, and do not offer them a link.`,
+          state,
+          events,
+          isError: true,
+        };
+      }
       // Charging before the thing being paid for exists is the wrong order, and it
       // is the order this journey kept falling into: pay, then discover there is no
       // reservation to attach the payment to, then apologise.

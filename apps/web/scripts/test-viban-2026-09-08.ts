@@ -79,5 +79,23 @@ console.log("\nrequest_payment refuses a Virtual IBAN outright");
   check("tools module still loads", typeof tools === "object");
 }
 
+console.log("\nAnd payment waits for the application to exist");
+{
+  const src2 = (await import("node:fs")).readFileSync(
+    new URL("../../../packages/core/src/ai/tools.ts", import.meta.url), "utf8"
+  );
+  check("request_payment refuses with no case reference", /submitBeforePayment && !state\.reference/.test(src2));
+  check("it names the tool to call first", /sub\.apiFlow\.saveTool \?\? "the submission tool"/.test(src2));
+  check("it says nothing was charged", /submitBeforePayment[\s\S]{0,900}?NOTHING has been charged/.test(src2));
+  check("it is an error, so the model cannot read past it", /submitBeforePayment[\s\S]{0,900}?isError: true/.test(src2));
+  const gate = src2.indexOf("submitBeforePayment && !state.reference");
+  const initiate = src2.indexOf("adapters.payment.initiate");
+  check("and it runs before the gateway is touched", gate !== -1 && gate < initiate, { gate, initiate });
+  const schema = (await import("node:fs")).readFileSync(
+    new URL("../../../packages/config/src/journey.ts", import.meta.url), "utf8"
+  );
+  check("the flag defaults to off, so no other journey changes", /submitBeforePayment: z\.boolean\(\)\.default\(false\)/.test(schema));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
