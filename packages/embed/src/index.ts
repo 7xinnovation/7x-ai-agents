@@ -244,7 +244,13 @@ function boot() {
 
   // Host can still refresh the token explicitly:
   //   window.Dialog.setUaePassToken("<token>")
-  (window as unknown as { Dialog?: Record<string, unknown> }).Dialog = { setUaePassToken: push };
+  // `version` so a page can say which loader it is running. A widget that
+  // misbehaves on someone else's site is otherwise diagnosed by guessing whether
+  // they have the current file.
+  (window as unknown as { Dialog?: Record<string, unknown> }).Dialog = {
+    setUaePassToken: push,
+    version: "2026-09-08",
+  };
 
   /**
    * Follow the stored token for the life of the page.
@@ -320,6 +326,44 @@ function boot() {
   launcher.setAttribute("aria-label", "Open assistant");
   launcher.innerHTML = CHAT_ICON + X_ICON;
 
+  /**
+   * Size the panel against the window, in an inline style.
+   *
+   * The stylesheet already caps it, and a stylesheet is the host page's to
+   * override: one `iframe{height:100%!important}` on their side, or any rule
+   * more specific than ours, and the panel is whatever they said. It is then
+   * taller than the window, the browser clips it, and because the panel is
+   * anchored to the BOTTOM what disappears is the header — the logo, the
+   * language switch, the sign-in button — while the conversation underneath
+   * carries on working. Quiet, and reported as "the widget does not fit".
+   *
+   * An inline style beats any rule that is not !important, so this is the size
+   * the panel actually gets. Recomputed on resize, and on the visual viewport
+   * too: a mobile keyboard sliding up changes the space without changing
+   * window.innerHeight.
+   */
+  const WANT_W = 404, WANT_H = 640;
+  function fit() {
+    if (mode === "full") {
+      frame.style.width = "";
+      frame.style.height = "";
+      frame.style.maxWidth = "";
+      frame.style.maxHeight = "";
+      return;
+    }
+    const vv = window.visualViewport;
+    const vh = Math.round(vv?.height ?? window.innerHeight);
+    const vw = Math.round(vv?.width ?? window.innerWidth);
+    // What the CSS reserves: the launcher, the gap above it, and the offset
+    // below it. Read from the computed value so a data-offset-bottom is obeyed.
+    const bottom = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--dlg-bottom"), 10) || 24;
+    const room = vh - bottom - 88;
+    frame.style.width = `${Math.min(WANT_W, Math.max(0, vw - 32))}px`;
+    frame.style.height = `${Math.min(WANT_H, Math.max(0, room))}px`;
+    frame.style.maxWidth = `${Math.max(0, vw - 32)}px`;
+    frame.style.maxHeight = `${Math.max(0, room)}px`;
+  }
+
   function setMode(next: Mode) {
     mode = next;
     frame.classList.toggle("open", next !== "closed");
@@ -328,7 +372,12 @@ function boot() {
     launcher.classList.toggle("open", next !== "closed");
     launcher.style.display = next === "full" ? "none" : "flex";
     document.documentElement.style.overflow = next === "full" ? "hidden" : "";
+    fit();
   }
+
+  addEventListener("resize", fit);
+  window.visualViewport?.addEventListener("resize", fit);
+  fit();
 
   launcher.addEventListener("click", () => setMode(mode === "closed" ? "widget" : "closed"));
 

@@ -65,12 +65,26 @@ Open the page and inspect the frame:
   our loader is in charge, and any sizing problem is ours to fix.
 - A bare `<iframe>` with your own class or inline height means it is yours.
 
-A quick check from the console:
+A quick check from the console. **Measure `.dlg-frame`, never `iframe`** — the
+loader also creates a hidden 0x0 bridge frame, and it is appended first, so
+`document.querySelector('iframe')` usually returns that one and tells you
+nothing:
 
 ```js
-document.querySelector('.dlg-frame')      // ours if this returns an element
-getComputedStyle(document.querySelector('iframe')).maxHeight  // "none" = unsized
+const f = document.querySelector('.dlg-frame');   // ours if this is an element
+const s = getComputedStyle(f);
+({
+  version: window.Dialog?.version,                 // the loader you are running
+  rect: f.getBoundingClientRect().toJSON(),        // where it actually is
+  height: s.height, maxHeight: s.maxHeight,
+  window: [innerWidth, innerHeight],
+  clippedAtTop: f.getBoundingClientRect().top < 0, // the header is off-screen
+})
 ```
+
+`clippedAtTop: true` means the panel is taller than the space above the
+launcher. Since the loader sizes it inline against the window on every resize,
+that should not happen — if it does, send this object over.
 
 ## Signing a customer in
 
