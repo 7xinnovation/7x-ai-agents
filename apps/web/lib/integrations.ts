@@ -754,6 +754,9 @@ export async function buildApiTools(
     ownedBoxes?: () => Promise<string[] | null>;
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
+    /** uniqueBoxId -> officeId, and printed number -> uniqueBoxId, from the case. */
+    initialOfferedBoxAt?: Record<string, string>;
+    initialUniqueByNumber?: Record<string, string>;
     /** The gateway payment opened in an earlier turn; the confirm comes later. */
     initialGatewayPayment?: { url: string; reference: string; orderNo?: string | null; paidAt?: string | null; amount?: number | null } | null;
     /** A hold carried over from an earlier turn; Select and Save are turns apart. */
@@ -781,6 +784,8 @@ export async function buildApiTools(
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
+  getOfferedBoxAt: () => Record<string, string>;
+  getUniqueByNumber: () => Record<string, string>;
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
   /** The payment Emirates Post opened on their gateway, from either save. */
@@ -844,8 +849,8 @@ export async function buildApiTools(
    * BOX_NOT_FREE, correctly, and the customer was told their box had just been
    * taken. It was free the whole time, at 201.
    */
-  const offeredBoxAt: Record<string, string> = {};
-  const uniqueByNumber: Record<string, string> = {};
+  const offeredBoxAt: Record<string, string> = { ...(opts.initialOfferedBoxAt ?? {}) };
+  const uniqueByNumber: Record<string, string> = { ...(opts.initialUniqueByNumber ?? {}) };
   let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
@@ -3234,6 +3239,8 @@ export async function buildApiTools(
     getDurationPrices: () => durationPrices,
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
+    getOfferedBoxAt: () => offeredBoxAt,
+    getUniqueByNumber: () => uniqueByNumber,
     getGatewayPayment: () => gatewayPayment,
     getGsbCompanies: () => [...gsbCompanies],
   };

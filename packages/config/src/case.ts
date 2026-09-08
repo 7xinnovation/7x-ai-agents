@@ -69,6 +69,17 @@ export const CaseState = z.object({
    */
   offeredBoxIds: z.array(z.string()).default([]),
   /**
+   * The branch each offered box was listed at, as uniqueBoxId -> officeId, and
+   * the uniqueBoxId behind each printed box number.
+   *
+   * FreeBoxes is per branch, so a box number means nothing without one. The box
+   * is chosen in one turn and reserved in a later one, and the tool layer is
+   * rebuilt every request -- so this has to live on the case or it is empty at
+   * exactly the moment it is needed.
+   */
+  offeredBoxAt: z.record(z.string()).default({}),
+  uniqueByNumber: z.record(z.string()).default({}),
+  /**
    * The payment Emirates Post opened for this case, on their own gateway.
    *
    * A RENTAL reaches it through a hold, so it used to be read off the hold. A
@@ -189,6 +200,8 @@ export function emptyCase(): CaseState {
     documents: [],
     confirmedJourneys: [],
     offeredBoxIds: [],
+    offeredBoxAt: {},
+    uniqueByNumber: {},
     hold: null,
     gatewayPayment: null,
     pulsedAt: null,

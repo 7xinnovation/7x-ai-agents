@@ -66,5 +66,20 @@ check("either spelling of the location key is handled", /body\.locationId !== un
 check("a correction is audited with the box it was for", /integration_input_corrected[\s\S]{0,320}?box: chosen/.test(sel.slice(0, 3000)));
 check("nothing is touched when the branch already agrees", /String\(body\[locKey\] \?\? ""\) !== at/.test(sel.slice(0, 3000)));
 
+console.log("\nIt survives the turn, which is the whole point");
+const caseSrc = (await import("node:fs")).readFileSync(
+  new URL("../../../packages/config/src/case.ts", import.meta.url), "utf8"
+);
+const routeSrc = (await import("node:fs")).readFileSync(
+  new URL("../app/api/chat/route.ts", import.meta.url), "utf8"
+);
+check("the case carries offeredBoxAt", /offeredBoxAt: z\.record\(z\.string\(\)\)\.default\(\{\}\)/.test(caseSrc));
+check("the case carries uniqueByNumber", /uniqueByNumber: z\.record\(z\.string\(\)\)\.default\(\{\}\)/.test(caseSrc));
+check("an empty case still has both", /offeredBoxAt: \{\},[\s\S]{0,60}uniqueByNumber: \{\}/.test(caseSrc));
+check("the tool layer is seeded from the case", /initialOfferedBoxAt: session\.state\.offeredBoxAt/.test(routeSrc));
+check("...and the number map too", /initialUniqueByNumber: session\.state\.uniqueByNumber/.test(routeSrc));
+check("and both are written back after the turn", /getOfferedBoxAt\(\)[\s\S]{0,400}?offeredBoxAt: atNow/.test(routeSrc));
+check("the seed merges rather than replaces", /\{ \.\.\.\(opts\.initialOfferedBoxAt \?\? \{\}\) \}/.test(src));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -630,6 +630,8 @@ export async function POST(req: NextRequest) {
     initialGatewayPayment: session.state.gatewayPayment ?? null,
     // The list is shown in one turn and picked from in the next.
     initialOfferedBoxIds: session.state.offeredBoxIds ?? [],
+    initialOfferedBoxAt: session.state.offeredBoxAt ?? {},
+    initialUniqueByNumber: session.state.uniqueByNumber ?? {},
     // The company is looked up turns before the save that has to declare where
     // its details came from.
     gsbCompanies: session.state.gsbCompanies ?? [],
@@ -2217,6 +2219,14 @@ export async function POST(req: NextRequest) {
         if (offeredNow.length && offeredNow.join(",") !== (finalState.offeredBoxIds ?? []).join(",")) {
           finalState = { ...finalState, offeredBoxIds: offeredNow };
         }
+        // ...and WHERE each of them was offered. The box is chosen in one turn
+        // and reserved in a later one, and the tool layer is rebuilt every
+        // request, so without this the branch is unknown at the only moment it
+        // matters -- which is how a box listed at 201 was reserved against 206.
+        const atNow = apiTools.getOfferedBoxAt();
+        const byNumNow = apiTools.getUniqueByNumber();
+        if (Object.keys(atNow).length) finalState = { ...finalState, offeredBoxAt: atNow };
+        if (Object.keys(byNumNow).length) finalState = { ...finalState, uniqueByNumber: byNumNow };
         const heldNow = apiTools.getLastHold();
         const holdChanged =
           heldNow &&
