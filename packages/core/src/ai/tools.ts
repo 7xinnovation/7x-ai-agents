@@ -267,6 +267,23 @@ const LICENCE_DOC = /^(updated_)?trade_licen[cs]e$|^initial_approval$/i;
 const CUSTOMER_EDITABLE = /(^|_)(email|phone|mobile|contact_no|contact_number|designation)$|^contact_name$|_contact_(name|no|number)$/i;
 
 /**
+ * Fields the customer DECLARES, even though a document once filled them.
+ *
+ * activity_codes is the case in point. It used to be read off the trade licence
+ * and locked, which is how a postal licence application went out carrying
+ * "Coffee Shop, Restaurant" as its activities. It is now the applicant's own
+ * answer -- which of the three postal services they are applying to provide --
+ * and their answer will almost never match the DED activities printed on the
+ * licence.
+ *
+ * Left in the contradiction check, that mismatch reads as "the licence on file
+ * is out of date", rejects a perfectly current trade licence, and blocks the
+ * submission on an upload that would change nothing. The licence never claimed
+ * to say which postal services they want.
+ */
+const DECLARED_BY_CUSTOMER = /^activity_codes$|^payment_method$/i;
+
+/**
  * The document that supplied a field, if one did.
  *
  * `__doc_fields` maps each uploaded document to the fields its extraction
@@ -302,6 +319,8 @@ export function licenceContradiction(
 ): { documentKey: string; previous: string } | null {
   // Contact details are the customer's own, whatever document they came off.
   if (CUSTOMER_EDITABLE.test(fieldKey)) return null;
+  // ...and so is what they are applying FOR, which no document states.
+  if (DECLARED_BY_CUSTOMER.test(fieldKey)) return null;
   const before = state.data[fieldKey];
   if (before === undefined || before === null || before === "") return null;
   if (String(before).trim() === String(newValue ?? "").trim()) return null;

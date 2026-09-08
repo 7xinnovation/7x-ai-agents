@@ -125,6 +125,38 @@ function personMatches(a: string, b: string): boolean {
   return shared >= 2 && shared / short.length >= 0.5;       // most of it, and not by one common part
 }
 
+/**
+ * Could these two names plausibly be the same person written differently?
+ *
+ * personMatches answers "is this the same person"; this answers the weaker
+ * question that decides whether a mismatch is worth ASKING about or worth
+ * REFUSING. Transliteration moves vowels, drops middle names and hyphenates --
+ * Valentina/Valentyna, Mohammed/Muhammad -- but it does not turn one name into a
+ * completely different one. Two names that share no part and no recognisable
+ * stem are two people.
+ *
+ * Deliberately generous: any shared part, or any pair of parts sharing a four
+ * character prefix, is enough to fall back to asking. The cost of being too
+ * generous is a question the customer answers; the cost of being too strict is a
+ * refused document that was always correct.
+ */
+export function couldBeSamePerson(a: string, b: string): boolean {
+  const partsOf = (s: string) =>
+    s.split(/[\s\-_.,'\u2019]+/).map((p) => normaliseName(p)).filter((p) => p.length > 1);
+  const A = partsOf(a);
+  const B = partsOf(b);
+  if (!A.length || !B.length) return true; // nothing to judge on -- do not refuse
+  for (const x of A) {
+    for (const y of B) {
+      if (x === y) return true;
+      if (x.length >= 4 && y.length >= 4 && x.slice(0, 4) === y.slice(0, 4)) return true;
+      // One written inside the other: "abdelaziz" vs "abdel aziz".
+      if (x.length >= 5 && y.length >= 5 && (x.includes(y) || y.includes(x))) return true;
+    }
+  }
+  return false;
+}
+
 export interface EntityConflict {
   /**
    * `block` -- an exact identifier disagrees, so this is provably another
@@ -439,6 +471,35 @@ export function partnerDocumentCheck(
   }
 
   if (!expected) return { conflict: null, observedName: found };
+
+  // A STRANGER, not a spelling.
+  //
+  // "confirm" here rests on transliteration: the same person's name is written
+  // differently on a passport and an Emirates ID, so a mismatch was kept and
+  // queried rather than refused. That reasoning only holds while the two names
+  // could be the same person. It does not hold for a card in the name of
+  // somebody this application has never mentioned -- and that was accepted, with
+  // a green tick against partner 3 and a stranger's Emirates ID behind it.
+  //
+  // So the two cases are separated: a name that shares nothing with this partner
+  // and matches nobody else named on the application is refused, exactly as the
+  // owner's slot already refuses one.
+  if (!couldBeSamePerson(expected, found)) {
+    const others = namedPeople(data)
+      .map((p) => p.name)
+      .filter((n) => !personMatches(n, found));
+    return {
+      observedName: found,
+      conflict: {
+        severity: "block",
+        reason:
+          `This document is in the name of ${found}, who is not named on this application. ` +
+          `Partner ${slot.index} is ${expected}` +
+          (others.length > 1 ? `, and this application names: ${others.join(", ")}` : "") +
+          `. Please upload partner ${slot.index}'s own document.`,
+      },
+    };
+  }
 
   return {
     observedName: found,
