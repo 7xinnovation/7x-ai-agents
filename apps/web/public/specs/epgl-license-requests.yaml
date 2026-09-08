@@ -16,6 +16,9 @@ info:
       * API 3 – Retrieve Request Status            (GET  /LicenseRequest/status)
       * API 4 – Duplicate Submission Check         (POST /LicenseRequest/duplicate-check) – optional
       * API 5 – Upload / Attach Document           (POST /Document)
+      * API 6 - Record NI Payment Result       (POST /services/apexrest/paymentNotification/) - deployed path
+      * API 7 - Read Company Profile           (GET  /services/data/v62.0/query - SOQL, no custom Apex)
+      * API 8 - Read IDEP Quarterly Figures    (GET  /services/data/v62.0/query - SOQL, no custom Apex)
 
     Submission model (API 1 & 2): a single atomic call (allOrNone) sends the company
     (Account) and everything attached to it – owners, contacts, portal user, members,
@@ -35,7 +38,7 @@ info:
 
     NOTE: The exact Apex REST resource paths below are placeholders to be confirmed by the
     Salesforce team; substitute the deployed paths before integration.
-  version: 1.0.0
+  version: 1.2.0
   contact:
     name: Salesforce Team
 
@@ -190,7 +193,6 @@ paths:
                       referenceId: NewAccount
                       url: /services/data/v66.0/sobjects/Account
                       body:
-                        Id: 0015f00000XXXXXAAA
                         Name: QProslIJ4j2UAT03 For Letters & Post Items Delivery
                         EPG_Company_Name_Arabic__c: قبروسليج٤جؤات٠٣ لنقل بعائث بريد الرسائل
                         EPG_Company_Status__c: Active
@@ -748,6 +750,172 @@ paths:
         '400': { description: Invalid file or missing link target. }
         '401': { description: Missing or invalid access token. }
 
+
+  # ---------------------------------------------------------------------------
+  # Payment Notification (API 6)
+  # Once the Payment Notification is sent to Salesforce, the Payment Advice is
+  # automatically marked as Paid, after the request has been approved by the
+  # Business Team and its status is set to In Process.
+  #
+  # Review change: the previous "Application ID" (applicationId) reference has been
+  # replaced by the unique attribute licenseRequestSalesforceId (the License
+  # Request's Salesforce record Id), used consistently below. The Apex side still
+  # binds "applicationId" today and will be aligned in a separate deployment.
+  # ---------------------------------------------------------------------------
+  /services/apexrest/paymentNotification/:
+    post:
+      operationId: recordPayment
+      tags: [Payment]
+      summary: Record a completed NI payment result (API 6)
+      description: >
+        Once the Payment Notification is sent to Salesforce, the Payment Advice is
+        automatically marked as Paid, after the request has been approved by the
+        Business Team and its status is set to In Process.
+
+        Records the outcome of a payment taken through NI (N-Genius) against a license
+        request. Unlike the paths above, this is the REAL deployed path (not a
+        placeholder) - the endpoint already exists and is live in the org.
+
+        The request is located by notifyPayment.licenseRequestSalesforceId - the License
+        Request's Salesforce record Id, a globally unique identifier. This unique
+        attribute replaces the previous "Application ID" (applicationId) reference.
+        It is the same value the status API already returns as salesforceRecordId, so
+        the Agent holds it from submission onwards. On success Salesforce logs a Payment_Notification__c audit record,
+        sets the License Request to "Payment Verified", marks its payment advice
+        (EPG_Transaction__c, record type Invoice) as "Paid" with the summed transaction
+        amounts, and approves the related payment items.
+
+        Responsibility notes for the Agent:
+        (1) The payment advice and its Oracle AR invoice are created automatically by
+        Salesforce when the request reaches the payable stage - the Agent never creates
+        or updates them directly; this call is the Agent's entire write surface.
+        (2) Receipt creation and Oracle receipt posting remain a Finance-side step inside
+        Salesforce; this call does not close the receipting chain.
+        (3) Call this endpoint ONLY for confirmed successful payments. Do not report
+        failed or declined payments through it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentNotificationRequest' }
+            example:
+              entityId: 'Emirates Post Group Licensing - AI Assistant'
+              notifyPayment:
+                salesforceId: 'a11FW000VmSctdoYIB'
+                payment:
+                  paymentId: '9490c2c9-0b20-4673-91ed-aa2facbd6335'
+                  payOn: '2026-09-04T12:22:53.689Z'
+                  payThru: 'N-Genius'
+                  paymentMethod: 'CreditCard'
+                  paymentStatus: 'completed'
+                  transactions:
+                    - transactionId: '9490c2c9-0b20-4673-91ed-aa2facbd6335'
+                      amount: 1000
+                      responseCurrency: { en: 'AED', ar: "درهم" }
+      responses:
+        '200':
+          description: Payment recorded. License Request set to "Payment Verified".
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentNotificationResponse' }
+              example:
+                status: 200
+                desc: { code: '43020', en: Success, ar: "نجاح" }
+                message: { code: '83250-8635', en: Success, ar: "نجاح" }
+                correlationId: 75be3872-da72-4325-9957-36ddc708588a
+        '400': { description: Missing/invalid licenseRequestSalesforceId or malformed body. }
+        '401': { description: Missing or invalid access token. }
+        '404': { description: No License Request matches the supplied licenseRequestSalesforceId. }
+
+  /services/data/v62.0/query:
+    get:
+      operationId: readCompanyAndFinanceData
+      tags: [Company Data]
+      summary: Read company profile & IDEP quarterly figures (API 7 & 8)
+      description: >
+        Standard Salesforce REST query endpoint - no custom Apex resource required.
+        Use the canned SOQL in the examples; all field API names were verified against
+        the live org.
+
+        Field notes (corrections to earlier assumptions):
+        (1) The Emirates ID lives on Contact as EPG_Emirates_Id__c (lowercase d); for
+        applications that arrived via DET also check
+        LegalEntity_Profile_Person_EmiratesID__c.
+        (2) Contact.EPG_Designation__c is a multi-select picklist - values arrive
+        semicolon-separated.
+        (3) EPG_Finance_Summary__c records are keyed to the LICENCE
+        (EPG_License_No__c), not the company; the financeSummariesByAccount example
+        joins from the Account, so an accountId is still all you need.
+
+        Prerequisite: the Agent integration user must be granted read access on
+        Account, Contact and EPG_Finance_Summary__c (object + fields). Granted
+        separately by the Salesforce team; not part of this contract file.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+          description: SOQL query (URL-encoded). Use one of the canned examples.
+          examples:
+            companyByTradeLicense:
+              summary: API 7 - company profile by trade licence number
+              value: >-
+                SELECT Id, Name, EPG_Company_Name_Arabic__c, EPG_Trade_Name_in_English__c,
+                EPG_Trade_Name_in_Arabic__c, EPG_Trade_license_no__c,
+                EPG_Trade_license_Expiry_date__c, EPG_Trade_license_issuance_date__c,
+                EPG_TRN_No__c, EPG_Emirates__c, EPG_Regulator__c, EPG_License_Number__c,
+                EPG_License_Status__c, EPG_License_Expiry_Date__c,
+                (SELECT FirstName, LastName, Email, Phone, EPG_Emirates_Id__c,
+                EPG_Designation__c FROM Contacts)
+                FROM Account WHERE EPG_Trade_license_no__c = '2137129'
+            companyByEmiratesId:
+              summary: API 7 - company located via a contact's Emirates ID
+              value: >-
+                SELECT AccountId, Account.Name, Account.EPG_Trade_license_no__c,
+                Account.EPG_Trade_Name_in_English__c, Account.EPG_License_Number__c,
+                Account.EPG_License_Status__c
+                FROM Contact WHERE EPG_Emirates_Id__c = '784194147908318'
+            financeSummariesByAccount:
+              summary: API 8 - quarterly leviable-income figures for a company
+              value: >-
+                SELECT EPG_Year__c, Quarter__c, EPG_Leviable_Income__c,
+                EPG_Non_Leviable_Income__c, EPG_TotalLevy__c,
+                EPG_Form_9_Due_Fees_for_the_period__c, Amount_Paid__c
+                FROM EPG_Finance_Summary__c
+                WHERE EPG_License_No__c IN
+                (SELECT EPG_License__c FROM Account WHERE Id = '0015f00001YKVzWAAX')
+                ORDER BY EPG_Year__c DESC, Quarter__c
+      responses:
+        '200':
+          description: Query result. Shape is the standard Salesforce QueryResult.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueryResult' }
+              examples:
+                financeSummaries:
+                  summary: API 8 sample (verified data shape)
+                  value:
+                    totalSize: 2
+                    done: true
+                    records:
+                      - attributes: { type: EPG_Finance_Summary__c }
+                        EPG_Year__c: '2026'
+                        Quarter__c: Q1
+                        EPG_Leviable_Income__c: 5538091.48
+                        EPG_Non_Leviable_Income__c: 0
+                        EPG_TotalLevy__c: 101603.18
+                        EPG_Form_9_Due_Fees_for_the_period__c: 101603.18
+                        Amount_Paid__c: null
+                      - attributes: { type: EPG_Finance_Summary__c }
+                        EPG_Year__c: '2026'
+                        Quarter__c: Q2
+                        EPG_Leviable_Income__c: 6760279.91
+                        EPG_Non_Leviable_Income__c: 0
+                        EPG_TotalLevy__c: 131145.37
+                        EPG_Form_9_Due_Fees_for_the_period__c: 131145.37
+                        Amount_Paid__c: null
+        '400': { description: Malformed SOQL. }
+        '401': { description: Missing or invalid access token. }
 components:
   securitySchemes:
     oauth2ClientCredentials:
@@ -974,11 +1142,8 @@ components:
         EPG_Emirates_Id__c: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing User.' }
     Members:
       type: object
-      description: >
-        Members__c – board members / managers. Upsert key – AccountId__c + Name (NameEn).
-        EPG_Contact__c and EPG_Designation__c do NOT exist on this object (EPGL, 2026-09-08);
-        a row without Name is filed as "Unknown Member".
-      required: [AccountId__c, Name]
+      description: Members__c – board members / managers. Upsert key – AccountId__c + Name (NameEn).
+      required: [AccountId__c]
       properties:
         AccountId__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
         Name: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing Member under the Account.' }
@@ -1008,21 +1173,28 @@ components:
         serviceNameAR__c: { type: string }
         providerCode__c: { type: string, nullable: true, description: Defaults to EPG }
         submissionCount__c: { type: integer, example: 1 }
-        # Corrected 2026-09-08 from EPGL's review of LR-37214. Their published
-        # spec named Terms_Conditions_Accepted__c here and omitted the request's
-        # own emirate/region entirely; both are wrong. Kept in this copy so the
-        # next import does not reintroduce them.
         Activity_Codes__c:
           type: string
           example: '5320002,5320009'
           description: >
-            NUMERIC postal activity codes, comma-separated — never descriptive text.
-            Accepted values: 5320002 Letters & Post Items Delivery, 5320007 Documents
-            Delivery, 5320009 Parcels Delivery. These are the postal activities applied
-            for, NOT the company's trade-licence activities.
-        EPG_Terms_and_Conditions__c: { type: boolean, description: 'Terms acceptance. This is the field that drives the checkbox — NOT Terms_Conditions_Accepted__c, which does not exist on the object.' }
-        EPG_Current_Emirate__c: { type: string, example: Dubai, description: 'Text. The emirate on the REQUEST — the Account has its own EPG_Emirates__c.' }
-        EPG_Current_Region__c: { type: string, example: Al Mankhool, description: 'Text. The region on the REQUEST — the Account has its own EPG_Region__c.' }
+            NUMERIC postal activity codes, comma-separated - never descriptive text.
+            5320002 Letters & Post Items Delivery, 5320007 Documents Delivery,
+            5320009 Parcels Delivery. These are the postal activities APPLIED FOR,
+            not the company's trade-licence activities (EPGL, 2026-09-08).
+        # DIVERGENCE, 2026-09-08. This schema and this spec's own renewal example
+        # disagree: the example (see EPG_Terms_and_Conditions__c above, in the
+        # renewal request body) sets EPG_Terms_and_Conditions__c on the licence
+        # request, while this schema names Terms_Conditions_Accepted__c. Fuad
+        # Alnsour's review of LR-37214 resolves it -- rename it -- so we send
+        # EPG_Terms_and_Conditions__c and lib/epglFields.ts enforces that.
+        EPG_Terms_and_Conditions__c: { type: boolean, description: 'Terms acceptance. Per EPGL 2026-09-08 this, NOT Terms_Conditions_Accepted__c, is the field that drives the checkbox.' }
+        # Absent from the published spec, and confirmed by EPGL as the correct
+        # targets: "EPG_Current_Emirate__c and EPG_Current_Region__c were not in
+        # the swagger but are the correct targets." They are the LICENCE
+        # REQUEST's own emirate and region; the Account keeps EPG_Emirates__c and
+        # EPG_Region__c, which is why both pairs exist.
+        EPG_Current_Emirate__c: { type: string, example: Dubai, description: 'Text. The emirate on the REQUEST, not the Account.' }
+        EPG_Current_Region__c: { type: string, example: Al Mankhool, description: 'Text. The region on the REQUEST, not the Account.' }
 
     # ---- Renewal-specific (Appendix B) ----
     Branch:
@@ -1047,3 +1219,91 @@ components:
         TrialBalance_Q2__c: { type: string, description: Quarter 2 total income (AED) }
         TrialBalance_Q3__c: { type: string, description: Quarter 3 total income (AED) }
         TrialBalance_Q4__c: { type: string, description: Quarter 4 total income (AED) }
+
+    PaymentNotificationRequest:
+      type: object
+      required: [notifyPayment]
+      properties:
+        entityId: { type: string, description: Caller identifier (e.g. EPGL-CHAT). }
+        notifyPayment:
+          type: object
+          required: [licenseRequestSalesforceId, payment]
+          properties:
+            # Renamed per review comment: unique attribute instead of "Application ID".
+            licenseRequestSalesforceId:
+              type: string
+              description: >-
+                Salesforce record Id of the License Request (EPG_License_Request__c.Id) -
+                globally unique. Same value returned by the status API as salesforceRecordId.
+                Replaces the previous "Application ID" (applicationId) reference.
+            payment:
+              type: object
+              properties:
+                invoiceId: { type: string }
+                refInvoiceId: { type: string }
+                paymentId: { type: string, description: NI payment reference. }
+                payOn: { type: string, description: Payment datetime (ISO 8601). }
+                payBy: { type: string }
+                payThru: { type: string, description: Channel, e.g. NI. }
+                paymentMethod: { type: string }
+                paymentStatus: { type: string, description: Send only successful payments (e.g. PAID). }
+                transactions:
+                  type: array
+                  items: { $ref: '#/components/schemas/PaymentTransaction' }
+            message:
+              type: object
+              properties:
+                code: { type: string }
+                en: { type: string }
+                ar: { type: string }
+            infos:
+              type: array
+              items:
+                type: object
+                properties:
+                  infoKey: { type: string }
+                  infoValue: { type: string }
+    PaymentTransaction:
+      type: object
+      required: [amount]
+      properties:
+        transactionId: { type: string }
+        refTransactionId: { type: string }
+        itemId: { type: string }
+        beneficiaryId: { type: string, description: Use EPG. }
+        amount: { type: number, description: Amount in AED. Amounts across transactions are summed. }
+        currency:
+          type: object
+          properties:
+            en: { type: string }
+            ar: { type: string }
+    PaymentNotificationResponse:
+      type: object
+      properties:
+        status: { type: integer }
+        correlationId: { type: string, nullable: true }
+        desc:
+          type: object
+          properties:
+            code: { type: string }
+            en: { type: string }
+            ar: { type: string }
+        message:
+          type: object
+          properties:
+            code: { type: string }
+            en: { type: string }
+            ar: { type: string }
+    QueryResult:
+      type: object
+      description: Standard Salesforce REST query result envelope.
+      properties:
+        totalSize: { type: integer }
+        done: { type: boolean }
+        nextRecordsUrl: { type: string, description: Present when the result is paginated. }
+        records:
+          type: array
+          items:
+            type: object
+            description: Queried sObject rows; fields depend on the SOQL SELECT list.
+            additionalProperties: true

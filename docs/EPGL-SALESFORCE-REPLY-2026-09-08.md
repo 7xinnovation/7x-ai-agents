@@ -46,6 +46,30 @@ Three notes on the details:
 - **`EPG_Account__c` on `EPG_License_Request__c` is untouched** — your list did
   not flag it and the swagger confirms it, so we left it exactly as it was.
 
+### One thing in v1.2.0 still disagrees with your review
+
+Thank you for the updated spec — v1.2.0 confirms `EPG_Company__c`,
+`AccountId__c`, `EPG_Emirates_ID__c`, `serviceId__c`, `serviceNameEN__c` and
+`Activity_Codes__c` exactly as you described them, and `Members__c` now carries
+only `AccountId__c` and `Name`.
+
+Two points where we have followed your review over the document, so you know
+what we are sending:
+
+- **Terms.** The spec disagrees with itself: the renewal example sets
+  `EPG_Terms_and_Conditions__c` on the licence request, while the
+  `EPGLicenseRequest` schema still lists `Terms_Conditions_Accepted__c`. Your
+  review says rename it, so we send **`EPG_Terms_and_Conditions__c`**. Worth
+  correcting the schema before someone builds to it.
+- **Emirate and region.** Still absent from v1.2.0, as you noted. We send
+  `EPG_Current_Emirate__c` and `EPG_Current_Region__c` on the licence request and
+  leave `EPG_Emirates__c` / `EPG_Region__c` on the Account, where the spec does
+  document them.
+
+We also noted the new `/services/data/v62.0/query` endpoint (APIs 7 & 8) for
+company profile and IDEP quarterly figures, and the field notes attached to it.
+We are not using it yet — we will come back to you separately about that.
+
 ### `EPG_Payment_Reference__c` and `EPG_Contact__c` — please confirm
 
 You asked whether we need these persisted. Our reading:
