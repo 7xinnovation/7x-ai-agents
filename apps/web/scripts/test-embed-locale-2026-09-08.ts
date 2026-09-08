@@ -79,17 +79,21 @@ check("the size is written with important", /setProperty\(prop, `\$\{px\}px`, "i
 check("there is a diagnose() for when it still does not fit", /dlg\.diagnose = diagnose/.test(src));
 check("...which names a transformed ancestor breaking position:fixed", /fixedPositioningBrokenBy/.test(src));
 
-console.log("\nA clipped panel becomes a usable one");
-check("there is a visibility enforcement", /function enforceVisible\(\)/.test(src));
-check("it triggers on any edge outside the viewport", /r\.top < 0 \|\| r\.left < 0 \|\| r\.bottom > window\.innerHeight \+ 4 \|\| r\.right > window\.innerWidth \+ 4/.test(src));
-check("...and not on a panel that fits", /if \(!outside\) return;/.test(src));
-check("...nor before layout has happened", /if \(!r\.width \|\| !r\.height\) return;/.test(src));
-check("it goes full-screen against the WINDOW", /\["position", "fixed"\][\s\S]{0,200}?\["height", "100dvh"\]/.test(src));
-check("written important, so host CSS cannot undo it", /frame\.style\.setProperty\(prop, value, "important"\)/.test(src));
-check("it measures after layout, not before", /requestAnimationFrame\(enforceVisible\)/.test(src));
-check("it says so once, rather than silently", /switched to full screen/.test(src));
-check("full-screen mode and small screens are left to the CSS", /if \(mode !== "widget" \|\| window\.matchMedia\(COMPACT\)\.matches\) return;/.test(src));
-check("diagnose still reports the likely culprit", /fixedPositioningBrokenBy/.test(src));
+console.log("\nThe full-screen fallback is gone, and stays gone");
+// It fought fit(): the fallback wrote inset:0 !important, the ResizeObserver saw
+// a size that did not match what fit() intends and called fit(), which wrote the
+// 404 width back over it -- leaving a 404-wide panel anchored to the LEFT of the
+// page. Two mechanisms writing the same properties will fight.
+check("nothing enforces a full-screen fallback", !/enforceVisible/.test(src));
+check("nothing writes inset:0 over fit()", !/\["top", "0px"\]/.test(src));
+check("fit() is the only thing that sizes the panel", (src.match(/frame\.style\.setProperty\(/g) ?? []).length <= 1);
+check("the resize handler is plain fit", /addEventListener\("resize", fit\)/.test(src));
+check("and so is the load handler", /frame\.addEventListener\("load", fit\)/.test(src));
+check("the ResizeObserver still corrects drift", /new ResizeObserver/.test(src));
+check("...by calling fit, not by writing its own size", /correcting = true;\s*fit\(\);/.test(src));
+check("diagnose survives, since it is what identified this", /dlg\.diagnose = diagnose/.test(src));
+check("...and still reports a transformed ancestor", /fixedPositioningBrokenBy/.test(src));
+check("why it was removed is written down", /A full-screen fallback lived here and was removed/.test(src));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
