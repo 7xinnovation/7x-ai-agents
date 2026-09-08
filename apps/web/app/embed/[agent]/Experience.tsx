@@ -59,6 +59,7 @@ const STR = {
     emptyTitle: "Nothing to assemble yet",
     emptyBody: "As we talk, your application takes shape here: details, documents, and what's left.",
     missing: "Submission readiness",
+    requirements: "Requirements",
     ready: "Ready to submit",
     readyShort: "ready",
     reference: "Reference",
@@ -109,6 +110,7 @@ const STR = {
     emptyTitle: "لا يوجد ما يُجمع بعد",
     emptyBody: "أثناء المحادثة، يتشكّل طلبك هنا: التفاصيل والمستندات وما تبقّى.",
     missing: "جاهزية الإرسال",
+    requirements: "المتطلبات",
     ready: "جاهز للإرسال",
     readyShort: "جاهز",
     reference: "الرقم المرجعي",
@@ -1580,23 +1582,10 @@ export function Experience({
                         style={{ width: `${progress.pct}%` }}
                       />
                     </div>
-                    {/* The requirements themselves, not just the percentage. A bar
-                        says how far along they are; only the list says what is
-                        actually LEFT (FB-1437), and completed items stay ticked. */}
-                    {checklist.length ? (
-                      <div className="dlg-progress-checks">
-                        {checklist.map((m) => (
-                          <span
-                            className={`dlg-progress-check ${m.done ? "done" : "todo"}`}
-                            key={`${m.kind}:${m.key}`}
-                            title={labelMap.get(m.key) ?? m.key}
-                          >
-                            {m.done ? <CheckCircle size={12} weight="fill" /> : <Circle size={12} weight={iconWeight} />}
-                            {labelMap.get(m.key) ?? m.key}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
+                    {/* The bar alone here. The requirements themselves read as a
+                        wall of pills directly beneath it — eighteen of them on an
+                        EPGL licence — and pushed the details the customer came to
+                        check off the screen. The list now sits under DETAILS. */}
                   </div>
                 ) : null}
 
@@ -1643,6 +1632,28 @@ export function Experience({
                         )}
                       </div>
                     ))}
+                  </div>
+                ) : null}
+
+                {/* What is actually LEFT (FB-1437), under the details rather than
+                    above them, and one per line rather than wrapped into pills:
+                    at eighteen requirements the wrapped version was a block of
+                    text nobody read, and the order it implies — do this, then
+                    this — was lost to whatever fitted on each row. Completed
+                    items stay, ticked. */}
+                {checklist.length ? (
+                  <div className="dlg-card">
+                    <h3>
+                      <ListChecks size={15} weight="bold" /> {t.requirements}
+                    </h3>
+                    <ul className="dlg-checklist">
+                      {checklist.map((m) => (
+                        <li className={m.done ? "done" : "todo"} key={`${m.kind}:${m.key}`}>
+                          {m.done ? <CheckCircle size={14} weight="fill" /> : <Circle size={14} weight={iconWeight} />}
+                          <span>{labelMap.get(m.key) ?? m.key}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ) : null}
 

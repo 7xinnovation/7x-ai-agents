@@ -1831,42 +1831,54 @@ body {
 
    They used to sit under the bar above the conversation as well. Seven pills of
    things not yet done, in front of someone who has only just started, read as
-   clutter however they were spaced — so above the chat it is now the bar alone,
-   and the list lives here, one tap away, with room to be read. */
-.dlg-progress-checks {
+   clutter however they were spaced — so above the chat it is now the bar alone.
+   The list lives in the panel under DETAILS; see .dlg-checklist. */
+/* The requirements list, in the panel under DETAILS.
+
+   It was a wrapped row of pills directly beneath the progress bar. That works
+   at five requirements and fails at eighteen: an EPGL licence filled the top of
+   the panel with a block of pills and pushed the details the customer came to
+   read off the screen, while the order the list implies -- do this, then this --
+   was decided by whatever happened to fit on each row.
+
+   One per line, so it reads top to bottom and the eye can find the unfinished
+   ones by their weight rather than by hunting for a dashed border. */
+.dlg-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 5px;
+  flex-direction: column;
 }
-.dlg-progress-check {
-  display: inline-flex;
+.dlg-checklist li {
+  display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--c-border);
-  background: var(--c-surface);
-  font-size: 11.5px;
-  line-height: 1.6;
-  white-space: nowrap;
+  gap: 8px;
+  padding: 7px 2px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-border) 55%, transparent);
+}
+.dlg-checklist li:last-child {
+  border-bottom: 0;
+}
+.dlg-checklist li svg {
+  flex: none;
+}
+.dlg-checklist li.done {
   color: var(--c-text-muted);
 }
-.dlg-progress-check.done {
-  color: color-mix(in srgb, var(--c-success) 80%, var(--c-text));
-  border-color: color-mix(in srgb, var(--c-success) 30%, var(--c-border));
-  background: color-mix(in srgb, var(--c-success) 6%, var(--c-surface));
-}
-.dlg-progress-check.done svg {
+.dlg-checklist li.done svg {
   color: var(--c-success);
 }
-.dlg-progress-check.todo {
-  font-weight: 600;
+/* Done items are struck through only in colour, never in text: a completed
+   requirement is still a requirement, and a line through it reads as cancelled. */
+.dlg-checklist li.todo {
   color: var(--c-text);
-  border-style: dashed;
+  font-weight: 600;
 }
-.dlg-progress-check.todo svg {
-  opacity: 0.45;
+.dlg-checklist li.todo svg {
+  opacity: 0.4;
 }
 
 .dlg-progress-top .dlg-progress-track {
