@@ -131,67 +131,71 @@ placeholder and the panel is not connecting.
 
 ---
 
-## 7. Payment — you are right, and the drift is ours
+## 7. Payment — your process map and this rule disagree
 
-We initially read this as a conflict with our design. It is not: it is a
-regression on our side, and your rule restates what you already told us.
+We are working to **Payment Process with Agentic — Process Map**, which is your
+document. In it, the customer **submits the application and pays in the same
+step**, and verification comes afterwards:
 
-Your fee clarification of **14 August** says the annual licensing fee is
-requested *once the document review is approved*, and that the exact payable
-amount is the figure in the payment request EPGL issues after that review. That
-is written into the assistant's own knowledge base in those words, and it is how
-our production configuration behaves today: no payment is taken in the chat.
+```
+submit + pay  ->  payment processed  ->  receipt issued
+              ->  request verified  ->  licence copy generated
+```
 
-On **3 September** a change to our staging environment turned the in-chat payment
-on, because the payment path looked configured but inert. It should not have
-been: the instruction to take payment immediately after submission now sits in
-the same guidance as the older, correct instruction that payment is not taken in
-the chat at all. That contradiction is why LR-37214 carried `EPG_Amount_Paid__c:
-1010` and why a payment notification reached you seconds after submission.
+So payment precedes verification by design. A rule that rejects payment
+notifications until the licence is approved would reject every notification the
+Online Payment branch produces, because in your own flow the money always
+settles first.
 
-To be clear about the blast radius: **this affected staging only.** LR-37214 was
-a sandbox submission on `epro--preprod2.sandbox`, not a customer. No live
-applicant has been charged — payment is switched off in our production
-configuration.
+**Please confirm which is authoritative** — the process map, or the approval
+gate. We have built to the map and would rather not change it on our reading of
+a Teams message.
 
-We are removing the contradiction. Before we do, one question decides how:
+If the map stands, our request is simply that the notification is accepted at
+submission-time status, and that approval governs when the licence is issued
+rather than whether the payment is recorded.
 
-**Who collects the annual licensing fee after approval?** Your August note says it
-is "paid through the secure payment gateway", and elsewhere that EPGL issues the
-payment request through its own channel. Those point at different systems:
+### The second payment option is not built yet
 
-- **If EPGL collects it** — the assistant submits the application, tells the
-  applicant EPGL will issue the payment request after review, and stops there. We
-  take no payment and send no payment notification, and your proposed approval
-  validation never has anything to reject. This matches our production behaviour
-  today and needs nothing further from us.
-- **If we collect it on your behalf** — we need to reach the applicant after
-  approval, when they are no longer in the chat. We would email or SMS them a
-  link that opens a fresh checkout session, poll `getRequestStatus` to know when
-  approval has happened, and notify you once the money settles. Payment would
-  then be after approval by construction, so your validation and our flow agree
-  without either side special-casing the other. This is buildable — we already
-  run scheduled reconciliation on the same pattern — but it is work we should not
-  start until you confirm it is wanted.
+The map offers the customer a choice we do not currently present:
 
-**We assume the first.** Please correct us if not.
+- **Online Payment (Payment Gateway)** — built and working. This is what
+  LR-37214 used.
+- **Current System (VIBAN)** — **not built.** The map has the assistant create
+  the Salesforce account and then notify Finance to request a Virtual IBAN, after
+  which your Finance Officer issues the VIBAN, pastes it into the application,
+  and the customer receives it by email and pays by transfer. Finance then
+  confirms receipt and issues the receipt manually.
 
-One consequence either way: the amount cannot be decided by us. Our staging
-configuration carried a flat AED 1,000 and production carries AED 150,000, and
-neither matches the AED 100,000 annual licensing fee in your own clarification.
-If we ever do collect, the figure has to come from your payment request rather
-than from a number configured on our side — please confirm the field or endpoint
-that carries it.
+We would like to build it, and we need two things from you:
+
+1. **How should the assistant notify Finance of a VIBAN request?** A Salesforce
+   field or status we set on the application, a queue record we create, an email
+   address — whichever fits your process. Right now we have no mechanism at all.
+2. **Who tells the licence request the payment arrived?** In this branch the
+   money never touches our gateway, so we cannot send the payment notification.
+   We assume your Finance Officer confirming receipt is what marks it paid, and
+   that we should send nothing. Please confirm.
+
+Note that in the VIBAN branch the approval gate is moot from our side — we never
+send a payment notification for it.
 
 ### Still open from our point 1
 
 Your reply did not say **which fields drive License Amount, Amount (Paid) and
 Payment Status** on the licence request. `EPG_Amount_Paid__c: 1010` was accepted
 and the notification carrying the same 1,010 moved Request Status to Payment
-Verified, yet all three still displayed as `AED 0.00` / blank. This still matters
-even if EPGL collects the fee: something has to populate those three fields when
-a payment is recorded, and we would like to know whether we should be sending
-`EPG_Amount_Paid__c` at all.
+Verified, yet all three still displayed as `AED 0.00` / blank. Please tell us
+what populates them — and whether we should be sending `EPG_Amount_Paid__c` at
+all, or whether the notification alone is meant to.
+
+### One thing on our side, either way
+
+The fee amount is configured on our side — a flat AED 1,000 on staging and AED
+150,000 on production — and neither matches the AED 100,000 annual licensing fee
+in your clarification of 14 August. **What is the correct figure for a new
+licence, and is it fixed or per-application?** If it varies, we need a field or
+endpoint to read it from rather than a number configured by us.
 
 ---
 
@@ -203,6 +207,7 @@ a payment is recorded, and we would like to know whether we should be sending
 4. Confirm `Name` (the LR number) as the update key for `EPG_License_Request__c`.
 5. What would a document download endpoint give you that the base64 upload does not?
 6. Should we keep sending `EPG_Document__c` placeholder rows at all?
-7. **Who collects the annual licensing fee after approval — EPGL, or us on your behalf?** (We assume EPGL.)
-8. If we ever collect it: which field or endpoint carries the amount from your payment request?
+7. **Which is authoritative — the process map (pay at submission), or the approval gate?** We have built to the map.
+8. How should the assistant notify Finance to request a Virtual IBAN, and who marks that branch paid?
 9. Which fields drive License Amount, Amount (Paid) and Payment Status — and should we be sending `EPG_Amount_Paid__c` at all?
+10. What is the correct new-licence fee, and is it fixed or per-application?
