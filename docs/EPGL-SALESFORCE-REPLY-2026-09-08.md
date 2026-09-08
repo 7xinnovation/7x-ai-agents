@@ -131,47 +131,67 @@ placeholder and the panel is not connecting.
 
 ---
 
-## 7. Payment — this one needs a decision before go-live
+## 7. Payment — you are right, and the drift is ours
 
-> *The application should get approval by the business team before sending the
-> payment notification; this validation should be added from our side to restrict
-> payment notification unless the license approved.*
+We initially read this as a conflict with our design. It is not: it is a
+regression on our side, and your rule restates what you already told us.
 
-**This would break every submission the assistant makes.** Our flow takes the
-money before the business team has seen anything:
+Your fee clarification of **14 August** says the annual licensing fee is
+requested *once the document review is approved*, and that the exact payable
+amount is the figure in the payment request EPGL issues after that review. That
+is written into the assistant's own knowledge base in those words, and it is how
+our production configuration behaves today: no payment is taken in the chat.
 
-```
-duplicate check  ->  submit licence request  ->  customer pays (N-Genius)  ->  we notify you
-```
+On **3 September** a change to our staging environment turned the in-chat payment
+on, because the payment path looked configured but inert. It should not have
+been: the instruction to take payment immediately after submission now sits in
+the same guidance as the older, correct instruction that payment is not taken in
+the chat at all. That contradiction is why LR-37214 carried `EPG_Amount_Paid__c:
+1010` and why a payment notification reached you seconds after submission.
 
-The notification fires seconds after the customer's card settles, which is
-minutes after submission and long before any approval. If notifications are
-rejected until the licence is approved, every payment we take becomes money
-received with no record of it on your side.
+To be clear about the blast radius: **this affected staging only.** LR-37214 was
+a sandbox submission on `epro--preprod2.sandbox`, not a customer. No live
+applicant has been charged — payment is switched off in our production
+configuration.
 
-We cannot pay after approval, either: the customer is in a chat session and will
-not return days later to complete a payment.
+We are removing the contradiction. Before we do, one question decides how:
 
-Two ways forward, and we would like your view on which:
+**Who collects the annual licensing fee after approval?** Your August note says it
+is "paid through the secure payment gateway", and elsewhere that EPGL issues the
+payment request through its own channel. Those point at different systems:
 
-1. **Accept the notification at any status**, and let approval govern what the
-   licence costs and when it is issued — not whether the payment is recorded.
-2. **We hold the notification** and re-send it once `getRequestStatus` reports
-   approval. This works, but it means a settled payment sits unreported on your
-   side for as long as approval takes, and it needs a retry window we would have
-   to agree.
+- **If EPGL collects it** — the assistant submits the application, tells the
+  applicant EPGL will issue the payment request after review, and stops there. We
+  take no payment and send no payment notification, and your proposed approval
+  validation never has anything to reject. This matches our production behaviour
+  today and needs nothing further from us.
+- **If we collect it on your behalf** — we need to reach the applicant after
+  approval, when they are no longer in the chat. We would email or SMS them a
+  link that opens a fresh checkout session, poll `getRequestStatus` to know when
+  approval has happened, and notify you once the money settles. Payment would
+  then be after approval by construction, so your validation and our flow agree
+  without either side special-casing the other. This is buildable — we already
+  run scheduled reconciliation on the same pattern — but it is work we should not
+  start until you confirm it is wanted.
 
-Our preference is (1): the payment is a fact whether or not the licence is
-approved, and refunds are a separate decision.
+**We assume the first.** Please correct us if not.
+
+One consequence either way: the amount cannot be decided by us. Our staging
+configuration carried a flat AED 1,000 and production carries AED 150,000, and
+neither matches the AED 100,000 annual licensing fee in your own clarification.
+If we ever do collect, the figure has to come from your payment request rather
+than from a number configured on our side — please confirm the field or endpoint
+that carries it.
 
 ### Still open from our point 1
 
 Your reply did not say **which fields drive License Amount, Amount (Paid) and
 Payment Status** on the licence request. `EPG_Amount_Paid__c: 1010` was accepted
 and the notification carrying the same 1,010 moved Request Status to Payment
-Verified, yet all three still displayed as `AED 0.00` / blank. If those are
-formula or roll-up fields fed by a Payment record we are not creating, please
-tell us what to create.
+Verified, yet all three still displayed as `AED 0.00` / blank. This still matters
+even if EPGL collects the fee: something has to populate those three fields when
+a payment is recorded, and we would like to know whether we should be sending
+`EPG_Amount_Paid__c` at all.
 
 ---
 
@@ -183,5 +203,6 @@ tell us what to create.
 4. Confirm `Name` (the LR number) as the update key for `EPG_License_Request__c`.
 5. What would a document download endpoint give you that the base64 upload does not?
 6. Should we keep sending `EPG_Document__c` placeholder rows at all?
-7. Payment notification before approval — option 1 or option 2?
-8. Which fields drive License Amount, Amount (Paid) and Payment Status?
+7. **Who collects the annual licensing fee after approval — EPGL, or us on your behalf?** (We assume EPGL.)
+8. If we ever collect it: which field or endpoint carries the amount from your payment request?
+9. Which fields drive License Amount, Amount (Paid) and Payment Status — and should we be sending `EPG_Amount_Paid__c` at all?
