@@ -54,5 +54,17 @@ check("the MyHome rewrite precedes the branch check", myhome !== -1 && branchGua
 console.log("\nThe reservation tool is reachable at all");
 check("enabled:false still skips an operation", /\(op as \{ enabled\?: boolean \}\)\.enabled === false\) continue/.test(src));
 
+console.log("\nThe reservation goes to the branch the box came from");
+const sel = src.slice(src.indexOf("Reserve the box the customer actually chose"));
+check("the box is remembered with its branch", /const offeredBoxAt: Record<string, string>/.test(src));
+check("and the printed number with its uniqueBoxId", /const uniqueByNumber: Record<string, string>/.test(src));
+check("both are filled from the FreeBoxes REQUEST, not guessed", /askedAt[\s\S]{0,220}?offeredBoxAt\[uid\] = askedAt/.test(src));
+check("boxNumber is read as well as uniqueBoxID", /body\.uniqueBoxID \?\? body\.uniqueBoxId \?\? body\.boxNumber/.test(sel.slice(0, 900)));
+check("a printed number resolves to its uniqueBoxId", /uniqueByNumber\[sent\]/.test(sel.slice(0, 1200)));
+check("the location is corrected to where the box was offered", /body\[locKey\] = at;/.test(sel.slice(0, 3000)));
+check("either spelling of the location key is handled", /body\.locationId !== undefined \? "locationId" : body\.LocationId !== undefined/.test(sel.slice(0, 3000)));
+check("a correction is audited with the box it was for", /integration_input_corrected[\s\S]{0,320}?box: chosen/.test(sel.slice(0, 3000)));
+check("nothing is touched when the branch already agrees", /String\(body\[locKey\] \?\? ""\) !== at/.test(sel.slice(0, 3000)));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

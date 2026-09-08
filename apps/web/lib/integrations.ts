@@ -833,6 +833,19 @@ export async function buildApiTools(
   const gsbCompanies = new Set(opts.gsbCompanies ?? []);
   /** uniqueBoxIds the customer was offered, so a reservation can use a real one. */
   let offeredBoxIds: string[] = opts.initialOfferedBoxIds ?? [];
+  /**
+   * The branch each offered box actually came from, and the uniqueBoxId behind
+   * each printed box number.
+   *
+   * FreeBoxes is per branch, so a box number only means anything alongside the
+   * location it was listed at. Production, 8 September: boxes were listed at
+   * officeId 201, and Rental/Select went out with the same box number and
+   * locationId 206 -- a different branch entirely. Emirates Post answered 108
+   * BOX_NOT_FREE, correctly, and the customer was told their box had just been
+   * taken. It was free the whole time, at 201.
+   */
+  const offeredBoxAt: Record<string, string> = {};
+  const uniqueByNumber: Record<string, string> = {};
   let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
@@ -1125,20 +1138,50 @@ export async function buildApiTools(
       }
     }
 
-    // Reserve the box the customer actually chose, with the id the backend issued.
+    // Reserve the box the customer actually chose, with the id the backend issued,
+    // AT THE BRANCH IT WAS OFFERED FROM.
     if (/rental_select$/i.test(toolName) && offeredBoxIds.length) {
       const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
-      const sent = String(body.uniqueBoxID ?? body.uniqueBoxId ?? "");
-      if (sent && !offeredBoxIds.includes(sent)) {
+      // The model writes the box under whichever key it feels like -- uniqueBoxID,
+      // uniqueBoxId, or boxNumber carrying the PRINTED number. All three mean the
+      // same box to the customer, so all three are read.
+      const sent = String(body.uniqueBoxID ?? body.uniqueBoxId ?? body.boxNumber ?? "");
+      let chosen: string | null = offeredBoxIds.includes(sent) ? sent : null;
+      if (sent && !chosen) {
         // The model builds this id rather than copying it, so it arrives with a
         // prefix added or dropped. Match on the digits that are actually a box.
-        const match =
-          offeredBoxIds.find((id) => id.endsWith(sent) || sent.endsWith(id)) ?? null;
-        if (match) {
-          body.uniqueBoxID = match;
+        chosen = uniqueByNumber[sent] ?? offeredBoxIds.find((id) => id.endsWith(sent) || sent.endsWith(id)) ?? null;
+        if (chosen) {
+          body.uniqueBoxID = chosen;
           delete body.uniqueBoxId;
           input = { ...input, body };
         }
+      }
+
+      // THE BRANCH THE BOX CAME FROM, NOT THE ONE THE MODEL REMEMBERS.
+      //
+      // Production, 8 September. FreeBoxes was called for officeId 201 and
+      // returned box 2062 (uniqueBoxId 22062). Rental/Select then went out as
+      // {boxNumber: "2062", locationId: "206"} -- the right box, the wrong
+      // branch -- and Emirates Post answered 108 BOX_NOT_FREE, which is true of
+      // 2062 at 206 and false of 2062 at 201. The customer was told the box had
+      // been taken since they picked it, walked back to the list, and given
+      // numbers from a branch they had not chosen.
+      //
+      // A box number only means something next to the branch it was listed at,
+      // and we know that branch: it is the one we asked FreeBoxes about.
+      const at = chosen ? offeredBoxAt[chosen] : undefined;
+      const locKey = body.locationId !== undefined ? "locationId" : body.LocationId !== undefined ? "LocationId" : null;
+      if (at && locKey && String(body[locKey] ?? "") !== at) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "integration_input_corrected",
+          payload: { tool: toolName, field: locKey, was: String(body[locKey] ?? ""), now: at, box: chosen, reason: "the box was offered at a different branch" },
+        }).catch(() => {});
+        body[locKey] = at;
+        input = { ...input, body };
       }
     }
 
@@ -2265,6 +2308,21 @@ export async function buildApiTools(
             .map((x: Record<string, unknown>) => String(x?.uniqueBoxId ?? ""))
             .filter(Boolean)
             .slice(0, 400);
+          // Which branch these came from, so a later reservation cannot drift to
+          // another one. Taken from the REQUEST, which is what was actually asked.
+          {
+            const askedAt = asStr(
+              ((input ?? {}) as Record<string, unknown>).LocationId ??
+                ((input ?? {}) as Record<string, unknown>).locationId
+            );
+            for (const x of rows as Record<string, unknown>[]) {
+              const uid = String(x?.uniqueBoxId ?? "");
+              const num = String(x?.boxId ?? x?.boxNumber ?? "");
+              if (!uid) continue;
+              if (askedAt) offeredBoxAt[uid] = askedAt;
+              if (num) uniqueByNumber[num] = uid;
+            }
+          }
 
           // WHICH TEN TO SHOW, decided here rather than remembered.
           //
