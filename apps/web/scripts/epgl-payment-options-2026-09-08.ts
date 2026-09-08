@@ -22,7 +22,7 @@
  * submission handler. Neither depends on the model having read this.
  *
  * Idempotent. Run from apps/web:
- *   npx tsx scripts/epgl-payment-options-2026-09-08.ts --env <file> [--apply]
+ *   npx tsx scripts/epgl-payment-options-2026-09-08.ts --env <file> [--fee <aed>] [--apply]
  */
 import { databaseUrlFrom } from "./lib/envFile";
 
@@ -39,8 +39,18 @@ import pg from "pg";
 import { agents } from "@dialog/db";
 import { eq } from "drizzle-orm";
 
-/** The annual licensing fee, confirmed 2026-09-08. Production already carries it. */
-const FEE = 150000;
+/**
+ * The annual licensing fee. AED 150,000, confirmed 2026-09-08.
+ *
+ * STAGING CANNOT CHARGE IT. The sandbox gateway carries a risk rule on order
+ * amount, and a 150,000 order comes back 422 amountLimitExceeded -- which
+ * surfaces in the chat as "Something went wrong on our side" at the exact
+ * moment the customer presses submit. So staging is run with --fee at a figure
+ * the sandbox will accept; the number under test there is the plumbing, not the
+ * price.
+ */
+const FEE = Number(arg("--fee") ?? 150000);
+if (!Number.isFinite(FEE) || FEE <= 0) throw new Error("--fee must be a positive number");
 
 /** The stale rule the process map contradicts. Removed verbatim. */
 const STALE_RULE =
