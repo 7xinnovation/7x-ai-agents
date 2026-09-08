@@ -6,6 +6,11 @@
  *           data-host="https://HOST"
  *           data-locale="en"></script>
  *
+ * data-locale is optional. Left off, the widget follows the PAGE: whatever
+ * <html lang> says. Emirates Post and EPGL both serve their Arabic site with
+ * lang="ar", so the assistant opens in the language the reader is already in
+ * without the host having to wire anything up.
+ *
  * It injects a floating launcher and an iframe-isolated app. The iframe loads
  * /embed/<agent>; all branding/behaviour comes from the agent config, so this
  * loader carries zero company-specific code. It fetches the agent's theme so the
@@ -51,6 +56,31 @@ interface BootConfig {
 
 const STYLE_ID = "dialog-embed-style";
 
+/** The locales the app actually has. Anything else falls back to English. */
+const LOCALES = ["en", "ar"] as const;
+
+/**
+ * Which language to open in.
+ *
+ * data-locale wins when the host sets it, because that is someone stating an
+ * intention. With no attribute we read <html lang> -- the page already knows
+ * what language it is in, and on a bilingual site the reader has usually just
+ * chosen it. "ar-AE", "AR" and "ar" all mean Arabic, so only the primary subtag
+ * is compared, lower-cased.
+ *
+ * Read once, at boot. Both sites serve their Arabic pages from a different URL,
+ * so a language switch is a page load and this runs again; a site that instead
+ * rewrote the attribute in place would need the panel reloaded, which would
+ * throw away the conversation in it.
+ */
+function pickLocale(explicit: string | undefined): string {
+  const want = (explicit || document.documentElement.getAttribute("lang") || "en")
+    .trim()
+    .toLowerCase()
+    .split(/[-_]/)[0];
+  return (LOCALES as readonly string[]).includes(want ?? "") ? want! : "en";
+}
+
 function readConfig(): BootConfig {
   const el =
     (document.currentScript as HTMLScriptElement | null) ??
@@ -60,7 +90,7 @@ function readConfig(): BootConfig {
   return {
     agent: d.agent || "default",
     host,
-    locale: d.locale || "en",
+    locale: pickLocale(d.locale),
     position: d.position === "bottom-left" ? "bottom-left" : "bottom-right",
     uaePassToken:
       d.uaepassToken ||
@@ -249,7 +279,7 @@ function boot() {
   // they have the current file.
   (window as unknown as { Dialog?: Record<string, unknown> }).Dialog = {
     setUaePassToken: push,
-    version: "2026-09-08",
+    version: "2026-09-08b",
   };
 
   /**

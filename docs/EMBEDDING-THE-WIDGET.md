@@ -11,11 +11,28 @@ stops fitting.
   src="https://agent.7x.ae/dialog.js"
   data-agent="nxn-dialog"
   data-host="https://agent.7x.ae"
-  data-locale="en"
   defer></script>
 ```
 
-That is the whole integration. The script creates its own launcher and panel,
+That is the whole integration.
+
+### Language
+
+**Leave `data-locale` off and the widget follows the page.** It reads
+`<html lang>` at load: `lang="ar"` opens the assistant in Arabic, `lang="en"` in
+English. Regional tags work too — `ar-AE`, `en-GB` — and so does any casing.
+
+That means the Arabic site needs no different snippet from the English one: the
+same tag on both, and the assistant matches whichever page the reader is on.
+
+Set `data-locale="ar"` (or `"en"`) only to override the page — it wins over
+`<html lang>`, which is what you want if the widget should stay in one language
+regardless. Anything unrecognised falls back to English.
+
+One caveat: the language is read once, when the page loads. Both sites serve
+Arabic from their own URLs, so switching language is a page load and this is
+picked up. A language toggle that rewrote `<html lang>` *without* navigating
+would not be — tell us if that is ever the case. The script creates its own launcher and panel,
 positions them, and sizes them against the window:
 
 | | |

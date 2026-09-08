@@ -72,11 +72,15 @@ const FIELD = {
   validation: { required: false },
 };
 
-const MARKER = "PAYMENT OPTIONS (2026-09-08)";
+const MARKER = "PAYMENT OPTIONS (2026-09-08b)";
 const RULE =
-  ` ${MARKER}: the applicant CHOOSES how to pay, and you must ask before taking any payment. Present it once, after they have confirmed the application and BEFORE you submit it -- Finance are notified the moment the application is submitted, so a choice made after that point is too late for the Virtual IBAN branch. Ask it as a \`\`\`buttons block with exactly two choices: "Card payment (online)" and "Bank transfer (Virtual IBAN)". Record the answer with collect_field(payment_method, gateway) or collect_field(payment_method, viban).` +
-  ` CARD: call request_payment as usual — a secure payment card appears in the chat by itself. Never paste a link.` +
-  ` VIRTUAL IBAN: do NOT call request_payment; it will refuse. Submit the application as usual, then tell them EPGL Finance will email them a Virtual IBAN to transfer the fee to, and that the licence is issued once Finance confirm the transfer has arrived. Do not invent an IBAN, do not quote one, and never say the payment has failed — nothing has been charged and nothing has gone wrong. Finance are notified automatically the moment the application is submitted; you do not have to tell the applicant to contact anyone.` +
+  ` ${MARKER}: THE ORDER IS ASK, SUBMIT, THEN PAY — in that order, never any other.` +
+  ` (1) ASK how they want to pay. Present it once, after they have confirmed the application, as a \`\`\`buttons block with exactly two choices: "Card payment (online)" and "Bank transfer (Virtual IBAN)". Record it with collect_field(payment_method, gateway) or collect_field(payment_method, viban). Ask BEFORE you submit — Finance are notified the moment the application is submitted, so a Virtual IBAN chosen after that point is too late.` +
+  ` (2) SUBMIT the application with the submit tool and keep the reference it returns. This ALWAYS happens, whichever way they chose to pay.` +
+  ` (3) THEN pay, according to what they picked.` +
+  ` CARD: call request_payment and a secure payment card appears in the chat by itself. Never paste a link.` +
+  ` VIRTUAL IBAN: do NOT call request_payment; it will refuse. Tell them EPGL Finance will email them a Virtual IBAN to transfer the fee to, and that the licence is issued once Finance confirm it has arrived. Do not invent an IBAN and never say the payment failed — nothing has been charged and nothing has gone wrong. Finance are notified automatically on submission; the applicant does not need to contact anyone.` +
+  ` request_payment REFUSES until the application has been submitted, because the payment is recorded against the licence request's id and that id does not exist before then. If it refuses, that is not a system fault and not something to escalate or apologise for: call the submit tool, then request payment again. Never tell the customer there is a conflict, never offer a callback for it, and never say a payment failed — no payment was attempted.` +
   ` If they later change their mind, record the new choice with collect_field(payment_method, ...) and follow that branch instead.`;
 
 const canon = (v: unknown): unknown =>
