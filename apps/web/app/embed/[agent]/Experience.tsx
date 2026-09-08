@@ -1165,9 +1165,34 @@ export function Experience({
         }
       };
 
+      /**
+       * A STALLED STREAM IS NOT A STREAM THAT IS STILL THINKING.
+       *
+       * reader.read() waits forever on a connection that was dropped without a
+       * FIN -- a proxy or a phone changing network -- and nothing below ever
+       * runs, so the spinner spins for as long as the customer is willing to
+       * watch it. 8 September: a rental whose order had been created, with the
+       * payment link already written and stored, sat on "Working on it…" while
+       * the reply that carried it never arrived.
+       *
+       * The server sends a heartbeat, so silence this long means the connection
+       * is gone rather than the model being slow. Give up and go and read what
+       * actually happened -- the turn finishes server-side whether or not we are
+       * listening, which is what makes recovery possible at all.
+       */
+      const STALL_MS = 45_000;
+      let stalled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const armStall = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => { stalled = true; void reader.cancel().catch(() => {}); }, STALL_MS);
+      };
+      armStall();
+
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        armStall();
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
@@ -1179,6 +1204,23 @@ export function Experience({
           } catch {
             /* ignore partial */
           }
+        }
+      }
+      if (timer) clearTimeout(timer);
+
+      // The connection died mid-turn. The reply is finished and stored on the
+      // server, so fetch it rather than leaving the customer with half a
+      // sentence and no payment link.
+      if (stalled && convId.current) {
+        try {
+          const res = await fetch(`/api/conversations/${convId.current}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.messages) && data.messages.length) setMessages(data.messages);
+            if (data.case) setCaseState(data.case);
+          }
+        } catch {
+          /* offline too; the message below is the honest outcome */
         }
       }
     } catch (err) {

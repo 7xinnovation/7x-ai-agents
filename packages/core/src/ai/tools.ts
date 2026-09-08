@@ -523,13 +523,40 @@ export async function dispatchTool(
     case "request_escalation": {
       if (!adapters.crm) return { result: "No CRM configured for escalation.", state, events, isError: true };
       const actx = adapterContext(agent, agent.integrations.crm);
-      const { reference } = await adapters.crm.createCallback(actx, {
-        name: String(input.name ?? "Unknown"),
-        phone: String(input.phone ?? ""),
-        email: input.email as string | undefined,
-        reason: String(input.reason ?? ""),
-        userRef: ctx.userRef,
-      });
+      /**
+       * A CALLBACK THAT CANNOT BE ARRANGED IS A SENTENCE, NOT A DEAD CHAT.
+       *
+       * The ops adapter throws rather than invent a reference for a request
+       * nobody will receive, which is right. What was wrong is where the throw
+       * went: straight out of the tool, out of the turn, and out of the stream --
+       * so a customer whose rental had just been SAVED, order and payment URL and
+       * all, sat on "Working on it…" until they gave up. Reported 8 September
+       * with NXN_BRANCH_OPS_EMAIL unset on staging and production both.
+       *
+       * The failure is real and the model should say so. It is not a reason to
+       * stop mid-sentence.
+       */
+      let reference: string;
+      try {
+        ({ reference } = await adapters.crm.createCallback(actx, {
+          name: String(input.name ?? "Unknown"),
+          phone: String(input.phone ?? ""),
+          email: input.email as string | undefined,
+          reason: String(input.reason ?? ""),
+          userRef: ctx.userRef,
+        }));
+      } catch (e) {
+        return {
+          result:
+            `The callback could not be arranged: ${e instanceof Error ? e.message : "the request could not be passed on"}. ` +
+            `Do NOT give the customer a reference — nobody has received this. Say plainly that you cannot arrange a callback right now, ` +
+            `and give them Emirates Post's contact number 600 599 999 so they can reach someone themselves. ` +
+            `Anything already completed in this conversation still stands: if a payment or a booking succeeded, say so and do not suggest it failed.`,
+          state,
+          events,
+          isError: true,
+        };
+      }
       state = { ...state, status: "escalated" };
       events.push({ type: "escalation", reference });
       events.push({ type: "case", state });
@@ -746,11 +773,27 @@ export async function dispatchTool(
       const attachedDocs = state.documents
         .filter((d) => d.status === "uploaded" || d.status === "accepted")
         .map((d) => ({ key: d.key, fileName: d.fileName ?? "", status: d.status }));
-      const { reference } = await adapters.crm.createCase(actx, {
-        journeyKey: state.journeyKey!,
-        data: attachedDocs.length ? { ...state.data, _documents: attachedDocs } : state.data,
-        userRef: ctx.userRef,
-      });
+      // Same rule as the callback: a submission that could not be recorded is
+      // something to tell the customer, not something to end the turn on.
+      let reference: string;
+      try {
+        ({ reference } = await adapters.crm.createCase(actx, {
+          journeyKey: state.journeyKey!,
+          data: attachedDocs.length ? { ...state.data, _documents: attachedDocs } : state.data,
+          userRef: ctx.userRef,
+        }));
+      } catch (e) {
+        return {
+          result:
+            `The request could not be recorded: ${e instanceof Error ? e.message : "it could not be passed on"}. ` +
+            `Do NOT give the customer a reference and do not tell them it is submitted — nobody has received it. ` +
+            `Say plainly that you could not file it, and give them Emirates Post's contact number 600 599 999. ` +
+            `Anything already completed in this conversation still stands and must not be described as failed.`,
+          state,
+          events,
+          isError: true,
+        };
+      }
       state = { ...state, status: "submitted", reference };
       events.push({ type: "submitted", reference });
       events.push({ type: "case", state });
