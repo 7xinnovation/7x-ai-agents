@@ -114,5 +114,20 @@ console.log("\nAnd the RENDERED flow teaches the same order");
   check("the old pay-first wording survives for everyone else", /Do NOT call it before the payment is "paid"/.test(prompt));
 }
 
+console.log("\nThe duplicate check is called once, not five times");
+{
+  const { readFileSync } = await import("node:fs");
+  const intg = readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8");
+  const blk = intg.slice(intg.indexOf("THE DUPLICATE CHECK, ASKED ONCE"), intg.indexOf("TELL EMIRATES POST WHICH TRANSACTIONS ARE OURS"));
+  check("a decided case short-circuits the tool", /if \(decided\) \{[\s\S]{0,120}?return \{/.test(blk));
+  check("...before Salesforce is called at all", intg.indexOf("THE DUPLICATE CHECK, ASKED ONCE") < intg.indexOf("let res = await executeOperation"));
+  check("the reply carries no list to re-present", !/matchedRequests/.test(blk));
+  check("it names the decision back", /already decided: \$\{decided\}/.test(blk));
+  check("it says to submit next", /submit the application with the submit tool/.test(blk));
+  check("it forbids a second call", /Do NOT call this tool again/.test(blk));
+  check("it is not an error, so it cannot read as a fault", !/isError/.test(blk));
+  check("an undecided case still runs the check", /const decided = opts\.duplicateDecision\?\.\(\);\s*if \(decided\)/.test(blk));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

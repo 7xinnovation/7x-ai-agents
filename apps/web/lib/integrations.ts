@@ -2103,6 +2103,34 @@ export async function buildApiTools(
       if (bundle && emirate) lastBranchQuery = { emirate, bundle };
     }
     /**
+     * THE DUPLICATE CHECK, ASKED ONCE -- AND CALLED ONCE.
+     *
+     * Appending "they have already answered this" to the RESPONSE stopped the
+     * model re-asking the customer. It did not stop it re-calling the tool: on
+     * 8 September one EPGL run called duplicateCheck five times in three minutes
+     * and never called submitLicenseRequest at all, then gave up and tried to
+     * arrange a callback. Each call returns the same growing list of every
+     * application ever filed for that trade licence, which is precisely the
+     * material for going round again.
+     *
+     * Once the customer has decided, there is nothing left for this tool to
+     * answer. Short-circuited before the call -- so Salesforce is not asked five
+     * times either -- and the reply carries no list to re-present, only the
+     * decision and the next thing to do.
+     */
+    if (/duplicatecheck$/i.test(toolName)) {
+      const decided = opts.duplicateDecision?.();
+      if (decided) {
+        return {
+          result:
+            `Already checked, and the customer has already decided: ${decided}. There is nothing further to check and the list is not needed again. ` +
+            `Proceed on that decision now — submit the application with the submit tool and keep the reference it returns. ` +
+            `Do NOT call this tool again in this conversation, and do NOT put the existing applications in front of the customer a second time.`,
+        };
+      }
+    }
+
+    /**
      * TELL EMIRATES POST WHICH TRANSACTIONS ARE OURS.
      *
      * Their PO Box APIs carry a Source on the request; their own website sends
