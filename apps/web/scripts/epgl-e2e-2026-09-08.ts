@@ -73,7 +73,18 @@ async function say(userMessage: string, attempt = 0): Promise<string> {
   let buf = "";
   let text = "";
   for (;;) {
-    const { done, value } = await reader.read();
+    let done: boolean;
+    let value: Uint8Array | undefined;
+    try {
+      ({ done, value } = await reader.read());
+    } catch (e) {
+      // ECONNRESET part-way through the stream. The request was fine; the link
+      // dropped. Retrying the whole turn is what a customer's browser would do.
+      if (attempt >= 4) throw e;
+      console.log(`    (stream dropped; asking again in 20s)`);
+      await new Promise((r) => setTimeout(r, 20_000));
+      return say(userMessage, attempt + 1);
+    }
     if (done) break;
     buf += dec.decode(value, { stream: true });
     let i: number;

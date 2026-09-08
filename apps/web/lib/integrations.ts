@@ -350,6 +350,15 @@ const HALL_TTL_MS = 2 * 60 * 60 * 1000;
  * So the pages are counted here. Keyed by conversation, bundle and branch, and
  * kept for the life of a conversation.
  */
+/**
+ * What we call ourselves on Emirates Post's PO Box APIs.
+ *
+ * Their website sends "Web"; their API team asked for a distinct value so bot
+ * transactions can be identified. Overridable by env in case they settle on a
+ * different string, so changing it is a setting rather than a deploy.
+ */
+const REQUEST_SOURCE = process.env.NXN_REQUEST_SOURCE || "ChatBot";
+
 const offeredBoxMemory = new Map<string, { at: number; shown: string[] }>();
 const OFFERED_TTL_MS = 2 * 60 * 60 * 1000;
 
@@ -2093,6 +2102,46 @@ export async function buildApiTools(
       const emirate = asStr(inp.EmirateCode ?? inp.emirateCode ?? inp.Emirate ?? inp.emirate).toUpperCase();
       if (bundle && emirate) lastBranchQuery = { emirate, bundle };
     }
+    /**
+     * TELL EMIRATES POST WHICH TRANSACTIONS ARE OURS.
+     *
+     * Their PO Box APIs carry a Source on the request; their own website sends
+     * "Web". Their API team asked us to send a distinct value so a transaction
+     * made through the assistant can be told apart from one made on the site --
+     * which is their reporting, their reconciliation, and their answer when
+     * somebody asks where a rental came from.
+     *
+     * Writes only. A transaction is a POST or a PUT; stamping every availability
+     * lookup would add noise to the thing they are trying to count. Never
+     * overwritten: a value already on the payload was put there deliberately.
+     *
+     * Scoped by the host rather than by the integration's name, because the name
+     * is whatever an admin typed ("NXN Staging" points at production).
+     */
+    if (/emiratespost\.ae/i.test(String(entry.spec.baseUrl ?? ""))) {
+      if (/^(POST|PUT|PATCH)$/i.test(String(entry.op.method))) {
+        const b = (input ?? {}).body;
+        if (b && typeof b === "object" && !Array.isArray(b)) {
+          const body = { ...(b as Record<string, unknown>) };
+          if (!asStr(body.Source) && !asStr(body.source)) {
+            body.Source = REQUEST_SOURCE;
+            input = { ...input, body };
+          }
+        }
+      }
+      // A few of their reads take it as a query parameter instead. Only where
+      // the operation actually declares one -- inventing query parameters on
+      // somebody else's API is how you get a 400 nobody can explain.
+      const srcParam = (entry.op.params ?? []).find((prm) => /source$/i.test(String(prm?.name ?? "")));
+      if (srcParam?.name) {
+        const inp = { ...((input ?? {}) as Record<string, unknown>) };
+        if (!asStr(inp[srcParam.name])) {
+          inp[srcParam.name] = REQUEST_SOURCE;
+          input = inp;
+        }
+      }
+    }
+
     // Decrypt stored secrets only at the moment of the outbound call.
     const liveSpec: EnvSpec = {
       ...entry.spec,
