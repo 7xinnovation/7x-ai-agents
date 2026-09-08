@@ -63,11 +63,25 @@ const doc = (name: string) => ({ owner_name: name });
 }
 
 // 4. A name belonging to nobody on the application.
+//
+// This used to be accepted with a note, on the reasoning that transliteration
+// makes the same person look different on different documents. That reasoning
+// was extended past where it holds: on 8 September a partner slot for Valentina
+// Mintah took an Emirates ID in the name of Nida and showed a green tick. A name
+// sharing nothing with this partner AND matching nobody else on the application
+// is a stranger, and is refused -- see test-partner-stranger-2026-09-08.
 {
   const r = partnerDocumentCheck("partner_2_passport", LICENCE, doc("SOMEONE ELSE ENTIRELY"));
   check("an unknown name is raised", r.conflict !== null, r.conflict);
   check("...naming who was expected", !!r.conflict && r.conflict.reason.includes("AHMED KHALID SAEED"), r.conflict?.reason);
-  check("...and allows for spelling", !!r.conflict && /spelling difference/.test(r.conflict.reason), r.conflict?.reason);
+  check("...and is REFUSED, not excused as a spelling", r.conflict?.severity === "block", r.conflict?.severity);
+  check("...saying whose document it actually is", !!r.conflict && /SOMEONE ELSE ENTIRELY/.test(r.conflict.reason), r.conflict?.reason);
+}
+
+// 4b. A name that plausibly IS this partner, written differently, still only asks.
+{
+  const r = partnerDocumentCheck("partner_2_passport", LICENCE, doc("AHMAD KHALED SAEED"));
+  check("a transliteration is a question, not a refusal", r.conflict?.severity !== "block", r.conflict?.severity);
 }
 
 // 5. THE PAIR. With no name from the licence, the Emirates ID is matched against
