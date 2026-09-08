@@ -45,15 +45,16 @@ if (!ENV) throw new Error("--env <envfile> is required");
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import { agentIntegrations } from "@dialog/db";
+import { agentIntegrations, auditLog } from "@dialog/db";
 import { eq } from "drizzle-orm";
+import { auditOperationFlags } from "./lib/auditOps";
 
 /** Only these. Everything else keeps whatever flag it has. */
 const ENABLE = new Set(["post_api_Rental_Select", "post_api_Rental_UpdatePayment_paymentReferenceNo"]);
 
 async function main() {
   const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
-  const db = drizzle(pool, { schema: { agentIntegrations } });
+  const db = drizzle(pool, { schema: { agentIntegrations, auditLog } });
   try {
     const rows = await db.select().from(agentIntegrations);
     const changes: string[] = [];
@@ -86,6 +87,16 @@ async function main() {
       }
       if (touched && APPLY) {
         await db.update(agentIntegrations).set({ environments: envs as never }).where(eq(agentIntegrations.id, row.id));
+        // So the next person asking "who turned this on, and when" has an answer
+        // in the database rather than in a commit message.
+        await auditOperationFlags(db, {
+          agentId: row.agentId ?? undefined,
+          script: "nxn-enable-rental-ops-2026-09-08",
+          integration: row.name,
+          environment: ENV_KEY,
+          enabled: [...ENABLE].filter((t) => changes.some((c) => c.includes(t))),
+          note: "reservation and payment-reference operations were off, so no rental could be paid for",
+        });
       }
     }
     if (!changes.length) {
