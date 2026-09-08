@@ -55,6 +55,8 @@ interface BootConfig {
 }
 
 const STYLE_ID = "dialog-embed-style";
+/** Bumped whenever the loader changes, so a host page can say what it is running. */
+const VERSION = "2026-09-08c";
 
 /** The locales the app actually has. Anything else falls back to English. */
 const LOCALES = ["en", "ar"] as const;
@@ -279,7 +281,7 @@ function boot() {
   // they have the current file.
   (window as unknown as { Dialog?: Record<string, unknown> }).Dialog = {
     setUaePassToken: push,
-    version: "2026-09-08b",
+    version: VERSION,
   };
 
   /**
@@ -373,12 +375,25 @@ function boot() {
    * window.innerHeight.
    */
   const WANT_W = 404, WANT_H = 640;
+  /**
+   * The same breakpoint the stylesheet uses for its full-bleed panel.
+   *
+   * These have to agree, and they did not. The stylesheet says a narrow OR short
+   * window gets `inset:0; width:100vw; height:100dvh; max-width:none` -- and then
+   * fit() wrote an inline 404-wide panel over the top of it, because an inline
+   * style beats a media query. So on exactly the screens that need the whole
+   * window, the panel was pinned to a size that did not fit, by the code meant to
+   * make it fit.
+   */
+  const COMPACT = "(max-width:640px),(max-height:520px)";
+  const clearSize = () => {
+    for (const p of ["width", "height", "max-width", "max-height"]) frame.style.removeProperty(p);
+  };
   function fit() {
-    if (mode === "full") {
-      frame.style.width = "";
-      frame.style.height = "";
-      frame.style.maxWidth = "";
-      frame.style.maxHeight = "";
+    // Full-screen, or small enough that the stylesheet takes it full-bleed:
+    // step out of the way and let the CSS own it.
+    if (mode === "full" || window.matchMedia(COMPACT).matches) {
+      clearSize();
       return;
     }
     const vv = window.visualViewport;
@@ -388,14 +403,61 @@ function boot() {
     // below it. Read from the computed value so a data-offset-bottom is obeyed.
     const bottom = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--dlg-bottom"), 10) || 24;
     const room = vh - bottom - 88;
-    frame.style.width = `${Math.min(WANT_W, Math.max(0, vw - 32))}px`;
-    frame.style.height = `${Math.min(WANT_H, Math.max(0, room))}px`;
-    frame.style.maxWidth = `${Math.max(0, vw - 32)}px`;
-    frame.style.maxHeight = `${Math.max(0, room)}px`;
+    // Written with `important`, because a plain inline style still loses to a
+    // host rule that carries !important -- and a page we do not control is
+    // exactly where that happens.
+    const set = (prop: string, px: number) => frame.style.setProperty(prop, `${px}px`, "important");
+    set("width", Math.min(WANT_W, Math.max(0, vw - 32)));
+    set("height", Math.min(WANT_H, Math.max(0, room)));
+    set("max-width", Math.max(0, vw - 32));
+    set("max-height", Math.max(0, room));
   }
+
+  /**
+   * What the panel actually ended up as, for when it still does not fit.
+   *
+   * I have twice reasoned about this from a screenshot and been wrong, so the
+   * page can now say for itself: window.Dialog.diagnose() in the console on the
+   * host page returns the numbers rather than an impression of them.
+   */
+  function diagnose() {
+    const r = frame.getBoundingClientRect();
+    const cs = getComputedStyle(frame);
+    // position:fixed is measured against the nearest ancestor with a transform,
+    // filter or perspective -- not the window. A host page that animates a
+    // wrapper moves and clips everything fixed inside it, and nothing in our
+    // own CSS can reach that.
+    let culprit: string | null = null;
+    for (let el: HTMLElement | null = frame.parentElement; el; el = el.parentElement) {
+      const s2 = getComputedStyle(el);
+      if (s2.transform !== "none" || s2.filter !== "none" || s2.perspective !== "none" || s2.contain.includes("paint")) {
+        culprit = `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className ? "." + String(el.className).split(/\s+/).join(".") : ""}`;
+        break;
+      }
+    }
+    return {
+      version: VERSION,
+      mode,
+      rect: r.toJSON(),
+      computed: { width: cs.width, height: cs.height, maxWidth: cs.maxWidth, maxHeight: cs.maxHeight, position: cs.position, zIndex: cs.zIndex },
+      window: { innerWidth: window.innerWidth, innerHeight: window.innerHeight, visualViewport: window.visualViewport ? [window.visualViewport.width, window.visualViewport.height] : null },
+      compact: window.matchMedia(COMPACT).matches,
+      clippedAtTop: r.top < 0,
+      clippedAtLeft: r.left < 0,
+      overflowsRight: r.right > window.innerWidth,
+      overflowsBottom: r.bottom > window.innerHeight,
+      /** A transformed/filtered ancestor, which breaks position:fixed. */
+      fixedPositioningBrokenBy: culprit,
+      lang: document.documentElement.getAttribute("lang"),
+    };
+  }
+
+  /** Has the panel ever been opened? Once it has, its src must not be replaced. */
+  let opened = false;
 
   function setMode(next: Mode) {
     mode = next;
+    if (next !== "closed") opened = true;
     frame.classList.toggle("open", next !== "closed");
     frame.classList.toggle("full", next === "full");
     frame.classList.toggle("widget", next === "widget");
@@ -421,8 +483,49 @@ function boot() {
     else if (msg.action === "close") setMode("closed");
   });
 
+  /**
+   * Follow the page's language while it is open.
+   *
+   * Reading <html lang> at boot covers a site that navigates to switch language.
+   * Emirates Post does not: the toggle swaps the attribute in place, so the page
+   * turned Arabic and the assistant stayed English until someone reloaded.
+   *
+   * The panel is told, rather than reloaded. Reloading the iframe would swap the
+   * language by throwing away the conversation in it, which is a worse answer
+   * than the problem — the app holds its locale in state and can just switch.
+   */
+  function watchLang() {
+    let current = cfg.locale;
+    const obs = new MutationObserver(() => {
+      const next = pickLocale(undefined);
+      // Only when the PAGE decided it. A host that pinned data-locale meant it.
+      if (next === current || readConfig().locale !== next) return;
+      current = next;
+      cfg.locale = next;
+      // The panel may not have been opened yet, in which case its src carries
+      // the new locale already and there is nothing to tell.
+      try {
+        frame.contentWindow?.postMessage({ source: "dialog-host", action: "locale", locale: next }, new URL(cfg.host).origin);
+      } catch {
+        /* not loaded yet, or gone; the src below is the fallback */
+      }
+      // Rewriting src RELOADS the panel, so it is only safe while the panel has
+      // never been opened. Once there is a conversation in it, the message above
+      // is the whole answer -- swapping the language by discarding what the
+      // customer has typed is not switching language, it is starting again.
+      if (mode === "closed" && !opened) {
+        frame.src = frame.src.replace(/([?&]locale=)[^&]*/, `$1${next}`);
+      }
+    });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+  }
+  watchLang();
+
   document.body.appendChild(frame);
   document.body.appendChild(launcher);
+  // Now that the frame exists, the page can be asked what it actually looks like.
+  const dlg = (window as unknown as { Dialog?: Record<string, unknown> }).Dialog;
+  if (dlg) dlg.diagnose = diagnose;
 }
 
 if (document.readyState === "loading") {

@@ -4,6 +4,26 @@ Two ways. The first is one line and we own the sizing. The second is an iframe
 you place yourself, and then the sizing is yours — which is where the widget
 stops fitting.
 
+## If the panel does not fit
+
+Run this in the console on the page that is embedding it:
+
+```js
+window.Dialog.diagnose()
+```
+
+It returns what the panel actually is — its rectangle, its computed size, the
+window it is in, whether it is clipped on any edge, and the loader version. Send
+that object over; it settles in one go what a screenshot cannot.
+
+The field worth reading first is **`fixedPositioningBrokenBy`**. The panel is
+`position: fixed`, which is measured against the window — *unless* some ancestor
+has a `transform`, `filter`, `perspective` or `contain: paint`, in which case the
+browser measures against that element instead and the panel is moved and clipped
+by it. Nothing in our stylesheet can reach that; it has to be fixed on the host
+page, usually by not transforming a wrapper that spans the whole document. If
+that field names an element, that element is the problem.
+
 ## 1. The loader (recommended)
 
 ```html
@@ -29,10 +49,11 @@ Set `data-locale="ar"` (or `"en"`) only to override the page — it wins over
 `<html lang>`, which is what you want if the widget should stay in one language
 regardless. Anything unrecognised falls back to English.
 
-One caveat: the language is read once, when the page loads. Both sites serve
-Arabic from their own URLs, so switching language is a page load and this is
-picked up. A language toggle that rewrote `<html lang>` *without* navigating
-would not be — tell us if that is ever the case. The script creates its own launcher and panel,
+It also **follows a switch made without reloading**. A toggle that swaps
+`<html lang>` in place is watched, and the panel changes language where it
+stands — the conversation in it is kept, because swapping the language by
+discarding what the customer has typed is not switching language, it is
+starting again. The script creates its own launcher and panel,
 positions them, and sizes them against the window:
 
 | | |

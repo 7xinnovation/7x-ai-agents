@@ -732,8 +732,31 @@ export function Experience({
         .filter(Boolean)
     );
     const onMsg = (e: MessageEvent) => {
-      const m = e.data as { source?: string; uaePassToken?: string };
-      if (m?.source !== "dialog-host" || typeof m.uaePassToken !== "string") return;
+      const m = e.data as { source?: string; uaePassToken?: string; action?: string; locale?: string };
+      if (m?.source !== "dialog-host") return;
+
+      /**
+       * The page changed language while we were open.
+       *
+       * Emirates Post's language toggle swaps <html lang> in place rather than
+       * navigating, so the page turned Arabic and the assistant stayed English
+       * until someone reloaded. The loader watches the attribute and tells us,
+       * because the alternative -- reloading the panel with a new locale -- swaps
+       * the language by discarding the conversation inside it.
+       *
+       * Deliberately NOT origin-gated. This carries no credential and grants
+       * nothing: the worst a stray frame can do is show this reader their own
+       * assistant in the other language, which they can change back with the
+       * toggle in the header. allowedOrigins is often unset, and refusing to
+       * follow the page's own language until someone configures it would fail
+       * quietly on exactly the sites that need it.
+       */
+      if (m.action === "locale" && (m.locale === "en" || m.locale === "ar")) {
+        setLocale(m.locale);
+        return;
+      }
+
+      if (typeof m.uaePassToken !== "string") return;
       if (!permitted.has(e.origin)) return;
       // They signed out. The host page does not know that and will keep offering
       // its token; taking it would sign them back in without them asking.
