@@ -97,5 +97,22 @@ console.log("\nAnd payment waits for the application to exist");
   check("the flag defaults to off, so no other journey changes", /submitBeforePayment: z\.boolean\(\)\.default\(false\)/.test(schema));
 }
 
+console.log("\nAnd the RENDERED flow teaches the same order");
+{
+  const { readFileSync } = await import("node:fs");
+  const prompt = readFileSync(new URL("../../../packages/core/src/ai/prompt.ts", import.meta.url), "utf8");
+  // The numbered steps are the most literal instruction the model gets. They
+  // used to say "call request_payment ... do NOT call the save before the
+  // payment is paid" -- the exact opposite of what EPGL needs -- and they won
+  // over the journey notes every time.
+  check("the renderer branches on submitBeforePayment", /f\.submitBeforePayment && f\.saveTool/.test(prompt));
+  const branch = prompt.slice(prompt.indexOf("if (f.submitBeforePayment && f.saveTool)"), prompt.indexOf("} else {"));
+  check("step 3 is the save, not the payment", /3\. After the customer confirms, call \$\{f\.saveTool\} FIRST/.test(branch));
+  check("it says the save charges nothing", /NOTHING is charged by this call/.test(branch));
+  check("step 4 is the payment", /4\. THEN call request_payment/.test(branch));
+  check("a refusal is named as expected, not a fault", /refusal is expected rather than a fault/.test(branch));
+  check("the old pay-first wording survives for everyone else", /Do NOT call it before the payment is "paid"/.test(prompt));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

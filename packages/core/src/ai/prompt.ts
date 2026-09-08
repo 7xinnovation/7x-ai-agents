@@ -48,10 +48,33 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
       lines.push(`  1. Call ${f.detailsTool} once to fetch the record and the values you need (current expiry, bundle, customer details). Reuse them — do not re-ask the customer for what the tool returned, and do not call it again on later turns.`);
     if (f.pricingTool)
       lines.push(`  2. Get the AUTHORITATIVE amount for the chosen option from ${f.pricingTool}. If you have ALREADY fetched and shown that exact price (e.g. on the option/duration card the customer just picked), REUSE it — do NOT call ${f.pricingTool} again for the same option. Quote exactly that figure and ask the customer to confirm.`);
+    // WHICH COMES FIRST, THE RECORD OR THE MONEY.
+    //
+    // Normally the money: the internal checkout takes payment and the save then
+    // records the transaction, so a failed save has not charged anybody.
+    //
+    // EPGL is the other way round and cannot be otherwise -- its payment
+    // notification keys on notifyPayment.salesforceId, the licence request's own
+    // id, which does not exist until the composite has been submitted. Pay first
+    // and the money settles against nothing.
+    //
+    // Those numbered steps are the most literal instruction the model gets, and
+    // they said "call request_payment ... Do NOT call the save before the payment
+    // is paid" while the journey's own notes said the opposite. The rendered flow
+    // won, every time. request_payment then refused, and the model told the
+    // customer it had hit "a sequencing conflict between the submission and
+    // payment systems" and offered a callback -- which is exactly what it looks
+    // like from where it was standing.
+    if (f.submitBeforePayment && f.saveTool) {
+      lines.push(`  3. After the customer confirms, call ${f.saveTool} FIRST to create the record with ${sys}, and keep the reference it returns. NOTHING is charged by this call. It must happen BEFORE any payment: the payment is recorded against this record's id, and until it exists there is nothing for the money to attach to — request_payment will refuse, and that refusal is expected rather than a fault to escalate or apologise for.`);
+      lines.push(`  4. THEN call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"}. A secure payment card appears in the chat by itself; never paste a link. WAIT for confirmation.`);
+      lines.push(`  5. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference.`);
+    } else {
     lines.push(`  3. After the customer confirms, call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"} and share the secure link. WAIT for confirmation.`);
     if (f.saveTool)
       lines.push(`  4. Once payment is confirmed (payment status "paid"), call ${f.saveTool} ONCE to record the transaction with ${sys} and give the customer the reference from its response. Do NOT call it before the payment is "paid", and do NOT share any payment URL it returns — the customer has already paid on the internal checkout, and sending them to a second payment page would charge them twice.`);
     lines.push(`  ${f.saveTool ? 5 : 4}. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. submit_case IS the finalisation for this journey — NEVER tell the customer it is complete, confirmed, or that a receipt link is available until submit_case has returned a reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
+    }
     lines.push(`  Keep the case panel live: as soon as you learn each of this journey's fields, call collect_field for it (e.g. the box number, the chosen period) — including values you read from a tool — so the customer's side panel fills in step by step, not all at the end.`);
     if (f.notes) lines.push(`  Field-mapping notes: ${f.notes}`);
     return lines.join("\n");

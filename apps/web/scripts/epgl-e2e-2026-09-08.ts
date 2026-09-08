@@ -157,10 +157,23 @@ const seen = new Set<string>();
 let reply = await say("I want to apply for a new postal activity licence");
 let priced = "";
 let lastSaid = "";
+/** The licence request number, which only exists once the composite lands. */
+let submitted = false;
 
 console.log("  walking the journey");
+/**
+ * A real payment card, not a sentence about one.
+ *
+ * "The secure payment card will appear below" is what the assistant says when it
+ * has narrated the submission and called nothing — and an earlier version of
+ * this driver counted that as reaching payment, so a run where neither the
+ * submission nor the payment happened reported 6/6. Only the block itself, or a
+ * button carrying an amount, means the customer can actually pay.
+ */
+const paid = (t: string) => /```pay\b/.test(t) || /Pay\s+AED\s*[\d,]+/i.test(t);
+
 for (let turn = 0; turn < 40; turn++) {
-  if (/```pay|Pay AED|payment card/i.test(reply)) { priced = reply; break; }
+  if (paid(reply)) { priced = reply; break; }
 
   // 1. Anything it asked to be uploaded, before anything is said.
   const asked = wantedUploads(reply).filter((k) => !seen.has(k));
@@ -176,6 +189,8 @@ for (let turn = 0; turn < 40; turn++) {
     reply = await say("I've uploaded that. Please carry on.");
     continue;
   }
+
+  if (/\bLR-\d{4,}\b/.test(reply) && /submitted|reference|received/i.test(reply)) submitted = true;
 
   // 2. Otherwise answer what was asked.
   const hit = answers.find(([re]) => re.test(reply));
@@ -195,7 +210,8 @@ check(
 );
 
 console.log("\n  submission and payment");
-check("it reached the payment step", Boolean(priced), reply.slice(0, 220));
+check("it reached a real payment card", Boolean(priced), reply.slice(0, 220));
+check("the application was actually submitted, not just narrated", submitted, reply.slice(0, 220));
 check("nothing blew up on our side", !/went wrong on our side/i.test(reply), reply.slice(0, 220));
 check("no internal identifier leaked", !/maps to key|__c\b|referenceId/i.test(priced || reply), (priced || reply).slice(0, 220));
 
