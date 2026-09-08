@@ -26,7 +26,9 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
 const FACTS: EpglRequestFacts = {
   emirate: "Dubai",
   region: "Al Mankhool",
-  activityCodes: "Coffee Shop, Restaurant",
+  // The DED activities off the trade licence. They are not postal activity
+  // codes, and since 2026-09-08 they are no longer sent as if they were.
+  activityCodes: "Letters & Post Items Delivery, Parcels Delivery",
   regulator: "Dep. of Economic Development",
   termsAccepted: true,
   amountPaid: 1010,
@@ -50,10 +52,10 @@ const itemOf = (out: unknown, ref: string) =>
   const lr = itemOf(withEpglRequestFields(thin(), FACTS), "NewLicenseRequest");
   check("amount paid", lr.EPG_Amount_Paid__c === 1010, lr.EPG_Amount_Paid__c);
   check("payment reference", lr.EPG_Payment_Reference__c === FACTS.paymentReference, lr.EPG_Payment_Reference__c);
-  check("terms accepted", lr.Terms_Conditions_Accepted__c === true, lr.Terms_Conditions_Accepted__c);
-  check("emirate", lr.EPG_Emirates__c === "Dubai", lr.EPG_Emirates__c);
-  check("region", lr.EPG_Region__c === "Al Mankhool", lr.EPG_Region__c);
-  check("activities", lr.EPG_Activity_Codes__c === "Coffee Shop, Restaurant", lr.EPG_Activity_Codes__c);
+  check("terms accepted", lr.EPG_Terms_and_Conditions__c === true, lr.EPG_Terms_and_Conditions__c);
+  check("emirate", lr.EPG_Current_Emirate__c === "Dubai", lr.EPG_Current_Emirate__c);
+  check("region", lr.EPG_Current_Region__c === "Al Mankhool", lr.EPG_Current_Region__c);
+  check("activities, as numeric codes", lr.Activity_Codes__c === "5320002,5320009", lr.Activity_Codes__c);
   check("what the model DID send survives", lr.serviceId === "S-EPG-000002" && lr.EPG_Account__c === "@{NewAccount.id}", lr);
   const acct = itemOf(withEpglRequestFields(thin(), FACTS), "NewAccount");
   check("regulator lands on the account", acct.EPG_Regulator__c === "Dep. of Economic Development", acct);
@@ -63,12 +65,12 @@ const itemOf = (out: unknown, ref: string) =>
 //    read off the customer's documents.
 {
   const mine = thin() as Record<string, any>;
-  mine.body.compositeRequest[1].body.EPG_Emirates__c = "Sharjah";
+  mine.body.compositeRequest[1].body.EPG_Current_Emirate__c = "Sharjah";
   mine.body.compositeRequest[1].body.EPG_Amount_Paid__c = 2020;
   const lr = itemOf(withEpglRequestFields(mine, FACTS), "NewLicenseRequest");
-  check("the model's emirate is not overwritten", lr.EPG_Emirates__c === "Sharjah", lr.EPG_Emirates__c);
+  check("the model's emirate is not overwritten", lr.EPG_Current_Emirate__c === "Sharjah", lr.EPG_Current_Emirate__c);
   check("the model's amount is not overwritten", lr.EPG_Amount_Paid__c === 2020, lr.EPG_Amount_Paid__c);
-  check("...and the gaps are still filled", lr.EPG_Region__c === "Al Mankhool", lr.EPG_Region__c);
+  check("...and the gaps are still filled", lr.EPG_Current_Region__c === "Al Mankhool", lr.EPG_Current_Region__c);
 }
 
 // 3. Nothing known, nothing written. An unpaid case must not claim an amount,
@@ -77,10 +79,10 @@ const itemOf = (out: unknown, ref: string) =>
   const lr = itemOf(withEpglRequestFields(thin(), {}), "NewLicenseRequest");
   check("no amount invented", lr.EPG_Amount_Paid__c === undefined, lr.EPG_Amount_Paid__c);
   check("no reference invented", lr.EPG_Payment_Reference__c === undefined, lr.EPG_Payment_Reference__c);
-  check("terms not ticked", lr.Terms_Conditions_Accepted__c === undefined, lr.Terms_Conditions_Accepted__c);
+  check("terms not ticked", lr.EPG_Terms_and_Conditions__c === undefined, lr.EPG_Terms_and_Conditions__c);
   const notAccepted = itemOf(withEpglRequestFields(thin(), { termsAccepted: false }), "NewLicenseRequest");
-  check("an explicit false does not tick them either", notAccepted.Terms_Conditions_Accepted__c === undefined, notAccepted);
-  check("empty strings are not written", itemOf(withEpglRequestFields(thin(), { region: "" }), "NewLicenseRequest").EPG_Region__c === undefined);
+  check("an explicit false does not tick them either", notAccepted.EPG_Terms_and_Conditions__c === undefined, notAccepted);
+  check("empty strings are not written", itemOf(withEpglRequestFields(thin(), { region: "" }), "NewLicenseRequest").EPG_Current_Region__c === undefined);
 }
 
 // 4. Shapes that must not throw.

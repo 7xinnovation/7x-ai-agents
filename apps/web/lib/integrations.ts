@@ -14,6 +14,7 @@ import { registrationFees, observedRents, observedServices, rememberFees, feesIn
 import { gatewayOrderState } from "./gatewayOrder";
 import { renewalChoices, upgradesAmong, describeBundle, type RenewalBundle } from "./renewalBundles";
 import { isManagementPath, boxNumberIn, mayManage } from "./boxOwnership";
+import { withEpglFieldNames, postalActivityCodes } from "./epglFields";
 
 export type EnvKey = "staging" | "production";
 
@@ -595,11 +596,15 @@ export function withEpglRequestFields(
     EPG_Emirates__c: facts.emirate,
   }) || patched;
 
+  // The licence request's own emirate and region are NOT the Account's fields of
+  // the same name -- Salesforce's review named EPG_Current_Emirate__c and
+  // EPG_Current_Region__c as the targets here. Activity codes are numeric, and
+  // terms live on EPG_Terms_and_Conditions__c.
   patched = fill(items.find((i) => /EPG_License_Request__c$/i.test(String(i?.url ?? ""))), {
-    EPG_Emirates__c: facts.emirate,
-    EPG_Region__c: facts.region,
-    EPG_Activity_Codes__c: facts.activityCodes,
-    Terms_Conditions_Accepted__c: facts.termsAccepted === true ? true : undefined,
+    EPG_Current_Emirate__c: facts.emirate,
+    EPG_Current_Region__c: facts.region,
+    Activity_Codes__c: postalActivityCodes(facts.activityCodes) ?? undefined,
+    EPG_Terms_and_Conditions__c: facts.termsAccepted === true ? true : undefined,
     EPG_Amount_Paid__c: facts.amountPaid,
     EPG_Payment_Reference__c: facts.paymentReference,
   }) || patched;
@@ -1752,6 +1757,8 @@ export async function buildApiTools(
       if (opts.epglRequestFacts) {
         input = withEpglRequestFields(input, opts.epglRequestFacts) ?? input;
       }
+      // Last, so it corrects the model's fields and ours alike.
+      input = withEpglFieldNames(input) ?? input;
     }
 
     // The documents the customer uploaded, onto the rental they belong to.

@@ -974,8 +974,11 @@ components:
         EPG_Emirates_Id__c: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing User.' }
     Members:
       type: object
-      description: Members__c – board members / managers. Upsert key – AccountId__c + Name (NameEn).
-      required: [AccountId__c]
+      description: >
+        Members__c – board members / managers. Upsert key – AccountId__c + Name (NameEn).
+        EPG_Contact__c and EPG_Designation__c do NOT exist on this object (EPGL, 2026-09-08);
+        a row without Name is filed as "Unknown Member".
+      required: [AccountId__c, Name]
       properties:
         AccountId__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
         Name: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing Member under the Account.' }
@@ -1005,8 +1008,21 @@ components:
         serviceNameAR__c: { type: string }
         providerCode__c: { type: string, nullable: true, description: Defaults to EPG }
         submissionCount__c: { type: integer, example: 1 }
-        Activity_Codes__c: { type: string, example: '5320002' }
-        Terms_Conditions_Accepted__c: { type: boolean, description: Required for renewal. }
+        # Corrected 2026-09-08 from EPGL's review of LR-37214. Their published
+        # spec named Terms_Conditions_Accepted__c here and omitted the request's
+        # own emirate/region entirely; both are wrong. Kept in this copy so the
+        # next import does not reintroduce them.
+        Activity_Codes__c:
+          type: string
+          example: '5320002,5320009'
+          description: >
+            NUMERIC postal activity codes, comma-separated — never descriptive text.
+            Accepted values: 5320002 Letters & Post Items Delivery, 5320007 Documents
+            Delivery, 5320009 Parcels Delivery. These are the postal activities applied
+            for, NOT the company's trade-licence activities.
+        EPG_Terms_and_Conditions__c: { type: boolean, description: 'Terms acceptance. This is the field that drives the checkbox — NOT Terms_Conditions_Accepted__c, which does not exist on the object.' }
+        EPG_Current_Emirate__c: { type: string, example: Dubai, description: 'Text. The emirate on the REQUEST — the Account has its own EPG_Emirates__c.' }
+        EPG_Current_Region__c: { type: string, example: Al Mankhool, description: 'Text. The region on the REQUEST — the Account has its own EPG_Region__c.' }
 
     # ---- Renewal-specific (Appendix B) ----
     Branch:
