@@ -52,11 +52,21 @@ function check(name: string, ok: boolean, got?: unknown) {
 }
 
 async function say(userMessage: string, attempt = 0): Promise<string> {
-  const res = await fetch(`${HOST}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agentSlug: "epgl-dialog", userMessage, conversationId, locale: "en" }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${HOST}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentSlug: "epgl-dialog", userMessage, conversationId, locale: "en" }),
+    });
+  } catch (e) {
+    // The documents are megabytes and the link to the host is not always
+    // steady. A dropped connection is not a finding about the product.
+    if (attempt >= 4) throw e;
+    console.log(`    (connection dropped; retrying in 20s)`);
+    await new Promise((r) => setTimeout(r, 20_000));
+    return say(userMessage, attempt + 1);
+  }
   if (!res.ok || !res.body) throw new Error(`chat ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
@@ -96,7 +106,7 @@ const wantedUploads = (t: string) =>
     .map((m) => /key:\s*(\S+)/.exec(m[1] ?? "")?.[1] ?? "")
     .filter(Boolean);
 
-async function upload(key: string): Promise<string> {
+async function upload(key: string, attempt = 0): Promise<string> {
   const name = FILES[key];
   if (!name) return `(no file mapped for ${key})`;
   const path = [`${DOCS}/${name}`, `${DOCS}/TEST/${name}`].find((p) => existsSync(p));
@@ -106,9 +116,16 @@ async function upload(key: string): Promise<string> {
   fd.append("conversationId", conversationId ?? "");
   fd.append("key", key);
   fd.append("file", new Blob([new Uint8Array(readFileSync(path))], { type: "application/pdf" }), name);
-  const res = await fetch(`${HOST}/api/upload`, { method: "POST", body: fd });
-  const json = (await res.json().catch(() => ({}))) as { rejected?: boolean; reason?: string };
-  return json.rejected ? `REJECTED: ${json.reason ?? "no reason"}` : "uploaded";
+  try {
+    const res = await fetch(`${HOST}/api/upload`, { method: "POST", body: fd });
+    const json = (await res.json().catch(() => ({}))) as { rejected?: boolean; reason?: string };
+    return json.rejected ? `REJECTED: ${json.reason ?? "no reason"}` : "uploaded";
+  } catch (e) {
+    if (attempt >= 4) return `(upload failed: ${(e as Error).message})`;
+    console.log(`    (upload of ${key} dropped; retrying in 20s)`);
+    await new Promise((r) => setTimeout(r, 20_000));
+    return upload(key, attempt + 1);
+  }
 }
 
 console.log(`\n${HOST} · epgl-dialog · new licence, driven end to end\n`);

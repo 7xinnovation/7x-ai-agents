@@ -267,21 +267,29 @@ const LICENCE_DOC = /^(updated_)?trade_licen[cs]e$|^initial_approval$/i;
 const CUSTOMER_EDITABLE = /(^|_)(email|phone|mobile|contact_no|contact_number|designation)$|^contact_name$|_contact_(name|no|number)$/i;
 
 /**
- * Fields the customer DECLARES, even though a document once filled them.
+ * The fields whose change actually means the licence copy is superseded.
  *
- * activity_codes is the case in point. It used to be read off the trade licence
- * and locked, which is how a postal licence application went out carrying
- * "Coffee Shop, Restaurant" as its activities. It is now the applicant's own
- * answer -- which of the three postal services they are applying to provide --
- * and their answer will almost never match the DED activities printed on the
- * licence.
+ * An ALLOW-LIST, and it used to be the other way round: every field the trade
+ * licence had supplied counted, minus a few exceptions. That default is wrong in
+ * the direction that hurts, because the penalty is refusing the customer's
+ * perfectly current trade licence and blocking the application on an upload that
+ * would change nothing.
  *
- * Left in the contradiction check, that mismatch reads as "the licence on file
- * is out of date", rejects a perfectly current trade licence, and blocks the
- * submission on an upload that would change nothing. The licence never claimed
- * to say which postal services they want.
+ * It bit twice in one day. First activity_codes: the licence's DED activities
+ * ("Coffee Shop, Restaurant") against the postal services the applicant is
+ * actually applying for -- two different things that were never going to match.
+ * Then address_street: the licence was read in Arabic, the customer restated the
+ * SAME address in English, and their licence was rejected for it.
+ *
+ * These four are the licence's printed identity. If one of them changes, the
+ * copy on file genuinely no longer evidences the application and a current one
+ * has to be asked for -- the company-name case the client raised. Everything
+ * else on a licence is context: an address phrased differently, an activity list
+ * that answers a different question, a contact detail that is the customer's own
+ * to give. A new field defaults to "not a contradiction", which is the safe way
+ * round.
  */
-const DECLARED_BY_CUSTOMER = /^activity_codes$|^payment_method$/i;
+const LICENCE_IDENTITY = /^(company_name(_ar|_en)?|trade_(license|licence)_number|(license|licence)_expiry_date|(license|licence)_issue_date)$/i;
 
 /**
  * The document that supplied a field, if one did.
@@ -319,8 +327,8 @@ export function licenceContradiction(
 ): { documentKey: string; previous: string } | null {
   // Contact details are the customer's own, whatever document they came off.
   if (CUSTOMER_EDITABLE.test(fieldKey)) return null;
-  // ...and so is what they are applying FOR, which no document states.
-  if (DECLARED_BY_CUSTOMER.test(fieldKey)) return null;
+  // Only the licence's printed identity can contradict the licence.
+  if (!LICENCE_IDENTITY.test(fieldKey)) return null;
   const before = state.data[fieldKey];
   if (before === undefined || before === null || before === "") return null;
   if (String(before).trim() === String(newValue ?? "").trim()) return null;
