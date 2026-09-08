@@ -561,6 +561,24 @@ export async function dispatchTool(
           isError: true,
         };
       }
+      // THE APPLICANT CHOSE THE OTHER WAY TO PAY.
+      //
+      // EPGL's process map offers two payment methods and only one of them is
+      // ours. If the applicant picked the Virtual IBAN, opening a gateway card
+      // would charge them through a channel they declined -- and Finance would
+      // still be raising a VIBAN for the same application. Refused here rather
+      // than in a prompt, because "do not call this tool" is exactly the kind of
+      // instruction that survives review and fails on the day.
+      const method = String(state.data["payment_method"] ?? "").toLowerCase();
+      if (method === "viban") {
+        return {
+          result:
+            "PAYMENT BLOCKED: the applicant chose to pay by Virtual IBAN, not through the payment gateway. Do NOT open a payment card. Submit the application if you have not already, then tell them EPGL Finance will email them a Virtual IBAN to transfer the fee to, and that their licence is issued once Finance confirms the transfer. NOTHING has been charged and nothing has gone wrong -- this is the method they picked. If they have changed their mind and want to pay by card now, record it with collect_field(payment_method, gateway) and call request_payment again.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       // Only auth-required journeys (e.g. new rentals) gate payment on sign-in.
       // Guest-allowed journeys (e.g. renewals) may pay after ownership validation.
       if (journey?.requiresAuth && !ctx.authenticated) {

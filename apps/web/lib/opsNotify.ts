@@ -13,7 +13,7 @@ import { sendEmail, isValidEmail, textToHtml, type EmailResult } from "./email";
  * either way so the coordination trail is never silent.
  */
 export interface OpsNotifyOutcome {
-  kind: "key_delivery" | "home_delivery" | "authorised_agent";
+  kind: "key_delivery" | "home_delivery" | "authorised_agent" | "viban_request";
   to?: string;
   trackingRef?: string;
   result: EmailResult | { ok: false; reason: "recipient_not_configured" };
@@ -34,6 +34,8 @@ export async function notifyOpsForSubmission(input: {
   const out: OpsNotifyOutcome[] = [];
 
   const customerLines = [
+    (val(data, "contact_name") || val(data, "full_name")) &&
+      `Name: ${val(data, "contact_name") || val(data, "full_name")}`,
     val(data, "contact_phone") && `Phone: ${val(data, "contact_phone")}`,
     val(data, "contact_email") && `Email: ${val(data, "contact_email")}`,
     val(data, "box_number") && `PO Box: ${val(data, "box_number")}`,
@@ -106,6 +108,53 @@ export async function notifyOpsForSubmission(input: {
         text: body,
         html: textToHtml(body, "Authorised agent confirmation"),
       }),
+    });
+  }
+
+  // VIRTUAL IBAN → EPGL Finance raise one with the bank.
+  //
+  // Their process map gives the applicant a choice of two ways to pay, and this
+  // is the one that does not touch our gateway: the assistant submits the
+  // application, Finance requests a Virtual IBAN from the bank, pastes it onto
+  // the Salesforce application, and the applicant receives it by email and pays
+  // by transfer. Finance confirms receipt and issues the receipt themselves.
+  //
+  // The map has the Finance Officer open Salesforce and extract the company
+  // name, trade licence number and issuance date BY HAND before they can raise
+  // the request. We already hold all three, so they are in the email — the
+  // manual lookup is the step most likely to be got wrong or skipped.
+  //
+  // We deliberately send NO payment notification for this branch: the money
+  // never reaches us, so Finance confirming receipt is what marks it paid.
+  if (val(data, "payment_method").toLowerCase() === "viban") {
+    const to = process.env.EPGL_FINANCE_EMAIL || "";
+    const body = [
+      `A licence application was submitted (${input.agentName}) and the applicant chose to pay by VIRTUAL IBAN.`,
+      ``,
+      `Please raise a Virtual IBAN with the bank and paste it onto the application in Salesforce.`,
+      ``,
+      `Licence request: ${reference}`,
+      ...[
+        val(data, "company_name") && `Company name: ${val(data, "company_name")}`,
+        val(data, "company_name_ar") && `Company name (Arabic): ${val(data, "company_name_ar")}`,
+        val(data, "trade_license_number") && `Trade licence number: ${val(data, "trade_license_number")}`,
+        val(data, "license_issue_date") && `Trade licence issuance date: ${val(data, "license_issue_date")}`,
+        val(data, "license_expiry_date") && `Trade licence expiry date: ${val(data, "license_expiry_date")}`,
+        val(data, "emirate") && `Emirate: ${val(data, "emirate")}`,
+      ].filter(Boolean),
+      ``,
+      `Applicant contact:`,
+      ...(customerLines.length ? customerLines : ["  (none recorded)"]),
+      ``,
+      `The applicant has been told Finance will email them the Virtual IBAN to pay into.`,
+      `No payment has been taken through the payment gateway for this application.`,
+    ].join("\n");
+    out.push({
+      kind: "viban_request",
+      to: to || undefined,
+      result: to
+        ? await sendEmail({ to, subject: `[${input.agentName}] Virtual IBAN request — licence request ${reference}`, text: body })
+        : { ok: false, reason: "recipient_not_configured" },
     });
   }
 
