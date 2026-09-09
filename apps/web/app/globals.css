@@ -2414,6 +2414,13 @@ body {
 .dlg-toggle.is-on .dlg-toggle-thumb {
   transform: translateX(17px);
 }
+/* translateX is physical, not logical: in Arabic the track is mirrored by the
+   layout but the thumb still slid to the RIGHT, so an ON toggle showed a filled
+   track with the thumb parked at the start — which reads as off. It has to
+   travel toward the end of the line, whichever end that is. */
+[dir="rtl"] .dlg-toggle.is-on .dlg-toggle-thumb {
+  transform: translateX(-17px);
+}
 .dlg-toggle:focus-visible {
   outline: none;
 }

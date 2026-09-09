@@ -2405,7 +2405,7 @@ export async function buildApiTools(
             ...res,
             result:
               res.result +
-              `\n\nTHE HOLD EXPIRES AT ${hh}:${mm} ON ${dd}-${mo}-${uae.getUTCFullYear()}, UAE TIME. Use exactly that when you tell the customer their deadline — write it as "${hh}:${mm} (UAE time)". The expiry in the response above is UTC; do not repeat it, do not say "UTC", and do not convert it yourself.`,
+              `\n\nTHE HOLD EXPIRES AT ${hh}:${mm} ON ${dd}-${mo}-${uae.getUTCFullYear()}, UAE TIME. Use exactly that when you tell the customer their deadline — write it as "${hh}:${mm} ${opts.locale === "ar" ? "(بتوقيت الإمارات)" : "(UAE time)"}". The expiry in the response above is UTC; do not repeat it, do not say "UTC", and do not convert it yourself.`,
           };
         }
       }

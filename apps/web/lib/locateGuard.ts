@@ -101,3 +101,61 @@ export function locateGuard(opts: LocateGuardOptions = {}) {
     },
   };
 }
+
+
+/**
+ * The Arabic conversation gets the Arabic enquiry page.
+ *
+ * The link is written by the model from its guidance, and the guidance names
+ * both — so in Arabic it still reached for the English one often enough to be
+ * reported. The rule is not a judgement call: an Arabic reply links to the /ar/
+ * page, always. Applied to the finished text, so it catches the link wherever
+ * the model put it.
+ */
+const ENQUIRY_EN = /https:\/\/www\.emiratespost\.ae\/contact-us\/raise-an-enquiry/g;
+const ENQUIRY_AR = "https://www.emiratespost.ae/ar/contact-us/raise-an-enquiry";
+
+export function arabicEnquiryLink(text: string, locale?: string): string {
+  if (locale !== "ar") return text;
+  return text.replace(ENQUIRY_EN, ENQUIRY_AR);
+}
+
+/** The FAQ has the same pair, and the same habit. */
+const FAQ_EN = /https:\/\/www\.emiratespost\.ae\/faq/g;
+const FAQ_AR = "https://www.emiratespost.ae/ar/faq";
+
+export function arabicLinks(text: string, locale?: string): string {
+  if (locale !== "ar") return text;
+  return text.replace(ENQUIRY_EN, ENQUIRY_AR).replace(FAQ_EN, FAQ_AR);
+}
+
+
+/**
+ * The same rewrite, applied while the reply streams.
+ *
+ * A URL arrives across several deltas, so a naive per-chunk replace would miss
+ * one split down the middle. The tail is held back — a little longer than the
+ * longest link we rewrite — and released once it can no longer be part of one.
+ */
+const HOLD = 72;
+
+export function linkGuard(locale?: string) {
+  let buf = "";
+  const on = locale === "ar";
+  return {
+    push(delta: string): string {
+      if (!on) return delta;
+      buf += delta;
+      if (buf.length <= HOLD) return "";
+      const out = arabicLinks(buf.slice(0, buf.length - HOLD), locale);
+      buf = buf.slice(buf.length - HOLD);
+      return out;
+    },
+    flush(): string {
+      if (!on) return "";
+      const out = arabicLinks(buf, locale);
+      buf = "";
+      return out;
+    },
+  };
+}

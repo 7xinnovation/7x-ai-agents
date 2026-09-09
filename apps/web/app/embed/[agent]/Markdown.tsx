@@ -208,16 +208,29 @@ export function isPaymentUrl(raw: string): boolean {
   }
 }
 
+/**
+ * What the customer "says" when they come back from the payment page.
+ *
+ * It is sent as their own message, so it has to be in their own language — an
+ * Arabic conversation showed an English sentence in the customer's own bubble.
+ */
+const PAID_BACK: Record<string, string> = {
+  en: "I have completed the payment on the Emirates Post page. Please verify it and confirm my booking.",
+  ar: "لقد أتممت الدفع على صفحة بريد الإمارات. يُرجى التحقق منه وتأكيد الحجز.",
+};
+
 function ChatPay({
   url,
   amount,
   label,
   onSelect,
+  locale,
 }: {
   url: string;
   amount?: string;
   label?: string;
   onSelect?: (text: string) => void;
+  locale?: string;
 }) {
   const [opened, setOpened] = React.useState(false);
   const [returned, setReturned] = React.useState(false);
@@ -265,11 +278,11 @@ function ChatPay({
       }
       win.current = null;
       setOpened(false);
-      onSelect?.("I have completed the payment on the Emirates Post page. Please verify it and confirm my booking.");
+      onSelect?.(PAID_BACK[locale === "ar" ? "ar" : "en"]!);
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [onSelect, returned]);
+  }, [onSelect, returned, locale]);
 
   // The native host reports the customer back from the payment page; a browser
   // reports it by postMessage from the return page. Both end up here.
@@ -280,9 +293,9 @@ function ChatPay({
         setReturned(true);
         win.current = null;
         setOpened(false);
-        onSelect?.("I have completed the payment on the Emirates Post page. Please verify it and confirm my booking.");
+        onSelect?.(PAID_BACK[locale === "ar" ? "ar" : "en"]!);
       }),
-    [onSelect, returned]
+    [onSelect, returned, locale]
   );
 
   const open = () => {
@@ -872,7 +885,7 @@ export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; 
           try { return new URL(u).origin !== window.location.origin; } catch { return false; }
         };
         if (purl && external(purl) && isPaymentUrl(purl))
-          nodes.push(<ChatPay key={k++} url={purl} amount={get("amount")} label={get("label")} onSelect={onSelect} />);
+          nodes.push(<ChatPay key={k++} url={purl} amount={get("amount")} label={get("label")} onSelect={onSelect} locale={lang} />);
         continue;
       }
       if (isLocate) {
@@ -981,7 +994,7 @@ export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; 
           else if (meta) {
             const t = meta[2]!.trim();
             const split = t.match(/^(.+?)\s*:\s*(.+)$/);
-            sTotal = split ? { label: split[1]!.trim(), value: split[2]!.trim() } : { label: "Total", value: t };
+            sTotal = split ? { label: split[1]!.trim(), value: split[2]!.trim() } : { label: lang === "ar" ? "الإجمالي" : "Total", value: t };
           } else if (row) sRows.push({ label: row[1]!.trim(), value: row[2]!.trim() });
         }
         if (sRows.length || sTotal) nodes.push(<ChatSummary key={k++} title={sTitle} rows={sRows} total={sTotal} />);
