@@ -4,8 +4,7 @@
 **Supersedes:** `EPGL-SUBMISSION-TRACE-LR-37214.md` (3 September)
 
 Every correction from your 8 September review is applied. This is the payload as
-it actually leaves us today, copied from our audit log rather than written out by
-hand.
+it leaves us today, taken from our audit log rather than written out by hand.
 
 Each field below was checked against your org with a `describe` before this
 document was written: 22 of 22 confirmed present and writeable, except where
@@ -147,7 +146,7 @@ sends nothing at all if the answer is not one of them.
         "serviceId__c": "S-EPG-000002",
         "EPG_Account__c": "@{NewAccount.id}",
         "EPG_Service__c": "a1H5f0000033Q7pEAE",
-        "serviceNameEN__c": "Issue Postal Activity License",
+        "ServiceNameEN__c": "Issue Postal Activity License",
         "Activity_Codes__c": "5320002,5320009",
         "EPG_Current_Region__c": "Al Mankhool",
         "EPG_Payment_Method__c": "viban",
