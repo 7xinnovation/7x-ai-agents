@@ -45,6 +45,23 @@ const FILES: Record<string, string> = {
 };
 
 let conversationId: string | undefined;
+/**
+ * What the SERVER did, as opposed to what the assistant said about it.
+ *
+ * Reading the reply text was never going to settle either of these. The payment
+ * card is not a fence in the prose -- request_payment mints an N-Genius session
+ * and the client renders it from a `payment_initiated` event, so a driver that
+ * greps for ```pay reports "no payment card" for a run that opened ten of them.
+ * And the submission is a `submitted` event carrying whatever reference the
+ * backend issued: on the licence branch that is a Salesforce id, not the LR-
+ * number the text search expected.
+ *
+ * Both are reset each turn and latched across the run.
+ */
+let paymentOpened = false;
+let submittedRef: string | null = null;
+/** How many times the backend confirmed a submission. Must be one. */
+let submissions = 0;
 let pass = 0;
 let fail = 0;
 const failures: string[] = [];
@@ -98,6 +115,8 @@ async function say(userMessage: string, attempt = 0): Promise<string> {
         try {
           const ev = JSON.parse(line.slice(5).trim()) as Record<string, unknown>;
           if (ev.type === "text" && typeof ev.delta === "string") text += ev.delta;
+          if (ev.type === "payment_initiated") paymentOpened = true;
+          if (ev.type === "submitted" && typeof ev.reference === "string") { submittedRef = ev.reference; submissions++; }
           if (typeof ev.conversationId === "string") conversationId = ev.conversationId;
         } catch { /* keepalive */ }
       }
@@ -180,12 +199,21 @@ console.log("  walking the journey");
  * "The secure payment card will appear below" is what the assistant says when it
  * has narrated the submission and called nothing — and an earlier version of
  * this driver counted that as reaching payment, so a run where neither the
- * submission nor the payment happened reported 6/6. Only the block itself, or a
- * button carrying an amount, means the customer can actually pay.
+ * submission nor the payment happened reported 6/6. The strictness was right;
+ * the signal was not. A payment the customer can actually make is one the server
+ * opened, which is `payment_initiated` on the stream — a fence in the prose is
+ * one way of showing it and not the way this journey uses.
  */
-const paid = (t: string) => /```pay\b/.test(t) || /Pay\s+AED\s*[\d,]+/i.test(t);
+const paid = (t: string) => paymentOpened || /```pay\b/.test(t) || /Pay\s+AED\s*[\d,]+/i.test(t);
 
 for (let turn = 0; turn < 40; turn++) {
+  // Latched FIRST, because the break below is reached on the very turn that
+  // submits and opens the card at once — and a latch further down the body runs
+  // on the next iteration, which there never is. The backend said so, or the
+  // assistant quoted a licence request number; the event is the reliable half,
+  // since the card branch quotes the Salesforce id instead.
+  if (submittedRef || (/\bLR-\d{4,}\b/.test(reply) && /submitted|reference|received/i.test(reply))) submitted = true;
+
   // The Virtual IBAN branch never opens a card; a licence request number is
   // the whole of its success.
   if (PAY === "viban" ? submitted : paid(reply)) { priced = reply; break; }
@@ -204,8 +232,6 @@ for (let turn = 0; turn < 40; turn++) {
     reply = await say("I've uploaded that. Please carry on.");
     continue;
   }
-
-  if (/\bLR-\d{4,}\b/.test(reply) && /submitted|reference|received/i.test(reply)) submitted = true;
 
   // 2. Otherwise answer what was asked.
   const hit = answers.find(([re]) => re.test(reply));
@@ -227,6 +253,10 @@ check(
 console.log("\n  submission and payment");
 check(PAY === "viban" ? "it reached the end of the Virtual IBAN branch" : "it reached a real payment card", Boolean(priced), reply.slice(0, 220));
 check("the application was actually submitted, not just narrated", submitted, reply.slice(0, 220));
+// One application per conversation. A run on 9 September made seven, then
+// twenty-one, because request_payment could not see a reference the backend had
+// already issued and kept sending the model back to submit again.
+check("...exactly once", submitted && submissions <= 1, `${submissions} submissions`);
 check("nothing blew up on our side", !/went wrong on our side/i.test(reply), reply.slice(0, 220));
 check("no internal identifier leaked", !/maps to key|__c\b|referenceId/i.test(priced || reply), (priced || reply).slice(0, 220));
 
