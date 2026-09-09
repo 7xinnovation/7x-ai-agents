@@ -585,6 +585,8 @@ export interface EpglRequestFacts {
   /** What actually settled, fee included. */
   amountPaid?: number;
   paymentReference?: string;
+  /** "gateway" or "viban" — how the applicant chose to pay. */
+  paymentMethod?: string;
 }
 
 export function withEpglRequestFields(
@@ -622,7 +624,24 @@ export function withEpglRequestFields(
   // the same name -- Salesforce's review named EPG_Current_Emirate__c and
   // EPG_Current_Region__c as the targets here. Activity codes are numeric, and
   // terms live on EPG_Terms_and_Conditions__c.
+  /**
+   * A VIRTUAL IBAN APPLICATION IS SUBMITTED, NOT HELD.
+   *
+   * EPGL's process for it: capture everything, submit the request to Salesforce
+   * so it is locked, and tell the applicant their Virtual IBAN will be issued
+   * within one working day. The request carries a status saying it is waiting
+   * for money rather than waiting for us.
+   *
+   * The value is env-settable because EPG_Request_Status__c is a picklist and
+   * only two of its values have ever been seen in the wild -- "Payment Verified"
+   * and "Under document review". An unaccepted value fails the WHOLE composite
+   * under allOrNone, so if EPGL name a different string it is a setting to
+   * change rather than a deploy, and EPGL_VIBAN_STATUS="" turns it off entirely.
+   */
+  const vibanStatus = process.env.EPGL_VIBAN_STATUS ?? "Pending Payment";
   patched = fill(items.find((i) => /EPG_License_Request__c$/i.test(String(i?.url ?? ""))), {
+    EPG_Request_Status__c:
+      facts.paymentMethod?.toLowerCase() === "viban" && vibanStatus ? vibanStatus : undefined,
     EPG_Current_Emirate__c: facts.emirate,
     EPG_Current_Region__c: facts.region,
     Activity_Codes__c: postalActivityCodes(facts.activityCodes) ?? undefined,

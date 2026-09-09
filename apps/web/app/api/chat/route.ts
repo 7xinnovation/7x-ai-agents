@@ -697,6 +697,8 @@ export async function POST(req: NextRequest) {
             emirate: str(session.state.data.emirate),
             region: str(session.state.data.region),
             activityCodes: str(session.state.data.activity_codes),
+            // Decides whether the request is submitted as awaiting a transfer.
+            paymentMethod: str(session.state.data.payment_method),
             regulator: str(session.state.data.regulator),
             termsAccepted:
               isTrue(session.state.data.terms_accepted) || isTrue(session.state.data.declaration_accepted),
