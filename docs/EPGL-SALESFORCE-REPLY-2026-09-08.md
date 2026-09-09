@@ -11,6 +11,48 @@ settle before they reach production.
 
 ---
 
+## BLOCKER — no agent-sourced submission can pass your Contact validation
+
+Every submission we make is rejected with:
+
+> `Rolled back due to allOrNone=true: Either of Is Primary Contact or  Is Secondary Contact should be selected`
+
+We cannot satisfy this rule, and we do not think anyone calling the API can.
+
+**What we tried.** Your spec documents `Secondary_Contact` (enum `'True'|'False'`)
+on Contact, so we sent it. No change. We then described the object with our own
+integration credentials:
+
+| Field | Exists | createable | updateable |
+|---|---|---|---|
+| `Secondary_Contact` | **no** | — | — |
+| `Is_Primary_Contact__c` | yes | **false** | **false** |
+| `Is_Secondary_Contact__c` | yes | **false** | **false** |
+| `EPG_Designation__c` | yes | **false** | **false** |
+
+So: the field your published spec names does not exist on the object, and the two
+fields the validation actually reads cannot be written by our user. We send
+`Is_Primary_Contact__c: true` regardless — Salesforce ignores a field the caller
+cannot write, and the payload will be correct the moment access is granted.
+
+**What we think is needed, in order of likelihood:**
+
+1. **Field-level security.** `createable:false` is reported per profile, so this
+   may simply be that the integration user's profile has no write access to those
+   two fields. Granting it would fix this outright.
+2. **Or the validation rule should not apply to agent-sourced requests.** The
+   composite already carries `isAgentSource: true`; if the rule is meant for
+   records created by hand in the UI, that flag is the natural exemption.
+3. **Or your CompositeHandler should set the designation itself**, from something
+   we *can* send.
+
+`EPG_Designation__c` is the same problem waiting to happen: your renewal notes
+require at least one Contact whose designation contains "Accountant", and that
+field is equally read-only to us.
+
+Please also correct the spec — it documents a Contact field that does not exist
+and omits the two that a validation rule requires.
+
 ## 1–3. Field renames — done
 
 Applied, and applied in code rather than in the assistant's instructions. The

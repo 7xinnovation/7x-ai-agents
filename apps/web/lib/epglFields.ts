@@ -117,6 +117,15 @@ const RULES: Record<string, Rules> = {
    * trade licence at all. So primary is the default, set only when the
    * submission has not already said otherwise — a genuinely secondary contact
    * marked as such stays that way.
+   *
+   * IT DOES NOT WORK YET, AND CANNOT FROM HERE. The same describe reports both
+   * flags as createable:false, updateable:false — our integration user cannot
+   * write either of them, so a rule demanding one of them be true can never be
+   * satisfied by an API-created Contact. EPG_Designation__c is read-only to us
+   * for the same reason. Sending the value anyway is deliberate and harmless:
+   * Salesforce ignores a field the caller cannot write, and the day EPGL grant
+   * field-level access the payload is already correct. Until then every
+   * agent-sourced EPGL submission fails on this rule, and it is theirs to fix.
    */
   Contact: {
     drop: ["Secondary_Contact"],
