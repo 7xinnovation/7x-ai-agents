@@ -15,6 +15,11 @@
  * must be recorded as off. The existing rule "never enable auto-renew without
  * explicit consent" is unchanged.
  *
+ * CONFIRMED AGAIN 9 September. The UAT round reported this as consent taken
+ * without asking (bug log, Day 1 #14) and Emre confirmed it stays as it is:
+ * auto-renewal starts ON. Recorded here so the next person to meet that bug
+ * report does not quietly flip a recurring charge back off.
+ *
  * Idempotent. Run from apps/web:
  *   npx tsx scripts/fix-nxn-toggles-default-on-2026-08-27.ts [--env <file>]
  */
