@@ -106,7 +106,9 @@ console.log("\nEPG_License_Request__c");
   ]));
   const l = outOf(r, "NewLicenseRequest");
   check("serviceId gains its __c", l.serviceId__c === "S-EPG-000002" && l.serviceId === undefined, l);
-  check("serviceNameEN gains its __c", l.serviceNameEN__c === "Issue Postal Activity License" && l.serviceNameEN === undefined, l);
+  // Capital S: their spec says serviceNameEN__c, the org says ServiceNameEN__c.
+  // Salesforce writes are case-insensitive so both land, but we send the real one.
+  check("serviceNameEN becomes ServiceNameEN__c", l.ServiceNameEN__c === "Issue Postal Activity License" && l.serviceNameEN === undefined, l);
   check("EPG_Activity_Codes__c becomes Activity_Codes__c", l.Activity_Codes__c !== undefined && l.EPG_Activity_Codes__c === undefined, l);
   check("Terms_Conditions_Accepted__c becomes EPG_Terms_and_Conditions__c", l.EPG_Terms_and_Conditions__c === true && l.Terms_Conditions_Accepted__c === undefined, l);
   check("EPG_Emirates__c becomes EPG_Current_Emirate__c", l.EPG_Current_Emirate__c === "Dubai" && l.EPG_Emirates__c === undefined, l);

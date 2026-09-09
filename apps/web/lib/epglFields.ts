@@ -134,8 +134,16 @@ const RULES: Record<string, Rules> = {
   EPG_License_Request__c: {
     rename: {
       serviceId: "serviceId__c",
-      serviceNameEN: "serviceNameEN__c",
-      serviceNameAR: "serviceNameAR__c",
+      // Capital S. Their review and their swagger both say serviceNameEN__c; a
+      // describe of the object says the field is ServiceNameEN__c. Salesforce
+      // resolves field names case-insensitively on write, so the lower-case form
+      // has been landing correctly all along — but there is no reason to send a
+      // name the org does not use, and the next person to compare payload
+      // against schema should not have to work this out again.
+      serviceNameEN: "ServiceNameEN__c",
+      serviceNameEN__c: "ServiceNameEN__c",
+      serviceNameAR: "ServiceNameAR__c",
+      serviceNameAR__c: "ServiceNameAR__c",
       EPG_Activity_Codes__c: "Activity_Codes__c",
       Terms_Conditions_Accepted__c: "EPG_Terms_and_Conditions__c",
       EPG_Emirates__c: "EPG_Current_Emirate__c",
