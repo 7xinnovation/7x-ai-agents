@@ -482,6 +482,24 @@ export function Experience({
   // Journeys that mark nothing keep the original every-text-field behaviour.
   const editableKeys = useMemo(() => {
     const set = new Set<string>();
+    /**
+     * NOTHING IS EDITABLE ONCE IT HAS BEEN SUBMITTED OR PAID FOR.
+     *
+     * Every field carried a pencil, and it stayed there after the application
+     * was confirmed and the terms accepted — so a customer could quietly change
+     * a detail the order had already been placed on, with no re-confirmation and
+     * no way for them to know whether it had changed the order or only the
+     * panel. Reported 9 September as a data-integrity gap, and it is one: the
+     * panel would no longer describe what was actually bought.
+     *
+     * A correction before submission is the point of the pencil and stays.
+     */
+    const settled =
+      caseState?.status === "submitted" ||
+      caseState?.status === "escalated" ||
+      caseState?.payment?.status === "paid";
+    if (settled) return set;
+
     const j = agent.journeys.find((x) => x.key === caseState?.journeyKey);
     const fields = (j?.steps ?? []).flatMap((s) => s.fields);
     const curated = fields.some((f) => f.editable !== undefined);
@@ -490,7 +508,7 @@ export function Experience({
       if (curated ? f.editable === true : true) set.add(f.key);
     }
     return set;
-  }, [agent, caseState?.journeyKey]);
+  }, [agent, caseState?.journeyKey, caseState?.status, caseState?.payment?.status]);
   const [editKey, setEditKey] = useState<string | null>(null);
   const [editVal, setEditVal] = useState("");
   const [editBusy, setEditBusy] = useState(false);
@@ -1524,10 +1542,17 @@ export function Experience({
                       onPaid={onPaymentPaid}
                     />
                   ) : null}
+                  {/* Say what these are.
+
+                      They rendered as bare chips — "NXN Services Guide §7" with
+                      nothing around it — and read as internal references leaking
+                      into the chat, which is exactly how they were reported. The
+                      label existed in the strings all along and was never used. */}
                   {m.citations?.length ? (
                     <div className="dlg-sources">
+                      <span className="dlg-sources-label">{t.sources}</span>
                       {m.citations.map((s, k) => (
-                        <span className="dlg-source" key={k}>
+                        <span className="dlg-source" key={k} title={t.sources}>
                           {s}
                         </span>
                       ))}

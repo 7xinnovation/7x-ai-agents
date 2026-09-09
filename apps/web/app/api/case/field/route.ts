@@ -48,6 +48,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "field_not_editable" }, { status: 400 });
   }
 
+  /**
+   * A SETTLED CASE IS NOT EDITABLE, whatever the field says.
+   *
+   * The panel hides its pencils once an application is submitted or paid for,
+   * but hiding a control is not enforcing a rule -- this endpoint would still
+   * have taken the edit. Changing a detail after the order was placed on it
+   * leaves the panel describing something that was never bought, with no
+   * re-confirmation anywhere.
+   */
+  const settled =
+    caseRow.state.status === "submitted" ||
+    caseRow.state.status === "escalated" ||
+    caseRow.state.payment?.status === "paid";
+  if (settled) {
+    return NextResponse.json({ error: "case_already_settled" }, { status: 409 });
+  }
+
   const { state, error } = setField(agent.definition, caseRow.state, key, value);
   if (error) return NextResponse.json({ error: error.message }, { status: 422 });
 

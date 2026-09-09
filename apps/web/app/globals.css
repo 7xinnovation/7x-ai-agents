@@ -1321,6 +1321,14 @@ body {
 .dlg-voice-btn.is-end { background: #d5493f; border-color: #cc3333; color: #fff; }
 .dlg-voice-btn.is-end:hover { background: #cc3333; }
 
+.dlg-sources-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-text-muted);
+  align-self: center;
+}
 .dlg-sources {
   display: flex;
   flex-wrap: wrap;
