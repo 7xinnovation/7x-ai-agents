@@ -676,6 +676,8 @@ export async function buildApiTools(
     blockUnpaidSaves?: { toolSuffixes: string[]; paid: boolean };
     /** Ties a failed backend call to the conversation it broke, for the audit log. */
     conversationId?: string;
+    /** The conversation's language, for text we emit ourselves rather than the model. */
+    locale?: string;
     /**
      * True when the ACTIVE journey takes payment on the backend's own gateway (its
      * apiFlow declares a confirmTool). It changes what a save returning a payment
@@ -2825,7 +2827,8 @@ export async function buildApiTools(
                   ? "\n\nSOME OF THESE ARE PO BOX HALLS, NOT BRANCHES: " +
                     halls.map((h) => `${h.nameEn} (keys and counter services at ${h.alternativeBranchEn ?? "another branch"})`).join("; ") +
                     ". A box hall gives access to boxes only — no counter, no parcels, no registered mail — and the KEY IS NOT ISSUED THERE. Mark each one on its card (e.g. `badge: P.O. Box Hall`). If the customer chooses one, you MUST show them this notice WORD FOR WORD before going any further, and get their explicit acknowledgement before reserving anything:\n\n" +
-                    poBoxHallNotice("<the alternativeBranchEn for the hall they chose>") +
+                    poBoxHallNotice("<the alternativeBranchEn for the hall they chose>", opts.locale) +
+                    (opts.locale === "ar" ? "\n\nThe notice above is already in Arabic — give it to the customer exactly as written." : "") +
                     "\n\nSubstitute the real branch name where the placeholder is. Do not paraphrase, shorten or summarise the notice, and do not proceed on an assumed yes — a customer who is not told turns up at a room of boxes expecting a post office, with their key in another building. A hall is still a REAL OPTION and is offered like any other location on this list: the notice is a condition of choosing it, not a reason to steer them away from it."
                   : "") +
                 "\n\nopenNow says whether the branch is open at this moment, in UAE time; when it is false, opensAt is when it next opens. A CLOSED branch can still be rented — say so — but the customer must be told before they pick it, not after: put `badge: Closed now` on its card and give the opening time in the line beneath (e.g. `desc: Closed now, opens 08:00`). If the branch they choose is closed, tell them plainly, say when it opens, and in the same reply name a branch from this list that is open now and has boxes, as an alternative they can take instead. Never let a customer walk to a closed counter because we did not mention it.",

@@ -637,6 +637,8 @@ export async function POST(req: NextRequest) {
     blockUnpaidSaves: unpaidSaveTools.length ? { toolSuffixes: unpaidSaveTools, paid: paidAlready } : undefined,
     // So a backend refusal is recoverable afterwards, not only in this turn's context.
     conversationId: session.conversationId,
+    // So notices we emit ourselves are in the customer's language, not English.
+    locale: body.locale,
     // Select and Save land in DIFFERENT TURNS — the reservation is made when the
     // payment is taken, the save happens once the payment settles. buildApiTools is
     // rebuilt per request, so without seeding this the hold is forgotten between

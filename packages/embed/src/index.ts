@@ -56,7 +56,7 @@ interface BootConfig {
 
 const STYLE_ID = "dialog-embed-style";
 /** Bumped whenever the loader changes, so a host page can say what it is running. */
-const VERSION = "2026-09-08f";
+const VERSION = "2026-09-09a";
 
 /** The locales the app actually has. Anything else falls back to English. */
 const LOCALES = ["en", "ar"] as const;
@@ -411,6 +411,30 @@ function boot() {
     set("height", Math.min(WANT_H, Math.max(0, room)));
     set("max-width", Math.max(0, vw - 32));
     set("max-height", Math.max(0, room));
+
+    /**
+     * THEN CHECK WHERE IT ACTUALLY LANDED.
+     *
+     * `room` is computed from --dlg-bottom read off :root, while the panel is
+     * POSITIONED by the same variable resolved on the frame. A host page that
+     * sets it anywhere else makes the two disagree, and the panel then sits
+     * higher than the arithmetic allowed — which is how it ends up with its
+     * header off the top of the window while every value we calculated looks
+     * correct. It is also why diagnose() reported a 640px panel, a 691px
+     * max-height and a top edge at 31px, three numbers that cannot all be right.
+     *
+     * Rather than model the page's own offsets, measure the result and take the
+     * difference off the height. Only ever SHRINKS, never moves: a wrong guess
+     * here costs a slightly shorter panel, not a panel in the wrong place.
+     */
+    const MIN_TOP = 24;
+    const top = frame.getBoundingClientRect().top;
+    if (top < MIN_TOP) {
+      const h = parseFloat(getComputedStyle(frame).height) || WANT_H;
+      const shrunk = Math.max(240, Math.round(h - (MIN_TOP - top)));
+      set("height", shrunk);
+      set("max-height", shrunk);
+    }
   }
 
   /**

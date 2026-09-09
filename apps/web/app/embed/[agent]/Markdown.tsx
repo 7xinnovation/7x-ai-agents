@@ -758,7 +758,7 @@ function applyCardKey(card: OptionCard, key: string, value: string) {
  * after a tool round) so it never lags far behind. When `animate` is false
  * (completed / resumed messages) it renders in full immediately.
  */
-export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx }: { text: string; animate: boolean; onSelect?: (text: string) => void; uploadCtx?: UploadCtx }) {
+export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx, locale }: { text: string; animate: boolean; onSelect?: (text: string) => void; uploadCtx?: UploadCtx; locale?: string }) {
   const [shown, setShown] = React.useState(animate ? 0 : text.length);
   const shownRef = React.useRef(shown);
   const textRef = React.useRef(text);
@@ -802,10 +802,20 @@ export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx }: { tex
   }, [animate, text]);
 
   // Cards/uploads are interactive only once the reply has fully rendered.
-  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} onSelect={animate ? undefined : onSelect} uploadCtx={animate ? undefined : uploadCtx} />;
+  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} onSelect={animate ? undefined : onSelect} uploadCtx={animate ? undefined : uploadCtx} locale={locale} />;
 }
 
-export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect?: (text: string) => void; uploadCtx?: UploadCtx }) {
+/**
+ * `locale` is passed in its own right rather than read off uploadCtx.
+ *
+ * TypewriterMarkdown deliberately withholds uploadCtx while a message is still
+ * animating, so every control rendered during streaming fell back to English —
+ * an Arabic conversation showed "18 to choose from" and "Browse nearby branches
+ * on a map". The language of the conversation is not part of the upload
+ * context and should never have depended on it.
+ */
+export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; onSelect?: (text: string) => void; uploadCtx?: UploadCtx; locale?: string }) {
+  const lang: Locale = locale === "ar" ? "ar" : locale === "en" ? "en" : uploadCtx?.locale ?? "en";
   const lines = text.split("\n");
   const nodes: React.ReactNode[] = [];
   let i = 0;
@@ -873,7 +883,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
             <ChatLocate
               key={k++}
               label={labelLine ? labelLine[1] : undefined}
-              locale={uploadCtx?.locale}
+              locale={lang}
               onSelect={onSelect}
             />
           );
@@ -924,7 +934,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
             <ChatCardSelect
               key={k++}
               cards={labels.map((l) => ({ title: l, attrs: [] }))}
-              locale={uploadCtx?.locale}
+              locale={lang}
               onSelect={onSelect}
             />
           );
@@ -986,7 +996,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
           if (m && /^emirate$/i.test(m[1]!)) mEmirate = m[2]!.trim().toUpperCase();
           else if (m) mBundle = m[2]!.trim();
         }
-        if (onSelect && mEmirate && mBundle) nodes.push(<ChatMap key={k++} emirate={mEmirate} bundle={mBundle} onSelect={onSelect} locale={uploadCtx?.locale} />);
+        if (onSelect && mEmirate && mBundle) nodes.push(<ChatMap key={k++} emirate={mEmirate} bundle={mBundle} onSelect={onSelect} locale={lang} />);
         continue;
       }
       if (isCards) {
@@ -995,7 +1005,7 @@ export function Markdown({ text, onSelect, uploadCtx }: { text: string; onSelect
         // being a wall to scroll past. Ten box numbers still read well as cards;
         // twenty-one branches do not.
         if (cards.length > 12 && onSelect) {
-          nodes.push(<ChatCardSelect key={k++} cards={cards} locale={uploadCtx?.locale} onSelect={onSelect} />);
+          nodes.push(<ChatCardSelect key={k++} cards={cards} locale={lang} onSelect={onSelect} />);
           continue;
         }
         if (cards.length) {

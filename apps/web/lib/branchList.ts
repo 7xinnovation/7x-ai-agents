@@ -106,7 +106,26 @@ export function prepareBranches(
 }
 
 /** The notice, in the words Emirates Post's own site uses. */
-export function poBoxHallNotice(alternativeBranch: string): string {
+/**
+ * The notice a customer must see before choosing a P.O. Box hall.
+ *
+ * In BOTH languages, because it is emitted from here rather than written by the
+ * model — so an Arabic conversation was being handed a wall of English at the
+ * one moment it matters, immediately before the customer accepts a limitation
+ * on the service they are buying. Reported 9 September.
+ */
+export function poBoxHallNotice(alternativeBranch: string, locale?: string): string {
+  if (locale === "ar") {
+    return (
+      "تنبيه مهم\n\n" +
+      "هذا الموقع يعمل كمجمع صناديق بريد ويوفر الوصول إلى صندوق البريد فقط.\n" +
+      "صندوق البريد مخصص للمراسلات العادية التي تتناسب مع الأبعاد المادية لحجم الصندوق المختار.\n" +
+      "خدمات الكاونتر، واستلام الطرود الكبيرة، ومعالجة البريد المسجل، والخدمات الإضافية غير متوفرة في هذا الموقع.\n" +
+      "يمكن استلام مفاتيح صندوق البريد من الفرع التشغيلي المخصص فقط، أو عبر خيار التوصيل المعتمد (إن وُجد). لا تُصرف المفاتيح في مجمع صناديق البريد هذا.\n" +
+      `للحصول على خدمات تتجاوز الوصول إلى صندوق البريد، يُرجى زيارة الفرع التشغيلي البديل: ${alternativeBranch}.\n\n` +
+      "بالمتابعة، فإنك تقر بهذه القيود على الخدمة وتوافق عليها."
+    );
+  }
   return (
     "Important Notice\n\n" +
     "This location operates as a P.O. Box Hall/complex and provides P.O. Box access only.\n" +
