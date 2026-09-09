@@ -129,10 +129,12 @@ best-effort by design and never mentioned to the customer.
 ## 3. Found while testing: seven licence requests for one application
 
 This one was not on the list. It surfaced because the card branch had never been
-run end to end, and the Virtual IBAN branch hides it completely.
+run end to end, and the Virtual IBAN branch hides it completely — VIBAN refuses
+payment earlier, for its own good reason, so it never reaches the gate that was
+broken.
 
-`request_payment` refuses to open a card until the thing being paid for exists,
-and it decides that by reading the case's reference. Nothing but the internal
+`request_payment` will not open a card until the thing being paid for exists, and
+it decides that by reading the case's reference. Nothing but the internal
 submission step was writing that field — and a licence submits through Salesforce
 instead, which recorded the reference for the audit log and left the case saying
 nothing had been submitted.
@@ -144,19 +146,44 @@ One run created **seven licence requests**, attached all eight documents to each
 of them, never reached the payment card, and finished by telling the customer
 their browser was probably broken.
 
-Fixed in two places. The reference is now written the moment Salesforce confirms
-it. And a second create-shaped submission is refused outright once one has
-succeeded — amending an application still works, since that is a real thing a
-customer does, but a duplicate create never is.
+**Measured, before and after:**
+
+| | Submissions | Documents attached | Payment cards |
+|---|---|---|---|
+| Before | 7 → then 21 | 56 → 167 | 0 → 21 |
+| After | **1** | **8** | **1** |
+
+It took two goes. The first fix broke the deadlock but the duplicate guard still
+did nothing, because it remembered the reference in a variable rebuilt on every
+request — so it was empty on exactly the turn a duplicate arrives on, which is a
+later one than the original. It now reads the case.
 
 ### What to test
 
 1. Run a new licence to the end choosing **card**.
    → The payment card appears. One licence request, not several.
 2. Check the reference the agent quotes.
-   → It should be the same one throughout, never a new one each message.
+   → The same one throughout, never a new one each message.
 3. Ask to **change a detail** after submitting.
-   → It should update the existing application, not create another.
+   → It updates the existing application rather than creating another.
+
+---
+
+## 4. Two things that were the test's fault, not the product's
+
+Worth recording so nobody chases them again.
+
+**The payment-card check.** The driver grepped the assistant's text for a
+` ```pay ` block. This journey does not use one — the card is minted server-side
+and rendered from an event — so a run that opened ten payment cards was reported
+as reaching none. That is how I first read the card branch as "never reached
+payment" when what had actually happened was worse and different.
+
+**The submission check.** It looked for an `LR-` number. The card branch quotes
+the Salesforce id instead. Same fact, other notation.
+
+Both now assert on what the server did. The driver also checks the thing the
+seven-submissions bug should have failed on in the first place: exactly one.
 
 ---
 
@@ -167,7 +194,7 @@ customer does, but a duplicate create never is.
 | Contact validation | **fixed** — submits cleanly on the account that failed |
 | Customer Pulse, new licence | **on** — sandbox, fires on submission |
 | Customer Pulse, renewal | **on** — sandbox, fires on submission |
-| Duplicate submissions | **fixed** — one create per conversation |
+| Duplicate submissions | **fixed** — 1 submission, 8 documents, 1 card |
 | `getRequestStatus` 404s | **fixed** — the id is filled in |
 | VIBAN status value | **waiting on EPGL** — theirs overrides ours |
 | Production | **not touched** — staging only, as usual |
