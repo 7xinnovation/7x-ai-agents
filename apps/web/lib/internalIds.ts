@@ -36,6 +36,26 @@ const ONLY_IDS = new RegExp(`^\\(\\s*(?:${INTERNAL})\\s*[:=]?\\s*[\\w.-]+(?:\\s*
 const ERROR_CODE = /\s*[([]\s*(?:ERROR_[A-Z_]+|[A-Z]+_NOT_FREE|[A-Z]+_NOT_FOUND|INVALID_[A-Z_]+|MISMATCH_[A-Z_]+|[A-Z_]{6,}_DETAILS)\s*[)\]]/g;
 
 /**
+ * ...and the same code written as a sentence.
+ *
+ * "Error 173 means the delivery area wasn't accepted." The bracketed form was
+ * caught; this one reads as an explanation and sails through. It is still
+ * Emirates Post's internal numbering read out to somebody who cannot act on it,
+ * and the half after "means" is the only part that was ever for them.
+ *
+ * The remaining sentence can start lower-case. An earlier version capitalised
+ * it and, because the rule also fired after a newline, turned "emirate: DXB"
+ * inside a fenced map block into "Emirate: DXB" and broke fifteen tests. A
+ * lower-case first letter is a blemish; a corrupted block is a bug.
+ */
+const ERROR_PROSE = /\berrors?\s+(?:code\s+)?\d{2,4}\s*(?:means|indicates|is)?\s*[:,-]?\s*/gi;
+
+/** A bare SCREAMING_SNAKE code, outside brackets. */
+const BARE_CODE = /\s*\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}\b/g;
+
+
+
+/**
  * The same pairs written inline, e.g. "Naif Post Office, officeId 214, is…".
  * Punctuation on both sides means the pair was an aside and both commas go;
  * otherwise a single space stands in for it, so the sentence still reads.
@@ -55,9 +75,16 @@ export function stripInternalIds(text: string): string {
     .replace(INLINE, (_m, lead: string, trail: string) => (lead && trail ? "" : lead || trail || " "))
     // Removing the pair can leave the punctuation that framed it: "(open until
     // 8pm,)" and "has . Let me". Tidy the seams rather than the sentence.
+    // Codes come out BEFORE the seams are tidied, or the tidy runs against text
+    // that still holds them and leaves "failed with , so" behind.
+    .replace(ERROR_CODE, "")
+    // ...and the prose form, which reads as an explanation and used to sail past.
+    .replace(ERROR_PROSE, "")
+    .replace(BARE_CODE, "")
+    // A preposition with nothing left after it is a seam, not a sentence.
+    .replace(/\b(?:with|by)\s*([,.;])/gi, "$1")
     .replace(/([,;])\s*([)\]])/g, "$2")
-    .replace(/\s+([.,;:!?)\]])/g, "$1")
-    .replace(ERROR_CODE, "");
+    .replace(/\s+([.,;:!?)\]])/g, "$1");
 }
 
 export function internalIdFilter() {
