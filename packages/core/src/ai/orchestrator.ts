@@ -450,7 +450,35 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
             const saveTool = findJourney(agent, state.journeyKey)?.submission?.apiFlow?.saveTool;
             if (saveTool && tu.name === saveTool) {
               const ref = submissionReference(r.result);
-              if (ref) { submittedThisTurn = true; yield { type: "submitted", reference: ref }; }
+              if (ref) {
+                submittedThisTurn = true;
+                // THE REFERENCE IS NOT ONLY AN ANALYTICS FACT.
+                //
+                // request_payment refuses to open a card until the thing being
+                // paid for exists, and it decides that by reading state.reference
+                // -- which nothing but the internal submit_case was writing. So
+                // an apiFlow journey that submits through a backend saveTool got
+                // a reference yielded for the audit log and a state that still
+                // said nothing had been submitted.
+                //
+                // On EPGL's card branch that is a loop with a cost. The model
+                // submits, asks for payment, is told "call the submission tool
+                // FIRST", obeys, asks again, is told the same thing. A single
+                // run on 9 September created SEVEN licence requests for one
+                // application, attached all eight documents to each of them,
+                // never reached the payment card, and told the customer their
+                // browser was broken. The Virtual IBAN branch hid it completely:
+                // it refuses payment earlier, for its own good reason, so it
+                // never reaches this gate.
+                //
+                // Written the moment the backend confirms it, in the same shape
+                // submit_case writes, so the two spines cannot disagree.
+                if (state.reference !== ref) {
+                  state = { ...state, status: "submitted", reference: ref };
+                  yield { type: "case", state };
+                }
+                yield { type: "submitted", reference: ref };
+              }
             }
           }
           continue;

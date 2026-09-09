@@ -892,6 +892,18 @@ export async function buildApiTools(
    */
   let lastFreeBoxesBranch: { officeId: string; name: string } | null = null;
   const uniqueByNumber: Record<string, string> = { ...(opts.initialUniqueByNumber ?? {}) };
+  /**
+   * The licence request the last successful EPGL submit created.
+   *
+   * getRequestStatus takes `id` as a query parameter their swagger marks
+   * OPTIONAL, and their endpoint answers 404 without it -- so the model, reading
+   * the spec correctly, called it bare twice after every submission and got two
+   * failures for a request that had just succeeded. It recovered by accident,
+   * through duplicate-check. The id is not a judgement call: it is the one this
+   * conversation just created.
+   */
+  let lastLicenceRequestId: string | null = null;
+
   let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
   const runtimeToken = () => captured ?? opts.sessionToken ?? undefined;
@@ -1852,6 +1864,41 @@ export async function buildApiTools(
       if (patched) input = { ...input, body };
     }
 
+    /**
+     * One application, submitted once.
+     *
+     * The same tool serves creates and updates, so it cannot simply be refused
+     * after the first success -- their update shape carries Account.Id and the
+     * licence request's Name, and a customer amending an application uses it.
+     * What is never right is a second CREATE in a conversation that already made
+     * one: every child record is made again, every document is attached again,
+     * and the customer ends up with several licence requests for one licence.
+     *
+     * On 9 September a single run made seven. The cause was a missing
+     * state.reference (fixed in the orchestrator, where it belongs), but the
+     * cost of that bug was entirely in how many times this call was allowed to
+     * land -- so it is also refused here, where it is cheap and certain.
+     */
+    if (/submitlicenserequest$/i.test(toolName) && lastLicenceRequestId) {
+      const items = ((input?.body as Record<string, unknown> | undefined)?.compositeRequest ?? []) as Record<string, unknown>[];
+      const licence = Array.isArray(items)
+        ? items.find((i) => /EPG_License_Request__c\s*$/.test(String(i?.url ?? "")))
+        : undefined;
+      const lb = (Array.isArray(licence?.body) ? licence?.body[0] : licence?.body) as Record<string, unknown> | undefined;
+      const isUpdate = Boolean(asStr(lb?.Id) || asStr(lb?.Name));
+      if (licence && !isUpdate) {
+        return {
+          result:
+            `ALREADY SUBMITTED — NOTHING WAS SENT. This conversation has already created licence request ${lastLicenceRequestId}, and this call would create a SECOND one with its own copies of the company, the partners and every document. ` +
+            `NOTHING has gone wrong and nothing has been lost: the application is on file and its documents are attached. ` +
+            `Do NOT tell the customer their submission failed, do NOT ask them to re-upload anything, and do NOT retry. ` +
+            `If the next step is payment, call request_payment now — the reference it needs already exists. ` +
+            `If the customer genuinely wants to change something on the application, send the UPDATE shape instead: Account.Id plus the licence request's own Name.`,
+          isError: true,
+        };
+      }
+    }
+
     if (/submitlicenserequest$/i.test(toolName)) {
       if ((opts.epglDocuments ?? []).length) {
         input = withEpglDocumentPlaceholders(input, opts.epglDocuments ?? []) ?? input;
@@ -2199,6 +2246,19 @@ export async function buildApiTools(
           inp[srcParam.name] = REQUEST_SOURCE;
           input = inp;
         }
+      }
+    }
+
+    // The status of WHICH request. See lastLicenceRequestId: without the id their
+    // endpoint is a 404, and the model has no way to know that from a parameter
+    // marked optional. Never overwritten -- an id the model supplied is a
+    // deliberate one, and may well be an older application the customer asked
+    // about.
+    if (/getrequeststatus$/i.test(toolName) && lastLicenceRequestId) {
+      const inp = { ...((input ?? {}) as Record<string, unknown>) };
+      if (!asStr(inp.id)) {
+        inp.id = lastLicenceRequestId;
+        input = inp;
       }
     }
 
@@ -2926,6 +2986,17 @@ export async function buildApiTools(
           res.result +
           `\n\nTHE ORDER EXISTS AND IS NOT PAID. Emirates Post has opened a payment for it on their own gateway. Present the payment URL from this response as a PAY BLOCK — three backticks, then pay, then \`url: <the paymentUrl>\`, then \`amount: AED <total>\`, then three backticks — and say the renewal completes once they pay. Do NOT call it renewed, confirmed or complete on the strength of an order number. When they say they have paid, confirm it with the confirm tool and only then tell them the renewal is done.`,
       };
+    }
+    if (!res.isError && /submitlicenserequest$/i.test(toolName)) {
+      try {
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        for (const item of b?.compositeResponse ?? []) {
+          if (!/^NewLicenseRequest/i.test(String(item?.referenceId ?? ""))) continue;
+          if (item?.body?.success && item?.body?.id) lastLicenceRequestId = String(item.body.id);
+        }
+      } catch {
+        /* an unreadable submit leaves the status read to the model, as before */
+      }
     }
     if (!res.isError && /rental_save$/i.test(toolName) && /paymentUrl/i.test(res.result)) {
       // Keep the reference the confirm call actually wants. The save response
