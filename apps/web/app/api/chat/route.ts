@@ -2351,8 +2351,21 @@ export async function POST(req: NextRequest) {
         // on our own checkout — EPGL's licence fee among them, which settles in a
         // LATER turn than the one that submitted, so the submission is read from
         // the case rather than from this turn.
-        const purchase =
-          finalState.hold?.paidAt
+        //
+        // EPGL is the exception, and deliberately so. Their own portal fires the
+        // survey from saveNewLicenseRequest -- the FIRST submit out of Draft,
+        // before a dirham has moved -- and a licence paid by Virtual IBAN is
+        // never paid in the conversation at all: the IBAN is issued the next
+        // working day and settled by bank transfer. Gating on payment would mean
+        // that whole branch is surveyed never, and the card branch surveyed at a
+        // different moment than the portal. So licensing surveys on submission.
+        const licensing = pulseService === "license_new" || pulseService === "license_renewal";
+        const submitted = submittedRef ?? finalState.reference;
+        const purchase = licensing
+          ? submitted
+            ? { reference: submitted, amount: finalState.payment.amount }
+            : null
+          : finalState.hold?.paidAt
             ? { reference: finalState.hold.orderNo ?? finalState.hold.reference, amount: finalState.hold.amount }
             : finalState.gatewayPayment?.paidAt
               ? { reference: finalState.gatewayPayment.orderNo ?? finalState.gatewayPayment.reference, amount: finalState.payment.amount }
@@ -2373,7 +2386,7 @@ export async function POST(req: NextRequest) {
           }).catch(() => null);
           if (token) {
             finalState = { ...finalState, surveyIssuedAt: new Date().toISOString() };
-            send({ type: "survey", token, locale: body.locale, sandbox: pulseIsSandbox() });
+            send({ type: "survey", token, locale: body.locale, sandbox: pulseIsSandbox(pulseService) });
             await audit({ ...a, actor: "system", action: "survey_offered", payload: { service: pulseService, transactionId: String(purchase.reference) } });
           }
         }

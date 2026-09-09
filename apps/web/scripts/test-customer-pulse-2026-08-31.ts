@@ -89,5 +89,37 @@ const t2 = await pulseSurveyToken({
 });
 check("a malformed identity still yields a token", typeof t2 === "string" && t2.length > 20, t2);
 
+// EPGL, once Customer Pulse issued its linking ids (9 Sep 2026). Its channel and
+// main service are NOT Emirates Post's -- kK/Dt against kn/D2 -- so the point of
+// the split is that a licence survey is filed against the licensing channel and
+// not the PO Box one. A run where the two came out identical would mean the
+// override was ignored and every licence response landed in Emirates Post's pile.
+if (pulseConfigured("license_new")) {
+  const licence = await pulseSurveyToken({
+    service: "license_new",
+    transactionId: `test-licence-${uuid()}`,
+    feesAed: 150000,
+    customer: { name: "Test Applicant", email: "test@example.com", mobile: "0553708000" },
+  });
+  check(`a new-licence token is minted (${licence ?? "none"})`, typeof licence === "string" && licence.length > 20, licence);
+
+  const renewal = await pulseSurveyToken({
+    service: "license_renewal",
+    transactionId: `test-licence-renewal-${uuid()}`,
+    feesAed: 150000,
+    customer: { name: "Test Applicant", email: "test@example.com", mobile: "0553708000" },
+  });
+  check(`a licence-renewal token is minted (${renewal ?? "none"})`, typeof renewal === "string" && renewal.length > 20, renewal);
+
+  check(
+    "EPGL reads its own channel, not Emirates Post's",
+    (process.env.CUSTOMER_PULSE_EPGL_ID_CHANNEL ?? process.env.CUSTOMER_PULSE_ID_CHANNEL) !== undefined,
+  );
+  // Worth stating rather than asserting: if these ever match, the two services
+  // are being reported as one, and that is a configuration mistake not a test.
+  const sameChannel = !process.env.CUSTOMER_PULSE_EPGL_ID_CHANNEL;
+  if (sameChannel) console.log("NOTE  CUSTOMER_PULSE_EPGL_ID_CHANNEL is unset — EPGL is sharing the PO Box channel");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

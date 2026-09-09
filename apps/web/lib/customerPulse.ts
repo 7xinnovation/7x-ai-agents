@@ -84,13 +84,37 @@ export function toE164(raw: string | null | undefined): string {
   return "";
 }
 
+/**
+ * Which set of credentials a survey belongs to.
+ *
+ * Not cosmetic. Customer Pulse issues linking ids per SERVICE, and EPGL's are
+ * not Emirates Post's: the two agree on the entity (Q, EPG) and the survey (C)
+ * and differ on everything else -- channel kK against kn, main service Dt
+ * against D2 -- and they are registered under different integration keys, since
+ * they are different Salesforce orgs. Before this, one CUSTOMER_PULSE_ID_CHANNEL
+ * served both, so switching EPGL on would have quietly filed every licence
+ * survey against the PO Box channel.
+ *
+ * So EPGL reads CUSTOMER_PULSE_EPGL_* first and falls back to the shared name.
+ * A deployment where the two really do match needs no new settings at all.
+ */
+const EPGL_SERVICES: ReadonlySet<PulseService> = new Set(["license_new", "license_renewal"]);
+
+function envFor(service: PulseService, suffix: string): string {
+  if (EPGL_SERVICES.has(service)) {
+    const own = process.env[`CUSTOMER_PULSE_EPGL_${suffix}`];
+    if (own) return own;
+  }
+  return process.env[`CUSTOMER_PULSE_${suffix}`] ?? "";
+}
+
 function config(service: PulseService) {
-  const base = (process.env.CUSTOMER_PULSE_API_BASE_URL ?? "").replace(/\/$/, "");
-  const apiKey = process.env.CUSTOMER_PULSE_API_KEY ?? "";
-  const entity = process.env.CUSTOMER_PULSE_ID_ENTITY ?? "";
-  const channel = process.env.CUSTOMER_PULSE_ID_CHANNEL ?? "";
-  const survey = process.env.CUSTOMER_PULSE_ID_SURVEY ?? "";
-  const mainService = process.env.CUSTOMER_PULSE_ID_MAIN_SERVICE ?? "";
+  const base = envFor(service, "API_BASE_URL").replace(/\/$/, "");
+  const apiKey = envFor(service, "API_KEY");
+  const entity = envFor(service, "ID_ENTITY");
+  const channel = envFor(service, "ID_CHANNEL");
+  const survey = envFor(service, "ID_SURVEY");
+  const mainService = envFor(service, "ID_MAIN_SERVICE");
   const subService = process.env[SUB_SERVICE_ENV[service]] ?? "";
   if (!base || !apiKey || !entity || !channel || !survey || !subService) return null;
   return { base, apiKey, entity, channel, survey, mainService, subService };
@@ -101,8 +125,9 @@ function config(service: PulseService) {
  * has a matching host, and a token minted on one is not valid on the other — so
  * the client is TOLD which to load rather than inferring it.
  */
-export function pulseIsSandbox(): boolean {
-  return /sandbox/i.test(process.env.CUSTOMER_PULSE_API_BASE_URL ?? "");
+export function pulseIsSandbox(service?: PulseService): boolean {
+  const base = service ? envFor(service, "API_BASE_URL") : process.env.CUSTOMER_PULSE_API_BASE_URL ?? "";
+  return /sandbox/i.test(base);
 }
 
 /** True when this deployment is configured to show the survey at all. */
@@ -157,6 +182,12 @@ export async function pulseSurveyToken(input: {
     khadamati: {
       entity_linking_id: cfg.entity,
       service_channel_linking_id: cfg.channel,
+      // Required by their schema and missing here until 9 Sep 2026. The sandbox
+      // issues a token without it, which is why it went unnoticed -- but the
+      // sub-service is the only thing separating a new licence from a renewal,
+      // or a personal box from a corporate one, in their reporting. Without it
+      // every transaction lands in one undifferentiated pile.
+      sub_service_linking_id: cfg.subService,
       ...(cfg.mainService ? { main_service_linking_id: cfg.mainService } : {}),
     },
     initial_transaction_status: {

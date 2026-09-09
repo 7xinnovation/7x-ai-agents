@@ -170,47 +170,86 @@ console.log("\nShape is preserved");
   check("undefined survives", withEpglFieldNames(undefined) === undefined);
 }
 
-console.log("\nContact — the flag Salesforce insists on");
-// The rule reads Is_Primary_Contact__c / Is_Secondary_Contact__c, both booleans
-// and neither in the published spec. The spec's Secondary_Contact does not exist
-// on the object at all -- confirmed by a describe against their own sandbox
-// after sending it as 'True' changed nothing.
+console.log("\nContact — secondary contacts, and only those");
+// Their swagger says it in one word each: Contact is "Secondary contacts",
+// User is "Portal applicant". Their handler stamps the designation itself --
+// Primary on the Contact it builds from NewUser, Secondary on ours -- and both
+// flags are read-only to our integration user anyway. So we state nothing that
+// contradicts it, and never send the applicant twice.
 {
   const r = withEpglFieldNames(wrap([
     item("Contact", { Email: "a@b.c", LastName: "K", FirstName: "E", AccountId: "@{NewAccount.id}" }, "NewContact"),
   ]));
   const c = outOf(r, "NewContact");
-  check("the contact is marked primary", c.Is_Primary_Contact__c === true, c);
-  check("...as a boolean, which is what the field is", typeof c.Is_Primary_Contact__c === "boolean", typeof c.Is_Primary_Contact__c);
+  check("a contact is marked secondary, which is what the object is for", c.Is_Secondary_Contact__c === "True", c);
+  check("...as the STRING their enum declares, not a boolean", typeof c.Is_Secondary_Contact__c === "string", typeof c.Is_Secondary_Contact__c);
+  check("we no longer claim it is primary — their handler decides that", c.Is_Primary_Contact__c === undefined, c);
   check("everything else is untouched", c.Email === "a@b.c" && c.AccountId === "@{NewAccount.id}", c);
 }
 {
-  // The spec's field does not exist on the object, so sending it is noise at
-  // best. It goes, whatever value it arrived with.
+  // Their pre-9-Sep swagger named a field that does not exist on the object,
+  // confirmed by a describe against their own sandbox. It goes, whatever value
+  // it arrived with, and the real name takes its place.
   const r = withEpglFieldNames(wrap([item("Contact", { LastName: "K", Secondary_Contact: "True" }, "C")]));
-  check("the spec's non-existent Secondary_Contact is dropped", outOf(r, "C").Secondary_Contact === undefined, outOf(r, "C"));
-  check("...and the real flag is set in its place", outOf(r, "C").Is_Primary_Contact__c === true, outOf(r, "C"));
+  check("the old Secondary_Contact is dropped", outOf(r, "C").Secondary_Contact === undefined, outOf(r, "C"));
+  check("...and the corrected name carries the value", outOf(r, "C").Is_Secondary_Contact__c === "True", outOf(r, "C"));
 }
 {
-  // A genuinely secondary contact stays secondary, and is not also primary.
-  const r = withEpglFieldNames(wrap([item("Contact", { LastName: "K", Is_Secondary_Contact__c: true }, "C")]));
-  const c = outOf(r, "C");
-  check("a secondary contact is left secondary", c.Is_Secondary_Contact__c === true, c);
-  check("...and is not marked primary as well", c.Is_Primary_Contact__c === undefined, c);
+  // A boolean is the natural thing for a model to send for a field whose label
+  // reads like a checkbox. Their enum is strings.
+  const t = withEpglFieldNames(wrap([item("Contact", { LastName: "K", Is_Secondary_Contact__c: true }, "C")]));
+  check("a boolean true becomes 'True'", outOf(t, "C").Is_Secondary_Contact__c === "True", outOf(t, "C"));
+  const f = withEpglFieldNames(wrap([item("Contact", { LastName: "K", Is_Secondary_Contact__c: false }, "C")]));
+  check("a boolean false becomes 'False'", outOf(f, "C").Is_Secondary_Contact__c === "False", outOf(f, "C"));
+  const s2 = withEpglFieldNames(wrap([item("Contact", { LastName: "K", Is_Secondary_Contact__c: "false" }, "C")]));
+  check("a lower-case string is normalised too", outOf(s2, "C").Is_Secondary_Contact__c === "False", outOf(s2, "C"));
 }
 {
-  const r = withEpglFieldNames(wrap([item("Contact", [{ LastName: "A" }, { LastName: "B", Is_Secondary_Contact__c: true }], "C")]));
+  // The 9 September blocker, reproduced. The applicant already has a PRIMARY
+  // Contact from a previous submission, matched on Email; sending them again as
+  // NewContact asks Salesforce to mark that same record Secondary as well, and
+  // the validation rule refuses. The applicant belongs in NewUser only.
+  const r = withEpglFieldNames(wrap([
+    item("Contact", { Email: "Emre.Karayalcin@7x.ae", LastName: "Karayalcin" }, "NewContact"),
+    item("User", { Email: "emre.karayalcin@7x.ae", FirstName: "Emre", LastName: "Karayalcin" }, "NewUser"),
+  ]));
+  const ids = (r!.body as any).compositeRequest.map((i: any) => i.referenceId);
+  check("the applicant is not also sent as a secondary contact", !ids.includes("NewContact"), ids);
+  check("...and the applicant themselves still goes", ids.includes("NewUser"), ids);
+}
+{
+  // A genuinely different person is exactly what the object is for, and stays.
+  const r = withEpglFieldNames(wrap([
+    item("Contact", { Email: "ops@company.ae", LastName: "Mintah" }, "NewContact"),
+    item("User", { Email: "emre.karayalcin@7x.ae", LastName: "Karayalcin" }, "NewUser"),
+  ]));
+  const c = outOf(r, "NewContact");
+  check("a real secondary contact survives", c && c.Email === "ops@company.ae", c);
+  check("...marked secondary", c.Is_Secondary_Contact__c === "True", c);
+}
+{
+  // One row of an array-bodied Contact can collide while the others do not.
+  const r = withEpglFieldNames(wrap([
+    item("Contact", [{ Email: "ops@company.ae", LastName: "A" }, { Email: "me@7x.ae", LastName: "B" }], "C"),
+    item("User", { Email: "me@7x.ae", LastName: "B" }, "NewUser"),
+  ]));
   const rows = outOf(r, "C");
-  check("each contact is judged on its own", rows[0].Is_Primary_Contact__c === true, rows);
-  check("...so the secondary one is not overruled", rows[1].Is_Primary_Contact__c === undefined && rows[1].Is_Secondary_Contact__c === true, rows);
+  check("only the colliding row is dropped", rows.length === 1 && rows[0].Email === "ops@company.ae", rows);
+}
+{
+  // With no NewUser there is nothing to collide with, and the contact stands.
+  const r = withEpglFieldNames(wrap([item("Contact", { Email: "solo@company.ae", LastName: "S" }, "C")]));
+  check("a lone contact is kept", outOf(r, "C").Email === "solo@company.ae", outOf(r, "C"));
 }
 {
   // The flag belongs to Contact. Putting it on the Account is what the model
   // tried when the rolled-back error was echoed onto every item.
   const r = withEpglFieldNames(wrap([item("Account", { Name: "ACME" }, "NewAccount")]));
-  check("the Account does not get a contact flag", outOf(r, "NewAccount").Is_Primary_Contact__c === undefined, outOf(r, "NewAccount"));
+  const a = outOf(r, "NewAccount");
+  check("the Account does not get a contact flag", a.Is_Primary_Contact__c === undefined && a.Is_Secondary_Contact__c === undefined, a);
   const p = withEpglFieldNames(wrap([item("EPG_Partner__c", { Name: "P" }, "P")]));
-  check("nor does a partner", outOf(p, "P").Is_Primary_Contact__c === undefined, outOf(p, "P"));
+  const q = outOf(p, "P");
+  check("nor does a partner", q.Is_Primary_Contact__c === undefined && q.Is_Secondary_Contact__c === undefined, q);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

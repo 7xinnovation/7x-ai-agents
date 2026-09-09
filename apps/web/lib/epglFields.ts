@@ -101,35 +101,36 @@ const RULES: Record<string, Rules> = {
    * model read it as an Account problem, tried the flag there, tried again, and
    * finally offered a callback for an application that was complete.
    *
-   * Their swagger says the field is `Secondary_Contact`, an enum of 'True' |
-   * 'False'. I sent that, and the rule still fired. A describe against their own
-   * sandbox says why: Secondary_Contact DOES NOT EXIST on Contact. The two
-   * fields the rule actually reads are booleans —
+   * Two spec errors and one design error sat behind it, and only the third one
+   * mattered.
    *
-   *   Is_Primary_Contact__c     "Is Primary Contact"
-   *   Is_Secondary_Contact__c   "Is Secondary Contact"
+   * The spec errors: their swagger called the field `Secondary_Contact`; the
+   * real name is `Is_Secondary_Contact__c` (corrected in their 9 Sep swagger),
+   * a STRING enum of 'True' | 'False' rather than a boolean. And the two fields
+   * the rule reads are read-only to our integration user, so guessing at them
+   * was never going to work anyway.
    *
-   * — and neither is in the published spec. The error names the labels, which is
-   * why guessing from it did not work twice.
+   * The design error is ours, and it is the one that broke the submission.
+   * Their two Contact-shaped objects are not interchangeable:
    *
-   * The contact we send is the person the applicant nominated to be contacted
-   * about this licence, which is the primary one; they need not be named on the
-   * trade licence at all. So primary is the default, set only when the
-   * submission has not already said otherwise — a genuinely secondary contact
-   * marked as such stays that way.
+   *   NewUser     the portal applicant. Their handler creates a Contact for
+   *               this person and marks it PRIMARY.
+   *   NewContact  "Secondary contacts" -- the company's other contact person.
+   *               Their handler marks it SECONDARY.
    *
-   * IT DOES NOT WORK YET, AND CANNOT FROM HERE. The same describe reports both
-   * flags as createable:false, updateable:false — our integration user cannot
-   * write either of them, so a rule demanding one of them be true can never be
-   * satisfied by an API-created Contact. EPG_Designation__c is read-only to us
-   * for the same reason. Sending the value anyway is deliberate and harmless:
-   * Salesforce ignores a field the caller cannot write, and the day EPGL grant
-   * field-level access the payload is already correct. Until then every
-   * agent-sourced EPGL submission fails on this rule, and it is theirs to fix.
+   * We were sending the applicant's own email as NewContact. Their handler
+   * matches Contact on Email, found the Primary contact a previous submission
+   * had already created for that same person, and tried to mark it Secondary
+   * too. One person cannot be both, so the rule fired -- correctly.
+   *
+   * So we no longer state the designation at all (their handler owns it, and we
+   * could not write it if we wanted to), and a NewContact that names the same
+   * person as NewUser is dropped rather than sent: one applicant needs one
+   * record, and their handler already makes it Primary.
    */
   Contact: {
-    drop: ["Secondary_Contact"],
-    defaults: { Is_Primary_Contact__c: true },
+    drop: ["Secondary_Contact", "Is_Primary_Contact__c"],
+    defaults: { Is_Secondary_Contact__c: "True" },
   },
   EPG_License_Request__c: {
     rename: {
@@ -167,13 +168,30 @@ function fixRow(object: string, row: Record<string, unknown>): Record<string, un
   for (const [key, value] of Object.entries(rules.defaults ?? {})) {
     if (out[key] === undefined || out[key] === null || out[key] === "") out[key] = value;
   }
-  // One designation, not both. A contact explicitly marked secondary is not also
-  // the primary one, and the rule is satisfied either way.
-  if (object === "Contact" && out.Is_Secondary_Contact__c === true) delete out.Is_Primary_Contact__c;
+  // Their enum is the STRINGS 'True' and 'False', not booleans -- an unexpected
+  // type is one more way to fail a whole allOrNone composite.
+  if (object === "Contact" && out.Is_Secondary_Contact__c !== undefined) {
+    const v = out.Is_Secondary_Contact__c;
+    out.Is_Secondary_Contact__c = v === false || /^(false|no|0)$/i.test(String(v)) ? "False" : "True";
+  }
   if (object === "EPG_License_Request__c" && out.Activity_Codes__c !== undefined) {
     const codes = postalActivityCodes(out.Activity_Codes__c);
     if (codes) out.Activity_Codes__c = codes;
     else delete out.Activity_Codes__c;
+  }
+  return out;
+}
+
+/** Every email the composite claims for the portal applicant. */
+function applicantEmails(items: Record<string, unknown>[]): Set<string> {
+  const out = new Set<string>();
+  for (const item of items) {
+    if (objectOf(item?.url) !== "User") continue;
+    const rows = Array.isArray(item.body) ? item.body : [item.body];
+    for (const row of rows as Record<string, unknown>[]) {
+      const email = String(row?.Email ?? "").trim().toLowerCase();
+      if (email) out.add(email);
+    }
   }
   return out;
 }
@@ -185,7 +203,17 @@ function fixRow(object: string, row: Record<string, unknown>): Record<string, un
  * "Unknown Member" — so a nameless row is not a record with a gap in it, it is
  * a placeholder that will also collide with every other nameless row.
  */
-function keepRow(object: string, row: Record<string, unknown>): boolean {
+function keepRow(object: string, row: Record<string, unknown>, applicants: Set<string>): boolean {
+  // The applicant is not their own secondary contact. Their handler creates a
+  // PRIMARY Contact from NewUser and matches Contact on Email, so a NewContact
+  // carrying the applicant's email is an update of that same record trying to
+  // mark it Secondary as well -- which is exactly the validation rule that
+  // rejected every submission on 9 September. Sending nothing is right, not a
+  // workaround: the record their handler makes from NewUser is the one wanted.
+  if (object === "Contact") {
+    const email = String(row.Email ?? "").trim().toLowerCase();
+    return !(email && applicants.has(email));
+  }
   if (object !== "Members__c") return true;
   return String(row.Name ?? "").trim().length > 0;
 }
@@ -196,18 +224,21 @@ export function withEpglFieldNames(
 ): Record<string, unknown> | undefined {
   const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
   if (!Array.isArray(body.compositeRequest)) return input;
-  const items = (body.compositeRequest as Record<string, unknown>[]).map((item) => {
+  const all = body.compositeRequest as Record<string, unknown>[];
+  const applicants = applicantEmails(all);
+  const items = all.map((item) => {
     const object = objectOf(item?.url);
     if (!object || !item) return item;
+    const keep = (r: Record<string, unknown>) => keepRow(object, r, applicants);
     if (Array.isArray(item.body)) {
       const rows = (item.body as Record<string, unknown>[])
-        .filter((r) => r && typeof r === "object" && keepRow(object, r))
+        .filter((r) => r && typeof r === "object" && keep(r))
         .map((r) => fixRow(object, r));
       return { ...item, body: rows };
     }
     if (item.body && typeof item.body === "object") {
       const row = item.body as Record<string, unknown>;
-      if (!keepRow(object, row)) return null;
+      if (!keep(row)) return null;
       return { ...item, body: fixRow(object, row) };
     }
     return item;
