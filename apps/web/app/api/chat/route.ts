@@ -2271,6 +2271,15 @@ export async function POST(req: NextRequest) {
         const byNumNow = apiTools.getUniqueByNumber();
         if (Object.keys(atNow).length) finalState = { ...finalState, offeredBoxAt: atNow };
         if (Object.keys(byNumNow).length) finalState = { ...finalState, uniqueByNumber: byNumNow };
+
+        // THE BRANCH THE CUSTOMER CHOSE, on the case rather than in the model's
+        // head. Asking Emirates Post for a branch's free boxes IS the choice
+        // being made -- there is no other reason to ask -- and the panel was
+        // showing "Branch: not yet chosen" beside a box number from that branch.
+        const branchNow = apiTools.getChosenBranch();
+        if (branchNow && !str(finalState.data.branch)) {
+          finalState = { ...finalState, data: { ...finalState.data, branch: branchNow.name } };
+        }
         const heldNow = apiTools.getLastHold();
         const holdChanged =
           heldNow &&

@@ -815,6 +815,8 @@ export async function buildApiTools(
   /** uniqueBoxIds from the most recent availability lookup. */
   getOfferedBoxIds: () => string[];
   getOfferedBoxAt: () => Record<string, string>;
+  /** The branch the last availability lookup was made against, as officeId + name. */
+  getChosenBranch: () => { officeId: string; name: string } | null;
   getUniqueByNumber: () => Record<string, string>;
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
@@ -880,6 +882,15 @@ export async function buildApiTools(
    * taken. It was free the whole time, at 201.
    */
   const offeredBoxAt: Record<string, string> = { ...(opts.initialOfferedBoxAt ?? {}) };
+  /**
+   * The branch whose boxes we last listed.
+   *
+   * Asking FreeBoxes about a branch IS the customer having chosen it — there is
+   * no other reason to look. The case panel showed "Branch: not yet chosen"
+   * beside a box number from that very branch, because recording it was left to
+   * the model and the model was busy listing boxes.
+   */
+  let lastFreeBoxesBranch: { officeId: string; name: string } | null = null;
   const uniqueByNumber: Record<string, string> = { ...(opts.initialUniqueByNumber ?? {}) };
   let lastHold: { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null =
     freshHold(opts.initialHold) ?? null;
@@ -2418,6 +2429,10 @@ export async function buildApiTools(
               ((input ?? {}) as Record<string, unknown>).LocationId ??
                 ((input ?? {}) as Record<string, unknown>).locationId
             );
+            if (askedAt) {
+              const known = branchesShown(opts.conversationId);
+              lastFreeBoxesBranch = { officeId: askedAt, name: known[askedAt] ?? askedAt };
+            }
             for (const x of rows as Record<string, unknown>[]) {
               const uid = String(x?.uniqueBoxId ?? "");
               const num = String(x?.boxId ?? x?.boxNumber ?? "");
@@ -2705,6 +2720,29 @@ export async function buildApiTools(
             })
             .filter(Boolean);
           rememberPriceBook(opts.conversationId, bundlePriceBook);
+
+          /**
+           * SHOW EVERY BUNDLE THAT CAME BACK.
+           *
+           * Emirates Post returned MyBox, MyHome and MyHome Instant; an Arabic
+           * conversation showed two of them and the customer reported MyHome
+           * Instant missing. The English one showed all three, so nothing was
+           * filtered — the list was simply shortened on the way out, which is
+           * exactly what happens to a long list nobody is counting.
+           *
+           * The same shape as the box numbers, which had the same problem and
+           * stopped having it once the response said how many there were and
+           * named them.
+           */
+          const names = list.map((bn) => asStr(bn.name_En) || asStr(bn.bundle_Id)).filter(Boolean);
+          if (names.length) {
+            periodNote =
+              `\n\nSHOW ALL ${names.length} OF THESE BUNDLES, every time, in this order: ${names.join(", ")}.` +
+              ` They are what Emirates Post offers for this request and the customer chooses between them — leaving one out chooses for them.` +
+              ` This holds in every language: an Arabic reply must carry all ${names.length} as well, with the Arabic name beside the English one.` +
+              periodNote;
+          }
+
           if (lines.length) {
             periodNote =
               "\n\nEACH RENTAL PERIOD HAS ITS OWN PRICE, and where a longer term saves money the saving is stated. Show the saving on the card for that period (e.g. `badge: Save AED 50`) so a longer term reads as a choice rather than a bigger number — and quote the saving exactly as given, never work one out yourself. These are the prices: Quote these EXACTLY when you show the customer their period options — do not use the 12-month price for every period, and never multiply one period's price to reach another:\n" +
@@ -3403,6 +3441,7 @@ export async function buildApiTools(
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
     getOfferedBoxAt: () => offeredBoxAt,
+    getChosenBranch: () => lastFreeBoxesBranch,
     getUniqueByNumber: () => uniqueByNumber,
     getGatewayPayment: () => gatewayPayment,
     getGsbCompanies: () => [...gsbCompanies],
