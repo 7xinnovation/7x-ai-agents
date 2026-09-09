@@ -24,6 +24,8 @@ const cliArg = (n: string) => {
 };
 const HOST = (cliArg("--host") ?? "").replace(/\/$/, "");
 const DOCS = cliArg("--docs") ?? "/Users/emrekarayalcin/Documents/7x-proj-tech/agents";
+/** "gateway" (default) or "viban" — which payment branch to walk. */
+const PAY = (cliArg("--pay") ?? "gateway").toLowerCase();
 const VERBOSE = process.argv.includes("--verbose");
 if (!HOST) throw new Error("--host <https://…> is required");
 
@@ -152,7 +154,7 @@ console.log(`\n${HOST} · epgl-dialog · new licence, driven end to end\n`);
 const answers: [RegExp, string][] = [
   [/duplicate|existing applications on file|update one of these/i, "Submit as new application"],
   [/postal (services|activities)|which activities|activity code/i, "Letters & post items delivery, and parcels delivery."],
-  [/payment method|how would you like to pay|virtual iban/i, "Card payment (online)"],
+  [/payment method|how would you like to pay|virtual iban/i, PAY === "viban" ? "Bank transfer (Virtual IBAN)" : "Card payment (online)"],
   [/owner'?s emirates id|emirates id number/i, "784-1984-0847950-3"],
   [/which emirate/i, "Dubai"],
   [/region|area of/i, "Al Mankhool"],
@@ -184,7 +186,9 @@ console.log("  walking the journey");
 const paid = (t: string) => /```pay\b/.test(t) || /Pay\s+AED\s*[\d,]+/i.test(t);
 
 for (let turn = 0; turn < 40; turn++) {
-  if (paid(reply)) { priced = reply; break; }
+  // The Virtual IBAN branch never opens a card; a licence request number is
+  // the whole of its success.
+  if (PAY === "viban" ? submitted : paid(reply)) { priced = reply; break; }
 
   // 1. Anything it asked to be uploaded, before anything is said.
   const asked = wantedUploads(reply).filter((k) => !seen.has(k));
@@ -221,7 +225,7 @@ check(
 );
 
 console.log("\n  submission and payment");
-check("it reached a real payment card", Boolean(priced), reply.slice(0, 220));
+check(PAY === "viban" ? "it reached the end of the Virtual IBAN branch" : "it reached a real payment card", Boolean(priced), reply.slice(0, 220));
 check("the application was actually submitted, not just narrated", submitted, reply.slice(0, 220));
 check("nothing blew up on our side", !/went wrong on our side/i.test(reply), reply.slice(0, 220));
 check("no internal identifier leaked", !/maps to key|__c\b|referenceId/i.test(priced || reply), (priced || reply).slice(0, 220));

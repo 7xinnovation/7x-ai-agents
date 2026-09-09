@@ -35,7 +35,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
-import { promisesMapWithout, locateBlock } from "@/lib/locateGuard";
+import { promisesMapWithout, locateBlock, addressAlreadyKnown } from "@/lib/locateGuard";
 import { narrationGuard } from "@/lib/narrationGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -1950,7 +1950,11 @@ export async function POST(req: NextRequest) {
         // names it, but nothing made the offer and the block arrive together, so
         // the customer was sent to look for a control that was not there.
         {
-          const add = promisesMapWithout(finalText) ? locateBlock(body.locale) : "";
+          // ...unless we already have the address. Reading it off the trade
+          // licence and then asking them to pin it is asking for what they have
+          // already given us.
+          const known = addressAlreadyKnown(finalState.data as Record<string, unknown>);
+          const add = !known && promisesMapWithout(finalText) ? locateBlock(body.locale) : "";
           if (add) {
             send({ type: "text", delta: add });
             finalText += add;

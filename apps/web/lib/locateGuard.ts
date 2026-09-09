@@ -45,6 +45,27 @@ export interface LocateGuardOptions {
   enabled?: boolean;
 }
 
+/**
+ * An address we already hold is not a question.
+ *
+ * The trade licence and the MOA carry the company's address, and it is read off
+ * them and shown in the panel. Asking the applicant to drop a pin on top of that
+ * asks them to supply what they have already supplied — and on 9 September the
+ * street address was sitting in the panel, in Arabic, while the assistant said
+ * "please confirm your company's physical location on the map".
+ *
+ * This is about the OFFER, not the guard: where the address is known, the map
+ * should not be pushed at them at all. They can still ask for it.
+ */
+export function addressAlreadyKnown(data: Record<string, unknown> | undefined): boolean {
+  if (!data) return false;
+  for (const key of ["address_street", "address_geo", "delivery_address", "street_address"]) {
+    const v = data[key];
+    if (typeof v === "string" && v.trim().length > 6) return true;
+  }
+  return false;
+}
+
 /** The block to append, with a label the customer will recognise. */
 export function locateBlock(locale?: string): string {
   const label = locale === "ar" ? "تحديد موقعي على الخريطة" : "Pin my location on the map";

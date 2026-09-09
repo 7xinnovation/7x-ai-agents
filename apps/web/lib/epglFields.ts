@@ -94,22 +94,33 @@ const RULES: Record<string, Rules> = {
     drop: ["EPG_Contact__c", "EPG_Designation__c"],
   },
   /**
-   * "Either of Is Primary Contact or Is Secondary Contact should be selected."
+   * "Either of Is Primary Contact or  Is Secondary Contact should be selected."
    *
-   * A Salesforce validation rule on Contact, and it rejected every EPGL
-   * submission on 9 September -- rolled back with that message echoed onto all
-   * nine items, so the model read it as an Account problem, tried the flag
-   * there, tried again, and finally offered a callback for a licence
-   * application that was complete.
+   * A Salesforce validation rule on Contact that rejected every EPGL submission
+   * on 9 September. allOrNone echoes the message onto all nine items, so the
+   * model read it as an Account problem, tried the flag there, tried again, and
+   * finally offered a callback for an application that was complete.
    *
-   * Their own spec has carried the answer all along: every Contact in every
-   * example body sends `Secondary_Contact: 'True'`. It is their flag, on their
-   * object, with a value only they can define -- not something to put in front
-   * of an applicant -- so it is filled in here. A string, and capitalised,
-   * because the field is an enum of 'True' | 'False' rather than a boolean.
+   * Their swagger says the field is `Secondary_Contact`, an enum of 'True' |
+   * 'False'. I sent that, and the rule still fired. A describe against their own
+   * sandbox says why: Secondary_Contact DOES NOT EXIST on Contact. The two
+   * fields the rule actually reads are booleans —
+   *
+   *   Is_Primary_Contact__c     "Is Primary Contact"
+   *   Is_Secondary_Contact__c   "Is Secondary Contact"
+   *
+   * — and neither is in the published spec. The error names the labels, which is
+   * why guessing from it did not work twice.
+   *
+   * The contact we send is the person the applicant nominated to be contacted
+   * about this licence, which is the primary one; they need not be named on the
+   * trade licence at all. So primary is the default, set only when the
+   * submission has not already said otherwise — a genuinely secondary contact
+   * marked as such stays that way.
    */
   Contact: {
-    defaults: { Secondary_Contact: "True" },
+    drop: ["Secondary_Contact"],
+    defaults: { Is_Primary_Contact__c: true },
   },
   EPG_License_Request__c: {
     rename: {
@@ -139,6 +150,9 @@ function fixRow(object: string, row: Record<string, unknown>): Record<string, un
   for (const [key, value] of Object.entries(rules.defaults ?? {})) {
     if (out[key] === undefined || out[key] === null || out[key] === "") out[key] = value;
   }
+  // One designation, not both. A contact explicitly marked secondary is not also
+  // the primary one, and the rule is satisfied either way.
+  if (object === "Contact" && out.Is_Secondary_Contact__c === true) delete out.Is_Primary_Contact__c;
   if (object === "EPG_License_Request__c" && out.Activity_Codes__c !== undefined) {
     const codes = postalActivityCodes(out.Activity_Codes__c);
     if (codes) out.Activity_Codes__c = codes;
