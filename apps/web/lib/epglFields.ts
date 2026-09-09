@@ -68,6 +68,8 @@ interface Rules {
   rename?: Record<string, string>;
   /** Fields the object does not have. */
   drop?: string[];
+  /** Values Salesforce requires that nobody would think to ask a customer for. */
+  defaults?: Record<string, unknown>;
 }
 
 /**
@@ -90,6 +92,24 @@ const RULES: Record<string, Rules> = {
   Members__c: {
     rename: { EPG_Account__c: "AccountId__c" },
     drop: ["EPG_Contact__c", "EPG_Designation__c"],
+  },
+  /**
+   * "Either of Is Primary Contact or Is Secondary Contact should be selected."
+   *
+   * A Salesforce validation rule on Contact, and it rejected every EPGL
+   * submission on 9 September -- rolled back with that message echoed onto all
+   * nine items, so the model read it as an Account problem, tried the flag
+   * there, tried again, and finally offered a callback for a licence
+   * application that was complete.
+   *
+   * Their own spec has carried the answer all along: every Contact in every
+   * example body sends `Secondary_Contact: 'True'`. It is their flag, on their
+   * object, with a value only they can define -- not something to put in front
+   * of an applicant -- so it is filled in here. A string, and capitalised,
+   * because the field is an enum of 'True' | 'False' rather than a boolean.
+   */
+  Contact: {
+    defaults: { Secondary_Contact: "True" },
   },
   EPG_License_Request__c: {
     rename: {
@@ -116,6 +136,9 @@ function fixRow(object: string, row: Record<string, unknown>): Record<string, un
     if (out[to] === undefined || out[to] === null || out[to] === "") out[to] = value;
   }
   for (const key of rules.drop ?? []) delete out[key];
+  for (const [key, value] of Object.entries(rules.defaults ?? {})) {
+    if (out[key] === undefined || out[key] === null || out[key] === "") out[key] = value;
+  }
   if (object === "EPG_License_Request__c" && out.Activity_Codes__c !== undefined) {
     const codes = postalActivityCodes(out.Activity_Codes__c);
     if (codes) out.Activity_Codes__c = codes;

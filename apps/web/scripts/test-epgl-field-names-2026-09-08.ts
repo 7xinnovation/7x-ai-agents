@@ -168,5 +168,36 @@ console.log("\nShape is preserved");
   check("undefined survives", withEpglFieldNames(undefined) === undefined);
 }
 
+console.log("\nContact — the flag Salesforce insists on");
+{
+  const r = withEpglFieldNames(wrap([
+    item("Contact", { Email: "a@b.c", LastName: "K", FirstName: "E", AccountId: "@{NewAccount.id}" }, "NewContact"),
+  ]));
+  const c = outOf(r, "NewContact");
+  check("Secondary_Contact is filled in", c.Secondary_Contact === "True", c);
+  check("...as the string their enum takes, not a boolean", typeof c.Secondary_Contact === "string", typeof c.Secondary_Contact);
+  check("everything else is untouched", c.Email === "a@b.c" && c.AccountId === "@{NewAccount.id}", c);
+}
+{
+  // A submission that already says otherwise means it: this is a default, not
+  // an override. A genuinely primary contact must be able to say so.
+  const r = withEpglFieldNames(wrap([item("Contact", { LastName: "K", Secondary_Contact: "False" }, "C")]));
+  check("an explicit False is respected", outOf(r, "C").Secondary_Contact === "False", outOf(r, "C"));
+}
+{
+  const r = withEpglFieldNames(wrap([item("Contact", [{ LastName: "A" }, { LastName: "B", Secondary_Contact: "False" }], "C")]));
+  const rows = outOf(r, "C");
+  check("every contact in an array gets it", rows[0].Secondary_Contact === "True", rows);
+  check("...without overwriting one that set it", rows[1].Secondary_Contact === "False", rows);
+}
+{
+  // The flag belongs to Contact. Putting it on the Account is what the model
+  // tried when the rolled-back error was echoed onto every item.
+  const r = withEpglFieldNames(wrap([item("Account", { Name: "ACME" }, "NewAccount")]));
+  check("the Account does not get a contact flag", outOf(r, "NewAccount").Secondary_Contact === undefined, outOf(r, "NewAccount"));
+  const p = withEpglFieldNames(wrap([item("EPG_Partner__c", { Name: "P" }, "P")]));
+  check("nor does a partner", outOf(p, "P").Secondary_Contact === undefined, outOf(p, "P"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
