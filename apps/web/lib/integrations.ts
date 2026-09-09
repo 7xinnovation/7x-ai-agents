@@ -703,6 +703,15 @@ export async function buildApiTools(
     /** What the customer already decided about existing applications, if anything. */
     duplicateDecision?: () => string | null;
     /**
+     * The licence request this CASE already has, read fresh on every call.
+     *
+     * Deliberately not a variable in this closure. Everything here is rebuilt
+     * per HTTP request, so a value remembered locally is empty on the next turn
+     * -- which is exactly the turn a duplicate arrives on. `offeredBoxAt` was
+     * the same mistake, and it was empty precisely when it was needed.
+     */
+    submittedReference?: () => string | null;
+    /**
      * Licence-request values taken from the case rather than from the model.
      * See withEpglRequestFields: the composite is the model's to compose, so
      * which fields it carries varies run to run, and the ones it drops are the
@@ -1879,7 +1888,8 @@ export async function buildApiTools(
      * cost of that bug was entirely in how many times this call was allowed to
      * land -- so it is also refused here, where it is cheap and certain.
      */
-    if (/submitlicenserequest$/i.test(toolName) && lastLicenceRequestId) {
+    const alreadySubmitted = opts.submittedReference?.() ?? lastLicenceRequestId;
+    if (/submitlicenserequest$/i.test(toolName) && alreadySubmitted) {
       const items = ((input?.body as Record<string, unknown> | undefined)?.compositeRequest ?? []) as Record<string, unknown>[];
       const licence = Array.isArray(items)
         ? items.find((i) => /EPG_License_Request__c\s*$/.test(String(i?.url ?? "")))
@@ -1889,7 +1899,7 @@ export async function buildApiTools(
       if (licence && !isUpdate) {
         return {
           result:
-            `ALREADY SUBMITTED — NOTHING WAS SENT. This conversation has already created licence request ${lastLicenceRequestId}, and this call would create a SECOND one with its own copies of the company, the partners and every document. ` +
+            `ALREADY SUBMITTED — NOTHING WAS SENT. This conversation has already created licence request ${alreadySubmitted}, and this call would create a SECOND one with its own copies of the company, the partners and every document. ` +
             `NOTHING has gone wrong and nothing has been lost: the application is on file and its documents are attached. ` +
             `Do NOT tell the customer their submission failed, do NOT ask them to re-upload anything, and do NOT retry. ` +
             `If the next step is payment, call request_payment now — the reference it needs already exists. ` +

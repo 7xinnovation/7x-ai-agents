@@ -687,6 +687,10 @@ export async function POST(req: NextRequest) {
     // the same question came back on each one -- after the customer had already
     // answered it.
     duplicateDecision: () => str(session.state.data.__duplicate_decision) ?? null,
+    // Read from the live case, not remembered in the tool layer: `case` events
+    // update this within the turn, so a submission and the resubmission that
+    // follows it two messages later both see the same answer.
+    submittedReference: () => liveState.reference ?? null,
     // The licence request's own fields, from the case rather than from whatever
     // the model remembers to include. LR-37212 carried the emirate, region,
     // activities, terms acceptance, amount paid and payment reference; LR-37214,
