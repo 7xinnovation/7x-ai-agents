@@ -199,6 +199,62 @@ which branch you meant.
 
 ---
 
+## 10 — The branch name: theirs, in your language, and only the one you picked
+
+**On staging only for now.** Reported today, from an Arabic conversation.
+
+You pressed **NXN - Al Barsha Branch** and the reply opened *"سأجلب الأرقام
+المتاحة في فرع الرشيدية"* — a real branch, twelve kilometres away. The numbers
+underneath were Al Barsha's and were correct. Only the sentence was wrong, and
+you asked three times whether the two were the same place before you believed
+it.
+
+Two separate faults met there.
+
+**The names were coming out in English, and the spelling was ours.** The branch
+step told the assistant to use each branch's `nameEn` exactly as Emirates Post
+write it. That rule was for bug 5 and it fixed bug 5. In an Arabic conversation
+it produced English cards and English buttons — and left the assistant with no
+Arabic name to copy, so it made one. Your `nameAr` is **«مكتب بريد الراشدية»**;
+it wrote «الرشيدية» in one turn and «الراشدية» in the next. **Your data was
+right the whole time.** The rule was never "use English", it was "use *their*
+name" — and which of your two names that is depends on the language being
+spoken.
+
+**The wrong branch itself** is not a wording problem: the card in that same
+reply was built from your data and named Al Barsha correctly. The sentence was
+written from memory and drifted into a neighbour. Announcements are now held
+until they are complete and dropped if they name a branch other than the one in
+play.
+
+**Test**
+
+1. Switch to Arabic **first**, then start a PO Box rental and get to the branch
+   list for Dubai.
+2. **Expect every card, button and sentence to carry Emirates Post's own Arabic
+   name** — «مكتب بريد البرشاء», «مكتب بريد الراشدية» (with the alif),
+   «مكتب بريد القوز الرابعة». No English names, no transliterations, no
+   shortening.
+3. Pick **مكتب بريد البرشاء**. The line that announces the box lookup must name
+   البرشاء and nothing else.
+4. Open the **map** from the same conversation. The pins, the popups and the
+   list beneath are in Arabic too, and "You are here" reads «أنت هنا».
+5. **Then the same in English**, to confirm nothing moved: the cards should read
+   *Al Barsha Post Office*, *Al Rashidiyah Post Office*, *NXN - Industrial
+   Sharjah Branch* — bug 5's rule is untouched.
+
+**Three things that deliberately still name another branch**, all of which
+appeared in your own conversation and all of which were right:
+
+- an answer comparing two branches, when you ask whether they are the same;
+- an alternative offered when the branch you chose is **closed** — the assistant
+  is required to name an open one;
+- an apology that names the branch it got wrong.
+
+If any of those disappear, that is a bug and worth reporting.
+
+---
+
 ## And one that was not on the list
 
 The assistant was asking for a map pin to confirm the company's address on EPGL
