@@ -1888,8 +1888,13 @@ export async function buildApiTools(
      * cost of that bug was entirely in how many times this call was allowed to
      * land -- so it is also refused here, where it is cheap and certain.
      */
-    const alreadySubmitted = opts.submittedReference?.() ?? lastLicenceRequestId;
-    if (/submitlicenserequest$/i.test(toolName) && alreadySubmitted) {
+    // The licence request this conversation already has: from this turn if the
+    // submission happened in it, otherwise from the case. Never from a variable
+    // alone -- everything in this closure is rebuilt per HTTP request, so a
+    // remembered value is empty on the next turn, which is the one a duplicate
+    // submission and a status check both arrive on.
+    const thisCasesRequest = lastLicenceRequestId ?? opts.submittedReference?.() ?? null;
+    if (/submitlicenserequest$/i.test(toolName) && thisCasesRequest) {
       const items = ((input?.body as Record<string, unknown> | undefined)?.compositeRequest ?? []) as Record<string, unknown>[];
       const licence = Array.isArray(items)
         ? items.find((i) => /EPG_License_Request__c\s*$/.test(String(i?.url ?? "")))
@@ -1899,7 +1904,7 @@ export async function buildApiTools(
       if (licence && !isUpdate) {
         return {
           result:
-            `ALREADY SUBMITTED — NOTHING WAS SENT. This conversation has already created licence request ${alreadySubmitted}, and this call would create a SECOND one with its own copies of the company, the partners and every document. ` +
+            `ALREADY SUBMITTED — NOTHING WAS SENT. This conversation has already created licence request ${thisCasesRequest}, and this call would create a SECOND one with its own copies of the company, the partners and every document. ` +
             `NOTHING has gone wrong and nothing has been lost: the application is on file and its documents are attached. ` +
             `Do NOT tell the customer their submission failed, do NOT ask them to re-upload anything, and do NOT retry. ` +
             `If the next step is payment, call request_payment now — the reference it needs already exists. ` +
@@ -2264,10 +2269,10 @@ export async function buildApiTools(
     // marked optional. Never overwritten -- an id the model supplied is a
     // deliberate one, and may well be an older application the customer asked
     // about.
-    if (/getrequeststatus$/i.test(toolName) && lastLicenceRequestId) {
+    if (/getrequeststatus$/i.test(toolName) && thisCasesRequest) {
       const inp = { ...((input ?? {}) as Record<string, unknown>) };
       if (!asStr(inp.id)) {
-        inp.id = lastLicenceRequestId;
+        inp.id = thisCasesRequest;
         input = inp;
       }
     }
@@ -3007,6 +3012,21 @@ export async function buildApiTools(
       } catch {
         /* an unreadable submit leaves the status read to the model, as before */
       }
+      // Named on the way out, so the model has the number in the same breath as
+      // the submission rather than hunting for it a turn later.
+      if (lastLicenceRequestId) {
+        const number = await epglRequestNumber(entry.spec, lastLicenceRequestId);
+        if (number) {
+          res = {
+            ...res,
+            result:
+              res.result +
+              `\n\nLICENCE REQUEST NUMBER: ${number}\n` +
+              `That is the reference to give the customer — the id above is Salesforce's internal record key and means nothing to them. ` +
+              `Do NOT say the reference is pending, awaiting assignment or not yet issued, and do NOT look it up with duplicate-check: that returns every application this company has, and the newest is not necessarily this one.`,
+          };
+        }
+      }
     }
     if (!res.isError && /rental_save$/i.test(toolName) && /paymentUrl/i.test(res.result)) {
       // Keep the reference the confirm call actually wants. The save response
@@ -3663,6 +3683,54 @@ function writeCache(key: string, value: { result: string; isError?: boolean }) {
     const oldest = lookupCache.keys().next().value;
     if (oldest === undefined) break;
     lookupCache.delete(oldest);
+  }
+}
+
+/**
+ * The licence request NUMBER behind a Salesforce record id.
+ *
+ * The composite answers with ids and nothing else, so at the moment a licence
+ * is submitted we know it exists and cannot name it. That is not cosmetic: the
+ * customer was shown "Application reference: awaiting assignment" beside a panel
+ * displaying a11FW000X3ht67kYIA, and on the next turn the model went looking for
+ * a number the only way it could -- duplicate-check, which returns every match
+ * on the company -- and quoted a DIFFERENT application's number back to them.
+ *
+ * Neither of their reads can answer it. getRequestStatus returns
+ * salesforceRecordId, requestStatus, licenseNumber and a requestIdentifier that
+ * comes back null; duplicate-check returns a list. So this uses the plain SOQL
+ * endpoint their own spec uses for API 7 and 8, which answers in one call.
+ *
+ * Best-effort by design. A failure here costs a nicer reference, not a
+ * submission, and the id still works everywhere it is actually needed.
+ */
+async function epglRequestNumber(spec: EnvSpec, id: string): Promise<string | null> {
+  // Salesforce's own id, straight into a SOQL string. It is theirs rather than
+  // anybody's input, and it is still checked before it is interpolated.
+  if (!/^[a-zA-Z0-9]{15,18}$/.test(id)) return null;
+  try {
+    const live: EnvSpec = {
+      ...spec,
+      authValue: isEncrypted(spec.authValue) ? decryptSecret(spec.authValue) : spec.authValue,
+    };
+    const token = await getClientCredentialsToken(live);
+    const soql = `SELECT Name FROM EPG_License_Request__c WHERE Id = '${id}'`;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6000);
+    try {
+      const res = await fetch(
+        `${String(live.baseUrl).replace(/\/$/, "")}/services/data/v62.0/query?q=${encodeURIComponent(soql)}`,
+        { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: ctl.signal }
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as { records?: { Name?: unknown }[] };
+      const name = String(body?.records?.[0]?.Name ?? "").trim();
+      return name || null;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return null;
   }
 }
 

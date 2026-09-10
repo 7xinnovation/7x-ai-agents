@@ -188,6 +188,20 @@ export const CaseState = z.object({
   gsbCompanies: z.array(z.string()).default([]),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
+  /**
+   * The reference a CUSTOMER can quote, when it differs from the one the system
+   * of record is keyed by.
+   *
+   * EPGL is why this exists. Their composite answers with Salesforce record ids
+   * -- a11FW000X3ht67kYIA -- and that id is what everything on our side needs:
+   * the payment webhook notifies against it, the documents are attached to it.
+   * But the number on the licence request, the one in their portal and on their
+   * emails, is LR-37319, and it is not in the submit response at all.
+   *
+   * So `reference` stays the key and this carries the name. Null everywhere the
+   * two are the same thing, which is every journey but this one.
+   */
+  referenceLabel: z.string().nullable().default(null),
   status: z.enum(["draft", "ready", "submitted", "escalated"]),
 });
 export type CaseState = z.infer<typeof CaseState>;
@@ -210,6 +224,7 @@ export function emptyCase(): CaseState {
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null },
     reference: null,
+    referenceLabel: null,
     status: "draft",
   };
 }

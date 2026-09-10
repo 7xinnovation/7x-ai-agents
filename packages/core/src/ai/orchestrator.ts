@@ -12,6 +12,20 @@ import { findJourney } from "../case/engine";
  * by the body: at least one success marker and no rollback / failure marker.
  * Returns a reference id (first Salesforce-style record id) when successful.
  */
+/**
+ * The licence request NUMBER, when the integration layer could name it.
+ *
+ * It appends "LICENCE REQUEST NUMBER: LR-37319" to the submit result, because
+ * the composite itself answers with Salesforce record ids and nothing a customer
+ * can quote. The id remains the reference everything is keyed by -- the payment
+ * webhook notifies against it and the documents attach to it -- so this travels
+ * beside it rather than replacing it.
+ */
+export function submissionLabel(result: string): string | null {
+  const m = /LICENCE REQUEST NUMBER:\s*(\S+)/.exec(result);
+  return m?.[1] ?? null;
+}
+
 export function submissionReference(result: string): string | null {
   // "IsSuccess": false is Emirates Post's way of saying it; "success": false is
   // Salesforce's. Neither is a submission, whatever else the body carries.
@@ -473,8 +487,9 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
                 //
                 // Written the moment the backend confirms it, in the same shape
                 // submit_case writes, so the two spines cannot disagree.
-                if (state.reference !== ref) {
-                  state = { ...state, status: "submitted", reference: ref };
+                const label = submissionLabel(r.result);
+                if (state.reference !== ref || (label && state.referenceLabel !== label)) {
+                  state = { ...state, status: "submitted", reference: ref, referenceLabel: label ?? state.referenceLabel };
                   yield { type: "case", state };
                 }
                 yield { type: "submitted", reference: ref };

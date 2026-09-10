@@ -1637,7 +1637,12 @@ export function Experience({
                   <div className="dlg-reference">
                     <CheckCircle size={20} weight="fill" color={c.success} />
                     <span className="ref-label">{t.reference}</span>
-                    <strong>{caseState!.reference}</strong>
+                    {/* The number the customer can quote, when it is not the
+                        same string the system of record is keyed by. EPGL's
+                        submit answers with a Salesforce record id; the panel
+                        showed a11FW000X3ht67kYIA where the customer needed
+                        LR-37319. */}
+                    <strong>{caseState!.referenceLabel ?? caseState!.reference}</strong>
                     {/* The receipt has always been generated and never offered.
                         A customer who has just paid wants it now, not after
                         asking for it. Opens in a tab so it can be printed or

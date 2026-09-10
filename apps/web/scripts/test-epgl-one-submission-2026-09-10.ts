@@ -33,11 +33,14 @@ const orch = readFileSync(new URL("../../../packages/core/src/ai/orchestrator.ts
 const tools = readFileSync(new URL("../../../packages/core/src/ai/tools.ts", import.meta.url), "utf8");
 const integrations = readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8");
 const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+const caseSchema = readFileSync(new URL("../../../packages/config/src/case.ts", import.meta.url), "utf8");
+const experience = readFileSync(new URL("../app/embed/[agent]/Experience.tsx", import.meta.url), "utf8");
+const webhook = readFileSync(new URL("../app/api/payments/webhook/route.ts", import.meta.url), "utf8");
 
 console.log("\nThe reference a backend submission earns is written down");
 const saveBlock = orch.slice(orch.indexOf("apiFlow journeys complete through a backend saveTool"), orch.indexOf("const res = await dispatchTool"));
 check("a successful saveTool still yields the submission", /yield \{ type: "submitted", reference: ref \}/.test(saveBlock));
-check("...and now writes it into the case as well", /state = \{ \.\.\.state, status: "submitted", reference: ref \}/.test(saveBlock));
+check("...and now writes it into the case as well", /state = \{ \.\.\.state, status: "submitted", reference: ref,/.test(saveBlock));
 check("...through a case event, so the turn persists it", /yield \{ type: "case", state \}/.test(saveBlock));
 check("it is not rewritten when it has not changed", /state\.reference !== ref/.test(saveBlock));
 check("the same shape submit_case writes, so the two cannot disagree",
@@ -50,7 +53,7 @@ check("...and says nothing was charged", /NOTHING has been charged and nothing h
 console.log("\nA second CREATE is refused; an UPDATE is not");
 const dup = integrations.slice(integrations.indexOf("One application, submitted once."), integrations.indexOf("if (/submitlicenserequest$/i.test(toolName)) {"));
 check("the guard is scoped to the submit tool", /submitlicenserequest\$\/i\.test\(toolName\)/.test(dup));
-check("it only fires once something has been submitted", /alreadySubmitted/.test(dup));
+check("it only fires once something has been submitted", /thisCasesRequest/.test(dup));
 check("an update shape is recognised by Id or Name", /asStr\(lb\?\.Id\) \|\| asStr\(lb\?\.Name\)/.test(dup));
 check("...and is let through", /if \(licence && !isUpdate\)/.test(dup));
 check("nothing is sent when it is refused", /NOTHING WAS SENT/.test(dup));
@@ -58,7 +61,7 @@ check("the model is told to pay rather than retry", /call request_payment now/.t
 check("the customer is not asked to re-upload", /do NOT ask them to re-upload/.test(dup));
 
 console.log("\nRead from the case, never remembered in the tool layer");
-check("the guard consults the live case first", /opts\.submittedReference\?\.\(\) \?\? lastLicenceRequestId/.test(integrations));
+check("the guard consults the live case", /lastLicenceRequestId \?\? opts\.submittedReference\?\.\(\) \?\? null/.test(integrations));
 check("the accessor exists on the options", /submittedReference\?: \(\) => string \| null/.test(integrations));
 check("route.ts wires it to the live state", /submittedReference: \(\) => liveState\.reference \?\? null/.test(route));
 // The whole point. offeredBoxAt was a variable in this same closure, rebuilt on
@@ -69,8 +72,24 @@ check("...because a closure variable is empty on the next turn — which is the 
 
 console.log("\nAnd the status read knows which request it is asking about");
 check("getRequestStatus is given the id", /getrequeststatus\$\/i\.test\(toolName\)/.test(integrations));
-check("...from the request this conversation created", /inp\.id = lastLicenceRequestId/.test(integrations));
+check("...from the request this conversation created", /inp\.id = thisCasesRequest/.test(integrations));
 check("...and never over one the model supplied", /if \(!asStr\(inp\.id\)\)/.test(integrations));
+
+
+console.log("\nThe number a customer can quote, beside the key we are keyed by");
+check("the request number is resolved after a submission", /async function epglRequestNumber/.test(integrations));
+check("...by SOQL, since neither of their reads carries it", /SELECT Name FROM EPG_License_Request__c/.test(integrations));
+check("...with the id checked before it is interpolated", /\^\[a-zA-Z0-9\]\{15,18\}\$\/\.test\(id\)/.test(integrations));
+check("...and a failure costs a nicer reference, not a submission", /catch \{\n    return null;\n  \}/.test(integrations));
+check("the model is given it in the same breath as the submission", /LICENCE REQUEST NUMBER: \$\{number\}/.test(integrations));
+check("...and told not to hunt for it with duplicate-check", /do NOT look it up with duplicate-check/.test(integrations));
+check("the orchestrator reads it back off the result", /export function submissionLabel/.test(orch));
+check("...and carries it on the case beside the reference", /referenceLabel: label \?\? state\.referenceLabel/.test(orch));
+check("the case state has somewhere to put it", /referenceLabel: z\.string\(\)\.nullable\(\)/.test(caseSchema));
+check("the panel prefers it", /caseState!\.referenceLabel \?\? caseState!\.reference/.test(experience));
+// The id, not the number, is what the payment notification is keyed by. Swapping
+// them would leave the licence request reading Amount Paid 0.00 forever.
+check("the webhook still notifies against the record id", /const licenseRequestId = String\(c\?\.state\.reference \?\? ""\)/.test(webhook));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
