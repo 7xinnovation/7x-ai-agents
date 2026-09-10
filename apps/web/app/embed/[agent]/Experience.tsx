@@ -1160,6 +1160,13 @@ export function Experience({
           // server decided the purchase is real, and nothing in the chat waits
           // on whether the survey opens.
           void showSurvey(ev.token, ev.locale ?? locale, Boolean(ev.sandbox));
+        } else if (ev.type === "locale") {
+          // The customer switched language by simply typing in it. Everything the
+          // MODEL says follows them on its own; everything the WIDGET says —
+          // the branch picker, the map button, the readiness bar, the composer —
+          // was still reading off the host page's <html lang> and stayed English
+          // through an entirely Arabic conversation.
+          if (ev.locale === "ar" || ev.locale === "en") setLocale(ev.locale);
         } else if (ev.type === "case") {
           setCaseState(ev.state);
         } else if (ev.type === "citation") {

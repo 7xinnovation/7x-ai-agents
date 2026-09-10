@@ -36,6 +36,7 @@ import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
+import { messageLocale } from "@/lib/replyLocale";
 import { narrationGuard } from "@/lib/narrationGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -532,6 +533,40 @@ export async function POST(req: NextRequest) {
 
     if (sub) {
       hostToken = body.uaePassToken;
+      /**
+       * KEPT, NOT JUST USED.
+       *
+       * This token was the ONLY credential Emirates Post accepts on their PO Box
+       * reads, and it lived for exactly one request. The host page sends it when
+       * it sends it; on every other turn the bearer slot was empty, and their
+       * backend answers 401 to an empty bearer whatever the API key says — I
+       * checked, on production, today:
+       *
+       *   FreeBoxes, no Authorization header        -> 401
+       *   FreeBoxes, X-API-KEY only, no bearer      -> 401
+       *   FreeBoxes, Bearer <host token>            -> 200, boxes at all 29 branches
+       *
+       * That is the whole of "no P.O. Box numbers are displayed for the selected
+       * branch". Every branch in Dubai, Sharjah and Umm Al Quwain has free boxes
+       * right now; we were being turned away at the door and reporting it as the
+       * branch being empty. The same empty bearer fails Rental/Select, which is
+       * why a reservation "could not be completed" on identical details minutes
+       * apart, and why the customer with box 2290 could never pay.
+       *
+       * Stored under the conversation the customer already proved themselves on,
+       * so it can only ever be replayed for them. The verification above has
+       * already run, and a token their backend later rejects is cleared by the
+       * 401 path rather than retried forever.
+       */
+      if (session.sessionToken !== body.uaePassToken) {
+        try {
+          await saveSessionToken(session.conversationId, body.uaePassToken, "uaepass");
+          session.sessionToken = body.uaePassToken;
+          session.sessionTokenKind = "uaepass";
+        } catch {
+          /* the turn has a token either way; a storage failure is not the customer's problem */
+        }
+      }
       // The verified subject is the identity — never the client's `userRef` claim.
       if (!session.authenticated || session.userRef !== sub) {
         await markAuthenticated(session.conversationId, sub);
@@ -1765,6 +1800,19 @@ export async function POST(req: NextRequest) {
         // The model talking to itself, kept out of the customer's chat.
         const narration = narrationGuard();
         // An Arabic reply links to the Arabic pages, whatever the model reached for.
+        // THE WIDGET'S OWN WORDS FOLLOW THE CONVERSATION.
+        //
+        // The locale comes from the host page's <html lang>, which is right
+        // until the customer starts typing Arabic on the English site. The model
+        // follows them; the widget did not, so an Arabic conversation carried an
+        // English branch picker, map button, readiness bar and composer -- all of
+        // which have Arabic translations nobody was reaching for.
+        //
+        // Sent as an event rather than inferred on the client: the server is
+        // where the message already is, and the client should not have to guess
+        // a language from rendered markdown.
+        const spoken = messageLocale(body.userMessage);
+        if (spoken && spoken !== body.locale) send({ type: "locale", locale: spoken });
         const links = linkGuard(body.locale);
         // An address read off the trade licence is not a question. Outermost, so
         // it judges the sentence the customer would actually have read.
@@ -1796,7 +1844,19 @@ export async function POST(req: NextRequest) {
             if (extras.keyDelivery && courierIsPriced()) courierSeen = true;
             return authoritativeAmount(extras);
           },
-          courierIsPriced
+          courierIsPriced,
+          // The box and the branch. Emirates Post reported these missing from the
+          // Selection Summary twice, as two bugs; asked for it directly, the
+          // assistant produced a card carrying both — so they were in the case
+          // all along and only ever absent from the card.
+          () => ({
+            boxNumber:
+              str(liveState.data.box_number) ??
+              apiTools.getLastHold()?.uniqueBoxId ??
+              null,
+            branch: str(liveState.data.branch) ?? null,
+          }),
+          body.locale
         );
         // And the total in the SENTENCE beside the card. The card's footer and
         // the pay button are stamped with the real charge; the paragraph under

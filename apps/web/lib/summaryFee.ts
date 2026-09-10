@@ -123,6 +123,62 @@ export function correctTotal(block: string, total: number): string {
   return OPEN + body.replace(written[0], line) + block.slice(close.index);
 }
 
+/**
+ * What the customer is actually buying, when the card forgot to say.
+ *
+ * Reported twice on 10 September, as separate bugs, and it is one: "the P.O. Box
+ * number and location were selected during the rental journey, but these details
+ * are not displayed in the Selection Summary", and "the selected P.O. Box details
+ * are not displayed for review and confirmation before proceeding with the
+ * payment". Asked for it directly, the assistant produced a complete card with
+ * PO Box 392028 and Al Quoz Fourth Branch in it — so nothing was missing from
+ * the case, only from the card.
+ *
+ * A summary that omits the box and the branch is a summary of the wrong thing:
+ * those two ARE the purchase, and everything else on the card is a term of it.
+ * So they are inserted rather than asked for, above the money, in the order the
+ * customer chose them.
+ *
+ * Only ever inserted, never corrected. A row the card already carries stands as
+ * written, whatever it says — if the card and the case disagree that is a real
+ * problem and papering over it here would hide it.
+ */
+export interface SummaryFacts {
+  boxNumber?: string | null;
+  branch?: string | null;
+}
+
+/** A row whose label mentions this thing AND carries a value. */
+const hasRow = (body: string, label: RegExp) =>
+  new RegExp(`^[ \\t]*-[ \\t]+[^\\n:]*(?:${label.source})[^\\n:]*:[ \\t]*\\S`, "im").test(body);
+
+export function insertSelectionRows(block: string, facts: SummaryFacts, locale?: string): string {
+  const close = /\n[ \t]*```[ \t]*$/.exec(block);
+  if (!close) return block;
+  const body = block.slice(OPEN.length, close.index);
+  // Only a card that actually lists rows; a bare fenced word is not a summary.
+  if (!/^[ \t]*-[ \t]+\S/m.test(body)) return block;
+
+  const ar = locale === "ar";
+  const wanted: { label: string; value: string; has: RegExp }[] = [];
+  const box = String(facts.boxNumber ?? "").trim();
+  const branch = String(facts.branch ?? "").trim();
+  if (box) wanted.push({ label: ar ? "الصندوق" : "PO Box", value: box, has: /p\.?o\.? ?box|box number|الصندوق|صندوق/ });
+  if (branch) wanted.push({ label: ar ? "الفرع" : "Branch", value: branch, has: /branch|office|الفرع|مكتب/ });
+
+  const rows = wanted.filter((w) => !hasRow(body, w.has)).map((w) => `- ${w.label}: ${w.value}`);
+  if (!rows.length) return block;
+
+  // Above the money. A summary reads as a description of the thing followed by
+  // what it costs, and a box number below the total reads as an afterthought.
+  const firstMoney = /^[ \t]*(?:[-*][ \t]+)?[^\n:]*(?:fee|rental|total|AED|الرسوم|الإجمالي|درهم)[^\n:]*:/im.exec(body);
+  const at = firstMoney ? firstMoney.index : body.length;
+  const head = body.slice(0, at).replace(/\n+$/, "");
+  const tail = body.slice(at);
+  const next = tail ? `${head}\n${rows.join("\n")}\n${tail}` : `${head}\n${rows.join("\n")}`;
+  return OPEN + next + block.slice(close.index);
+}
+
 export function summaryFeeGuard(
   fee: () => number | null,
   /**
@@ -135,7 +191,10 @@ export function summaryFeeGuard(
    * Whether the reservation prices key delivery at all. False removes the row;
    * true (the default) leaves the card's own choice standing.
    */
-  courierPriced: () => boolean = () => true
+  courierPriced: () => boolean = () => true,
+  /** The box and branch the customer picked, for a card that left them out. */
+  facts: () => SummaryFacts = () => ({}),
+  locale?: string
 ) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
@@ -163,6 +222,8 @@ export function summaryFeeGuard(
       const block = buf.slice(0, end - trailing.length);
       const amount = fee();
       let fixed = amount !== null && Number.isFinite(amount) ? insertRegistrationFee(block, amount) : block;
+      // The purchase itself, before anything priced.
+      fixed = insertSelectionRows(fixed, facts(), locale);
       // Sold only if Emirates Post priced it on this reservation.
       if (extrasNamedIn(fixed).keyDelivery && !courierPriced()) fixed = dropCourier(fixed);
       const charge = total(extrasNamedIn(fixed));

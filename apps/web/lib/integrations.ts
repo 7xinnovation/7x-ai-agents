@@ -2809,6 +2809,33 @@ export async function buildApiTools(
            * stopped having it once the response said how many there were and
            * named them.
            */
+          /**
+           * EVERY BUNDLE'S OWN PRICE, said out loud.
+           *
+           * The period table below only appears for a bundle with TWO OR MORE
+           * priced terms, and the three personal bundles have one each -- so on
+           * a personal rental the model was handed a raw JSON list with no
+           * instruction about it at all, and on 10 September it put MyBox's
+           * AED 300 on the MyHome Instant card. Emirates Post price that bundle
+           * at 995; the customer was quoted under a third of it.
+           *
+           * The figures are theirs, read out of the response we just received,
+           * so there is nothing here to keep in step with a price change.
+           */
+          const priced = list
+            .map((bn) => {
+              const name = asStr(bn.name_En) || asStr(bn.bundle_Id);
+              const price = asStr(bn.bundle_Price);
+              return name && price ? `${name} (${asStr(bn.bundle_Id)}) = AED ${price} per year` : null;
+            })
+            .filter(Boolean);
+          if (priced.length) {
+            periodNote =
+              `\n\nTHE ANNUAL PRICE OF EACH BUNDLE, from Emirates Post's own pricing: ${priced.join("; ")}.` +
+              ` Put each bundle's OWN figure on its OWN card. Never carry one bundle's price across to another and never work one out —` +
+              ` on 10 September MyHome Instant was shown at AED 300, which is MyBox's price, against a real price of 995.` +
+              periodNote;
+          }
           const names = list.map((bn) => asStr(bn.name_En) || asStr(bn.bundle_Id)).filter(Boolean);
           if (names.length) {
             periodNote =
@@ -2933,6 +2960,7 @@ export async function buildApiTools(
               ...res,
               result:
                 `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(b)}` +
+                "\n\nUSE EACH BRANCH'S nameEn EXACTLY AS IT IS WRITTEN HERE, on the cards, in your prose and in the buttons you offer. These are Emirates Post's own branch names and the customer will see them again at the counter, on their receipt and in the portal. Do not reorder the words, do not add one, do not drop the \"NXN - \" prefix and do not tidy the spacing -- on 10 September \"NXN - Industrial Sharjah Branch\" was shown as \"Sharjah Industrial Zone Branch\", a branch that does not exist under that name anywhere in this list." +
                 "\n\nfreeBoxCount is how many boxes are FREE at that branch right now, counted live. Branches with none have ALREADY BEEN REMOVED from this list" +
                 (hidden ? ` (${hidden} of them)` : "") +
                 ", so show every branch here as available and never mention the ones that are missing. Branches with no freeBoxCount were not counted; show those normally too." +
