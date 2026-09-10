@@ -187,13 +187,70 @@ seven-submissions bug should have failed on in the first place: exactly one.
 
 ---
 
+---
+
+## 5. Why the submission cannot come after the payment
+
+Asked, and worth writing down with the evidence rather than the reasoning.
+
+Their swagger, on the payment endpoint (API 6, the one they confirm is really
+deployed rather than a placeholder):
+
+> The request is located by `notifyPayment.licenseRequestSalesforceId` — the
+> License Request's Salesforce record Id… **It is the same value the status API
+> already returns as `salesforceRecordId`, so the Agent holds it from submission
+> onwards.**
+
+And on what the Agent may and may not do:
+
+> The payment advice and its Oracle AR invoice are created automatically by
+> Salesforce **when the request reaches the payable stage** — the Agent never
+> creates or updates them directly; this call is the Agent's entire write surface.
+
+So a payment is recorded *against a licence request*, addressed by an id that
+does not exist until the composite has been sent. There is nothing to attach
+money to before submission — which is also why `request_payment` now refuses to
+open a card until the reference exists.
+
+Their portal agrees: the stage bar reads **Registration and License Setup →
+Under Payment Review → Under License Issuance → Completed**.
+
+**What is still genuinely open** is not the order but the *timing*: whether the
+customer should pay immediately, or after EPGL approve the request and Salesforce
+raises the payment advice. Their 14 August note said payment follows approval;
+the *Payment Process with Agentic* map you sent shows submit and pay together,
+and that is what we built. Asked on 9 September, not yet answered.
+
+---
+
+## 6. The fee, and why staging is not 150,000
+
+AED 150,000 is the real figure. The N-Genius **sandbox** outlet will not take it —
+measured against outlet `b78ef8c7` on 10 September:
+
+| Amount | Result |
+|---|---|
+| AED 99,655 | `201` order created |
+| AED 99,946 | `422 amountLimitExceeded` |
+| AED 150,000 | `422 Amount limit exceeded for currency AED` |
+
+The ceiling is AED 100,000, and it is the gateway's own risk rule, not a setting
+of ours. So staging keeps a payable amount and the card branch stays testable end
+to end; production gets 150,000, where the merchant has no such rule.
+
+`scripts/epgl-licence-fee-2026-09-10.ts` sets it, and warns rather than silently
+breaking the card if it is ever pointed at a sandbox above the ceiling. It has
+not been run against production — that needs your word.
+
 ## Where things stand
 
 | | Status |
 |---|---|
 | Contact validation | **fixed** — submits cleanly on the account that failed |
-| Customer Pulse, new licence | **on** — sandbox, fires on submission |
-| Customer Pulse, renewal | **on** — sandbox, fires on submission |
+| Customer Pulse, new licence | **on** — after payment on card, on submission for VIBAN |
+| Customer Pulse, renewal | **on** — same split |
+| Customer reference | **fixed** — LR-37320 on the panel, not the record id |
+| Licence fee | staging payable; **150,000 script ready** for production |
 | Duplicate submissions | **fixed** — 1 submission, 8 documents, 1 card |
 | `getRequestStatus` 404s | **fixed** — the id is filled in |
 | VIBAN status value | **waiting on EPGL** — theirs overrides ours |
