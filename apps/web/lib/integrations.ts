@@ -1241,11 +1241,70 @@ export async function buildApiTools(
         // The model builds this id rather than copying it, so it arrives with a
         // prefix added or dropped. Match on the digits that are actually a box.
         chosen = uniqueByNumber[sent] ?? offeredBoxIds.find((id) => id.endsWith(sent) || sent.endsWith(id)) ?? null;
-        if (chosen) {
-          body.uniqueBoxID = chosen;
-          delete body.uniqueBoxId;
-          input = { ...input, body };
+      }
+      /**
+       * ON `uniqueBoxID`, WHICHEVER KEY IT ARRIVED UNDER.
+       *
+       * This used to run only in the branch above — only when the id the model
+       * sent did NOT match one we had offered. On MyBox that is every time,
+       * because their uniqueBoxId carries a prefix the printed number does not
+       * (2098 is offered as 22098), so the correction always fired and the key
+       * was always fixed on the way through.
+       *
+       * On MyHome and MyHome Instant uniqueBoxId and boxId are THE SAME NUMBER.
+       * So a model that wrote the box under `boxNumber` sent a number that
+       * matched perfectly, took the early exit, and went out with no
+       * `uniqueBoxID` at all. Emirates Post answered 108 BOX_NOT_FREE — for a box
+       * they had listed as free ninety seconds earlier — and the customer was
+       * told their box had been taken, twice, in two emirates.
+       *
+       * Production, 10 September: MYHOMEF box 970081 at Sharjah, then 910500 at
+       * Dubai. A reservation that succeeds carries `uniqueBoxID` and nothing
+       * else identifying the box, so the other spellings go with it.
+       */
+      if (chosen) {
+        if (body.uniqueBoxID !== chosen || body.uniqueBoxId !== undefined || body.boxNumber !== undefined) {
+          void audit({
+            agentId,
+            conversationId: opts.conversationId,
+            actor: "system",
+            action: "integration_input_corrected",
+            payload: {
+              tool: toolName,
+              field: "uniqueBoxID",
+              was: JSON.stringify({ uniqueBoxID: body.uniqueBoxID, uniqueBoxId: body.uniqueBoxId, boxNumber: body.boxNumber }),
+              now: chosen,
+              reason: "the reservation identifies the box by uniqueBoxID",
+            },
+          }).catch(() => {});
         }
+        body.uniqueBoxID = chosen;
+        delete body.uniqueBoxId;
+        delete body.boxNumber;
+        input = { ...input, body };
+      }
+
+      /**
+       * WHETHER THERE IS A PHYSICAL BOX TO COLLECT.
+       *
+       * Emirates Post price the reservation on this flag and refuse to price it
+       * when it disagrees with the bundle: a MyBox reserved with false, or a
+       * MyHome with true, comes back unpriced. It was left entirely to the model
+       * and named only in the error text it gets afterwards — so the first the
+       * customer heard was a reservation that failed for a reason nobody could
+       * see.
+       *
+       * The bundle decides it, not a judgement: MyHome and MyHome Instant are
+       * delivered to the customer's door and carry no box to collect; MyBox and
+       * every corporate bundle are collected at a branch. Set only when the
+       * model left it out — an explicit choice is theirs to make and to be told
+       * about by the error.
+       */
+      const bundleForBox = String(body.bundleId ?? body.bundleID ?? "").toUpperCase();
+      if (body.physicalBoxRequired === undefined && bundleForBox) {
+        const delivered = /^MYHOME/.test(bundleForBox);
+        body.physicalBoxRequired = !delivered;
+        input = { ...input, body };
       }
 
       // THE BRANCH THE BOX CAME FROM, NOT THE ONE THE MODEL REMEMBERS.

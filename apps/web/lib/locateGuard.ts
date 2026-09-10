@@ -124,9 +124,23 @@ export function arabicEnquiryLink(text: string, locale?: string): string {
 const FAQ_EN = /https:\/\/www\.emiratespost\.ae\/faq/g;
 const FAQ_AR = "https://www.emiratespost.ae/ar/faq";
 
+/**
+ * And the Terms, which matter more than either.
+ *
+ * This is the one link a customer is asked to ACCEPT, immediately before paying,
+ * and the acceptance is recorded against their rental. Handing an Arabic
+ * customer the English page and then filing their agreement to it is not a
+ * translation slip. Both /ar/ pages exist and answer 200 — checked 10 September,
+ * along with the English pair.
+ */
+const TERMS_EN = /https:\/\/www\.emiratespost\.ae\/terms-(individual|corporate)\b/g;
+
 export function arabicLinks(text: string, locale?: string): string {
   if (locale !== "ar") return text;
-  return text.replace(ENQUIRY_EN, ENQUIRY_AR).replace(FAQ_EN, FAQ_AR);
+  return text
+    .replace(ENQUIRY_EN, ENQUIRY_AR)
+    .replace(FAQ_EN, FAQ_AR)
+    .replace(TERMS_EN, (_m, which) => `https://www.emiratespost.ae/ar/terms-${which}`);
 }
 
 

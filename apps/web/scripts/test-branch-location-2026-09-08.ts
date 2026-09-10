@@ -55,16 +55,23 @@ console.log("\nThe reservation tool is reachable at all");
 check("enabled:false still skips an operation", /\(op as \{ enabled\?: boolean \}\)\.enabled === false\) continue/.test(src));
 
 console.log("\nThe reservation goes to the branch the box came from");
-const sel = src.slice(src.indexOf("Reserve the box the customer actually chose"));
+// The guard itself, bounded by the one that follows it rather than by a byte
+// count: a fixed window makes every added comment look like a deleted check,
+// and on 10 September four of these failed for exactly that reason while the
+// code they test was untouched.
+const sel = src.slice(
+  src.indexOf("Reserve the box the customer actually chose"),
+  src.indexOf("// A BOX WE ALREADY HOLD IS NOT A BOX SOMEONE ELSE TOOK.")
+);
 check("the box is remembered with its branch", /const offeredBoxAt: Record<string, string>/.test(src));
 check("and the printed number with its uniqueBoxId", /const uniqueByNumber: Record<string, string>/.test(src));
 check("both are filled from the FreeBoxes REQUEST, not guessed", /askedAt[\s\S]{0,220}?offeredBoxAt\[uid\] = askedAt/.test(src));
-check("boxNumber is read as well as uniqueBoxID", /body\.uniqueBoxID \?\? body\.uniqueBoxId \?\? body\.boxNumber/.test(sel.slice(0, 900)));
-check("a printed number resolves to its uniqueBoxId", /uniqueByNumber\[sent\]/.test(sel.slice(0, 1200)));
-check("the location is corrected to where the box was offered", /body\[locKey\] = at;/.test(sel.slice(0, 3000)));
-check("either spelling of the location key is handled", /body\.locationId !== undefined \? "locationId" : body\.LocationId !== undefined/.test(sel.slice(0, 3000)));
-check("a correction is audited with the box it was for", /integration_input_corrected[\s\S]{0,320}?box: chosen/.test(sel.slice(0, 3000)));
-check("nothing is touched when the branch already agrees", /String\(body\[locKey\] \?\? ""\) !== at/.test(sel.slice(0, 3000)));
+check("boxNumber is read as well as uniqueBoxID", /body\.uniqueBoxID \?\? body\.uniqueBoxId \?\? body\.boxNumber/.test(sel));
+check("a printed number resolves to its uniqueBoxId", /uniqueByNumber\[sent\]/.test(sel));
+check("the location is corrected to where the box was offered", /body\[locKey\] = at;/.test(sel));
+check("either spelling of the location key is handled", /body\.locationId !== undefined \? "locationId" : body\.LocationId !== undefined/.test(sel));
+check("a correction is audited with the box it was for", /integration_input_corrected[\s\S]{0,320}?box: chosen/.test(sel));
+check("nothing is touched when the branch already agrees", /String\(body\[locKey\] \?\? ""\) !== at/.test(sel));
 
 console.log("\nIt survives the turn, which is the whole point");
 const caseSrc = (await import("node:fs")).readFileSync(

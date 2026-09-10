@@ -9,7 +9,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-locate-guard-2026-09-08.ts
  */
-import { promisesMapWithout, locateBlock } from "../lib/locateGuard";
+import { promisesMapWithout, locateBlock, arabicLinks } from "../lib/locateGuard";
 
 let pass = 0;
 let fail = 0;
@@ -55,6 +55,29 @@ console.log("\nThe block itself");
 check("it is a locate fence", /```locate/.test(locateBlock()));
 check("...with a label line", /label: .+/.test(locateBlock()));
 check("and it closes", (locateBlock().match(/```/g) ?? []).length === 2);
+
+
+console.log("\nThe Terms, which is the one link a customer ACCEPTS");
+// Emirates Post gave us the real pair on 10 September; everything used to point
+// at one generic page. The acceptance is timestamped against the rental, so the
+// document it names has to be the one they are renting under.
+{
+  const en = "Please accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual) to continue.";
+  check("a personal link becomes the Arabic personal page",
+    arabicLinks(en, "ar").includes("https://www.emiratespost.ae/ar/terms-individual"), arabicLinks(en, "ar"));
+  const corp = "See [Terms](https://www.emiratespost.ae/terms-corporate).";
+  check("a corporate link becomes the Arabic corporate page",
+    arabicLinks(corp, "ar").includes("https://www.emiratespost.ae/ar/terms-corporate"), arabicLinks(corp, "ar"));
+  check("personal is never swapped for corporate",
+    !arabicLinks(en, "ar").includes("corporate"), arabicLinks(en, "ar"));
+  check("English is left alone", arabicLinks(en, "en") === en);
+  check("an already-Arabic link is not doubled",
+    arabicLinks("https://www.emiratespost.ae/ar/terms-individual", "ar") === "https://www.emiratespost.ae/ar/terms-individual");
+  const both = "personal https://www.emiratespost.ae/terms-individual and corporate https://www.emiratespost.ae/terms-corporate";
+  const out = arabicLinks(both, "ar");
+  check("both in one reply are each swapped for their own page",
+    out.includes("/ar/terms-individual") && out.includes("/ar/terms-corporate"), out);
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
