@@ -132,6 +132,28 @@ const RULES: Record<string, Rules> = {
     drop: ["Secondary_Contact", "Is_Primary_Contact__c"],
     defaults: { Is_Secondary_Contact__c: "True" },
   },
+  /**
+   * The applicant's name, in the two halves Salesforce keeps it in.
+   *
+   * Their schema requires FirstName, LastName and Email on User, and `Name` is
+   * not a field you can write there at all -- on User it is a read-only compound
+   * of the other two. On 10 September a submission went out carrying
+   * `Name: "Emre Karayalcin"` and neither half, and succeeded: the applicant
+   * already existed, so it matched on EPG_Emirates_Id__c and took the update
+   * path, where the missing halves changed nothing.
+   *
+   * A FIRST-time applicant has no record to match, and that same payload would
+   * either be rejected for a missing required field or create a portal user with
+   * no name on it. Nobody would see which until someone opened the record.
+   *
+   * Splitting a name is a guess, but a narrow one: everything before the last
+   * space is the given name, the last word is the family name, which is how
+   * their own examples read (SALMA MOHAMED SAEED / ALMANSOORI). A single word
+   * becomes the LastName, since that is the half Salesforce insists on.
+   */
+  User: {
+    drop: ["Name"],
+  },
   EPG_License_Request__c: {
     rename: {
       serviceId: "serviceId__c",
@@ -167,6 +189,18 @@ function fixRow(object: string, row: Record<string, unknown>): Record<string, un
   for (const key of rules.drop ?? []) delete out[key];
   for (const [key, value] of Object.entries(rules.defaults ?? {})) {
     if (out[key] === undefined || out[key] === null || out[key] === "") out[key] = value;
+  }
+  // Before `Name` is dropped, take the halves out of it if they are missing.
+  if (object === "User") {
+    const whole = String(row.Name ?? "").trim().replace(/\s+/g, " ");
+    if (whole && !String(out.FirstName ?? "").trim() && !String(out.LastName ?? "").trim()) {
+      const cut = whole.lastIndexOf(" ");
+      if (cut === -1) out.LastName = whole;
+      else {
+        out.FirstName = whole.slice(0, cut);
+        out.LastName = whole.slice(cut + 1);
+      }
+    }
   }
   // Their enum is the STRINGS 'True' and 'False', not booleans -- an unexpected
   // type is one more way to fail a whole allOrNone composite.

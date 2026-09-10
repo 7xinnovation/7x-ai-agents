@@ -252,5 +252,45 @@ console.log("\nContact — secondary contacts, and only those");
   check("nor does a partner", q.Is_Primary_Contact__c === undefined && q.Is_Secondary_Contact__c === undefined, q);
 }
 
+
+console.log("\nUser — the applicant's name in the halves Salesforce keeps");
+{
+  // What actually went out on 10 September. It succeeded only because the
+  // applicant already existed and matched on their Emirates ID.
+  const r = withEpglFieldNames(wrap([
+    item("User", { Name: "Emre Karayalcin", Email: "e@7x.ae", EPG_Emirates_Id__c: "784-1984-0847950-3" }, "NewUser"),
+  ]));
+  const u = outOf(r, "NewUser");
+  check("Name is split into the two required halves", u.FirstName === "Emre" && u.LastName === "Karayalcin", u);
+  check("...and Name itself goes, since User has no writeable one", u.Name === undefined, u);
+  check("everything else is untouched", u.Email === "e@7x.ae" && u.EPG_Emirates_Id__c === "784-1984-0847950-3", u);
+}
+{
+  // Their own example reads this way: given names, then the family name.
+  const r = withEpglFieldNames(wrap([item("User", { Name: "SALMA MOHAMED SAEED ALMANSOORI" }, "U")]));
+  const u = outOf(r, "U");
+  check("a four-part name keeps the last word as the family name", u.LastName === "ALMANSOORI", u);
+  check("...and the rest as the given name", u.FirstName === "SALMA MOHAMED SAEED", u);
+}
+{
+  // LastName is the half Salesforce insists on, so a lone word becomes that.
+  const r = withEpglFieldNames(wrap([item("User", { Name: "Valentina" }, "U")]));
+  check("a single word becomes the LastName", outOf(r, "U").LastName === "Valentina", outOf(r, "U"));
+}
+{
+  // A payload that already has the halves is not second-guessed.
+  const r = withEpglFieldNames(wrap([
+    item("User", { Name: "Wrong Person", FirstName: "Emre", LastName: "Karayalcin" }, "U"),
+  ]));
+  const u = outOf(r, "U");
+  check("halves already given are kept", u.FirstName === "Emre" && u.LastName === "Karayalcin", u);
+  check("...and the stray Name is still dropped", u.Name === undefined, u);
+}
+{
+  // Contact DOES have a writeable Name-ish shape of its own; this rule is User's.
+  const r = withEpglFieldNames(wrap([item("Members__c", { Name: "Board Member", AccountId__c: "x" }, "M")]));
+  check("a member's Name is left alone", outOf(r, "M").Name === "Board Member", outOf(r, "M"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
