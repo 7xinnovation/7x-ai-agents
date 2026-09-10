@@ -297,7 +297,10 @@ function recallExpiryDates(conversationId: string | undefined): Map<string, stri
  */
 const branchDirectory = new Map<string, { at: number; byName: Record<string, string>; byId: Record<string, string> }>();
 
-function rememberBranches(conversationId: string | undefined, rows: { officeId?: unknown; nameEn?: unknown }[]) {
+function rememberBranches(
+  conversationId: string | undefined,
+  rows: { officeId?: unknown; nameEn?: unknown; nameAr?: unknown }[]
+) {
   if (!conversationId || !rows.length) return;
   const prev = branchDirectory.get(conversationId);
   const cur = prev?.byName ?? {};
@@ -307,6 +310,17 @@ function rememberBranches(conversationId: string | undefined, rows: { officeId?:
     const name = String(r.nameEn ?? "").trim();
     if (id && name) {
       cur[name.toLowerCase()] = id;
+      // The name we show the customer is the one they will hand back, and in an
+      // Arabic conversation that is the ARABIC one. Indexing only nameEn meant
+      // an Arabic branch never resolved to an officeId -- so a MyHome save went
+      // out with no deliveryOfficeID and Emirates Post could not place the
+      // delivery. Seen on staging today: a three-year MyHome at Dubai Central,
+      // AED 2,155, held and never saved, three attempts, all in Arabic.
+      //
+      // byId keeps the English name: it is what our own notes and the audit log
+      // read back, and it does not change with the customer's language.
+      const ar = String(r.nameAr ?? "").trim();
+      if (ar) cur[ar.toLowerCase()] = id;
       ids[id] = name;
     }
   }
@@ -329,9 +343,18 @@ function officeIdForBranch(conversationId: string | undefined, branch: string | 
   const hit = branchDirectory.get(conversationId);
   if (!hit || Date.now() - hit.at > HALL_TTL_MS) return null;
   if (hit.byName[name]) return hit.byName[name]!;
-  // "Al Barsha" for "Al Barsha Post Office" — the customer rarely types the suffix.
-  const found = Object.entries(hit.byName).find(([k]) => k.startsWith(name) || name.startsWith(k));
-  return found ? found[1] : null;
+  // "Al Barsha" for "Al Barsha Post Office" — the customer rarely types the
+  // suffix. Every Arabic branch name in this list begins "مكتب بريد" or
+  // "الشبكة الوطنية", so a prefix can now match several branches where it used
+  // to match one. AMBIGUITY, not length, is the test: "Naif" still resolves
+  // because only one branch starts with it, and a shared Arabic prefix resolves
+  // to nothing rather than confidently to the first one in the list.
+  const ids = new Set(
+    Object.entries(hit.byName)
+      .filter(([k]) => k.startsWith(name) || name.startsWith(k))
+      .map(([, id]) => id)
+  );
+  return ids.size === 1 ? [...ids][0]! : null;
 }
 
 const hallMemory = new Map<string, { at: number; halls: { officeId: string; name: string; alternative: string }[] }>();
@@ -2954,7 +2977,7 @@ export async function buildApiTools(
             alternative: String(h.alternativeBranchEn ?? ""),
           }));
           rememberHalls(opts.conversationId, lastBranchHalls);
-          rememberBranches(opts.conversationId, rows as { officeId?: unknown; nameEn?: unknown }[]);
+          rememberBranches(opts.conversationId, rows as { officeId?: unknown; nameEn?: unknown; nameAr?: unknown }[]);
           if (annotated) {
             res = {
               ...res,
