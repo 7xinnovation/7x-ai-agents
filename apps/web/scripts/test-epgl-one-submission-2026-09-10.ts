@@ -91,5 +91,15 @@ check("the panel prefers it", /caseState!\.referenceLabel \?\? caseState!\.refer
 // them would leave the licence request reading Amount Paid 0.00 forever.
 check("the webhook still notifies against the record id", /const licenseRequestId = String\(c\?\.state\.reference \?\? ""\)/.test(webhook));
 
+
+console.log("\nWhen the satisfaction survey is asked for");
+const pulseBlock = route.slice(route.indexOf("EPGL splits on how the applicant chose to pay"), route.indexOf("// The courier the card sold"));
+check("a Virtual IBAN licence is surveyed on submission", /byViban \|\| finalState\.payment\.status === "paid"/.test(pulseBlock));
+check("...because that branch never pays in the conversation", /settles days later/.test(pulseBlock));
+check("a card licence waits for the money", /byViban \|\| finalState\.payment\.status === "paid"/.test(pulseBlock));
+check("...read from the method the applicant actually chose", /finalState\.data\.payment_method/.test(route));
+check("neither is surveyed before it is submitted", /submitted && \(byViban/.test(pulseBlock));
+check("Emirates Post is untouched by the split", /finalState\.hold\?\.paidAt/.test(pulseBlock));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

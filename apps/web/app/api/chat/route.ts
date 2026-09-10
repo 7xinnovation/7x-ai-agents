@@ -2356,17 +2356,25 @@ export async function POST(req: NextRequest) {
         // LATER turn than the one that submitted, so the submission is read from
         // the case rather than from this turn.
         //
-        // EPGL is the exception, and deliberately so. Their own portal fires the
-        // survey from saveNewLicenseRequest -- the FIRST submit out of Draft,
-        // before a dirham has moved -- and a licence paid by Virtual IBAN is
-        // never paid in the conversation at all: the IBAN is issued the next
-        // working day and settled by bank transfer. Gating on payment would mean
-        // that whole branch is surveyed never, and the card branch surveyed at a
-        // different moment than the portal. So licensing surveys on submission.
+        // EPGL splits on how the applicant chose to pay, and it has to.
+        //
+        // A licence paid by VIRTUAL IBAN is never paid in the conversation at
+        // all: Finance issues the IBAN the next working day and the transfer
+        // settles days later. Waiting for payment there means the survey is
+        // shown never. Their own portal fires it on the first submit out of
+        // Draft, so submission is both their behaviour and the only workable
+        // moment for that branch.
+        //
+        // A licence paid by CARD is a different matter. Surveying on submission
+        // puts a satisfaction modal over the payment step the customer is in the
+        // middle of -- which is what happened on 10 September -- and asks them
+        // how it went before it has gone. Same rule as Emirates Post there: the
+        // money first.
         const licensing = pulseService === "license_new" || pulseService === "license_renewal";
+        const byViban = String(finalState.data.payment_method ?? "").toLowerCase() === "viban";
         const submitted = submittedRef ?? finalState.reference;
         const purchase = licensing
-          ? submitted
+          ? submitted && (byViban || finalState.payment.status === "paid")
             ? { reference: submitted, amount: finalState.payment.amount }
             : null
           : finalState.hold?.paidAt
