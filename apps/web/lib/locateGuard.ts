@@ -159,3 +159,91 @@ export function linkGuard(locale?: string) {
     },
   };
 }
+
+/** Did the CUSTOMER ask for a map? Then they get one, address on file or not. */
+const ASKS_FOR_MAP = /\b(map|pin|location|gps|coordinates)\b|خريطة|الخريطة|موقعي|إحداثيات/i;
+
+/**
+ * Take the map away when the address is already on file.
+ *
+ * Suppressing our own appended block was only half of it. The model writes its
+ * OWN ```locate block, with its own label, and on 10 September that is exactly
+ * what happened: "One more thing before we wrap up — please confirm the location
+ * of your company's office on the map", with a pin control, for a company whose
+ * street address had been read off its trade licence several turns earlier and
+ * was sitting in the panel in Arabic.
+ *
+ * Both the block and the sentence offering it go. Leaving the sentence behind
+ * would be worse than either: an instruction to use a control that is no longer
+ * there is the precise failure the guard above exists to prevent.
+ *
+ * Never applied when the customer asked. Someone who says "let me pin it
+ * instead" means it, and the address on file may be the one they want to change.
+ *
+ * Streams, like the guards beside it: a sentence is emitted once it is complete
+ * and judged, and anything inside a fence that is not a locate block passes
+ * untouched.
+ */
+export function mapOfferGuard(opts: { addressKnown: () => boolean; userAsked?: string }) {
+  const exempt = Boolean(opts.userAsked && ASKS_FOR_MAP.test(opts.userAsked));
+  let buf = "";
+  let inFence = false;
+  let fenceIsLocate = false;
+
+  const drop = (s: string) => !exempt && opts.addressKnown() && OFFERS_MAP.test(s) && !ALREADY_PINNED.test(s);
+
+  const drain = (final: boolean): string => {
+    let out = "";
+    for (;;) {
+      if (inFence) {
+        const end = buf.indexOf("```", 3);
+        if (end === -1) {
+          if (!final) return out;
+          out += fenceIsLocate && !exempt && opts.addressKnown() ? "" : buf;
+          buf = "";
+          return out;
+        }
+        const block = buf.slice(0, end + 3);
+        out += fenceIsLocate && !exempt && opts.addressKnown() ? "" : block;
+        buf = buf.slice(end + 3);
+        inFence = false;
+        fenceIsLocate = false;
+        continue;
+      }
+      const start = buf.indexOf("```");
+      const upto = start === -1 ? buf : buf.slice(0, start);
+      const m = /^([\s\S]*?[.!?؟])(\s+)/.exec(upto);
+      if (m) {
+        const sentence = m[1]!;
+        out += drop(sentence) ? "" : sentence + m[2];
+        buf = buf.slice(m[0].length);
+        continue;
+      }
+      if (start !== -1) {
+        // Enough of the fence to know what it opens? The word follows the ticks.
+        const head = buf.slice(start, start + 16);
+        if (!final && head.length < 12 && !/\n/.test(head)) return out;
+        out += drop(upto) ? "" : upto;
+        buf = buf.slice(start);
+        fenceIsLocate = /^```\s*locate\b/i.test(buf);
+        inFence = true;
+        continue;
+      }
+      if (final && buf) {
+        out += drop(buf) ? "" : buf;
+        buf = "";
+      }
+      return out;
+    }
+  };
+
+  return {
+    push(delta: string): string {
+      buf += delta;
+      return drain(false);
+    },
+    flush(): string {
+      return drain(true);
+    },
+  };
+}

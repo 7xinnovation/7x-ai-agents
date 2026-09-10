@@ -35,7 +35,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
-import { promisesMapWithout, locateBlock, addressAlreadyKnown, linkGuard, arabicLinks } from "@/lib/locateGuard";
+import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { narrationGuard } from "@/lib/narrationGuard";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -1766,6 +1766,12 @@ export async function POST(req: NextRequest) {
         const narration = narrationGuard();
         // An Arabic reply links to the Arabic pages, whatever the model reached for.
         const links = linkGuard(body.locale);
+        // An address read off the trade licence is not a question. Outermost, so
+        // it judges the sentence the customer would actually have read.
+        const mapOffer = mapOfferGuard({
+          addressKnown: () => addressAlreadyKnown(liveState.data as Record<string, unknown>),
+          userAsked: body.userMessage,
+        });
         // The registration fee, put INTO the pre-payment card rather than left in
         // a sentence beneath it.
         // A file already in the case is not something to ask for again.
@@ -1837,13 +1843,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = links.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))));
+            const out = mapOffer.push(links.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = links.push(narration.push(
+            const held = mapOffer.push(links.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -1852,7 +1858,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            ));
+            )));
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -1925,7 +1931,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = links.push(narration.push(idFilter.push(
+          const rest = mapOffer.push(links.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -1933,7 +1939,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + links.flush();
+          ) + idFilter.flush()) + narration.flush()) + links.flush()) + mapOffer.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 

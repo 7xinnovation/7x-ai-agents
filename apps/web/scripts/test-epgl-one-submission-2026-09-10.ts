@@ -35,7 +35,7 @@ const integrations = readFileSync(new URL("../lib/integrations.ts", import.meta.
 const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
 const caseSchema = readFileSync(new URL("../../../packages/config/src/case.ts", import.meta.url), "utf8");
 const experience = readFileSync(new URL("../app/embed/[agent]/Experience.tsx", import.meta.url), "utf8");
-const webhook = readFileSync(new URL("../app/api/payments/webhook/route.ts", import.meta.url), "utf8");
+const epglPayment = readFileSync(new URL("../lib/epglPayment.ts", import.meta.url), "utf8");
 
 console.log("\nThe reference a backend submission earns is written down");
 const saveBlock = orch.slice(orch.indexOf("apiFlow journeys complete through a backend saveTool"), orch.indexOf("const res = await dispatchTool"));
@@ -87,9 +87,10 @@ check("the orchestrator reads it back off the result", /export function submissi
 check("...and carries it on the case beside the reference", /referenceLabel: label \?\? state\.referenceLabel/.test(orch));
 check("the case state has somewhere to put it", /referenceLabel: z\.string\(\)\.nullable\(\)/.test(caseSchema));
 check("the panel prefers it", /caseState!\.referenceLabel \?\? caseState!\.reference/.test(experience));
-// The id, not the number, is what the payment notification is keyed by. Swapping
-// them would leave the licence request reading Amount Paid 0.00 forever.
-check("the webhook still notifies against the record id", /const licenseRequestId = String\(c\?\.state\.reference \?\? ""\)/.test(webhook));
+// The id, not the number, is what the payment notification is keyed by. The
+// notifier moved out of the webhook route on 10 September, so this reads its
+// new home rather than the place it used to live.
+check("the notifier still keys on the record id", /const licenseRequestId = String\(c\?\.state\.reference \?\? ""\)/.test(epglPayment));
 
 
 console.log("\nWhen the satisfaction survey is asked for");
