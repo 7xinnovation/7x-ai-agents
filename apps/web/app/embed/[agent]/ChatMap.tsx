@@ -76,6 +76,7 @@ const MAP_STR = {
     branches: "Branches",
     metres: (n: number) => `${n} m`,
     km: (n: string) => `${n} km`,
+    youAreHere: "You are here",
   },
   ar: {
     browse: "تصفّح الفروع القريبة على الخريطة",
@@ -85,6 +86,7 @@ const MAP_STR = {
     branches: "الفروع",
     metres: (n: number) => `${n} متر`,
     km: (n: string) => `${n} كم`,
+    youAreHere: "أنت هنا",
   },
 } as const;
 
@@ -97,6 +99,15 @@ export function ChatMap({
   locale?: string;
 }) {
   const t = MAP_STR[locale === "ar" ? "ar" : "en"];
+  // Emirates Post send both names for every branch and this component was only
+  // ever showing the English one -- on the pins, in the popups and in the list,
+  // inside a conversation the customer was holding in Arabic. The name that goes
+  // back to the chat is the name they read, so what they picked and what they
+  // said they picked are the same string.
+  const label = React.useCallback(
+    (b: Branch) => (locale === "ar" && b.nameAr ? b.nameAr : b.name),
+    [locale]
+  );
   // The embed always lives at /embed/<slug>; derive it rather than thread a prop.
   const agentSlug = React.useMemo(
     () => (typeof window !== "undefined" ? window.location.pathname.match(/\/embed\/([^/?#]+)/)?.[1] : "") || "nxn-dialog",
@@ -113,8 +124,8 @@ export function ChatMap({
   const select = React.useCallback((b: Branch) => {
     if (selected) return;
     setSelected(b.id);
-    onSelect(b.name);
-  }, [selected, onSelect]);
+    onSelect(label(b));
+  }, [selected, onSelect, label]);
 
   const browse = async () => {
     if (phase !== "idle") return;
@@ -174,7 +185,7 @@ export function ChatMap({
     if (userLoc) {
       new mapboxgl.Marker({ color: "#3d33d1" })
         .setLngLat([userLoc.lng, userLoc.lat])
-        .setPopup(new mapboxgl.Popup({ offset: 14, closeButton: false }).setText("You are here"))
+        .setPopup(new mapboxgl.Popup({ offset: 14, closeButton: false }).setText(t.youAreHere))
         .addTo(map);
       bounds.extend([userLoc.lng, userLoc.lat]);
     }
@@ -182,10 +193,10 @@ export function ChatMap({
       const el = document.createElement("div");
       el.className = "dlg-map-pin";
       el.setAttribute("role", "button");
-      el.setAttribute("aria-label", b.name);
+      el.setAttribute("aria-label", label(b));
       const marker = new mapboxgl.Marker(el)
         .setLngLat([b.lng, b.lat])
-        .setPopup(new mapboxgl.Popup({ offset: 16, closeButton: false }).setText(b.name))
+        .setPopup(new mapboxgl.Popup({ offset: 16, closeButton: false }).setText(label(b)))
         .addTo(map);
       el.addEventListener("click", (e) => { e.stopPropagation(); marker.togglePopup(); select(b); });
       bounds.extend([b.lng, b.lat]);
@@ -194,7 +205,7 @@ export function ChatMap({
       try { map.fitBounds(bounds, { padding: 44, maxZoom: 13, duration: 0 }); } catch { /* ignore */ }
     }
     return () => { try { map.remove(); } catch { /* ignore */ } mapObj.current = null; };
-  }, [phase, branches, userLoc, select]);
+  }, [phase, branches, userLoc, select, label, t]);
 
   if (phase === "idle") {
     return (
@@ -248,7 +259,7 @@ export function ChatMap({
           >
             <span className="dlg-map-pinicon"><MapPin size={15} weight="fill" /></span>
             <span className="dlg-map-info">
-              <span className="dlg-map-name">{b.name}</span>
+              <span className="dlg-map-name">{label(b)}</span>
               {b.hours ? <span className="dlg-map-hours">{b.hours}</span> : null}
             </span>
             {typeof b.dist === "number" ? <span className="dlg-map-dist">{b.dist < 1 ? t.metres(Math.round(b.dist * 1000)) : t.km(b.dist.toFixed(1))}</span> : null}

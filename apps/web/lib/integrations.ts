@@ -295,6 +295,42 @@ function recallExpiryDates(conversationId: string | undefined): Map<string, stri
  *
  * The branch list carries both, so it is read from there instead.
  */
+/**
+ * How to write a branch's name, in the language the conversation is in.
+ *
+ * Emirates Post send BOTH names on every row — nameEn and nameAr — and until
+ * 10 September this note asked for nameEn and said nothing about the other one.
+ * That rule was written for a real bug (a branch renamed to "Sharjah Industrial
+ * Zone Branch", which exists nowhere in their data) and it fixed that bug, and
+ * in an Arabic conversation it did this instead:
+ *
+ *   - the cards and buttons came back in English, to a customer who had just
+ *     written to say she is elderly and cannot read English;
+ *   - and where the model wanted Arabic prose anyway it had no Arabic name to
+ *     copy, so it made one: «الرشيدية» for a branch Emirates Post call
+ *     «مكتب بريد الراشدية», in one turn, and «الراشدية» in the next.
+ *
+ * Both faults are the same missing sentence. The rule was never "use English",
+ * it was "use THEIR name" — and which of their two names is theirs depends on
+ * the language the customer is being answered in.
+ */
+function branchNameRule(locale?: string): string {
+  const shared =
+    " These are Emirates Post's own branch names and the customer will see them again at the counter, on their receipt and in the portal. Do not reorder the words, do not add one, do not drop the \"NXN - \" prefix and do not tidy the spacing -- on 10 September \"NXN - Industrial Sharjah Branch\" was shown as \"Sharjah Industrial Zone Branch\", a branch that does not exist under that name anywhere in this list." +
+    " NEVER TRANSLATE, TRANSLITERATE OR SHORTEN A BRANCH NAME YOURSELF, in either language. Every branch here carries both spellings; use the one for this conversation and copy it character for character.";
+  if (locale === "ar") {
+    return (
+      "\n\nTHIS CONVERSATION IS IN ARABIC, SO NAME EVERY BRANCH BY ITS nameAr, EXACTLY AS IT IS WRITTEN HERE — on the cards, in the buttons you offer and in your prose, including the sentence that introduces the list." +
+      shared +
+      " On 10 September a branch was announced as \"فرع الرشيدية\"; the row says \"مكتب بريد الراشدية\" and that is the only spelling that exists. If a row has no nameAr, use its nameEn unchanged rather than inventing one."
+    );
+  }
+  return (
+    "\n\nUSE EACH BRANCH'S nameEn EXACTLY AS IT IS WRITTEN HERE, on the cards, in your prose and in the buttons you offer." +
+    shared
+  );
+}
+
 const branchDirectory = new Map<string, { at: number; byName: Record<string, string>; byId: Record<string, string> }>();
 
 function rememberBranches(
@@ -326,6 +362,22 @@ function rememberBranches(
   }
   if (branchDirectory.size > 500) for (const [k, v] of branchDirectory) if (Date.now() - v.at > HALL_TTL_MS) branchDirectory.delete(k);
   branchDirectory.set(conversationId, { at: Date.now(), byName: cur, byId: ids });
+}
+
+/**
+ * Every name this conversation has been shown a branch under, in both
+ * languages, paired with its officeId.
+ *
+ * branchesShown() answers "what is branch 244 called"; this answers "which
+ * branch is that name". The guard on progress lines needs the second, and needs
+ * the Arabic names in it — the sentence that named the wrong branch on
+ * 10 September named it in Arabic.
+ */
+function branchNamesShown(conversationId: string | undefined): { officeId: string; name: string }[] {
+  if (!conversationId) return [];
+  const hit = branchDirectory.get(conversationId);
+  if (!hit || Date.now() - hit.at > HALL_TTL_MS) return [];
+  return Object.entries(hit.byName).map(([name, officeId]) => ({ officeId, name }));
 }
 
 /** The branches this conversation was actually shown, as officeId -> name. */
@@ -849,6 +901,8 @@ export async function buildApiTools(
   getOfferedBoxAt: () => Record<string, string>;
   /** The branch the last availability lookup was made against, as officeId + name. */
   getChosenBranch: () => { officeId: string; name: string } | null;
+  /** Every branch name shown in this conversation, English and Arabic, with its officeId. */
+  getBranchNames: () => { officeId: string; name: string }[];
   getUniqueByNumber: () => Record<string, string>;
   /** Normalised company keys GSB has returned in this case. */
   getGsbCompanies: () => string[];
@@ -3042,15 +3096,31 @@ export async function buildApiTools(
               ...res,
               result:
                 `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(b)}` +
-                "\n\nUSE EACH BRANCH'S nameEn EXACTLY AS IT IS WRITTEN HERE, on the cards, in your prose and in the buttons you offer. These are Emirates Post's own branch names and the customer will see them again at the counter, on their receipt and in the portal. Do not reorder the words, do not add one, do not drop the \"NXN - \" prefix and do not tidy the spacing -- on 10 September \"NXN - Industrial Sharjah Branch\" was shown as \"Sharjah Industrial Zone Branch\", a branch that does not exist under that name anywhere in this list." +
+                branchNameRule(opts.locale) +
                 "\n\nfreeBoxCount is how many boxes are FREE at that branch right now, counted live. Branches with none have ALREADY BEEN REMOVED from this list" +
                 (hidden ? ` (${hidden} of them)` : "") +
                 ", so show every branch here as available and never mention the ones that are missing. Branches with no freeBoxCount were not counted; show those normally too." +
                 (halls.length
                   ? "\n\nSOME OF THESE ARE PO BOX HALLS, NOT BRANCHES: " +
-                    halls.map((h) => `${h.nameEn} (keys and counter services at ${h.alternativeBranchEn ?? "another branch"})`).join("; ") +
+                    halls
+                      .map((h) => {
+                        // In Arabic the hall and the branch that issues its key
+                        // are named the way the customer will read them, for the
+                        // same reason the list above is: a name we hand over in
+                        // the wrong language is a name they cannot check.
+                        const ar = opts.locale === "ar";
+                        const name = (ar ? h.nameAr : h.nameEn) || h.nameEn || h.nameAr;
+                        const alt = (ar ? h.alternativeBranchAr : h.alternativeBranchEn) || h.alternativeBranchEn || h.alternativeBranchAr;
+                        return `${name} (keys and counter services at ${alt ?? "another branch"})`;
+                      })
+                      .join("; ") +
                     ". A box hall gives access to boxes only — no counter, no parcels, no registered mail — and the KEY IS NOT ISSUED THERE. Mark each one on its card (e.g. `badge: P.O. Box Hall`). If the customer chooses one, you MUST show them this notice WORD FOR WORD before going any further, and get their explicit acknowledgement before reserving anything:\n\n" +
-                    poBoxHallNotice("<the alternativeBranchEn for the hall they chose>", opts.locale) +
+                    poBoxHallNotice(
+                      opts.locale === "ar"
+                        ? "<اسم الفرع الذي يُسلَّم منه المفتاح، كما هو مكتوب في القائمة>"
+                        : "<the alternativeBranchEn for the hall they chose>",
+                      opts.locale
+                    ) +
                     (opts.locale === "ar" ? "\n\nThe notice above is already in Arabic — give it to the customer exactly as written." : "") +
                     "\n\nSubstitute the real branch name where the placeholder is. Do not paraphrase, shorten or summarise the notice, and do not proceed on an assumed yes — a customer who is not told turns up at a room of boxes expecting a post office, with their key in another building. A hall is still a REAL OPTION and is offered like any other location on this list: the notice is a condition of choosing it, not a reason to steer them away from it."
                   : "") +
@@ -3653,6 +3723,7 @@ export async function buildApiTools(
     getOfferedBoxIds: () => offeredBoxIds,
     getOfferedBoxAt: () => offeredBoxAt,
     getChosenBranch: () => lastFreeBoxesBranch,
+    getBranchNames: () => branchNamesShown(opts.conversationId),
     getUniqueByNumber: () => uniqueByNumber,
     getGatewayPayment: () => gatewayPayment,
     getGsbCompanies: () => [...gsbCompanies],

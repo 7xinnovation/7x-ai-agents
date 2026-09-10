@@ -38,6 +38,7 @@ import { collectedUploadGuard } from "@/lib/uploadGuard";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale } from "@/lib/replyLocale";
 import { narrationGuard } from "@/lib/narrationGuard";
+import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
@@ -1814,6 +1815,32 @@ export async function POST(req: NextRequest) {
         const spoken = messageLocale(body.userMessage);
         if (spoken && spoken !== body.locale) send({ type: "locale", locale: spoken });
         const links = linkGuard(body.locale);
+        // "I'll fetch the numbers at Al Rashidiyah" — for a customer who had
+        // just pressed Al Barsha. The list that followed was Al Barsha's and was
+        // right; only the sentence announcing it drifted, into a real branch
+        // twelve kilometres away, and the customer asked three times whether the
+        // two were the same place before they trusted the numbers.
+        //
+        // The branch in play is taken from the CUSTOMER'S OWN MESSAGE first,
+        // because that is the only source that exists at the moment the sentence
+        // streams: the announcement is written BEFORE the lookup it announces,
+        // so getChosenBranch() is still the previous branch, or nothing at all.
+        // Pressing a branch button sends its name as the message, which is
+        // exactly the case that failed.
+        const branchNarration = branchNarrationGuard({
+          branches: () => apiTools.getBranchNames(),
+          selected: () => {
+            const shown = apiTools.getBranchNames();
+            if (!shown.length) return null;
+            const idx = branchIndex(shown);
+            return (
+              branchNamedIn(body.userMessage, idx) ??
+              branchNamedIn(str(liveState.data.branch) ?? "", idx) ??
+              apiTools.getChosenBranch()?.officeId ??
+              null
+            );
+          },
+        });
         // An address read off the trade licence is not a question. Outermost, so
         // it judges the sentence the customer would actually have read.
         const mapOffer = mapOfferGuard({
@@ -1903,13 +1930,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = mapOffer.push(links.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))))));
+            const out = mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = mapOffer.push(links.push(narration.push(
+            const held = mapOffer.push(links.push(branchNarration.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -1918,7 +1945,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            )));
+            ))));
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -1991,7 +2018,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = mapOffer.push(links.push(narration.push(idFilter.push(
+          const rest = mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -1999,7 +2026,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + links.flush()) + mapOffer.flush();
+          ) + idFilter.flush()) + narration.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 
