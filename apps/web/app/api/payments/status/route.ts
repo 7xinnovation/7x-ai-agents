@@ -5,6 +5,7 @@ import { resolveAdapters, adapterContext, setPayment } from "@dialog/core";
 import { getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, saveCase, audit } from "@/lib/conversation";
+import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
 
   const db = getDb();
   const [pay] = await db
-    .select({ status: payments.status, agentId: payments.agentId })
+    .select({ status: payments.status, agentId: payments.agentId, amount: payments.amount })
     .from(payments)
     .where(and(eq(payments.reference, reference), eq(payments.conversationId, conversationId)))
     .limit(1);
@@ -68,6 +69,18 @@ export async function GET(req: NextRequest) {
       action: `payment_${status}_via_gateway_probe`,
       payload: { reference },
     });
+    // THIS is where the money is confirmed most of the time.
+    //
+    // The notification to EPGL used to hang off the webhook alone, so it ran
+    // only when N-Genius called us. This probe is what the customer's own
+    // browser polls while they are on the payment page, and it usually gets
+    // there first. LR-37324 was submitted, paid by card, marked paid here --
+    // and left reading "Under document review" in Salesforce with a lastUpdated
+    // of the submission, because nothing told them. The notifier is idempotent,
+    // so the webhook arriving afterwards is harmless.
+    if (status === "paid") {
+      await notifyEpglIfLicenceFee(pay.agentId, conversationId, reference, Number(pay.amount ?? 0));
+    }
   }
 
   return NextResponse.json({ status }, { headers: { "Cache-Control": "no-store" } });

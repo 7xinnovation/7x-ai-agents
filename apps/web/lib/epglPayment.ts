@@ -185,3 +185,78 @@ export async function notifyEpglPayment(
     retryable: effective !== 404 && effective !== 400,
   };
 }
+
+/**
+ * Tell EPGL Salesforce a licence fee has settled, from wherever we found out.
+ *
+ * This used to live in the webhook, and only the webhook, which meant it only
+ * ran when N-Genius called us. It is not the only way a payment is confirmed:
+ * the client polls /api/payments/status while the customer is on the payment
+ * page, and the reconcile sweep catches whatever is left. Both of those mark the
+ * payment paid on our side and neither told Salesforce.
+ *
+ * LR-37324 is what that looks like. Submitted 07:39:46, paid 07:40:29 by card on
+ * the sandbox gateway, detected by the polling probe rather than the webhook --
+ * and the licence request still read "Under document review" with a lastUpdated
+ * of the submission, because nothing had touched it since. The money was ours
+ * and Salesforce did not know.
+ *
+ * Idempotent by audit: it refuses to notify twice for the same payment
+ * reference, so the probe and the webhook racing each other is harmless.
+ *
+ * Best-effort throughout. The money has already moved by the time this runs, so
+ * a Salesforce problem must never fail the caller -- a webhook that 500s gets
+ * the payment retried against an order that is already settled. Every outcome is
+ * audited, so an unnotified payment is visible rather than silent.
+ */
+export async function notifyEpglIfLicenceFee(
+  agentId: string,
+  conversationId: string,
+  reference: string,
+  amount: number
+): Promise<void> {
+  try {
+    const { getAgentById } = await import("./agents");
+    const { getCase, audit, auditSeen } = await import("./conversation");
+
+    const agent = await getAgentById(agentId);
+    if (!agent || agent.definition.tenantSlug !== "epgl") return;
+
+    // Already done, by whichever path got there first.
+    if (await auditSeen(conversationId, "epgl_payment_notified", reference)) return;
+
+    const c = await getCase(conversationId);
+    // The licence request's Salesforce id is the case reference once submitted.
+    // Before submission there is nothing to notify against, which is normal:
+    // the request always exists first, and request_payment enforces it.
+    const licenseRequestId = String(c?.state.reference ?? "").trim();
+    if (!licenseRequestId) return;
+
+    const env = agent.definition.activeEnvironment ?? "production";
+    const res = await notifyEpglPayment(agent.id, env, {
+      licenseRequestId,
+      paymentId: reference,
+      amount,
+      currency: "AED",
+    });
+
+    await audit({
+      agentId,
+      conversationId,
+      actor: "system",
+      action: res.ok ? "epgl_payment_notified" : "epgl_payment_notify_failed",
+      payload: res.ok
+        ? { reference, licenseRequestId, correlationId: res.correlationId }
+        : { reference, licenseRequestId, status: res.status, reason: res.reason, retryable: res.retryable },
+    });
+  } catch (e) {
+    const { audit } = await import("./conversation");
+    await audit({
+      agentId,
+      conversationId,
+      actor: "system",
+      action: "epgl_payment_notify_failed",
+      payload: { reference, reason: e instanceof Error ? e.message : "unknown error", retryable: true },
+    });
+  }
+}

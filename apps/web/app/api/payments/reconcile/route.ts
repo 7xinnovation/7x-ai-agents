@@ -5,6 +5,7 @@ import { getDb, payments, agents, conversations, cases, escalations, analyticsEv
 import { getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, saveCase, audit } from "@/lib/conversation";
+import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
 import { emitEvent } from "@/lib/analytics";
 
 export const runtime = "nodejs";
@@ -52,6 +53,13 @@ export async function POST(req: NextRequest) {
       }
       await audit({ agentId: p.agentId, conversationId: p.conversationId ?? undefined, actor: "system", action: `payment_reconciled_${status}`, payload: { reference: p.reference } });
       await emitEvent({ type: status === "paid" ? "payment.completed" : "payment.failed", agentId: p.agentId, conversationId: p.conversationId ?? undefined, referenceId: p.reference, outcome: `reconciled_${status}`, attributes: { reference: p.reference, reconciled: true } });
+      // The backstop has to include telling Salesforce. This sweep exists for
+      // the payments nothing else caught, and a licence fee we found here is
+      // exactly one nobody has notified -- the notifier is idempotent, so a
+      // webhook or probe that got there first costs nothing.
+      if (status === "paid" && p.conversationId) {
+        await notifyEpglIfLicenceFee(p.agentId, p.conversationId, p.reference, Number(p.amount ?? 0));
+      }
       out.paymentsResolved++;
     } else {
       // Still unresolved past threshold → SLA breach (once per reference).

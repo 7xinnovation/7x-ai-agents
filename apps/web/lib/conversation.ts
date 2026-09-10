@@ -417,6 +417,37 @@ export async function audit(input: {
   });
 }
 
+/**
+ * Has this exact thing already been recorded for this conversation?
+ *
+ * For work that must happen once and can be reached from several directions.
+ * The EPGL payment notification is the case in point: the gateway webhook, the
+ * client's status poll and the reconcile sweep can each be the one that learns a
+ * payment settled, and Salesforce should hear about it once.
+ *
+ * Matched on the payload's `reference` rather than the row alone, so a second
+ * payment on the same conversation -- a reissued link, a retry after a decline
+ * -- is still notified.
+ */
+export async function auditSeen(
+  conversationId: string,
+  action: string,
+  reference: string
+): Promise<boolean> {
+  const row = await getDb()
+    .select({ id: auditLog.id })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.conversationId, conversationId),
+        eq(auditLog.action, action),
+        sql`${auditLog.payload} ->> 'reference' = ${reference}`
+      )
+    )
+    .limit(1);
+  return row.length > 0;
+}
+
 /** Fetch the active case for a conversation (used by the upload route). */
 export async function getCase(conversationId: string) {
   const row = await getDb().query.cases.findFirst({ where: eq(cases.conversationId, conversationId) });
