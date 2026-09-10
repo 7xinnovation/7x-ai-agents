@@ -169,6 +169,36 @@ one it was.
 
 ---
 
+## 9 — MyHome in Arabic reaches the payment (found while testing)
+
+Your three-year MyHome at Dubai Central, AED 2,155: reserved, then *"لم يتمكن
+النظام من إنشاء الطلب في الوقت المحدد"* three times.
+
+The case held the branch exactly as you saw it — **مكتب بريد دبي المركزي** — and
+the branch directory only indexed the English names. So the branch never
+resolved to an office id, the save went out with no `deliveryOfficeID`, and
+Emirates Post had nowhere to deliver the box to. Their 173 error names the
+address, which is why this looked like an address problem and never was.
+
+**Test**
+1. Switch to Arabic **first**, then rent a **MyHome** or **MyHome Instant** box.
+2. Pick a branch from the Arabic list, give an address, and go through to
+   payment.
+
+**Expect** the reservation to save and a payment card to appear. No *"مشكلة
+تقنية مؤقتة"*, no timeout.
+
+**Then the same in English**, to confirm nothing moved: pick "Naif Post Office"
+by typing just **Naif** — it should still resolve, because only one branch starts
+with that.
+
+**One thing that deliberately changed:** an Arabic fragment shared by several
+branches — typing just **مكتب بريد** — now resolves to nothing rather than
+confidently to the first branch in the list. If you do that, expect to be asked
+which branch you meant.
+
+---
+
 ## And one that was not on the list
 
 The assistant was asking for a map pin to confirm the company's address on EPGL
