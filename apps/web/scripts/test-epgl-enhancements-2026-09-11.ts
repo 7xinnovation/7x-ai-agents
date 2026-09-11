@@ -156,6 +156,24 @@ if (envAt !== -1) {
   check("a non-resident sole trader is asked for a licence and a passport, not an MOA or an EID",
     required.includes("trade_license") && required.includes("partner_1_passport") && !required.includes("moa") && !required.includes("partner_1_emirates_id"), required);
 
+  // The knowledge base answers QUESTIONS, and a question starts no journey, so
+  // the guidance above never reaches it. Three of EPGL's eight items were still
+  // answered wrongly from here after the guidance was correct.
+  const { kbChunks, kbDocuments } = await import("@dialog/db");
+  const chunks = await db.select().from(kbChunks).where(eq(kbChunks.agentId, row!.id));
+  const kbDocs = await db.select().from(kbDocuments).where(eq(kbDocuments.agentId, row!.id));
+  const all = chunks.map((c: any) => c.content).join("\n");
+  console.log("\nThe knowledge base");
+  check("1 — no 2-business-day answer survives", !/2 business days|يومي عمل/.test(all));
+  check("1 — and it says one", /typically within one business day/.test(all) && /خلال يوم عمل واحد/.test(all));
+  check("4 — the payment methods have their own answer", /Paying by CARD[\s\S]{0,120}SAME DAY/.test(all) && /Virtual IBAN means the licence is issued by the NEXT BUSINESS DAY/.test(all));
+  check("4 — in Arabic too", /يوم العمل التالي/.test(all));
+  check("7 — a non-resident partner is not asked for an Emirates ID", /non-resident partner has no Emirates ID|has no Emirates ID/i.test(all));
+  check("7 — in Arabic too", /لا يملك هوية إماراتية/.test(all));
+  check("8 — a sole establishment has no MOA", /a sole establishment does not/i.test(all));
+  check("8 — in Arabic too", /المؤسسة الفردية فلا يصدر لها عقد تأسيس/.test(all));
+  check("6 — no document is titled a courier licence", !kbDocs.some((d: any) => /courier|بريد سريع/i.test(d.title)), kbDocs.map((d: any) => d.title));
+
   await pool.end();
 }
 
