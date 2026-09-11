@@ -5,6 +5,9 @@ export interface PublicField {
   label: LocalizedString;
   required: boolean;
   type?: string;
+  // Required only while this holds — the trade licence number is not asked of a
+  // company that has an initial approval and no licence yet.
+  condition?: string;
   // Whether the customer may correct this value from the case panel (FB-1566).
   // Undefined on every field of a journey means "not curated" — the panel then
   // falls back to making all text-like fields editable, as it always did.

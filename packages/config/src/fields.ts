@@ -46,6 +46,19 @@ export const FieldDef: z.ZodType<FieldDefShape, z.ZodTypeDef, unknown> = z.lazy(
       .array(z.object({ value: z.string(), label: LocalizedString }))
       .optional(),
     validation: ValidationRule.default({ required: false }),
+    /**
+     * When present, `required` only bites while this holds — same grammar as a
+     * document's condition.
+     *
+     * EPGL, 11 September: "the Submission Readiness section mentions only the
+     * trade license number, while the applicant may provide either a trade
+     * license or an initial approval." A company whose licence has not been
+     * issued yet has an initial approval number and no trade licence number, and
+     * the readiness bar could never reach complete for them. Two fields, one of
+     * which is required only while the other is empty, is the shape they asked
+     * for.
+     */
+    condition: z.string().optional(),
     // For "group" fields — the shape of each repeated item.
     children: z.array(FieldDef).optional(),
     // Whether this field came pre-filled from a system of record (renewal:
@@ -75,6 +88,7 @@ export interface FieldDefShape {
   help?: z.infer<typeof LocalizedString>;
   options?: { value: string; label: z.infer<typeof LocalizedString> }[];
   validation: z.infer<typeof ValidationRule>;
+  condition?: string;
   children?: FieldDefShape[];
   prefillFrom?: string;
   editable?: boolean;

@@ -108,6 +108,9 @@ export function recomputeReadiness(agent: AgentDefinition, state: CaseState): Ca
 
   for (const field of journeyFields(journey)) {
     if (!field.validation.required) continue;
+    // A field can be required only in some applications -- the trade licence
+    // number, for a company that has one.
+    if (!evalCondition(field.condition, state.data)) continue;
     const present = state.data[field.key] !== undefined && state.data[field.key] !== "";
     const valid = present && !validateField(field, state.data[field.key]);
     if (!valid) missing.push({ key: field.key, kind: "field" });

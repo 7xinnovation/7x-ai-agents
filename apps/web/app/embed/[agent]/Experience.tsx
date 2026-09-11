@@ -35,6 +35,7 @@ import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
+import { maskForDisplay } from "@/lib/maskIdentity";
 import { openExternal, isNative, postNative, nativeToken, nativeHandoff, type ExternalWindow } from "./nativeBridge";
 
 interface PaymentInfo {
@@ -553,7 +554,7 @@ export function Experience({
     if (!j) return null;
     let total = 0;
     for (const s of j.steps) {
-      total += s.fields.filter((f) => f.required).length;
+      total += s.fields.filter((f) => f.required && docApplies(f.condition)).length;
       total += s.documents.filter((d) => d.requirement === "mandatory" && docApplies(d.condition)).length;
     }
     if (total === 0) return null;
@@ -570,7 +571,7 @@ export function Experience({
     const missingSet = new Set(caseState.readiness.missing.map((m) => `${m.kind}:${m.key}`));
     const items: { kind: "field" | "document"; key: string; done: boolean }[] = [];
     for (const s of j.steps) {
-      for (const f of s.fields) if (f.required) items.push({ kind: "field", key: f.key, done: !missingSet.has(`field:${f.key}`) });
+      for (const f of s.fields) if (f.required && docApplies(f.condition)) items.push({ kind: "field", key: f.key, done: !missingSet.has(`field:${f.key}`) });
       for (const d of s.documents)
         if (d.requirement === "mandatory" && docApplies(d.condition))
           items.push({ kind: "document", key: d.key, done: !missingSet.has(`document:${d.key}`) });
@@ -1719,12 +1720,14 @@ export function Experience({
                           // an Arabic session. Each value is now laid out by its own
                           // script.
                           <span className="dlg-field-value" dir="auto">
-                            {displayValue(v)}
+                            {maskForDisplay(k, displayValue(v))}
                             {editableKeys.has(k) ? (
                               // Pencil correction for extracted values (FB-1325).
                               <button
                                 type="button"
                                 className="dlg-field-pencil"
+                                // The unmasked value: a customer who retyped
+                                // what the panel showed them would save the mask.
                                 onClick={() => { setEditKey(k); setEditVal(displayValue(v)); }}
                                 aria-label={`Edit ${labelMap.get(k) ?? k}`}
                                 title={locale === "ar" ? "تعديل" : "Edit"}
