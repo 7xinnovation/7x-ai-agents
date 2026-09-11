@@ -261,6 +261,40 @@ export function entityMismatch(
     NAME_FIELDS.map((k) => extracted[k]).find((v): v is string => typeof v === "string" && v.trim().length > 1) ?? "";
   const against =
     NAME_FIELDS.map((k) => existing[k]).find((v): v is string => typeof v === "string" && v.trim().length > 1) ?? "";
+
+  /**
+   * A SUPERSEDED name, as distinct from a second one.
+   *
+   * EPGL, 11 September: "an old version of the MOA was uploaded but the system
+   * did not detect the change in the license name." It did detect it -- and then
+   * explained it away. The whole reason a name mismatch only asks is the YIFANG
+   * case: a registered name on the MOA beside a trade name on the licence is one
+   * company with two names, and refusing that was wrong.
+   *
+   * But that explanation is only available ONCE. When we already hold two
+   * different names for this company -- the registered name AND the trade name,
+   * both read off the licence -- the registered-versus-trade account of a third,
+   * unrelated name is exhausted. What is left is a document for a company under a
+   * name it no longer trades under, which is exactly what a stale MOA is, and it
+   * is the licensing team's problem to catch rather than the applicant's to
+   * confirm away.
+   *
+   * So the number of names already on file is what decides this. One name: ask,
+   * as before, and the YIFANG fix stands untouched. Two or more: refuse, and say
+   * both of them, so the customer can see which document they are missing.
+   */
+  const distinct = [...new Set(known)];
+  if (distinct.length >= 2) {
+    const heldPrinted = rawAll(existing, NAME_FIELDS).slice(0, 2);
+    return {
+      severity: "block",
+      reason:
+        `This document names "${shown}". This application is for ${heldPrinted.map((n) => `"${n}"`).join(" and ")}, ` +
+        `and "${shown}" is neither of them. If the company has been renamed, the document is an old one — please ` +
+        `upload the current version. If it is a different company, it belongs on a different application.`,
+    };
+  }
+
   return {
     severity: "confirm",
     reason:

@@ -11,7 +11,7 @@ import {
   Info,
   Warning,
 } from "@phosphor-icons/react";
-import { tr, type Locale, type LocalizedString } from "@dialog/config";
+import { tr, evalCondition, type Locale, type LocalizedString } from "@dialog/config";
 
 /**
  * Mobile document-upload hand-off page (feedback FB-6). A desktop user scans the
@@ -79,17 +79,9 @@ const STR = {
   },
 } as const;
 
-// Mirror of the engine's tiny document-condition evaluator.
-function condHolds(condition: string | undefined, data: Record<string, unknown>): boolean {
-  if (!condition) return true;
-  const eq = condition.match(/^\s*([\w.]+)\s*(==|!=)\s*'([^']*)'\s*$/);
-  if (eq) {
-    const [, key, op, val] = eq;
-    const actual = String(data[key!] ?? "");
-    return op === "==" ? actual === val : actual !== val;
-  }
-  return Boolean(data[condition.trim()]);
-}
+// The engine's own evaluator. The copy that used to stand here shared the embed
+// widget's gap: no numeric form, so a partner's documents never surfaced here.
+const condHolds = evalCondition;
 
 export default function MobileUploadPage() {
   const params = useParams<{ agent: string; cid: string }>();

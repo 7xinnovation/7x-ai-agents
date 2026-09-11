@@ -22,60 +22,12 @@ function journeyFields(journey: Journey): FieldDef[] {
 }
 
 /**
- * Tiny, safe condition evaluator for document `condition` expressions.
- * Supports: `key == 'value'`, `key != 'value'`, `key >= 2` (and < <= > == !=
- * against a number), and `key` (truthy). No code exec.
+ * The condition evaluator now lives in @dialog/config, so the engine, the embed
+ * widget and the mobile upload page all read one implementation. Re-exported
+ * here because that is where everything already imports it from.
  */
-
-/**
- * What a condition compares when it compares a number.
- *
- * An ARRAY counts as its length, which is what makes "partners >= 2" work
- * against a repeating group: the second partner's passport is required when
- * there is a second partner, and the count is the group itself, not a separate
- * field someone has to remember to keep in step with it.
- */
-function numericValue(raw: unknown): number | null {
-  if (Array.isArray(raw)) return raw.length;
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
-  if (typeof raw === "string" && raw.trim() !== "") {
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-export function evalCondition(expr: string | undefined, data: Record<string, unknown>): boolean {
-  if (!expr) return true;
-  const eq = expr.match(/^\s*([\w.]+)\s*(==|!=)\s*'([^']*)'\s*$/);
-  if (eq) {
-    const [, key, op, val] = eq;
-    const actual = String(data[key!] ?? "");
-    return op === "==" ? actual === val : actual !== val;
-  }
-  // Numeric comparison, for requirements that scale with a count -- one passport
-  // and one Emirates ID per partner, where the number of partners is read off
-  // the trade licence rather than fixed in the journey.
-  const num = expr.match(/^\s*([\w.]+)\s*(>=|<=|>|<|==|!=)\s*(-?\d+(?:\.\d+)?)\s*$/);
-  if (num) {
-    const [, key, op, rhs] = num;
-    const actual = numericValue(data[key!]);
-    // A missing or unreadable count is NOT zero. Treating it as zero would drop
-    // every per-partner document the moment extraction failed to find a number,
-    // and the application would look complete with nothing uploaded.
-    if (actual === null) return false;
-    const want = Number(rhs);
-    switch (op) {
-      case ">=": return actual >= want;
-      case "<=": return actual <= want;
-      case ">": return actual > want;
-      case "<": return actual < want;
-      case "==": return actual === want;
-      default: return actual !== want;
-    }
-  }
-  return Boolean(data[expr.trim()]);
-}
+export { evalCondition } from "@dialog/config";
+import { evalCondition } from "@dialog/config";
 
 export interface FieldValidationError {
   key: string;

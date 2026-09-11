@@ -29,7 +29,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import QRCode from "qrcode";
-import { tr, type CaseState, type Locale } from "@dialog/config";
+import { tr, evalCondition, type CaseState, type Locale } from "@dialog/config";
 import { Microphone } from "@phosphor-icons/react";
 import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
@@ -536,20 +536,13 @@ export function Experience({
     }
   }, [editKey, editVal, editBusy, agent.slug]);
 
-  // Mirror of the engine's document `condition` evaluator (key == 'v', key != 'v',
-  // bare-key truthy) so conditional slots only surface once their gate field says so.
+  // The engine's own evaluator, not a copy of it. The copy that used to live
+  // here never handled `partner_count >= 2`, so every per-partner document was
+  // invisible to this component's readiness count while the server counted them
+  // all -- the bar the customer read and the bar the submission enforced were
+  // different numbers.
   const docApplies = useCallback(
-    (condition: string | undefined) => {
-      if (!condition) return true;
-      const data = (caseState?.data ?? {}) as Record<string, unknown>;
-      const eq = condition.match(/^\s*([\w.]+)\s*(==|!=)\s*'([^']*)'\s*$/);
-      if (eq) {
-        const [, key, op, val] = eq;
-        const actual = String(data[key!] ?? "");
-        return op === "==" ? actual === val : actual !== val;
-      }
-      return Boolean(data[condition.trim()]);
-    },
+    (condition: string | undefined) => evalCondition(condition, (caseState?.data ?? {}) as Record<string, unknown>),
     [caseState]
   );
 
@@ -1716,7 +1709,16 @@ export function Experience({
                             </button>
                           </span>
                         ) : (
-                          <span className="dlg-field-value">
+                          // dir="auto" per VALUE, not per panel. EPGL, 11 September:
+                          // "any data available in Arabic should also be extracted
+                          // and displayed correctly". An Arabic company name inside
+                          // an English session inherited the panel's ltr, which puts
+                          // «ش.ذ.م.م» and any bracket or comma on the wrong end of
+                          // the string -- the name is right and reads as gibberish.
+                          // The reverse happens to a Latin trade licence number in
+                          // an Arabic session. Each value is now laid out by its own
+                          // script.
+                          <span className="dlg-field-value" dir="auto">
                             {displayValue(v)}
                             {editableKeys.has(k) ? (
                               // Pencil correction for extracted values (FB-1325).
