@@ -62,6 +62,16 @@ console.log("\nA field can be required only in some applications");
   }
 }
 
+console.log("\nAn auth-free journey cannot have sign-in demanded of it");
+{
+  const tools = readFileSync(new URL("../../../packages/core/src/ai/tools.ts", import.meta.url), "utf8");
+  const block = tools.slice(tools.indexOf('case "request_authentication"'), tools.indexOf('case "request_escalation"'));
+  check("the guard exists", /active\.requiresAuth === false/.test(block));
+  check("...and only fires while a journey is ACTIVE", /const active = findJourney\(agent, state\.journeyKey\)/.test(block) && /active &&/.test(block));
+  check("...and refuses rather than prompting", /isError: true/.test(block) && block.indexOf("active.requiresAuth === false") < block.lastIndexOf('events.push({ type: "auth_required"'));
+  check("the already-signed-in guard is still there", /if \(ctx\.authenticated\)/.test(block));
+}
+
 const envAt = process.argv.indexOf("--env");
 if (envAt !== -1) {
   const { databaseUrlFrom } = await import("./lib/envFile");
@@ -95,6 +105,8 @@ if (envAt !== -1) {
   check("...and the IBAN's destination is named", /added to their workspace/.test(J("new_license").guidance));
   check("identity numbers are not repeated in chat", /IDENTITY NUMBERS ARE NOT REPEATED IN FULL/.test(J("new_license").guidance));
   check("a non-resident is asked for no Emirates ID NUMBER either", /AND NOT THE NUMBER EITHER/.test(J("new_license").guidance));
+  check("signing in is named as optional, not asked for", /SIGNING IN IS OPTIONAL HERE/.test(J("new_license").guidance) && /SIGNING IN IS OPTIONAL HERE/.test(J("renewal").guidance));
+  check("...and the journeys really are auth-free", J("new_license").requiresAuth === false && J("renewal").requiresAuth === false);
 
   const moa = docs(J("new_license")).find((d: any) => d.key === "moa");
   check("the MOA is optional", moa?.requirement === "optional", moa?.requirement);

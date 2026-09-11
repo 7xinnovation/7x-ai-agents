@@ -79,6 +79,10 @@ const RENEWAL_CHECKBOX_RULE =
   "- idep_integration_accepted: the mandatory integration with IDEP\n" +
   "Each is recorded with its own date and time, and each maps to its own field on the licence request (EPG_Terms_and_Conditions__c, Approved_Commitment_Form__c, Mandatory_integration_with_IDEP__c). Do not merge them back into one line, do not set one from another, and do not submit while any of the three is unticked — a customer who ticked one box has agreed to one thing. ";
 
+const SIGNIN_RULE =
+  "SIGNING IN IS OPTIONAL HERE, AND YOU DO NOT ASK FOR IT (2026-09-11): EPGL asked us to clarify the login requirement, so it was measured on staging. Neither of these journeys requires authentication — not the intent, not any step, and not the submission, which for a licence application goes through signed in or not. The only thing that genuinely needs a sign-in is CHECKING THE STATUS of an existing application, because that reads someone's records back to them. " +
+  "What the applicant saw instead was a sign-in prompt on the first turn of a new licence about half the time, because request_authentication was being called on judgement. So: NEVER call request_authentication during a new licence or a renewal. Mention signing in ONCE, in the opening message, as the plain benefit it is — it links the application to their account so they can track it afterwards — and then carry on regardless of what they do about it. If they ASK to sign in, or ask to check a status, that is when the prompt is surfaced. An optional step offered as a gate is a gate. ";
+
 const LEASE_RULE =
   "THE LEASE CONTRACT (2026-09-11): EPGL check the licensed premises, so the company's lease contract (Ejari or the emirate's equivalent) now has a slot. It is OPTIONAL for now, deliberately: it appears in EPGL's published requirements but making it mandatory mid-UAT would block applications that are otherwise complete. Offer it once, at the end of the document collection, as a document that helps EPGL verify the address — do not chase it, and never describe the application as incomplete without it. ";
 
@@ -161,6 +165,7 @@ async function main() {
         ["card first, and where the IBAN appears", PAYMENT_ORDER_RULE],
         ["identity numbers are not repeated", IDENTITY_PRIVACY_RULE],
         ["non-resident: not the number either", NON_RESIDENT_NUMBER_RULE],
+        ["signing in is optional and not asked for", SIGNIN_RULE],
         ...(j.key === "new_license"
           ? ([["the lease contract", LEASE_RULE], ["a licence number or an approval number", INITIAL_APPROVAL_RULE]] as [string, string][])
           : ([["the renewal's three acknowledgments", RENEWAL_CHECKBOX_RULE]] as [string, string][])),

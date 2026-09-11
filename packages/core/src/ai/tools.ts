@@ -516,6 +516,33 @@ export async function dispatchTool(
           isError: true,
         };
       }
+      // A JOURNEY THAT DOES NOT REQUIRE SIGN-IN CANNOT HAVE IT DEMANDED OF IT.
+      //
+      // EPGL asked us to clarify the login requirement for a new licence. There
+      // is not one: neither the intent, nor any step, nor the submission gates on
+      // authentication -- a licence application goes through signed in or not.
+      // What the applicant met was a sign-in prompt on the first turn, in about
+      // one conversation in three, because this tool is called on the model's
+      // judgement and its judgement varied. Guidance did not settle it; three
+      // identical openings produced two clean runs and one prompt.
+      //
+      // Scoped as narrowly as it can be: only when a journey is ACTIVE and
+      // explicitly declares requiresAuth === false. With no journey in progress
+      // the prompt still surfaces -- that is the status-inquiry path, which
+      // genuinely reads someone's records back to them -- and an auth-required
+      // journey is untouched. The customer can still sign in whenever they like
+      // from the header, so nobody is stranded by this; they are only no longer
+      // asked to.
+      const active = findJourney(agent, state.journeyKey);
+      if (active && active.requiresAuth === false) {
+        return {
+          result:
+            "IGNORE THIS CALL: this journey does not require the customer to sign in — not to start it, not to pay, and not to submit. Do not surface a sign-in prompt and do not describe signing in as a requirement. Mention it at most once as optional (it links the application to their account so they can track it later) and carry on either way.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       events.push({ type: "auth_required", reason: String(input.reason ?? "") });
       return { result: "Authentication prompt surfaced to the user.", state, events };
     }
