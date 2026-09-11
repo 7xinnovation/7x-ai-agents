@@ -221,6 +221,175 @@ unknown form is not a sole establishment.
 
 ---
 
+# Part two — the consolidated testing feedback
+
+Everything below is from *Agentic AI Testing Feedback — Consolidated 11 Sept*,
+and is on staging alongside the eight above. **Six items are not done and the
+reasons are at the end** — they are decisions rather than changes.
+
+---
+
+## The fee is AED 150,000
+
+Six knowledge-base answers said 100,000, in both languages, against a gateway
+that charges 150,000. An applicant quoted one figure and charged another finds
+out at the payment page. All six now say 150,000; the 10% levy on leviable
+services and the AED 2 per shipment are separate charges and are untouched.
+
+**Test** — ask *"what does the licence cost?"* in both languages, and again from
+inside an application.
+
+## One business day, eight working hours
+
+**Test** — ask *"how long does it take?"*. Expect *"1 business day (8 working
+hours)"*, and «خلال يوم عمل واحد (8 ساعات عمل)» in Arabic.
+
+## The login requirement — there isn't one
+
+You asked us to clarify it. Measured: **neither journey requires
+authentication** — not the intent, not any step, and not the submission. A
+licence application goes through signed in or not. The only thing that genuinely
+needs a sign-in is **checking the status of an existing application**, which
+reads someone's records back to them.
+
+What you were seeing was a sign-in prompt on the first turn of a new licence,
+**about one conversation in three**, because it was raised on the assistant's
+own judgement and its judgement varied. Writing the rule into the guidance was
+not enough — three identical openings gave two clean runs and one prompt — so a
+journey that does not require sign-in can no longer have it demanded. Five
+consecutive runs afterwards, all clean.
+
+**Test** — start a new licence five or six times. **Expect no sign-in prompt at
+any point**, including at submission. Signing in stays available from the header
+and is mentioned once as optional (it links the application to your account so
+you can track it).
+
+## A trade licence *or* an initial approval
+
+Your screenshot showed *Initial approval number 1777380* in the details and
+**Trade license number** still unticked in Submission Readiness — a requirement
+that applicant could never meet.
+
+The trade licence number is now required **only while the initial approval
+number is empty**. Two fields, one of which bites only when the other is blank.
+
+**Test** — apply with an initial approval and no trade licence. Expect readiness
+to reach complete without a trade licence number, and the assistant to say the
+licence number is not needed until the licence is issued.
+
+## Identity numbers are masked
+
+`784-1990-4193131-4` now renders as `•••-••••-••••131-4`.
+
+The tension is worth naming: the panel exists so you can **check** what was read
+off your documents, and a value masked to nothing cannot be checked. Four
+characters is enough to tell your own card from a misread digit and not enough
+to be an identity document. The assistant confirms them the same way in chat —
+*"the Emirates ID ending 131-4"*.
+
+**This is presentation only.** The application holds the real value and EPGL
+receive it in full. The correction pencil edits the real one, not the mask.
+
+## The MOA is optional, and the lease contract has a slot
+
+- **MOA** — optional everywhere now, and still absent entirely for a sole
+  establishment (it is not "skippable" there, it does not exist).
+- **Lease contract** — added to both journeys, **optional**, offered once at the
+  end of document collection for the location check.
+
+> The lease contract is optional **deliberately**. It is in your published
+> requirements, but making it mandatory mid-UAT blocks applications that are
+> otherwise complete. One word to change if you want it enforced — tell us.
+
+## Non-resident partners: not the number either
+
+Yesterday's change dropped the Emirates ID **document**. It now drops the
+**number** as well — not asked for, not counted, and omitted from the submission
+rather than sent empty. Same for the owner, when the owner is the non-resident.
+
+## The renewal's three acknowledgments
+
+You saw one checkbox where three were expected. There are three now — the terms
+and conditions, the approved commitment form, and the mandatory IDEP integration
+— each ticked separately, each timestamped separately, each mapped to its own
+field (`EPG_Terms_and_Conditions__c`, `Approved_Commitment_Form__c`,
+`Mandatory_integration_with_IDEP__c`). The Declaration & Undertaking is the
+fourth line and was always separate.
+
+**Test** — reach the end of a renewal. Expect four tick-boxes, and submission
+refused while any of them is unticked.
+
+## The card comes first
+
+Both options are always offered, but they are not equivalent: the card has the
+licence issued the **same day**. So the card is presented first, as the
+recommended route, with the Virtual IBAN second — and a customer who picks the
+transfer is now told, in the message confirming submission, that **the Virtual
+IBAN will be added to their workspace** as well as emailed.
+
+## "Ask a question" no longer starts an application
+
+Pressing **Ask a question** and then saying *"applying for a new licence"* was
+opening the journey and asking for a name, an email and a document. That was a
+topic, not a decision.
+
+**Test** — Ask a question → "applying for a new licence". Expect a short menu
+(*what documents are needed / what are the steps / how long / what it costs*),
+an answer, and then an explicit *"shall I start the application?"*. Pressing the
+opening **Apply for Postal Activity License** button still starts it straight
+away, as it should.
+
+## Language consistency
+
+Your first screenshot has an Arabic panel beside an English conversation. The
+widget now follows the language the customer is actually writing in, both ways —
+verified on EPGL today: an English message on an Arabic page switches the whole
+interface to English, an Arabic message on an English page switches it to
+Arabic, and a bare "ok" changes nothing either way.
+
+---
+
+## Six things we did not change, and why
+
+1. **Save and resume.** A case already survives a page reload in the same
+   browser. Resuming from another device, or next week, means knowing who the
+   applicant is — which runs straight into the login question above, where the
+   answer is currently "no sign-in required". Tell us which you want and we will
+   build to it; it is a feature, not a wording change.
+
+2. **New licence: review then pay. Renewal: pay then review.** This reverses the
+   order the whole submission is built around, and it is the same question still
+   open with Salesforce since 9 September — the reason `Amount (Paid)` reads
+   0.00 on a paid request. We built submit-and-pay-together from your *Payment
+   Process with Agentic* map. **Please confirm this in writing and we will
+   change it**, but not on a bullet in a feedback document while the Salesforce
+   side says something else.
+
+3. **"The requirements in the journey differ from the website."** We need the
+   website's list beside ours to align them. Send the page or the list and this
+   is quick.
+
+4. **Uploads: all three at once on phone, one at a time on laptop.** The
+   one-at-a-time rule in chat is **FB-1565 — your own request from 10 August**.
+   The panel on the right already lets you upload any slot at any time on a
+   laptop. Which behaviour do you want in chat? We will not reverse a rule you
+   asked for without you asking.
+
+5. **"A new application with the same details gets into a loop."** We have not
+   reproduced this. Send the **conversation id** and we will — there is a
+   duplicate-check step before submission and it is the likely culprit, but
+   changing anything around it blind risks letting real duplicates through.
+
+6. **Consolidating 11/18 into four stages** (Data, Documents, Review, Payment &
+   Issuance) is a panel redesign rather than a content change, and is not in this
+   batch. Noted and queued.
+
+> One number will move on its own: the readiness total. See the note below about
+> the requirement count having been wrong — expect it to jump on a multi-partner
+> application. That is it becoming correct.
+
+---
+
 ## Found while testing, not on your list
 
 **The readiness bar was counting the wrong number.** The requirement rules are
@@ -235,9 +404,8 @@ application — that is it becoming correct, not a new requirement.
 
 **Two things for you to settle**, both pre-existing and neither changed by us:
 
-1. **The fee.** Six knowledge-base answers say AED 100,000. Production charges
-   AED 150,000. One of them is out of date, and it is your published figure in
-   your own FAQ, so we have not touched it.
+1. **The fee.** Settled on 11 September — the figure is **AED 150,000** and all
+   six knowledge-base answers now say so.
 2. **When payment is taken.** The FAQ says the payment request comes *after*
    approval. The assistant takes payment *at submission*, because your *Payment
    Process with Agentic* map shows submit-and-pay in one step. This is the same
