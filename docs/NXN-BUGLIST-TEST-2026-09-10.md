@@ -264,6 +264,99 @@ offered for an address already on file, that is worth reporting.
 
 ---
 
+# 13 September — the voice, and a question we already knew the answer to
+
+**On staging:** https://7xagents.7x-lab.com/embed/nxn-dialog
+
+---
+
+## The random tone under the voice
+
+**It was ours, not the voice model's.** I pulled the raw audio Azure generates
+for a normal reply and measured it: no DC offset, no clipping, and no narrowband
+component anywhere in the quietest part of it. Nothing was generating a tone —
+we were manufacturing one on the way to the speaker.
+
+The voice arrives as PCM at **24 kHz** in small chunks. Each chunk was made into
+its own audio buffer and played in a context running at the **device's** rate,
+which is 48 kHz on almost everything. The browser resamples a buffer like that,
+and it resamples each one **independently**, knowing nothing about the samples
+either side of it — so every chunk boundary picked up a small discontinuity. The
+boundaries arrive at a steady rate. A click nobody would notice on its own,
+repeated forty times a second, is a buzz sitting under the speech.
+
+The audio context is now opened at the audio's own rate, so nothing is
+resampled. A network stall no longer splices the next chunk onto the playhead
+either — it restarts with a small lead, so a gap sounds like a gap.
+
+**Test** — turn voice on and go through a normal rental, several replies long,
+on a phone and on a laptop. Expect clean speech with no buzz, hum or click under
+it, and no click at the joins between sentences.
+
+> If any tone remains, it is worth one more report with the **device and
+> browser**: a browser that refuses to open an audio context at 24 kHz falls
+> back to the old path, and knowing which one would tell us immediately.
+
+## "Dot dot dot"
+
+The voice was reading our own punctuation back to you. A fenced block — a
+summary card, a row of buttons — was being replaced with `". "` before the text
+was spoken, so a reply with a card between two sentences became
+
+> "Your PO Box is rented. . . Would you like a receipt?"
+
+and a voice instructed to read the text **exactly as written** read exactly
+that.
+
+Runs of dots now collapse to a single full stop, ellipses with them, and
+orphaned punctuation is dropped before the text ever reaches the voice. A bare
+URL is spoken as **"the link below"** («الرابط أدناه») rather than spelled out
+character by character — and not simply deleted, which would have turned "read
+more at https://…" into "read more at now". The voice is also told directly that
+punctuation is pacing and never a word.
+
+**Test** — with voice on, reach a reply that carries a summary card, then one
+with a link (the terms and conditions line), then one in Arabic.
+
+**Expect** no "dot", no "asterisk", no "dash", no spelled-out web address, and no
+stumble where a card sits between two sentences.
+
+---
+
+## "Who is renewing?" asked of a signed-in customer
+
+You reported this on **8 September** and it was fixed on 8 September. You have
+reported it again today, and it had not regressed — **it had never once run.**
+
+The rule was: if the customer is signed in and the box is on their own account,
+do not ask, record "The owner", move on. It looked for the box number **in the
+API call being made** — and `GetRenewedByOptions` is a GET with **no
+parameters**. So the box was always unknown, the check fell straight through,
+and you were offered five descriptions of yourself with the right one among
+them. The audit log has zero records of that rule firing in five days, against
+renewals that reached payment.
+
+The box now comes from the **application**, which has known it since you typed
+it, several turns and a price quote earlier.
+
+**Test**
+1. Sign in with UAE PASS.
+2. Renew a box that is **on your own account**, through to the summary.
+3. **Expect never to be asked who is renewing.** It should be recorded as *The
+   owner* / *المالك* without a question.
+
+**Must still be asked** — these are real questions, not noise:
+- a **guest** renewal (a box number typed without signing in);
+- a signed-in customer renewing a box that is **not** on their account;
+- anyone who has said they are renewing on someone else's behalf. If you tell it
+  *"I'm renewing for my father"*, it should take your word for it and not ask you
+  to confirm a second time.
+
+**And if it asks when it should not**, the reason is now recorded against the
+conversation — guest, no box, ownership lookup failed, or not your box. Send the
+**conversation id** and the answer is one query rather than five days.
+
+---
 ## What to send me if something fails
 
 The **conversation id** is enough — everything below is queryable from it:
