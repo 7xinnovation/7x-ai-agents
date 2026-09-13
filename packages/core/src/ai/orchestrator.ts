@@ -508,6 +508,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           userRef: input.userRef,
           locale,
           intent,
+          userMessage: input.userMessage,
           authoritativeAmount: input.authoritativeAmount?.() ?? null,
           holdBackedSaveTools: input.holdBackedSaveTools,
           holdPresent: input.holdPresent?.() ?? false,

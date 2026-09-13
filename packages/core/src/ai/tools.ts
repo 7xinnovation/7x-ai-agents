@@ -126,6 +126,28 @@ export type ToolEvent =
   | { type: "lookup"; kind: string }
   | { type: "submitted"; reference: string };
 
+/**
+ * Did the customer say a partner is outside the UAE?
+ *
+ * Deliberately generous about HOW they say it and strict about whether they did.
+ * The button we offer sends its own label, so that case is exact; the rest is
+ * for someone typing it themselves, in either language.
+ */
+export function saysNonResident(message: string | undefined): boolean {
+  const m = String(message ?? "").toLowerCase();
+  if (!m) return false;
+  return (
+    /\bnon[- ]?resident\b/.test(m) ||
+    /\b(lives?|living|based|resides?|residing)\s+(outside|abroad|overseas)/.test(m) ||
+    /\boutside\s+(the\s+)?(uae|country|emirates)\b/.test(m) ||
+    /\b(abroad|overseas)\b/.test(m) ||
+    /\b(does\s*n[o']?t|doesn't|has\s+no|no)\s+(have\s+)?(an?\s+)?emirates\s*id\b/.test(m) ||
+    /غير\s*مقيم/.test(m) ||
+    /خارج\s*(الدولة|الإمارات|البلاد)/.test(m) ||
+    /لا\s*(يملك|يوجد|توجد|تملك)\s*(لديه\s*)?هوية/.test(m)
+  );
+}
+
 export interface DispatchInput {
   agent: AgentDefinition;
   state: CaseState;
@@ -137,6 +159,13 @@ export interface DispatchInput {
   caseId: string;
   // Pre-turn intent classification, for confidence gating (PRD AI-governance).
   intent?: { intent: string; confidence: number };
+  /**
+   * What the customer actually said this turn.
+   *
+   * Used by exactly one guard, and only to answer "did they say this, or did we
+   * decide it for them". Never for routing, never for content.
+   */
+  userMessage?: string;
   /**
    * A total the BACKEND has committed to for this transaction — the minimumAmount
    * on an Emirates Post hold. It outranks both the definition's price and the
@@ -445,6 +474,41 @@ export async function dispatchTool(
 
     case "collect_field": {
       const fieldKey = String(input.key);
+      /**
+       * A PARTNER IS NOT NON-RESIDENT BECAUSE OF THEIR PASSPORT.
+       *
+       * "Non Resident" waives the Emirates ID, so it is the one value in this
+       * journey that REMOVES a mandatory document. EPGL asked for it on
+       * 11 September and the guidance that came with it said, in capitals, not
+       * to infer it from nationality — most UAE residents hold a foreign
+       * passport.
+       *
+       * On the first full run afterwards the model marked a British partner
+       * "Non Resident" anyway, and the application submitted without her
+       * Emirates ID. Nobody had said she lives abroad.
+       *
+       * So the value has to come from the CUSTOMER. They set it by answering the
+       * question — pressing "This partner lives outside the UAE", or saying it
+       * in their own words — and this checks that they did. Re-recording a value
+       * already on the case is allowed, so a correction elsewhere in the same
+       * turn does not trip over it.
+       *
+       * The refusal is not silent: the model is told to ask, which is what it
+       * should have done.
+       */
+      if (/^partner_\d+_residence$/.test(fieldKey) && String(input.value ?? "").toLowerCase() === "non resident") {
+        const already = String(state.data[fieldKey] ?? "").toLowerCase() === "non resident";
+        if (!already && !saysNonResident(ctx.userMessage)) {
+          return {
+            result:
+              "NOT RECORDED. Only the customer can say a partner lives outside the UAE — a foreign passport does not make somebody a non-resident, and most UAE residents hold one. " +
+              "Ask them, once, with three choices: upload the Emirates ID, type the number, or \"this partner lives outside the UAE\". Record this only after they have chosen the third.",
+            state,
+            events,
+            isError: true,
+          };
+        }
+      }
       // Checked BEFORE the write, while the previous value is still there.
       const contradicts = licenceContradiction(state, fieldKey, input.value);
       const { state: next, error } = setField(agent, state, fieldKey, input.value);
