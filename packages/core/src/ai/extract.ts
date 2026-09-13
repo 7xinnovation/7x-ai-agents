@@ -64,7 +64,8 @@ export const DOC_TYPE_LABELS: Record<DocType, { en: string; ar: string }> = {
   other: { en: "Unrecognised document", ar: "مستند غير معروف" },
 };
 
-function fieldsForExtraction(agent: AgentDefinition, state: CaseState, locale: Locale): { key: string; desc: string; type: string; options?: string[] }[] {
+/** Which journey fields a document may fill. Exported so the exclusions are testable. */
+export function extractionFieldsFor(agent: AgentDefinition, state: CaseState, locale: Locale): { key: string; desc: string; type: string; options?: string[] }[] {
   const journey = findJourney(agent, state.journeyKey);
   if (!journey) return [];
   const out: { key: string; desc: string; type: string; options?: string[] }[] = [];
@@ -74,6 +75,34 @@ function fieldsForExtraction(agent: AgentDefinition, state: CaseState, locale: L
       // Consent/boolean fields (and their server-stamped timestamps) are user
       // decisions, not document facts — skip.
       if (f.type === "boolean" || /(_consent|_accepted|_acknowledged)(_at)?$/.test(f.key)) continue;
+      /**
+       * A PARTNER'S RESIDENCE IS NOT PRINTED ON ANYTHING WE ARE SENT.
+       *
+       * EPGL asked for a non-resident option on 11 September, and it waives that
+       * partner's Emirates ID — the only value in the journey that removes a
+       * mandatory document. Adding the field put it in front of this extractor
+       * as `partner_3_residence (one of: Citizen, Resident, Non Resident)`, and
+       * a passport was enough for it: two consecutive end-to-end runs marked a
+       * British partner Non Resident and submitted without her Emirates ID
+       * (LR-37340 and LR-37341, 13 September).
+       *
+       * A guard on collect_field did not catch it, because this path does not go
+       * through collect_field — extracted values are written straight to the
+       * case. And no correct version of this exists: a passport shows
+       * nationality, an MOA shows a shareholding, and neither states whether
+       * somebody lives in the UAE. Most UAE residents hold a foreign passport.
+       *
+       * So it is not offered for extraction at all. It comes from the customer,
+       * through the question, or it stays empty and the Emirates ID stays
+       * required — which is the safe direction.
+       */
+      if (/_residence$/.test(f.key)) continue;
+      /**
+       * And how they want to pay, for the same reason: the customer chooses it,
+       * no document can know it, and reading it wrong sends them down the wrong
+       * payment branch.
+       */
+      if (f.key === "payment_method") continue;
       out.push({
         key: f.key,
         desc: label(f),
@@ -117,7 +146,7 @@ export async function extractFieldsFromDocument(input: {
    *  knows what was REQUESTED — used for classification, never to bias reading. */
   expected?: { key: string; label: string };
 }): Promise<ExtractionResult> {
-  const fields = fieldsForExtraction(input.agent, input.state, input.locale);
+  const fields = extractionFieldsFor(input.agent, input.state, input.locale);
   if (fields.length === 0) return { values: {} };
 
   const ext = (input.fileName.split(".").pop() ?? "").toLowerCase();

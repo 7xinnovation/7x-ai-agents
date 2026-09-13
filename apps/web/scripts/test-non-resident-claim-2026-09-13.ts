@@ -62,5 +62,36 @@ console.log("\nThe guard itself");
   check("...and is declared on the input", /userMessage\?: string;/.test(src));
 }
 
+console.log("\nAnd a document is never asked for it either");
+{
+  const ex = readFileSync(new URL("../../../packages/core/src/ai/extract.ts", import.meta.url), "utf8");
+  check("residence is not offered to the extractor", /if \(\/_residence\$\/\.test\(f\.key\)\) continue;/.test(ex));
+  check("...nor is the payment method", /if \(f\.key === "payment_method"\) continue;/.test(ex));
+  check("consent fields are still excluded as before", /f\.type === "boolean" \|\|/.test(ex));
+
+  // The real selector, against a journey shaped like EPGL's.
+  const { extractionFieldsFor } = await import("@dialog/core");
+  const journey = {
+    key: "new_license",
+    steps: [{
+      key: "company_details",
+      fields: [
+        { key: "company_name", label: { en: "Company name" }, type: "text", validation: { required: true } },
+        { key: "partner_1_nationality", label: { en: "Partner 1 nationality" }, type: "text", validation: { required: false } },
+        { key: "partner_1_residence", label: { en: "Partner 1 residence" }, type: "enum", options: [{ value: "Citizen", label: { en: "Citizen" } }], validation: { required: false } },
+        { key: "payment_method", label: { en: "Payment method" }, type: "enum", options: [{ value: "viban", label: { en: "IBAN" } }], validation: { required: false } },
+        { key: "declaration_accepted", label: { en: "Declaration" }, type: "boolean", validation: { required: true } },
+      ],
+      documents: [],
+    }],
+  };
+  const keys = extractionFieldsFor({ journeys: [journey] } as never, { journeyKey: "new_license" } as never, "en").map((f: { key: string }) => f.key);
+  check("the company name is still extracted", keys.includes("company_name"), keys);
+  check("nationality is still extracted — it IS printed", keys.includes("partner_1_nationality"), keys);
+  check("residence is not", !keys.includes("partner_1_residence"), keys);
+  check("the payment method is not", !keys.includes("payment_method"), keys);
+  check("the declaration is not", !keys.includes("declaration_accepted"), keys);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
