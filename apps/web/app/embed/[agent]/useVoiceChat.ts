@@ -17,14 +17,54 @@ import type { Locale } from "@dialog/config";
  */
 interface Msg { role: string; content: string }
 
-function forSpeech(md: string): string {
-  return md
-    .replace(/```[\s\S]*?```/g, ". ")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[*_`#>|]/g, " ")
-    .replace(/^\s*[-•]\s*/gm, ", ")
-    .replace(/\s+/g, " ")
-    .trim();
+/**
+ * The reply, as something to say out loud rather than something to render.
+ *
+ * Emirates Post, 13 September: "sometimes the agent mentions the dot. For
+ * example if the sentence says pobox is rented... it mentions dot dot dot."
+ *
+ * It was reading our own punctuation back. A fenced block — a ```summary card, a
+ * ```buttons list — was being replaced by ". ", so a reply that put a card
+ * between two sentences became "...rented. . . Which would you like?", and a
+ * voice told to read the text EXACTLY as written read exactly that. The same
+ * went for an ellipsis the model wrote itself, for the hyphens left behind when
+ * markdown was stripped, and for a bare URL, which is unspeakable in any voice.
+ *
+ * So punctuation is now pacing rather than text: runs of dots collapse to one
+ * full stop, orphaned punctuation goes, and anything that is not words is
+ * removed before the sentence reaches the voice rather than being explained to
+ * it afterwards.
+ */
+export function forSpeech(md: string, locale: "en" | "ar" = "en"): string {
+  return (
+    md
+      // A fenced block is a card, not a sentence. It becomes a pause.
+      .replace(/```[\s\S]*?```/g, " . ")
+      // Link text is speakable; the URL behind it is not.
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+      // Not deleted outright: "read more at https://..." would become "read more
+      // at now", which is worse than saying where it is.
+      .replace(/\bhttps?:\/\/\S+/gi, locale === "ar" ? " الرابط أدناه " : " the link below ")
+      .replace(/\bwww\.\S+/gi, locale === "ar" ? " الرابط أدناه " : " the link below ")
+      // Markdown furniture.
+      .replace(/[*_`#>|~]/g, " ")
+      .replace(/^\s*[-•]\s*/gm, ", ")
+      // A table's row of dashes, and the em-dashes markdown leaves behind.
+      .replace(/[-–—]{2,}/g, " ")
+      .replace(/\s[-–—]\s/g, ", ")
+      // THE REPORTED BUG: an ellipsis, or the dots our own block substitution
+      // leaves behind, read aloud as "dot dot dot".
+      .replace(/…/g, ". ")
+      .replace(/(?:\s*\.\s*){2,}/g, ". ")
+      .replace(/\s+/g, " ")
+      // Punctuation with no words left around it.
+      .replace(/\s+([.,!?؟،])/g, "$1")
+      .replace(/^[\s.,;:،؛]+/, "")
+      .replace(/([.,!?؟،])\1+/g, "$1")
+      .trim()
+      // A reply that was nothing but a card has nothing to say.
+      .replace(/^[.\s,]*$/, "")
+  );
 }
 
 function pickMime(): string {
@@ -140,8 +180,31 @@ export function useVoiceChat(opts: {
     const AC: typeof AudioContext | undefined =
       (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!AC) return false;
+    /**
+     * THE RANDOM TONE.
+     *
+     * Emirates Post, 13 September: "there is a random tone happening during the
+     * audio responses."
+     *
+     * The voice arrives as PCM16 at 24 kHz in small chunks, and each chunk was
+     * turned into its own AudioBuffer declared at 24 kHz and played in a context
+     * running at the device's native rate — 48 kHz on almost everything. The Web
+     * Audio API resamples such a buffer, and it resamples EACH ONE INDEPENDENTLY,
+     * with no knowledge of the samples either side of it. Every chunk boundary
+     * therefore gets a small discontinuity, and the boundaries arrive at a steady
+     * rate, so what should be a click you would never notice becomes a periodic
+     * buzz sitting under the speech. A tone.
+     *
+     * So the context is opened AT the audio's own rate and nothing is resampled.
+     * Browsers that refuse the hint fall back to the old behaviour, which is no
+     * worse than today; `sampleRate` below is read back rather than assumed.
+     */
     let ctx = audioCtxRef.current;
-    if (!ctx) { ctx = new AC(); audioCtxRef.current = ctx; }
+    if (!ctx) {
+      try { ctx = new AC({ sampleRate: 24000 }); }
+      catch { ctx = new AC(); }
+      audioCtxRef.current = ctx;
+    }
     try { if (ctx.state === "suspended") await ctx.resume(); } catch { /* ignore */ }
 
     const controller = new AbortController();
@@ -178,6 +241,9 @@ export function useVoiceChat(opts: {
         if (usable < bytes.length) carry = bytes.slice(usable);
         if (usable <= 0) continue;
         const n = usable / 2;
+        // 24 kHz because that is what the bytes ARE. When the context runs at
+        // the same rate -- which is why it is opened that way above -- the
+        // buffer is played sample for sample and nothing is resampled.
         const buf = ctx.createBuffer(1, n, 24000);
         const ch = buf.getChannelData(0);
         const dv = new DataView(bytes.buffer, bytes.byteOffset, usable);
@@ -185,16 +251,22 @@ export function useVoiceChat(opts: {
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(gain);
-        const startAt = Math.max(scheduled, ctx.currentTime);
+        // An underrun -- the network stalling for longer than the audio we have
+        // buffered -- used to butt the next chunk straight onto the playhead,
+        // joining two unrelated waveforms mid-cycle. Restart with the same small
+        // lead the stream opened with instead, so a gap sounds like a gap.
+        const startAt = scheduled >= ctx.currentTime ? scheduled : ctx.currentTime + 0.03;
         try { src.start(startAt); } catch { /* ctx closed */ }
         ttsSourcesRef.current.push(src);
         scheduled = startAt + buf.duration;
         played = true;
       }
     } catch { /* aborted or stream error */ }
-    if (!played) return false;
+    if (!played) { try { gain.disconnect(); } catch { /* ignore */ } return false; }
     const remaining = Math.max(0, scheduled - ctx.currentTime);
     await new Promise((r) => setTimeout(r, remaining * 1000 + 80));
+    // One gain node per reply, and the context outlives the reply.
+    try { gain.disconnect(); } catch { /* ignore */ }
     return true;
   }, []);
 
@@ -212,7 +284,7 @@ export function useVoiceChat(opts: {
   }, [locale]);
 
   const speak = useCallback((text: string) => {
-    const clean = forSpeech(text);
+    const clean = forSpeech(text, locale === "ar" ? "ar" : "en");
     if (!clean) { listenOnce(); return; }
     stopRecognition();
     speakingRef.current = true;
@@ -231,7 +303,7 @@ export function useVoiceChat(opts: {
         else done();
       })
       .catch(() => { if (activeRef.current) speakBrowser(clean, done); else done(); });
-  }, [listenOnce, stopRecognition, speakRealtime, speakBrowser]);
+  }, [listenOnce, stopRecognition, speakRealtime, speakBrowser, locale]);
 
   const cleanup = useCallback(() => {
     stopRecognition();

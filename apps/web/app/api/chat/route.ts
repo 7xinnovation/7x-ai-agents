@@ -670,6 +670,10 @@ export async function POST(req: NextRequest) {
 
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
     ownedBoxes,
+    // A renewal calls the box po_box_number; a rental calls it box_number. Both
+    // are the box the conversation is about, which is what the guards need and
+    // what a parameterless tool call cannot tell them.
+    caseBoxNumber: () => str(liveState.data.po_box_number) ?? str(liveState.data.box_number) ?? null,
     blockUnpaidSaves: unpaidSaveTools.length ? { toolSuffixes: unpaidSaveTools, paid: paidAlready } : undefined,
     // So a backend refusal is recoverable afterwards, not only in this turn's context.
     conversationId: session.conversationId,

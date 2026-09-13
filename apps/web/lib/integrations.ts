@@ -866,6 +866,15 @@ export async function buildApiTools(
      * lib/boxOwnership.
      */
     ownedBoxes?: () => Promise<string[] | null>;
+    /**
+     * The box THIS APPLICATION is about, from the live case.
+     *
+     * Not the same question as "which box does this tool call name". Some of
+     * Emirates Post's calls name none — GetRenewedByOptions takes no parameters
+     * at all — and the guards that need to know which box we are on were reading
+     * the tool's own input, so on those calls they read nothing and did nothing.
+     */
+    caseBoxNumber?: () => string | null;
     /** uniqueBoxIds offered in an earlier turn; the customer picks in a later one. */
     initialOfferedBoxIds?: string[];
     /** uniqueBoxId -> officeId, and printed number -> uniqueBoxId, from the case. */
@@ -2784,13 +2793,51 @@ export async function buildApiTools(
            * spoofed by typing a box number: it is the same list the management
            * gate uses.
            */
-          const askedBox = boxNumberIn(input);
+          /**
+           * WHY THIS NEVER FIRED.
+           *
+           * The rule was written on 8 September and Emirates Post reported the
+           * same bug again on 13 September, from a UAE PASS session renewing
+           * their own box. It had not regressed. It had never once run: the box
+           * number was read from `input`, and GetRenewedByOptions is a GET with
+           * NO PARAMETERS, so `askedBox` was always undefined and the guard fell
+           * straight through to asking. Zero `renewed_by_assumed_owner` rows in
+           * the audit log in five days, against two renewals that reached the
+           * save — which is the shape this class of mistake keeps taking here:
+           * a fact read from the one place that cannot hold it.
+           *
+           * The case knows the box. It has known it since the customer typed it,
+           * several turns and a price quote earlier.
+           */
+          const askedBox = boxNumberIn(input) ?? (opts.caseBoxNumber?.() ?? undefined);
           const owned = opts.ownedBoxes ? await opts.ownedBoxes().catch(() => null) : null;
           const theirs =
             Boolean(opts.authenticated) &&
             Boolean(askedBox) &&
             Array.isArray(owned) &&
             owned.some((b) => String(b).replace(/\D/g, "") === String(askedBox).replace(/\D/g, ""));
+          if (!theirs) {
+            // Say WHY, so the next report takes an hour rather than five days.
+            void audit({
+              agentId,
+              conversationId: opts.conversationId,
+              actor: "system",
+              action: "renewed_by_asked",
+              payload: {
+                tool: toolName,
+                box: askedBox ?? null,
+                authenticated: Boolean(opts.authenticated),
+                ownedKnown: Array.isArray(owned) ? owned.length : null,
+                why: !opts.authenticated
+                  ? "guest"
+                  : !askedBox
+                    ? "no box on the case or in the call"
+                    : owned === null
+                      ? "owned-box lookup failed"
+                      : "box is not on their account",
+              },
+            }).catch(() => {});
+          }
           if (theirs) {
             void audit({
               agentId,
