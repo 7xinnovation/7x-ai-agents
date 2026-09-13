@@ -707,13 +707,24 @@ export function withEpglRequestFields(
    * within one working day. The request carries a status saying it is waiting
    * for money rather than waiting for us.
    *
-   * The value is env-settable because EPG_Request_Status__c is a picklist and
-   * only two of its values have ever been seen in the wild -- "Payment Verified"
-   * and "Under document review". An unaccepted value fails the WHOLE composite
-   * under allOrNone, so if EPGL name a different string it is a setting to
-   * change rather than a deploy, and EPGL_VIBAN_STATUS="" turns it off entirely.
+   * WE NO LONGER STATE THE STATUS. We asked EPGL on 9 September what
+   * EPG_Request_Status__c should read between submission and the transfer
+   * arriving, because "Pending Payment" and "Virtual Iban Approved" both exist
+   * on the picklist and we were guessing between them. They answered on
+   * 11 September with the whole progression, and every step of it is theirs:
+   *
+   *   Under document review -> Documents approved -> Virtual Iban Approved
+   *   -> Payment Verified (once we send the payment notification) -> Closed
+   *
+   * "Pending Payment", which is what we had been setting, appears nowhere in it.
+   * A request stamped with a status their own process never assigns is a request
+   * their process does not know how to move, so the default is now to say
+   * nothing and let their handler drive. EPGL_VIBAN_STATUS still exists and
+   * still overrides, so if they ask for a value it is a setting rather than a
+   * deploy -- and an unaccepted value would fail the WHOLE composite under
+   * allOrNone, which is why it was worth a question rather than a guess.
    */
-  const vibanStatus = process.env.EPGL_VIBAN_STATUS ?? "Pending Payment";
+  const vibanStatus = process.env.EPGL_VIBAN_STATUS ?? "";
   patched = fill(items.find((i) => /EPG_License_Request__c$/i.test(String(i?.url ?? ""))), {
     EPG_Request_Status__c:
       facts.paymentMethod?.toLowerCase() === "viban" && vibanStatus ? vibanStatus : undefined,
@@ -722,7 +733,11 @@ export function withEpglRequestFields(
     Activity_Codes__c: postalActivityCodes(facts.activityCodes) ?? undefined,
     EPG_Terms_and_Conditions__c: facts.termsAccepted === true ? true : undefined,
     EPG_Amount_Paid__c: facts.amountPaid,
-    EPG_Payment_Reference__c: facts.paymentReference,
+    // EPG_Payment_Reference__c is NOT sent. Two answers arrived on 11 September
+    // and they agree: EPGL confirmed they already store
+    // notifyPayment.payment.paymentId from the payment notification, and a
+    // describe of EPG_License_Request__c on their org reports no such field at
+    // all. We were sending a reference nobody could receive.
   }) || patched;
 
   if (!patched) return input;
@@ -3229,6 +3244,44 @@ export async function buildApiTools(
           `\n\nTHE ORDER EXISTS AND IS NOT PAID. Emirates Post has opened a payment for it on their own gateway. Present the payment URL from this response as a PAY BLOCK — three backticks, then pay, then \`url: <the paymentUrl>\`, then \`amount: AED <total>\`, then three backticks — and say the renewal completes once they pay. Do NOT call it renewed, confirmed or complete on the strength of an order number. When they say they have paid, confirm it with the confirm tool and only then tell them the renewal is done.`,
       };
     }
+    /**
+     * WHAT A LICENCE REQUEST'S STATUS MEANS, in the applicant's terms.
+     *
+     * EPGL gave us the progression on 11 September, in answer to "how should the
+     * agent learn a request has become payable":
+     *
+     *   Under document review -> Documents approved -> [Virtual Iban Approved]
+     *   -> Payment Verified -> Closed
+     *
+     * and told us to watch for "Documents approved" before sending a payment
+     * notification. The raw string is theirs and is not written for a customer:
+     * "Documents approved" sounds like the end of something, and it is the
+     * moment the fee becomes due. So each status carries its plain meaning and
+     * the next thing that happens, and the model reads that rather than
+     * inventing a gloss for a picklist value it has never seen.
+     *
+     * The picklist has thirty-nine values. Only the ones on this path are named;
+     * anything else is reported as it stands, because a status we have not been
+     * told the meaning of is not one to explain to an applicant.
+     */
+    if (!res.isError && /getrequeststatus$/i.test(toolName)) {
+      try {
+        const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
+        const status = String(b?.requestStatus ?? "").trim();
+        const meaning = EPGL_STATUS_MEANING[status.toLowerCase()];
+        const ref = String(b?.requestIdentifier ?? "").trim();
+        const extra: string[] = [];
+        if (meaning) extra.push(`WHAT "${status}" MEANS: ${meaning}`);
+        else if (status) extra.push(`EPGL report this request as "${status}". Say that plainly and do not interpret it further — this is not one of the statuses whose meaning they have given us.`);
+        if (ref && ref.toLowerCase() !== "null") {
+          extra.push(`The customer's reference for this application is ${ref}. Use it, never the Salesforce record id beside it.`);
+        }
+        if (extra.length) res = { ...res, result: res.result + "\n\n" + extra.join(" ") };
+      } catch {
+        /* an unreadable status is relayed as it came */
+      }
+    }
+
     if (!res.isError && /submitlicenserequest$/i.test(toolName)) {
       try {
         const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
@@ -3915,6 +3968,34 @@ function writeCache(key: string, value: { result: string; isError?: boolean }) {
 }
 
 /**
+ * The statuses on EPGL's own path, and what each one means to the applicant.
+ *
+ * Their words on 11 September, turned into the applicant's. Keyed lowercase
+ * because a picklist value is not a promise about capitalisation.
+ */
+const EPGL_STATUS_MEANING: Record<string, string> = {
+  draft: "the application has not been submitted yet.",
+  open: "EPGL have received the application and it is waiting to be picked up for review.",
+  "under document review":
+    "EPGL are checking the uploaded documents. Nothing is required from the customer while this is the status — tell them that plainly rather than offering to chase it.",
+  "request for more documents":
+    "EPGL need something further before they can approve the documents. Ask the customer to check the email EPGL sent them for which document it is; do not guess at it.",
+  "documents approved":
+    "THE DOCUMENTS ARE APPROVED AND THE FEE IS NOW DUE. This is the point the application becomes payable — it is not the end of the process, and must not be described as the licence being issued.",
+  "virtual iban approved":
+    "EPGL Finance have issued the Virtual IBAN. The customer transfers the fee to it; the licence follows once the transfer is confirmed.",
+  "pending payment": "the fee is outstanding.",
+  "payment under review": "EPGL Finance are confirming the payment. Nothing is required from the customer.",
+  "payment under review (finance)": "EPGL Finance are confirming the payment. Nothing is required from the customer.",
+  "payment verified": "the payment has been confirmed. The licence is being issued.",
+  "under license issuance": "the licence is being issued.",
+  "license generated": "the licence has been issued and appears in the EPGL portal.",
+  closed: "the application is complete.",
+  rejected: "EPGL have rejected the application. Do not speculate about why — the reason comes from EPGL, and a callback is the right offer.",
+  cancelled: "the application was cancelled.",
+};
+
+/**
  * The licence request NUMBER behind a Salesforce record id.
  *
  * The composite answers with ids and nothing else, so at the moment a licence
@@ -3924,15 +4005,58 @@ function writeCache(key: string, value: { result: string; isError?: boolean }) {
  * a number the only way it could -- duplicate-check, which returns every match
  * on the company -- and quoted a DIFFERENT application's number back to them.
  *
- * Neither of their reads can answer it. getRequestStatus returns
- * salesforceRecordId, requestStatus, licenseNumber and a requestIdentifier that
- * comes back null; duplicate-check returns a list. So this uses the plain SOQL
- * endpoint their own spec uses for API 7 and 8, which answers in one call.
+ * On 10 September neither of their reads could answer it: getRequestStatus
+ * returned `requestIdentifier: null` on every request we tried, and
+ * duplicate-check returns a LIST of every application the company has — taking
+ * the newest from it is what quoted a different application's number back to a
+ * customer. So this used the plain SOQL endpoint instead.
  *
- * Best-effort by design. A failure here costs a nicer reference, not a
- * submission, and the id still works everywhere it is actually needed.
+ * EPGL FIXED IT on 11 September, and it is measured rather than taken on trust:
+ * four consecutive licence requests on their PreProd org now answer with their
+ * own number — LR-37337, LR-37336, LR-37335, LR-37333 — from
+ * GET /EPGL/LicenseRequest/status?id=<record id>.
+ *
+ * So that is asked first: it is the endpoint they support, it is one call, and
+ * it carries the status in the same breath. SOQL stays behind it because it is
+ * already written, costs nothing while it is not called, and is the only thing
+ * that answers if their handler regresses — which is exactly what this function
+ * was written for.
+ *
+ * Best-effort by design either way. A failure here costs a nicer reference, not
+ * a submission, and the id still works everywhere it is actually needed.
  */
 async function epglRequestNumber(spec: EnvSpec, id: string): Promise<string | null> {
+  const viaStatus = await epglStatusIdentifier(spec, id).catch(() => null);
+  if (viaStatus) return viaStatus;
+  return epglRequestNumberViaSoql(spec, id);
+}
+
+/** Their own endpoint, which now carries the request number beside the status. */
+async function epglStatusIdentifier(spec: EnvSpec, id: string): Promise<string | null> {
+  if (!/^[a-zA-Z0-9]{15,18}$/.test(id)) return null;
+  const live: EnvSpec = {
+    ...spec,
+    authValue: isEncrypted(spec.authValue) ? decryptSecret(spec.authValue) : spec.authValue,
+  };
+  const token = await getClientCredentialsToken(live);
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 6000);
+  try {
+    const res = await fetch(
+      `${String(live.baseUrl).replace(/\/$/, "")}/services/apexrest/EPGL/LicenseRequest/status?id=${encodeURIComponent(id)}`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: ctl.signal }
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as { requestIdentifier?: unknown };
+    const name = String(body?.requestIdentifier ?? "").trim();
+    // It answered null for a week. An empty string is not a reference.
+    return name && name.toLowerCase() !== "null" ? name : null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function epglRequestNumberViaSoql(spec: EnvSpec, id: string): Promise<string | null> {
   // Salesforce's own id, straight into a SOQL string. It is theirs rather than
   // anybody's input, and it is still checked before it is interpolated.
   if (!/^[a-zA-Z0-9]{15,18}$/.test(id)) return null;

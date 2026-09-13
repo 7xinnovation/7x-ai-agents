@@ -51,7 +51,11 @@ const itemOf = (out: unknown, ref: string) =>
 {
   const lr = itemOf(withEpglRequestFields(thin(), FACTS), "NewLicenseRequest");
   check("amount paid", lr.EPG_Amount_Paid__c === 1010, lr.EPG_Amount_Paid__c);
-  check("payment reference", lr.EPG_Payment_Reference__c === FACTS.paymentReference, lr.EPG_Payment_Reference__c);
+  // 2026-09-13: NOT sent any more. EPGL confirmed they store
+  // notifyPayment.payment.paymentId from the payment notification themselves,
+  // and a describe of EPG_License_Request__c on their org has no such field —
+  // we were filling in a reference nobody could receive.
+  check("payment reference is no longer sent", lr.EPG_Payment_Reference__c === undefined, lr.EPG_Payment_Reference__c);
   check("terms accepted", lr.EPG_Terms_and_Conditions__c === true, lr.EPG_Terms_and_Conditions__c);
   check("emirate", lr.EPG_Current_Emirate__c === "Dubai", lr.EPG_Current_Emirate__c);
   check("region", lr.EPG_Current_Region__c === "Al Mankhool", lr.EPG_Current_Region__c);

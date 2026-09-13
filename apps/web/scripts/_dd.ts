@@ -1,0 +1,10 @@
+import { databaseUrlFrom } from "./lib/envFile";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
+import { agents } from "@dialog/db";
+import { eq } from "drizzle-orm";
+const pool = new pg.Pool({ connectionString: databaseUrlFrom(process.argv[2]!) });
+const db = drizzle(pool, { schema: { agents } });
+const [r] = await db.select().from(agents).where(eq(agents.slug, process.argv[3]!));
+console.log(JSON.stringify(r!.definition));
+await pool.end();

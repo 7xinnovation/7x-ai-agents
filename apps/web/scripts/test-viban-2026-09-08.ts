@@ -146,9 +146,15 @@ console.log("\nA Virtual IBAN application is submitted, not held");
   const { readFileSync } = await import("node:fs");
   const intg = readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8");
   const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-  check("the request carries a status when the method is viban", /facts\.paymentMethod\?\.toLowerCase\(\) === "viban"/.test(intg));
+  check("the status is only ever considered for viban", /facts\.paymentMethod\?\.toLowerCase\(\) === "viban"/.test(intg));
   check("...on EPG_Request_Status__c", /EPG_Request_Status__c:/.test(intg));
-  check("the default says it is waiting for payment", /EPGL_VIBAN_STATUS \?\? "Pending Payment"/.test(intg));
+  // 2026-09-13: EPGL gave us the whole progression, and every step of it is
+  // theirs -- Under document review -> Documents approved -> Virtual Iban
+  // Approved -> Payment Verified -> Closed. "Pending Payment", which is what we
+  // had been stamping, appears nowhere in it, and a request in a status their
+  // process never assigns is one their process cannot move.
+  check("we no longer name a status ourselves", /EPGL_VIBAN_STATUS \?\? ""/.test(intg));
+  check("...and their progression is recorded beside the decision", /Under document review -> Documents approved -> Virtual Iban Approved/.test(intg));
   check("the value is settable, since it is a picklist", /process\.env\.EPGL_VIBAN_STATUS/.test(intg));
   check("an empty setting turns it off entirely", /&& vibanStatus \? vibanStatus : undefined/.test(intg));
   check("a card payment gets no such status", /=== "viban" && vibanStatus/.test(intg));
