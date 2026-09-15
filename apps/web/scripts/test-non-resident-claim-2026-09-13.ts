@@ -18,6 +18,19 @@ const check = (n: string, ok: boolean, got?: unknown) => {
   else { fail++; console.log(`  FAIL ${n}${got === undefined ? "" : `\n         ${JSON.stringify(got)}`}`); }
 };
 
+/**
+ * One `case` arm of the tool dispatcher, bounded by the next one.
+ *
+ * It used to be a fixed slice of N characters, and adding six hundred to
+ * collect_field pushed the lines being tested out of the window — the third time
+ * a fixed slice has failed that way (test-branch-location, 10 September).
+ */
+function caseBlock(src: string, name: string): string {
+  const from = src.indexOf(`case "${name}"`);
+  const next = src.indexOf('\n    case "', from + 10);
+  return src.slice(from, next === -1 ? src.length : next);
+}
+
 const src = readFileSync(new URL("../../../packages/core/src/ai/tools.ts", import.meta.url), "utf8");
 // The real predicate, not a copy of it.
 const { saysNonResident } = await import("@dialog/core");
@@ -49,7 +62,7 @@ for (const m of [
 
 console.log("\nThe guard itself");
 {
-  const g = src.slice(src.indexOf('case "collect_field"'), src.indexOf('case "collect_field"') + 2600);
+  const g = caseBlock(src, "collect_field");
   check("it fires on the residence field", /\^partner_\\d\+_residence\$/.test(g));
   check("...only for the value that waives a document", /=== "non resident"/.test(g));
   check("...and refuses rather than recording", /NOT RECORDED/.test(g) && /isError: true/.test(g));
@@ -104,7 +117,7 @@ console.log("\nOr the registry said so, which is better evidence than asking");
   check("initials are not a name", !sameHuman("A B", "Abdelaziz Mohamed Obaid"));
 
   const src = readFileSync(new URL("../../../packages/core/src/ai/tools.ts", import.meta.url), "utf8");
-  const g = src.slice(src.indexOf('case "collect_field"'), src.indexOf('case "collect_field"') + 3600);
+  const g = caseBlock(src, "collect_field");
   check("the guard consults the registry", /ctx\.registryNonResidents\?\.\(\)/.test(g));
   check("...matched against the name held for THAT partner", /partner_\$\{slot\}_name/.test(g));
   check("...and a partner with no name on file cannot be claimed", /partnerName\s*\?/.test(g));

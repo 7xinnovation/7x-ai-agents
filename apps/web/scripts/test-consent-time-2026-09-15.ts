@@ -19,8 +19,21 @@ const check = (n: string, ok: boolean, got?: unknown) => {
   if (ok) { pass++; console.log(`  ok   ${n}`); }
   else { fail++; console.log(`  FAIL ${n}${got === undefined ? "" : `\n         ${JSON.stringify(got)}`}`); }
 };
+/**
+ * One `case` arm of the tool dispatcher, bounded by the next one.
+ *
+ * It used to be a fixed slice of N characters, and adding six hundred to
+ * collect_field pushed the lines being tested out of the window — the third time
+ * a fixed slice has failed that way (test-branch-location, 10 September).
+ */
+function caseBlock(src: string, name: string): string {
+  const from = src.indexOf(`case "${name}"`);
+  const next = src.indexOf('\n    case "', from + 10);
+  return src.slice(from, next === -1 ? src.length : next);
+}
+
 const src = readFileSync(new URL("../../../packages/core/src/ai/tools.ts", import.meta.url), "utf8");
-const block = src.slice(src.indexOf('case "collect_field"'), src.indexOf('case "collect_field"') + 3600);
+const block = caseBlock(src, "collect_field");
 
 console.log("\nThe server stamps it, and the model cannot");
 {
