@@ -123,6 +123,14 @@ export type ToolEvent =
   | { type: "escalation"; reference: string }
   | { type: "auth_required"; reason: string }
   | { type: "payment_initiated"; reference: string; link?: string; amount: number; currency: string }
+  /**
+   * A consent refused or withdrawn, with the action it stopped.
+   *
+   * The consent log filed with the entity carries مرفوضة and مسحوبة rows
+   * alongside the granted ones. Without this the negative path left nothing
+   * behind: a refusal looked exactly like never having been asked.
+   */
+  | { type: "consent_declined"; field: string; outcome: "refused" | "withdrawn"; at: string; halted: string }
   | { type: "lookup"; kind: string }
   | { type: "submitted"; reference: string };
 
@@ -269,6 +277,27 @@ function customerEmail(state: CaseState): string | undefined {
 }
 
 /** The add-on fees whose condition currently holds. */
+/**
+ * What a refused consent stops from happening.
+ *
+ * Read off the journey rather than written down twice: the acceptance a
+ * chargeable journey gates payment on stops the payment, anything a submission
+ * needs stops the submission, and the rest stop the step they belong to. Stated
+ * in the customer's terms, because the consent log is read by people.
+ */
+export function haltedBy(agent: AgentDefinition, state: CaseState, fieldKey: string): string {
+  const journey = findJourney(agent, state.journeyKey);
+  const sub = journey?.submission;
+  if (fieldKey === "terms_accepted" && (sub?.requiresPayment || sub?.amount)) {
+    return "payment and submission of the request";
+  }
+  const required = (journey?.steps ?? []).some((st) =>
+    st.fields.some((f) => f.key === fieldKey && f.validation?.required)
+  );
+  if (required) return "submission of the request";
+  return "the step this acceptance belongs to";
+}
+
 export function applicableSurcharges(
   sub: NonNullable<Journey["submission"]>,
   data: Record<string, unknown>
@@ -594,6 +623,9 @@ export async function dispatchTool(
           isError: true,
         };
       }
+      // Held before the write, so a `false` arriving over a `true` is reported
+      // as a WITHDRAWAL rather than a refusal — the artefact distinguishes them.
+      const wasAgreed = isAgreement(state.data[fieldKey]);
       const { state: next, error } = setField(agent, state, fieldKey, input.value);
       if (error) return { result: `Validation failed: ${error.message}`, state, events, isError: true };
       state = next;
@@ -605,6 +637,26 @@ export async function dispatchTool(
       } else if (CONSENT_FIELD.test(fieldKey)) {
         const { [`${fieldKey}_at`]: _dropped, ...rest } = state.data as Record<string, unknown>;
         state = { ...state, data: rest };
+        /**
+         * A REFUSAL IS AN OUTCOME, NOT AN ABSENCE.
+         *
+         * The consent log the entity files has مرفوضة and مسحوبة rows — refused
+         * and withdrawn — each naming the action that consequently did not
+         * happen. Declining used to leave nothing behind but a missing field,
+         * which is indistinguishable from never having been asked, and a
+         * customer who withdrew an acceptance left no trace of having held it.
+         *
+         * Recorded with the moment and with what it stopped, so the negative
+         * path can be evidenced the same way the positive one is.
+         */
+        const withdrawn = wasAgreed ? "withdrawn" : "refused";
+        events.push({
+          type: "consent_declined",
+          field: fieldKey,
+          outcome: withdrawn,
+          at: new Date().toISOString(),
+          halted: haltedBy(agent, state, fieldKey),
+        });
       }
       if (contradicts) {
         // The copy on file was read to fill this field and still shows the old
@@ -798,6 +850,37 @@ export async function dispatchTool(
           isError: true,
         };
       }
+      /**
+       * AND NEVER TWICE FOR THE SAME THING.
+       *
+       * The payment artefact promises it in as many words — "لن نطلب منك الدفع
+       * مرة أخرى" — and until now the promise was kept by the model
+       * remembering, which is not a way to keep a promise about money. Anything
+       * that makes the model call this tool again on a settled case opens a
+       * second gateway payment: a customer saying "has it gone through?", a
+       * retry after a dropped connection, a resumed conversation.
+       *
+       * A case is settled when its payment reads `paid`. The way OUT of that
+       * state is submitting — after which the journey either completes or a new
+       * case begins — so refusing here strands nobody: the reply says what was
+       * already paid, with its reference, and points at the step that actually
+       * remains.
+       */
+      if (state.payment.status === "paid") {
+        const paid = typeof state.payment.amount === "number" ? `${state.payment.amount} ${state.payment.currency ?? sub.currency ?? "AED"}` : "the fee";
+        const ref = state.payment.reference ? ` under reference ${state.payment.reference}` : "";
+        return {
+          result:
+            `ALREADY PAID — NOTHING WAS CHARGED AND NOTHING IS WRONG. This case has a confirmed payment of ${paid}${ref}, so no second payment card has been opened. ` +
+            `Do NOT ask the customer to pay again, do NOT tell them the payment failed, and do NOT open a payment link. ` +
+            (state.status === "submitted"
+              ? "The application is already submitted as well — give them the reference and offer to check its status."
+              : "Call submit_case now: the payment is settled and submission is the step that remains.") +
+            " If they are asking whether the payment went through, the answer is yes.",
+          state,
+          events,
+        };
+      }
       // THE APPLICANT CHOSE THE OTHER WAY TO PAY.
       //
       // EPGL's process map offers two payment methods and only one of them is
@@ -873,10 +956,10 @@ export async function dispatchTool(
       // total has been quoted, the number the model passes next time already
       // contains the fee, and adding to it charges 100,000 -> 101,000 -> 102,010
       // across reissued links for one unchanged application.
+      // A settled case never reaches here any more — the already-paid refusal
+      // above returns first — so this no longer has to exclude "paid" itself.
       const remembered =
-        sub.processingFee && state.payment.status !== "paid" && typeof state.payment.baseAmount === "number"
-          ? state.payment.baseAmount
-          : undefined;
+        sub.processingFee && typeof state.payment.baseAmount === "number" ? state.payment.baseAmount : undefined;
       /**
        * A CHARGE THE BACKEND ADDS, NOT ONE THE CONFIGURATION KNOWS.
        *

@@ -26,7 +26,7 @@
 import { getDb, agents, kbDocuments, analyticsEvents, auditLog, cases } from "@dialog/db";
 import { eq, sql } from "drizzle-orm";
 import { AgentDefinition, emptyCase, type CaseState, type Journey } from "@dialog/config";
-import { buildSystemPrompt, TOOL_DEFS } from "@dialog/core";
+import { buildSystemPrompt, TOOL_DEFS, dispatchTool } from "@dialog/core";
 import { listIntegrations } from "./integrations";
 
 // ── The six live government services ─────────────────────────────────────────
@@ -190,6 +190,122 @@ const score = (checks: Check[]) => {
 };
 const band = (s: number): CriterionResult["status"] => (s >= 85 ? "complete" : s >= 45 ? "partial" : "gap");
 
+/**
+ * PROOF BY EXECUTION, NOT BY ASSERTION.
+ *
+ * Two of these criteria are about what the CODE does rather than what the
+ * configuration says, and there is no artefact to read for either: whether a
+ * settled case can be charged a second time, and whether declining leaves a
+ * record. They were honest `ok: false` while that was true — but flipping them
+ * to `ok: true` once the code changed would be exactly the "تأكيد وصفي" the
+ * guide rules out, and it would go on reading true long after someone refactored
+ * the guarantee away.
+ *
+ * So they are not asserted. The real tool is called, here, at assessment time,
+ * against a synthetic case and a stub gateway that records whether it was
+ * reached. If the refusal is ever removed the gateway gets called, the probe
+ * fails, and the score drops by itself.
+ *
+ * Nothing here touches a real case, a real agent or a real gateway: the agent
+ * definition and the case are built in memory for the probe and thrown away.
+ */
+export interface CodeProbe {
+  refusesSecondPayment: boolean;
+  recordsDeclinedConsent: boolean;
+  /** Why a probe could not run, when it could not. */
+  note?: string;
+}
+
+const PROBE_AGENT = {
+  name: "readiness-probe",
+  slug: "readiness-probe",
+  locales: ["en"],
+  intents: [],
+  guardrails: {},
+  integrations: { payment: { provider: "stub", settings: {} } },
+  journeys: [
+    {
+      key: "probe",
+      title: { en: "Probe" },
+      intent: "probe",
+      steps: [
+        {
+          key: "s",
+          title: { en: "s" },
+          documents: [],
+          fields: [{ key: "terms_accepted", type: "boolean", label: { en: "Terms" }, validation: { required: true } }],
+        },
+      ],
+      submission: { amount: 100, currency: "AED", requiresPayment: true, apiFlow: {} },
+    },
+  ],
+} as unknown as AgentDefinition;
+
+const probeCase = (over: Partial<CaseState>): CaseState =>
+  ({
+    caseId: "probe",
+    journeyKey: "probe",
+    status: "draft",
+    data: { terms_accepted: true },
+    documents: [],
+    payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null },
+    history: [],
+    readiness: { complete: false, missing: [] },
+    ...over,
+  }) as unknown as CaseState;
+
+export async function runCodeProbe(): Promise<CodeProbe> {
+  const out: CodeProbe = { refusesSecondPayment: false, recordsDeclinedConsent: false };
+  try {
+    // 1. A settled case must not reach the gateway at all.
+    let reached = false;
+    const paid = await dispatchTool(
+      "request_payment",
+      {},
+      {
+        agent: PROBE_AGENT,
+        agentId: "probe",
+        caseId: "probe",
+        locale: "en",
+        state: probeCase({
+          payment: { status: "paid", reference: "PROBE-1", amount: 100, currency: "AED", link: null, baseAmount: 100 },
+        } as Partial<CaseState>),
+        adapters: {
+          payment: {
+            initiate: async () => {
+              reached = true;
+              return { status: "pending" as const, reference: "PROBE-GW", link: "https://example.invalid/pay" };
+            },
+          },
+        },
+      } as never
+    );
+    // The gateway untouched is the evidence; the wording is corroboration.
+    out.refusesSecondPayment = !reached && /ALREADY PAID/i.test(String(paid.result ?? ""));
+
+    // 2. Declining a consent must leave a record naming what it stopped.
+    const declined = await dispatchTool(
+      "collect_field",
+      { key: "terms_accepted", value: false },
+      {
+        agent: PROBE_AGENT,
+        agentId: "probe",
+        caseId: "probe",
+        locale: "en",
+        state: probeCase({ data: {} } as Partial<CaseState>),
+        adapters: {},
+      } as never
+    );
+    const ev = (declined.events ?? []).find((e: { type: string }) => e.type === "consent_declined") as
+      | { outcome?: string; halted?: string; at?: string }
+      | undefined;
+    out.recordsDeclinedConsent = Boolean(ev?.outcome && ev?.halted && ev?.at);
+  } catch (e) {
+    out.note = e instanceof Error ? e.message : String(e);
+  }
+  return out;
+}
+
 interface Ctx {
   def: AgentDefinition;
   journey: Journey | undefined;
@@ -210,6 +326,8 @@ interface Ctx {
   agentId: string;
   /** NXN or EPGL - some artefact rules bind only to the licensing services. */
   entity: string;
+  /** What the code was observed to do, not what it is claimed to do. */
+  probe: CodeProbe;
 }
 
 // Numbers embedded in evidence strings are formatted server-side, where the
@@ -404,8 +522,14 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Consent names the data shared and its recipient", weight: 2, ok: false,
         detail: "The approval names the action and the amount, but not which data will be used or shared nor the system receiving it",
         fix: "State the data used, the data shared and the recipient in each consent, following the consent-log artefact's schema." },
-      { label: "A refusal or withdrawal is recorded with the halted action", weight: 2, ok: false,
-        detail: "Declining simply stops progress - no refused or withdrawn consent is recorded as its own outcome, so the negative path cannot be evidenced the way the artefact's مرفوضة and مسحوبة rows are",
+      // Closed 2026-09-15. A consent field set to anything other than an
+      // agreement now emits consent_declined, carrying the moment, whether it
+      // was a refusal or a withdrawal of something previously granted, and what
+      // it stopped — the artefact's مرفوضة and مسحوبة rows.
+      { label: "A refusal or withdrawal is recorded with the halted action", weight: 2, ok: c.probe.recordsDeclinedConsent,
+        detail: c.probe.recordsDeclinedConsent
+          ? "Verified by execution at assessment time: declining a consent returned a recorded outcome carrying the moment and the action it stopped, so the negative path is evidenced the way the artefact's مرفوضة and مسحوبة rows are"
+          : "Declining simply stops progress - no refused or withdrawn consent is recorded as its own outcome, so the negative path cannot be evidenced the way the artefact's مرفوضة and مسحوبة rows are",
         fix: "Record refused and withdrawn consents as first-class outcomes, each showing the action that was consequently not executed." },
     ];
   },
@@ -563,8 +687,16 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
           ? "Stale initiated payments are re-queried at the gateway using the same transaction reference before anything is retried; a paid status can only be set by the signed webhook or that reconciliation"
           : "With no payment binding there is no reconciliation path to check",
         fix: "Query the gateway for the same transaction reference before any retry, so an interrupted payment can never be charged twice." },
-      { label: "A paid case cannot be charged twice", weight: 2, ok: false,
-        detail: "request_payment opens a fresh gateway payment even when the case already holds a confirmed one - the artefact's never-double-pay rule (لن نطلب منك الدفع مرة أخرى) is currently upheld by model behaviour, not by code",
+      // Closed 2026-09-15. request_payment now returns before it reaches the
+      // gateway when the case's payment reads "paid": the reply states what was
+      // already settled and its reference and points at submission, the step
+      // that actually remains. The compiler holds it in place — the narrowing
+      // that refusal creates is what made the old "not yet paid" test below it
+      // provably redundant.
+      { label: "A paid case cannot be charged twice", weight: 2, ok: c.probe.refusesSecondPayment,
+        detail: c.probe.refusesSecondPayment
+          ? "Verified by execution at assessment time: request_payment was called on a settled case and the gateway was never reached, so the artefact's never-double-pay rule (لن نطلب منك الدفع مرة أخرى) is upheld by code rather than by model behaviour"
+          : "request_payment opens a fresh gateway payment even when the case already holds a confirmed one - the artefact's never-double-pay rule (لن نطلب منك الدفع مرة أخرى) rests on model behaviour, not on code",
         fix: "Refuse request_payment when the case already holds a confirmed payment for the same submission, and route to completion of the paid request instead." },
     ];
   },
@@ -637,6 +769,11 @@ export async function assessReadiness(): Promise<ReadinessReport> {
     .from(cases)
     .where(sql`${cases.updatedAt} > ${cases.createdAt} + interval '2 minutes'`);
 
+  // Executed once, then read by the checks that are about code rather than
+  // configuration. See runCodeProbe: a guarantee that stops holding stops
+  // scoring, without anyone remembering to come back here.
+  const probe = await runCodeProbe();
+
   const services: ServiceResult[] = [];
   for (const svc of SERVICES) {
     const row = bySlug.get(svc.agentSlug);
@@ -667,6 +804,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
       resumedCases: Number(resumed),
       agentId: row.id,
       entity: svc.entity,
+      probe,
     };
 
     const criteria = CRITERIA.map((cr) => {

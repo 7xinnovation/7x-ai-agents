@@ -2344,6 +2344,22 @@ export async function POST(req: NextRequest) {
             await emitEvent({ type: "knowledge.retrieved", ...std, attributes: { source: ev.source } });
           } else if (ev.type === "lookup") {
             await emitEvent({ type: "shipment.lookup", ...std, outcome: ev.kind, attributes: { kind: ev.kind } });
+          } else if (ev.type === "consent_declined") {
+            /**
+             * The refused and withdrawn rows of the consent log.
+             *
+             * A granted consent has always left a timestamp on the case. A
+             * declined one left nothing — indistinguishable from never having
+             * been asked — and a withdrawal erased the evidence that it had
+             * ever been given. Both are outcomes the entity files, so both are
+             * recorded here with what they stopped.
+             */
+            await audit({
+              ...a,
+              actor: "user",
+              action: "consent_declined",
+              payload: { field: ev.field, outcome: ev.outcome, at: ev.at, halted: ev.halted },
+            }).catch(() => {});
           } else if (ev.type === "payment_initiated") {
             // Every charge records the state of the reservation gate that let it
             // through. Three customers have now been charged for boxes that were

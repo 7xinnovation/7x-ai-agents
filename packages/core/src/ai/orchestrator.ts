@@ -189,6 +189,8 @@ export type OrchestratorEvent =
   | { type: "escalation"; reference: string }
   | { type: "auth_required"; reason: string }
   | { type: "payment_initiated"; reference: string; link?: string; amount: number; currency: string }
+  /** A consent refused or withdrawn — the consent log's مرفوضة and مسحوبة rows. */
+  | { type: "consent_declined"; field: string; outcome: "refused" | "withdrawn"; at: string; halted: string }
   | { type: "lookup"; kind: string }
   | { type: "integration"; tool: string }
   | { type: "submitted"; reference: string }
@@ -527,6 +529,8 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           else if (e.type === "auth_required") yield { type: "auth_required", reason: e.reason };
           else if (e.type === "payment_initiated")
             yield { type: "payment_initiated", reference: e.reference, link: e.link, amount: e.amount, currency: e.currency };
+          else if (e.type === "consent_declined")
+            yield { type: "consent_declined", field: e.field, outcome: e.outcome, at: e.at, halted: e.halted };
           else if (e.type === "lookup") yield { type: "lookup", kind: e.kind };
           else if (e.type === "submitted") yield { type: "submitted", reference: e.reference };
         }
