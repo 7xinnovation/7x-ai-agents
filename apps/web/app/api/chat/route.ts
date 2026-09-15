@@ -104,6 +104,9 @@ function isTrue(v: unknown): boolean {
 }
 
 /** Declared once: the customerContext above names it before the tool list is built. */
+/** Document keys already pushed to Salesforce, so a retry sends only the rest. */
+const SF_DOCS_SENT_KEY = "__sf_documents_sent";
+
 const MOE_TOOL_NAME = "epgl_licences_for_customer";
 
 /**
@@ -2156,6 +2159,36 @@ export async function POST(req: NextRequest) {
           } else if (ev.type === "submitted") {
             submittedRef = ev.reference;
             await audit({ ...a, actor: "agent", action: "case_submitted", payload: { reference: ev.reference, journey: finalState.journeyKey } });
+            /**
+             * WRITTEN NOW, NOT AT THE END OF THE TURN.
+             *
+             * A Virtual IBAN application on 15 September: LR-37354 exists in
+             * Salesforce and the case that made it still read `status: ready,
+             * reference: null` — because everything after the submit happens when
+             * the turn finishes, and that turn did not. The submit took
+             * thirty-five seconds; the last thing recorded is the confirmation
+             * email ten seconds later, and then nothing: no case save, no
+             * document push, no ops notification.
+             *
+             * The branch is not the cause — a Virtual IBAN turn just ENDS, with
+             * a sentence and nothing to click, so the customer closes the tab
+             * where a card payment holds them on the page. Whichever branch gets
+             * cut loses the same things.
+             *
+             * A submission is the one fact in a turn that must survive the turn.
+             * It is written the moment it happens, so a conversation that dies a
+             * second later still knows the application exists and still knows its
+             * reference — which is what lets the documents be caught up below.
+             */
+            try {
+              await mutateCase(session.caseId, (fresh) => ({
+                ...fresh,
+                status: "submitted",
+                reference: ev.reference,
+              }));
+            } catch (e) {
+              log.error("submitted_state_persist_failed", e, { agentId: agent.id, reference: ev.reference });
+            }
             // A payment that settled BEFORE the request existed has nothing to
             // notify Salesforce against, and the webhook gives up silently -- the
             // licence request then sits with Amount (Paid) 0.00 forever while the
@@ -2463,12 +2496,39 @@ export async function POST(req: NextRequest) {
         const submitJourney = findJourney(agent.definition, finalState.journeyKey);
         const uploadDocTool = submitJourney?.submission?.apiFlow?.saveTool ? serverOnlyDocTool : undefined;
         const storageGet = adapters.storage?.get?.bind(adapters.storage);
-        if (submittedRef && uploadDocTool && storageGet && /^[a-zA-Z0-9]{15,18}$/.test(submittedRef)) {
-          const ref = submittedRef;
+        /**
+         * ANY turn on a submitted case, not only the turn that submitted it.
+         *
+         * The push is deferred because a base64 upload per file holds the chat
+         * open for seconds — and deferred work dies with the turn. On
+         * 15 September a Virtual IBAN application submitted as LR-37354 and its
+         * eight files never went: the turn was cut somewhere after the
+         * confirmation email, and there is no second chance in a design where
+         * the only chance is the turn that submitted.
+         *
+         * So it is attempted on every later turn too, for whatever has not gone
+         * yet, and the case records what has. A re-send costs nothing: EPGL's
+         * API 5 upserts on EPG_File_Id__c and answers `createdNewDocument:
+         * false` to the second push of the same file — measured, not assumed.
+         */
+        const submittedReference =
+          submittedRef ?? (finalState.status === "submitted" ? finalState.reference : null);
+        const alreadySent = new Set(
+          Array.isArray(finalState.data[SF_DOCS_SENT_KEY])
+            ? (finalState.data[SF_DOCS_SENT_KEY] as unknown[]).map(String)
+            : []
+        );
+        if (submittedReference && uploadDocTool && storageGet && /^[a-zA-Z0-9]{15,18}$/.test(submittedReference)) {
+          const ref = submittedReference;
           const tool = uploadDocTool;
-          const attachedDocs = finalState.documents.filter((d) => d.status === "uploaded" || d.status === "accepted");
+          const attachedDocs = finalState.documents.filter(
+            (d) => (d.status === "uploaded" || d.status === "accepted") && !alreadySent.has(d.key)
+          );
           const sctx = adapterContext(agent.definition, agent.definition.integrations.storage);
           deferred.push(async () => {
+            // Recorded so a later turn knows what is left rather than sending
+            // everything again, and written once at the end rather than per file.
+            const sent: string[] = [];
             for (const d of attachedDocs) {
               try {
                 const row = await getDb().query.documents.findFirst({
@@ -2529,8 +2589,27 @@ export async function POST(req: NextRequest) {
                   action: res.isError ? "sf_document_failed" : "sf_document_attached",
                   payload: { key: d.key, fileName, reference: ref },
                 });
+                if (!res.isError) sent.push(d.key);
               } catch (e) {
                 log.error("sf_document_push_failed", e, { agentId: agent.id, key: d.key, reference: ref });
+              }
+            }
+            if (sent.length) {
+              try {
+                await mutateCase(session.caseId, (fresh) => ({
+                  ...fresh,
+                  data: {
+                    ...fresh.data,
+                    [SF_DOCS_SENT_KEY]: [
+                      ...new Set([
+                        ...(Array.isArray(fresh.data[SF_DOCS_SENT_KEY]) ? (fresh.data[SF_DOCS_SENT_KEY] as unknown[]).map(String) : []),
+                        ...sent,
+                      ]),
+                    ],
+                  },
+                }));
+              } catch (e) {
+                log.error("sf_documents_sent_record_failed", e, { agentId: agent.id, reference: ref });
               }
             }
           });

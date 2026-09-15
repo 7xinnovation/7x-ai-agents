@@ -46,8 +46,9 @@ check("the type, twice, as they spell it", /docType__c: ext/.test(push) && /file
 check("the size, from the bytes rather than guessed", /fileSize__c: stored\.bytes\.length/.test(push));
 
 console.log("\nWhat did not change");
-check("the push still happens after a successful submission", /if \(submittedRef && uploadDocTool && storageGet/.test(route));
-check("...only against a Salesforce record id", /\^\[a-zA-Z0-9\]\{15,18\}\$\/\.test\(submittedRef\)/.test(route));
+check("the push still happens after a successful submission", /if \(submittedReference && uploadDocTool && storageGet/.test(route));
+check("...and on any later turn, for whatever has not gone", /submittedRef \?\? \(finalState\.status === "submitted"/.test(route));
+check("...only against a Salesforce record id", /\^\[a-zA-Z0-9\]\{15,18\}\$\/\.test\(submittedReference\)/.test(route));
 check("...deferred, so the chat is not held open", /deferred\.push\(async \(\) => \{/.test(route));
 check("...and each file is audited either way", /action: res\.isError \? "sf_document_failed" : "sf_document_attached"/.test(route));
 
