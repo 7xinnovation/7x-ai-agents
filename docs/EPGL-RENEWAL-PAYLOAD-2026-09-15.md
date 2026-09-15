@@ -196,19 +196,3 @@ Nothing is gated on it yet. When you give us the list of companies with
 outstanding returns, we will hold the renewal until they are filed; until then
 the assistant says where Form 9 is completed and does not claim to know whether
 anybody's are outstanding.
-
----
-
-## 6. Still open from before
-
-Unchanged, and both waiting on you:
-
-1. **The payment order.** You answered that payment follows *Documents approved*.
-   EPGL's own side has not confirmed whether the fee is offered at submission or
-   after approval, and until it does we have not moved it. This is why
-   `Amount (Paid)` reads 0.00 on a paid request.
-2. **The updated Document swagger.** You shipped the new API 5 before sending it;
-   we mapped the contract by probing. One request: the endpoint rejects
-   `licenseRequestId` with *"Either licenseRequestId or accountId is required"* —
-   an error naming the field it was given and no longer accepts. Please have it
-   name `EPG_License_Request__c`.
