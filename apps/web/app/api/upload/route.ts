@@ -48,6 +48,8 @@ function acceptedDocTypes(key: string, label: string): DocType[] | null {
 const DOC_FIELDS_KEY = "__doc_fields";
 /** A company-name disagreement awaiting the customer's answer. */
 const NAME_CONFLICT_KEY = "__name_conflict";
+/** The fields that can hold a company name, for the audit line below. */
+const NAME_FIELDS_FOR_AUDIT = ["company_name", "company_name_ar", "trade_name_en", "trade_name_ar"] as const;
 
 /** Owner document slots, and the partner slot each one satisfies. */
 const OWNER_TO_PARTNER: Record<string, string> = {
@@ -336,6 +338,28 @@ export async function POST(req: NextRequest) {
   // Cross-check against the entity already on the application: the right KIND of
   // document for the WRONG company must not be accepted either.
   const conflict = entityMismatch(caseRow.state.data ?? {}, extraction.values ?? {}, { documentKey: key });
+  /**
+   * WHAT THE CHECK DECIDED, AND WHAT IT HAD TO DECIDE IT ON.
+   *
+   * FB-1722 took three reproductions to explain because the only evidence a
+   * document had been checked was the absence of a complaint. Recorded on every
+   * upload now: the names we held, the names the document yielded, and the
+   * verdict. A document that went through because it named nobody looks
+   * completely different here from one that went through because it matched.
+   */
+  await audit({
+    agentId: agent.id,
+    conversationId,
+    actor: "system",
+    action: "document_entity_check",
+    payload: {
+      key,
+      fileName: file.name,
+      verdict: conflict?.severity ?? "clear",
+      heldNames: NAME_FIELDS_FOR_AUDIT.map((f) => (caseRow.state.data ?? {})[f]).filter(Boolean).slice(0, 4),
+      documentNames: NAME_FIELDS_FOR_AUDIT.map((f) => (extraction.values ?? {})[f]).filter(Boolean).slice(0, 4),
+    },
+  }).catch(() => {});
   if (conflict?.severity === "block") {
     const reason =
       sessionLocale === "ar"
