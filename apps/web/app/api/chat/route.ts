@@ -2352,12 +2352,45 @@ export async function POST(req: NextRequest) {
                   continue;
                 }
                 const fileName = d.fileName || `${d.key}.pdf`;
+                const ext = (fileName.split(".").pop() ?? "pdf").toLowerCase();
+                /**
+                 * EPGL CHANGED THIS ENDPOINT UNDER US.
+                 *
+                 * Emirates Post's card-payment test on 15 September came back
+                 * with "Files (0)" on the licence request. Documents attached
+                 * normally at 16:09 the day before and every one of eight failed
+                 * at 07:34 the morning after. Nothing on our side had touched
+                 * the upload; API 5 had been redeployed.
+                 *
+                 * They told us on 14 September they WOULD extend it — and then
+                 * shipped it before sending the swagger. Probed against their
+                 * PreProd org, the contract is now:
+                 *
+                 *   versionData      -> content
+                 *   fileName         -> EPG_File_Name__c
+                 *   licenseRequestId -> EPG_License_Request__c
+                 *
+                 * The old names are not merely ignored, they are rejected:
+                 * `versionData` gives "content (base64 file data) is required",
+                 * and a payload with `licenseRequestId` gives "Either
+                 * licenseRequestId or accountId is required" — an error that
+                 * still names the fields it no longer accepts, which is why this
+                 * read as our bug for an hour.
+                 *
+                 * EPG_File_Id__c is the document row's own id, so a retried push
+                 * updates the same record rather than filing the same file
+                 * twice: their handler answers `createdNewDocument: false` to
+                 * the second one. Measured, not assumed.
+                 */
                 const res = await execIntegration(tool, {
                   body: {
-                    licenseRequestId: ref,
-                    fileName,
-                    fileType: (fileName.split(".").pop() ?? "pdf").toLowerCase(),
-                    versionData: Buffer.from(stored.bytes).toString("base64"),
+                    EPG_License_Request__c: ref,
+                    EPG_File_Name__c: fileName,
+                    EPG_File_Id__c: row.id,
+                    docType__c: ext,
+                    filetype__c: ext,
+                    fileSize__c: stored.bytes.length,
+                    content: Buffer.from(stored.bytes).toString("base64"),
                   },
                 });
                 await audit({
