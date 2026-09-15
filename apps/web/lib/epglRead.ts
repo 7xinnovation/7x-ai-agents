@@ -572,8 +572,9 @@ export function penaltyLabel(p: EpglPenalty): string {
  * been handed a grand total will quote it in the summary whether or not it
  * matches what the gateway was given.
  */
-export function penaltyNotice(split: PenaltySplit | null): string | null {
+export function penaltyNotice(split: PenaltySplit | null, opts: { collecting?: boolean } = {}): string | null {
   if (!split || (!split.chargeable.length && !split.pending.length)) return null;
+  const collecting = opts.collecting !== false;
   const out: string[] = [];
   if (split.chargeable.length) {
     out.push(
@@ -581,8 +582,11 @@ export function penaltyNotice(split: PenaltySplit | null): string | null {
     );
     for (const p of split.chargeable) out.push(`  - ${penaltyLabel(p)}: AED ${p.amount.toLocaleString("en-AE")}`);
     out.push(
-      "THESE ARE ADDED TO THE RENEWAL PAYMENT. Tell the customer BEFORE they pay: give the licence fee, then these as separate lines with what each is for, then the total. " +
-        "The payment card is built server-side and already includes them, so quote the same figures — do NOT work out your own total from other numbers, and do NOT open the payment without having said what is in it."
+      collecting
+        ? "THESE ARE ADDED TO THE RENEWAL PAYMENT. Tell the customer BEFORE they pay: give the licence fee, then these as separate lines with what each is for, then the total. " +
+            "The payment card is built server-side and already includes them, so quote the same figures — do NOT work out your own total from other numbers, and do NOT open the payment without having said what is in it."
+        : "THESE ARE NOT BEING COLLECTED IN THIS PAYMENT. Say what is outstanding and what each amount is for, then say plainly that the payment here covers the licence fee and that EPGL will confirm the penalties separately. " +
+            "Do NOT add them to the figure on the payment card, and do NOT tell the customer the renewal settles them."
     );
   }
   if (split.pending.length) {

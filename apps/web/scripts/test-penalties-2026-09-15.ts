@@ -10,6 +10,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-penalties-2026-09-15.ts
  */
+import { readFileSync } from "node:fs";
 import { splitPenalties, penaltyNotice, penaltyLabel, type EpglPenalty } from "../lib/epglRead";
 
 let pass = 0, fail = 0;
@@ -83,6 +84,41 @@ console.log("\nWhat the agent is told");
   check("pending alone never claims to be charged", !/ADDED TO THE RENEWAL PAYMENT/.test(onlyPending), onlyPending);
 }
 check("a penalty with no period still reads", penaltyLabel({ id: "x", amount: 1, type: "Non Compliance" }) === "Non Compliance");
+
+/**
+ * AND MONEY COLLECTED MUST COME FROM THE SYSTEM OF RECORD.
+ *
+ * Found on production, 15 September: the EPGL agent is live, its gateway is the
+ * real N-Genius outlet, and its Salesforce binding is the PreProd sandbox. A
+ * penalty read there is a test figure, and adding one to a live charge takes
+ * real money for a debt that may not exist.
+ *
+ * The licence fee is a published tariff and is safe to charge from
+ * configuration. A penalty is a fact about one company held in one system, so
+ * while the agent reads anything but production it is STATED and not collected.
+ */
+console.log("\nStated, but not collected, when the data is not production's");
+{
+  const s = splitPenalties([p("Approved", "Draft", 18000), p("Draft", "Draft", 5000, "Renewal")]);
+  const n = penaltyNotice(s, { collecting: false })!;
+  check("the amount is still told to the customer", n.includes("AED 18,000"), n);
+  check("...and what it is for", /Form-9 Non Submission/.test(n));
+  check("but it is NOT added to the payment", !/ADDED TO THE RENEWAL PAYMENT/.test(n), n);
+  check("...it says so explicitly", /NOT BEING COLLECTED IN THIS PAYMENT/.test(n), n);
+  check("...and forbids implying the renewal settles it", /do NOT tell the customer the renewal settles them/.test(n));
+  check("the unapproved ones are unaffected", n.includes("AED 5,000"));
+  // The default is still to collect: an omitted option must not silently
+  // disable charging on a correctly configured deployment.
+  check("collecting is the default", /ADDED TO THE RENEWAL PAYMENT/.test(penaltyNotice(s)!));
+  check("...and an explicit true collects", /ADDED TO THE RENEWAL PAYMENT/.test(penaltyNotice(s, { collecting: true })!));
+}
+{
+  const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  const at = route.indexOf("extraCharge: () => {");
+  const block = route.slice(at, route.indexOf("},", at));
+  check("the charge itself is gated on the production environment",
+    /activeEnvironment \?\? "production"\) !== "production"\) return null/.test(block), block.slice(0, 400));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

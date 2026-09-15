@@ -1147,7 +1147,10 @@ export async function POST(req: NextRequest) {
    */
   const withOutstanding = async (company: EpglCompany) => {
     await loadPenalties(company.accountId);
-    const note = penaltyNotice(epglPenalties.value) ?? outstandingSummary(company.fees);
+    // The wording follows the money: if this deployment is not reading the
+    // production system of record, the penalties are stated and not collected.
+    const collecting = (agent.definition.activeEnvironment ?? "production") === "production";
+    const note = penaltyNotice(epglPenalties.value, { collecting }) ?? outstandingSummary(company.fees);
     return note ? `${note}\n\n${JSON.stringify(company)}` : JSON.stringify(company);
   };
 
@@ -2285,6 +2288,23 @@ export async function POST(req: NextRequest) {
             const split = epglPenalties.value;
             if (!split || split.chargeableTotal <= 0) return null;
             if (!/renew/i.test(String(liveState.journeyKey ?? ""))) return null;
+            /**
+             * MONEY COLLECTED MUST COME FROM THE SYSTEM OF RECORD.
+             *
+             * Found on production, 15 September: the EPGL agent is live, its
+             * gateway is the real N-Genius outlet, and its Salesforce binding is
+             * the PreProd sandbox. A penalty read there is a test figure, and
+             * adding a test figure to a live charge takes real money for a debt
+             * that may not exist.
+             *
+             * The licence fee is a published tariff and is safe to charge from
+             * configuration. A penalty is a fact about one company, held in one
+             * system, and there is exactly one copy of it that counts. So while
+             * the agent is reading anything but production, the penalties are
+             * still STATED — the customer should know what EPGL's records show
+             * — and they are not collected.
+             */
+            if ((agent.definition.activeEnvironment ?? "production") !== "production") return null;
             return {
               amount: split.chargeableTotal,
               label: split.chargeable.length === 1 ? penaltyLabel(split.chargeable[0]!) : "Approved penalties",
