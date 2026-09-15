@@ -756,6 +756,25 @@ export function withEpglRequestFields(
     ServiceNameEN__c: facts.serviceNameEn,
     EPG_Terms_and_Conditions__c: facts.termsAccepted === true ? true : undefined,
     EPG_Amount_Paid__c: facts.amountPaid,
+    /**
+     * THE LICENCE THIS REQUEST IS ABOUT.
+     *
+     * LR-37362's "License" lookup was empty, and it is writable — a describe of
+     * their org on 15 September says createable and updateable, and 3,010 of
+     * their portal's own requests have it set. Every request this agent has ever
+     * created had it null.
+     *
+     * On a NEW licence that is correct and stays correct: there is no licence
+     * record until Licensing issue one, so there is nothing to point at. On a
+     * RENEWAL there is, we already hold it — the company lookup latches
+     * Account.EPG_License__c so the finance rows can carry it — and the request
+     * should say which licence it renews rather than leaving the reviewer to
+     * work it out from the company.
+     *
+     * `licenceRecordId` is only ever populated for an already-licensed company,
+     * which is what makes this safe to set unconditionally here.
+     */
+    EPG_License__c: facts.licenceRecordId,
     // EPG_Payment_Reference__c is NOT sent. Two answers arrived on 11 September
     // and they agree: EPGL confirmed they already store
     // notifyPayment.payment.paymentId from the payment notification, and a

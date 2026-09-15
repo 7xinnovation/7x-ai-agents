@@ -359,5 +359,77 @@ export const users = pgTable(
   })
 );
 
+/**
+ * Companies that may not renew, as Licensing publish them.
+ *
+ * EPGL's renewal process map has a gate straight after the company lookup:
+ * "System will check if company is blacklisted?" — and if it is, the client is
+ * told the renewal cannot proceed and Licensing will contact them. The list is
+ * Licensing's, it changes, and it arrives as a spreadsheet, so it is uploaded
+ * in the admin panel rather than deployed.
+ *
+ * A row is matched on the TRADE LICENCE number, because that is what the
+ * customer arrives with and what the MoE registry and the Salesforce lookup
+ * both return. The postal licence number is matched too when the list gives one
+ * — a company with several trade licences has one postal licence, and Licensing
+ * may publish either.
+ *
+ * Numbers are stored NORMALISED (upper case, alphanumeric only) alongside the
+ * value as printed, so "697670", "697-670" and " 697670 " are one company and
+ * the operator still sees what their file actually said.
+ *
+ * `batchId` is what makes a re-upload safe: the new rows land, then every row
+ * of a previous batch goes, so the list is always exactly the file last
+ * uploaded and never a merge of two.
+ */
+export const blockedCompanies = pgTable(
+  "blocked_companies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    /** The upload this row came from. */
+    batchId: uuid("batch_id").notNull(),
+    /** Trade licence number, normalised for matching. */
+    tradeLicenseKey: text("trade_license_key"),
+    /** Postal licence number, normalised for matching. */
+    postalLicenseKey: text("postal_license_key"),
+    /** Company name, normalised — a last resort when the file gives no number. */
+    companyNameKey: text("company_name_key"),
+    /** What the file actually said, for the admin list and for support. */
+    tradeLicenseNumber: text("trade_license_number"),
+    postalLicenseNumber: text("postal_license_number"),
+    companyName: text("company_name"),
+    /** Licensing's own note, shown to nobody but the team. */
+    reason: text("reason"),
+    createdAt: ts(),
+  },
+  (t) => ({
+    agentIdx: index("blocked_companies_agent_idx").on(t.agentId),
+    tradeIdx: index("blocked_companies_trade_idx").on(t.agentId, t.tradeLicenseKey),
+    postalIdx: index("blocked_companies_postal_idx").on(t.agentId, t.postalLicenseKey),
+    nameIdx: index("blocked_companies_name_idx").on(t.agentId, t.companyNameKey),
+  })
+);
+
+/** One uploaded list: who uploaded it, when, and from what file. */
+export const blockedCompanyBatches = pgTable(
+  "blocked_company_batches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    fileName: text("file_name").notNull(),
+    rowCount: integer("row_count").notNull(),
+    /** Rows the file carried that named no company at all. */
+    skippedCount: integer("skipped_count").default(0).notNull(),
+    uploadedBy: text("uploaded_by"),
+    createdAt: ts(),
+  },
+  (t) => ({ agentIdx: index("blocked_batches_agent_idx").on(t.agentId) })
+);
+
 // Ensure the pgvector extension exists (applied via raw SQL in push/seed).
 export const ensureVectorExtension = sql`CREATE EXTENSION IF NOT EXISTS vector;`;

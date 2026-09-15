@@ -45,6 +45,45 @@ export interface EpglCompany {
   /** Plain text, derived from the org's HTML-formula status field. */
   licenseStatus?: string;
   licenseExpiry?: string;
+  /**
+   * WHAT A RENEWAL WILL COST, READ RATHER THAN CALCULATED.
+   *
+   * EPGL's renewal process map has a step reading "System calculates renewal
+   * fees and penalties if any". We do not calculate any of it — Salesforce
+   * already holds every figure as a rollup, and computing a penalty ourselves
+   * would be inventing a number the regulator is the authority on. These are
+   * read straight off the Account and its licence record:
+   *
+   *   licenceAmount       Account.EPG_License_Amount__c        the licence fee on file
+   *   advanceBalance      Account.EPG_Balance_License_Amount__c what an advance payment still covers
+   *   pendingPenalties    Account.EPG_Pending_Penalties__c     "Due Amount (Penalties/Fines)"
+   *   pendingFines        Account.EPG_Pending_Fines__c
+   *   totalPenalties      EPG_License__r.Total_Penalty_Amount__c
+   *   form9Penalties      EPG_License__r.EPG_Form_9_penalty_charges__c   non-submission
+   *   renewalPenalty      EPG_License__r.Total_License_Renewal_Penalty__c  late renewal
+   *   nonCompliance       EPG_License__r.Total_Non_Compliance_Penalties__c
+   *   totalDue            EPG_License__r.EPG_Pending_Amount_Including_Penalties__c
+   *   totalLevy           EPG_License__r.EPG_Total_Levy_Amount__c
+   *
+   * All of them are currency rollups and all of them are populated in their org
+   * — measured on 15 September, e.g. CIAO DELIVERY SERVICES carrying 18,000 in
+   * Form 9 non-submission penalties against a 100,000 licence amount.
+   *
+   * These are for the AGENT to state, never to add up. The payable figure is the
+   * one EPGL put in the payment request after the document review.
+   */
+  fees?: {
+    licenceAmount?: number;
+    advanceBalance?: number;
+    pendingPenalties?: number;
+    pendingFines?: number;
+    totalPenalties?: number;
+    form9Penalties?: number;
+    renewalPenalty?: number;
+    nonCompliance?: number;
+    totalDue?: number;
+    totalLevy?: number;
+  };
   contacts: {
     firstName?: string;
     lastName?: string;
@@ -186,7 +225,29 @@ const COMPANY_FIELDS =
   "Id, Name, EPG_Company_Name_Arabic__c, EPG_Trade_Name_in_English__c, EPG_Trade_Name_in_Arabic__c, " +
   "EPG_Trade_license_no__c, EPG_Trade_license_Expiry_date__c, EPG_Emirates__c, EPG_Regulator__c, " +
   "EPG_License_Number__c, EPG_License__c, License_Status__c, EPG_License_Expiry_Date__c, " +
+  // What a renewal costs and what is outstanding — read, never calculated.
+  "EPG_License_Amount__c, EPG_Balance_License_Amount__c, EPG_Pending_Penalties__c, EPG_Pending_Fines__c, " +
+  "EPG_License__r.Total_Penalty_Amount__c, EPG_License__r.EPG_Form_9_penalty_charges__c, " +
+  "EPG_License__r.Total_License_Renewal_Penalty__c, EPG_License__r.Total_Non_Compliance_Penalties__c, " +
+  "EPG_License__r.EPG_Pending_Amount_Including_Penalties__c, EPG_License__r.EPG_Total_Levy_Amount__c, " +
   "(SELECT FirstName, LastName, Email, Phone, EPG_Emirates_Id__c, LegalEntity_Profile_Person_EmiratesID__c, EPG_Designation__c FROM Contacts)";
+
+/**
+ * Keep the figures that are actually figures.
+ *
+ * A null rollup and a zero rollup mean different things — "no penalty record"
+ * against "nothing outstanding" — and only the second is worth saying out loud.
+ * Nulls are dropped; an all-null set becomes undefined, so a company with no
+ * financial record carries no `fees` at all rather than a shape full of blanks.
+ */
+function money(raw: Record<string, unknown>): EpglCompany["fees"] {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+    if (Number.isFinite(n)) out[k] = n;
+  }
+  return Object.keys(out).length ? (out as EpglCompany["fees"]) : undefined;
+}
 
 function toCompany(r: Record<string, any>): EpglCompany {
   return {
@@ -203,6 +264,18 @@ function toCompany(r: Record<string, any>): EpglCompany {
     licenseRecordId: r.EPG_License__c ?? undefined,
     licenseStatus: plainLicenseStatus(r.License_Status__c ?? r.EPG_License_Status__c),
     licenseExpiry: r.EPG_License_Expiry_Date__c ?? undefined,
+    fees: money({
+      licenceAmount: r.EPG_License_Amount__c,
+      advanceBalance: r.EPG_Balance_License_Amount__c,
+      pendingPenalties: r.EPG_Pending_Penalties__c,
+      pendingFines: r.EPG_Pending_Fines__c,
+      totalPenalties: r.EPG_License__r?.Total_Penalty_Amount__c,
+      form9Penalties: r.EPG_License__r?.EPG_Form_9_penalty_charges__c,
+      renewalPenalty: r.EPG_License__r?.Total_License_Renewal_Penalty__c,
+      nonCompliance: r.EPG_License__r?.Total_Non_Compliance_Penalties__c,
+      totalDue: r.EPG_License__r?.EPG_Pending_Amount_Including_Penalties__c,
+      totalLevy: r.EPG_License__r?.EPG_Total_Levy_Amount__c,
+    }),
     contacts: ((r.Contacts?.records ?? []) as Record<string, any>[]).map((c) => ({
       firstName: c.FirstName ?? undefined,
       lastName: c.LastName ?? undefined,
