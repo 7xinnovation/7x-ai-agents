@@ -133,6 +133,32 @@ export type ToolEvent =
  * The button we offer sends its own label, so that case is exact; the rest is
  * for someone typing it themselves, in either language.
  */
+/**
+ * An acceptance, and the companion field that records WHEN.
+ *
+ * Emirates Post, 15 September: "stamp the server time alongside each acceptance
+ * so the moment of consent is auditable."
+ *
+ * There were timestamps already — `declaration_accepted_at` on EPGL has been
+ * filling in for weeks — and the guidance says "the system automatically records
+ * the acceptance DATE AND TIME". Nothing did. The model was writing them, in its
+ * own format ("2026-09-13 17:39:27 UTC"), from whatever it believed the time to
+ * be. That is a record of what the model thought, not of when somebody agreed,
+ * and it is exactly what "server time" is asking for.
+ *
+ * NXN had none at all: terms_accepted, save_card_consent and auto_renew_consent
+ * across four journeys, every one of them a bare true with no moment attached.
+ */
+const CONSENT_FIELD = /(_accepted|_consent|_acknowledged)$/;
+const CONSENT_STAMP = /(_accepted|_consent|_acknowledged)_at$/;
+
+/** Was this value an agreement, as opposed to a correction or a refusal? */
+function isAgreement(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "true" || v === "yes" || v === "1" || v === "نعم";
+}
+
 export function saysNonResident(message: string | undefined): boolean {
   const m = String(message ?? "").toLowerCase();
   if (!m) return false;
@@ -511,9 +537,32 @@ export async function dispatchTool(
       }
       // Checked BEFORE the write, while the previous value is still there.
       const contradicts = licenceContradiction(state, fieldKey, input.value);
+      /**
+       * The moment of consent is ours to record, not the model's to remember.
+       * A `*_at` the model offers is dropped on the floor: it is either right by
+       * luck or wrong by a day, and neither is an audit trail.
+       */
+      if (CONSENT_STAMP.test(fieldKey)) {
+        return {
+          result:
+            "IGNORED. Acceptance timestamps are stamped by the server the moment the customer agrees — record the acceptance itself and the time is written for you. Never state, guess or repeat one.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       const { state: next, error } = setField(agent, state, fieldKey, input.value);
       if (error) return { result: `Validation failed: ${error.message}`, state, events, isError: true };
       state = next;
+      if (CONSENT_FIELD.test(fieldKey) && isAgreement(input.value)) {
+        // ISO 8601 in UTC, from this machine's clock at the moment the tool ran.
+        // Withdrawing an acceptance clears the stamp with it, so a stale time can
+        // never sit beside a `false`.
+        state = { ...state, data: { ...state.data, [`${fieldKey}_at`]: new Date().toISOString() } };
+      } else if (CONSENT_FIELD.test(fieldKey)) {
+        const { [`${fieldKey}_at`]: _dropped, ...rest } = state.data as Record<string, unknown>;
+        state = { ...state, data: rest };
+      }
       if (contradicts) {
         // The copy on file was read to fill this field and still shows the old
         // value, so it no longer evidences the application. Asking for a current

@@ -107,13 +107,13 @@ export async function GET(req: NextRequest) {
       // The Emirates ID UAE PASS just verified. EPGL's licence registry accepts
       // nothing else, so a sign-in that drops it leaves the lookup with no input.
       if (caseId && id.emiratesId) await rememberVerifiedEmiratesId(caseId, id.emiratesId);
-      // The mobile and email on their profile, so the journey can show them for
+      // The name, mobile and email on their profile, so the journey can show them for
       // confirmation instead of asking someone who has just signed in to type
       // out what we were handed. Never overwrites an answer already given.
-      if (caseId && (id.mobile || id.email)) {
+      if (caseId && (id.mobile || id.email || id.name)) {
         try {
           await mutateCase(caseId, (st) => {
-            const seed = contactSeed(st, { mobile: id.mobile, email: id.email });
+            const seed = contactSeed(st, { mobile: id.mobile, email: id.email, name: id.name });
             return Object.keys(seed).length ? { ...st, data: { ...st.data, ...seed } } : st;
           });
         } catch {

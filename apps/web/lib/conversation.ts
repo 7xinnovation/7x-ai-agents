@@ -531,7 +531,8 @@ export async function loadConversation(conversationId: string) {
   if (!conv) return null;
   const caseRow = await db.query.cases.findFirst({ where: eq(cases.conversationId, conv.id) });
   const history = await db
-    .select({ role: messages.role, content: messages.content, meta: messages.meta })
+    // createdAt so a resumed transcript carries the same times the live one does.
+    .select({ role: messages.role, content: messages.content, meta: messages.meta, createdAt: messages.createdAt })
     .from(messages)
     .where(eq(messages.conversationId, conv.id))
     .orderBy(asc(messages.createdAt));

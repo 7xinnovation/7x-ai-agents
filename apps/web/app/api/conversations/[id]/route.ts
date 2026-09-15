@@ -15,6 +15,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     case: data.case,
     messages: data.messages
       .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role, content: m.content })),
+      // The time each message was persisted, so a resumed conversation reads the
+      // same as the live one. Emirates Post asked for a timestamp on every part
+      // of the conversation alongside the consent stamps — an audit trail with a
+      // gap where the transcript was reloaded is not one.
+      .map((m) => ({ role: m.role, content: m.content, at: m.createdAt?.toISOString?.() ?? null })),
   });
 }

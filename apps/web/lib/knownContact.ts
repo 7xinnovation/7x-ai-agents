@@ -15,11 +15,21 @@ import type { CaseState } from "@dialog/config";
 export interface KnownContact {
   mobile?: string;
   email?: string;
+  /**
+   * The name UAE PASS states for them.
+   *
+   * It was parsed at sign-in and thrown away: only the mobile and the email were
+   * seeded, so a signed-in EPGL applicant was still asked "what's your name and
+   * email address?" on the first turn. Half of that question we could already
+   * answer, and the other half we had been handed too.
+   */
+  name?: string;
 }
 
 /** The case fields these map to, in the order the journeys spell them. */
 const PHONE_KEYS = ["contact_phone", "phone", "mobile", "mobileNumber"];
 const EMAIL_KEYS = ["contact_email", "email", "emailAddress"];
+const NAME_KEYS = ["contact_name", "applicant_name", "customer_name", "full_name"];
 
 const filled = (data: Record<string, unknown>, keys: string[]): boolean =>
   keys.some((k) => {
@@ -35,6 +45,19 @@ export function tidyMobile(raw: string | undefined): string | undefined {
   // number; the journeys and the save payloads use the local 05x form.
   const local = digits.replace(/^\+?971/, "0").replace(/^(?!0)(5\d{8})$/, "0$1");
   return /^0\d{8,9}$/.test(local) ? local : /^\+?\d{7,15}$/.test(digits) ? digits : undefined;
+}
+
+/**
+ * A person's name, or nothing.
+ *
+ * UAE PASS returns fullnameEN, and occasionally returns a placeholder for a
+ * profile that has not been completed. Anything without two letters and a space
+ * is not a name worth showing back to somebody as theirs.
+ */
+export function tidyName(raw: string | undefined): string | undefined {
+  const v = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (v.length < 3 || !/\p{L}{2}/u.test(v)) return undefined;
+  return v;
 }
 
 export function tidyEmail(raw: string | undefined): string | undefined {
@@ -55,5 +78,7 @@ export function contactSeed(state: CaseState, known: KnownContact): Record<strin
   const email = tidyEmail(known.email);
   if (mobile && !filled(data, PHONE_KEYS)) seed.contact_phone = mobile;
   if (email && !filled(data, EMAIL_KEYS)) seed.contact_email = email;
+  const name = tidyName(known.name);
+  if (name && !filled(data, NAME_KEYS)) seed.contact_name = name;
   return seed;
 }

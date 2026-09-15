@@ -913,6 +913,25 @@ export async function POST(req: NextRequest) {
     if (agent.definition.slug === "epgl-dialog") {
       const profile = await knownEpglProfile(agent.id, userRef).catch(() => ({}));
       customerContext = formatEpglProfileContext(profile);
+      /**
+       * WHO IS APPLYING, when they have just told us.
+       *
+       * UAE PASS hands over the applicant's name and email at sign-in and the
+       * case is seeded with them, but nothing put them in front of the model —
+       * so the first thing a signed-in applicant was asked was "what's your name
+       * and email address?". Emirates Post raised it on 15 September.
+       *
+       * Read from the CASE, which is where the sign-in put them, so this holds
+       * for the rest of the conversation and not only on the turn after the
+       * callback. Named as theirs to confirm, not as a value to announce: a
+       * profile can be out of date, and the customer is the one who would know.
+       */
+      const signedInName = str(session.state.data.contact_name);
+      const signedInEmail = str(session.state.data.contact_email);
+      if (signedInName || signedInEmail) {
+        customerContext =
+          `${customerContext ?? ""}\nThe applicant is signed in with UAE PASS and we already have ${[signedInName && `their name (${signedInName})`, signedInEmail && `their email (${signedInEmail})`].filter(Boolean).join(" and ")}. Do NOT ask for either. Show them once, early, for a yes-or-correct — "I have you as <name>, <email>; is that right for this application?" — and carry on from their answer. If they correct one, record the correction with collect_field and use it from then on.`.trim();
+      }
       // Signed in, and we know their Emirates ID -- so their own trade licences
       // can be fetched rather than asked for. Named here so the model reaches
       // for the tool instead of asking a signed-in customer to type a licence

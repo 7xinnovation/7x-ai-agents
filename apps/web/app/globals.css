@@ -439,6 +439,25 @@ body {
   border-start-end-radius: 7px;
 }
 /* Rendered markdown inside bubbles */
+/* The moment each message was said. Emirates Post asked for a timestamp on every
+   part of the conversation, beside the consent stamps — so it has to be legible
+   and it must not compete with the message. Floated to the far edge of the
+   bubble, in the direction the bubble is already reading. */
+.dlg-msg-time {
+  display: block;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.45;
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.dlg-msg.user .dlg-msg-time {
+  text-align: start;
+}
+.dlg-msg.assistant .dlg-msg-time {
+  text-align: end;
+}
 .dlg-bubble :where(p, ul) {
   margin: 0;
 }

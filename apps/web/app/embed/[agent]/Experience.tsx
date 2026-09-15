@@ -50,6 +50,28 @@ interface ChatMessage {
   content: string;
   citations?: string[];
   payment?: PaymentInfo;
+  /** When this message was said, ISO. Absent on older persisted messages. */
+  at?: string | null;
+}
+
+/**
+ * The clock beside a message.
+ *
+ * Emirates Post asked for a timestamp on each part of the conversation, in the
+ * same breath as asking for the moment of consent to be auditable — so the
+ * transcript reads as a record rather than a chat. Shown in the customer's own
+ * locale and timezone, to the minute: the second belongs in the audit log, not
+ * on screen beside "Which bundle suits you?".
+ */
+function messageTime(at: string | null | undefined, locale: string): string {
+  if (!at) return "";
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    return d.toLocaleTimeString(locale === "ar" ? "ar-AE" : "en-GB", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return d.toISOString().slice(11, 16);
+  }
 }
 
 const STR = {
@@ -163,13 +185,20 @@ const STR = {
  * (YYYY-MM-DD) but must always be SHOWN as DD-MM-YYYY (FB-1439), including any
  * ISO timestamp the backend returned, so the panel never contradicts the chat.
  */
-const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/;
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}))?/;
 export function displayValue(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "object") return JSON.stringify(v);
   const s = String(v);
   const m = s.match(ISO_DATE_RE);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : s;
+  if (!m) return s;
+  const date = `${m[3]}-${m[2]}-${m[1]}`;
+  // A CONSENT TIMESTAMP IS NOT A DATE. Emirates Post asked for the moment of
+  // acceptance to be auditable, and this function used to throw the time away —
+  // "2026-09-15T08:41:03.000Z" rendered as "15-09-2026", which is the one part
+  // of it nobody needed. An expiry date still renders as a date, because that is
+  // all it is.
+  return m[4] ? `${date} ${m[4]}:${m[5]} UTC` : date;
 }
 
 /**
@@ -1083,10 +1112,11 @@ export function Experience({
     setAuthReason(null);
     // Silent turns (post-sign-in account pulse, payment settled) add no user
     // bubble — only the assistant's response is shown.
+    const said = new Date().toISOString();
     setMessages((prev) => [
       ...prev,
-      ...(silent ? [] : [{ role: "user" as const, content: text }]),
-      { role: "assistant" as const, content: "", citations: [] },
+      ...(silent ? [] : [{ role: "user" as const, content: text, at: said }]),
+      { role: "assistant" as const, content: "", citations: [], at: said },
     ]);
     setStreaming(true);
     setToolStatus(null);
@@ -1511,6 +1541,9 @@ export function Experience({
                     dir="auto" lets each message be read in the direction of the
                     language it is actually written in. */}
                 <div className="dlg-bubble" dir="auto">
+                  {messageTime(m.at, locale) ? (
+                    <time className="dlg-msg-time" dateTime={m.at ?? undefined}>{messageTime(m.at, locale)}</time>
+                  ) : null}
                   {m.content ? (
                     m.role === "assistant" ? (
                       <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={uploadCtx} locale={locale} />
