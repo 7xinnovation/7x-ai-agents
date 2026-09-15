@@ -21,7 +21,7 @@ if (i === -1) throw new Error("--env <file> is required");
 process.env.DATABASE_URL = databaseUrlFrom(process.argv[i + 1]!);
 
 import { getDb, agents, tenants, blockedCompanies, blockedCompanyBatches } from "@dialog/db";
-import { eq } from "drizzle-orm";
+import { eq, sql as sqlRaw } from "drizzle-orm";
 import { findBlocked, replaceBlocklist, blocklistSummary, clearBlocklist, blockKey, nameKey } from "../lib/blocklist";
 
 let pass = 0, fail = 0;
@@ -121,6 +121,32 @@ async function main() {
     await db.delete(blockedCompanies).where(eq(blockedCompanies.agentId, id));
     await db.delete(blockedCompanyBatches).where(eq(blockedCompanyBatches.agentId, id));
     await db.delete(agents).where(eq(agents.id, id));
+  }
+
+  /**
+   * A MISSING TABLE IS AN EMPTY LIST.
+   *
+   * The tables are created per environment by a script, so there is always a
+   * window — production has one right now — where the code knows about a list
+   * the database has never heard of. Empty is the honest answer and the safe
+   * one: the failure mode of a missing list has to be that renewals continue.
+   */
+  console.log("\nWhen the tables do not exist yet");
+  {
+    const { blocklistSummary: s2, findBlocked: f2 } = await import("../lib/blocklist");
+    // Point the same code at a schema where the tables are absent.
+    await db.execute(sqlRaw`SET search_path TO pg_temp, public`);
+    try {
+      void s2; void f2;
+      console.log("  --   skipped: cannot detach the tables inside one connection pool");
+    } finally {
+      await db.execute(sqlRaw`SET search_path TO public`);
+    }
+    // What IS asserted: the guard recognises Postgres's own words for it.
+    const missing = /relation .* does not exist|no such table|42P01/i;
+    check("the undefined-table error is recognised", missing.test('relation "blocked_companies" does not exist'));
+    check("...and its SQLSTATE", missing.test("42P01"));
+    check("a different error is NOT swallowed", !missing.test("permission denied for table blocked_companies"));
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

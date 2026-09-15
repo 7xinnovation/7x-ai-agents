@@ -76,7 +76,8 @@ export async function findBlocked(
     .select()
     .from(blockedCompanies)
     .where(and(eq(blockedCompanies.agentId, agentId), or(...(clauses as never[]))))
-    .limit(5);
+    .limit(5)
+    .catch((e) => emptyIfAbsent(e, [] as (typeof blockedCompanies.$inferSelect)[]));
   if (!rows.length) return null;
 
   const pick =
@@ -215,6 +216,26 @@ export async function replaceBlocklist(
   };
 }
 
+/**
+ * A missing table is an empty list, not an error.
+ *
+ * The two tables are created by a script per environment, so there is always a
+ * window — and on production there is one right now — where the code knows
+ * about a list the database has never heard of. An unhandled error there would
+ * take out the admin tab and, worse, would have to be caught somewhere in the
+ * renewal too.
+ *
+ * Empty is the honest answer and the safe one: nobody is blocked until
+ * Licensing's list has actually been uploaded. The same reasoning as an
+ * unreadable list — the failure mode of a missing list has to be that renewals
+ * continue.
+ */
+const MISSING_TABLE = /relation .* does not exist|no such table|42P01/i;
+function emptyIfAbsent<T>(e: unknown, empty: T): T {
+  if (MISSING_TABLE.test(String((e as { message?: string })?.message ?? e))) return empty;
+  throw e;
+}
+
 /** The list as it stands: the batch, and the first rows of it. */
 export async function blocklistSummary(agentId: string, sample = 25) {
   const db = getDb();
@@ -223,7 +244,8 @@ export async function blocklistSummary(agentId: string, sample = 25) {
     .from(blockedCompanyBatches)
     .where(eq(blockedCompanyBatches.agentId, agentId))
     .orderBy(desc(blockedCompanyBatches.createdAt))
-    .limit(1);
+    .limit(1)
+    .catch((e) => emptyIfAbsent(e, [] as { fileName: string }[]));
   const rows = await db
     .select({
       id: blockedCompanies.id,
@@ -234,7 +256,8 @@ export async function blocklistSummary(agentId: string, sample = 25) {
     })
     .from(blockedCompanies)
     .where(eq(blockedCompanies.agentId, agentId))
-    .limit(sample);
+    .limit(sample)
+    .catch((e) => emptyIfAbsent(e, [] as { id: string }[]));
   return { batch: batch ?? null, rows };
 }
 
