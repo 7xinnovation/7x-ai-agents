@@ -284,7 +284,8 @@ export async function POST(req: NextRequest) {
     const verdict = ownerDocumentCheck(
       (caseRow.state.data ?? {}) as Record<string, unknown>,
       extraction.values ?? {},
-      ownerKind === "passport" ? "passport" : "Emirates ID"
+      ownerKind === "passport" ? "passport" : "Emirates ID",
+      { holderName: extraction.holderName }
     );
     if (verdict.reject) {
       const state = await mutateCase(caseRow.caseId, (fresh) =>
@@ -356,6 +357,7 @@ export async function POST(req: NextRequest) {
       key,
       fileName: file.name,
       verdict: conflict?.severity ?? "clear",
+      holderName: extraction.holderName ?? null,
       heldNames: NAME_FIELDS_FOR_AUDIT.map((f) => (caseRow.state.data ?? {})[f]).filter(Boolean).slice(0, 4),
       documentNames: NAME_FIELDS_FOR_AUDIT.map((f) => (extraction.values ?? {})[f]).filter(Boolean).slice(0, 4),
     },
@@ -390,7 +392,9 @@ export async function POST(req: NextRequest) {
   // A partner's document is matched to a partner by the NAME on it, not by the
   // slot it was dropped into. A shuffled but complete set is worse than a short
   // one: every slot shows a tick and partner 3 has partner 1's passport.
-  const partner = partnerDocumentCheck(key, caseRow.state.data ?? {}, extraction.values ?? {});
+  const partner = partnerDocumentCheck(key, caseRow.state.data ?? {}, extraction.values ?? {}, {
+    holderName: extraction.holderName,
+  });
   // A document that positively belongs to ANOTHER partner on this application is
   // refused outright. It used to be accepted with a note beneath it -- a green
   // tick against partner 1 with partner 3's card behind it -- and a tick reads as

@@ -90,5 +90,24 @@ check(
   !namesDocument("مذكرة التأسيسية", ["مذكرة التأسيس"])
 );
 
+// AND NEVER SECOND. The opening message of a new licence names every document
+// in its preparation list, so naming is not enough once a block has gone out.
+const PREP = `Here is what to have ready:\n- Trade License\n- Memorandum of Association (MOA)\n\nLet's start with your Trade Licence:\n\n${B}upload\nkey: trade_license\n${B}\n\n${B}upload\nkey: moa\n${B}\n`;
+{
+  const out = run(PREP);
+  check("the document being asked for survives", /key:\s*trade_license/.test(out));
+  check("...and the offer trailing it does not", !/key:\s*moa/.test(out));
+  check("...even though the preparation list named it", /Memorandum of Association/.test(out));
+}
+// The same two the other way round is NOT this guard's to fix — it streams, and
+// cannot know a required document is coming until it has already passed the
+// offer through. The client decides that one, with the whole message in hand:
+// see allowedUploads in Markdown.tsx, where mandatory documents claim the
+// per-message cap first.
+check(
+  "an offer alone in its message is still made",
+  /key:\s*moa/.test(run(`Next, the Memorandum of Association, if you have it:\n\n${B}upload\nkey: moa\n${B}\n`))
+);
+
 console.log(failed ? `\n${failed} failing` : "\nall good");
 process.exit(failed ? 1 : 0);

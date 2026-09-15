@@ -507,10 +507,30 @@ export function partnerSlot(documentKey: string): { index: number; kind: string 
   return Number.isInteger(index) && index > 0 ? { index, kind: m[2]!.toLowerCase() } : null;
 }
 
-/** The person's name this document carries, however the extraction labelled it. */
-function personName(extracted: Record<string, unknown>): string | null {
+/**
+ * The person's name this document carries.
+ *
+ * `holderName` FIRST, and it is why the check works at all now.
+ *
+ * The fields below only ever hold a name when the extraction decided the person
+ * was the OWNER. That was fine for partner 1, who usually is, and blind for
+ * everyone else: on 15 September a stranger's Emirates ID went into partner 3's
+ * slot with a green tick, because the model read the name off the card, had no
+ * owner field to put it in for partner 3, and dropped it. The check then had
+ * nothing to compare and said nothing.
+ *
+ * `__document_holder_name` is asked of every identity document in its own right
+ * — see HOLDER_NAME_KEY in extract.ts — so whose card it is no longer depends
+ * on whose card we were hoping for.
+ */
+function personName(extracted: Record<string, unknown>, holderName?: string | null): string | null {
+  const held = typeof holderName === "string" ? holderName.trim() : "";
+  if (held.length > 1) return held;
   return raw(extracted, [...PERSON_NAME_FIELDS, "full_name", "name"]) || null;
 }
+
+/** Slots whose whole purpose is to identify one named person. */
+const IDENTITY_SLOT = /_(emirates_id|passport|eid|eid_front|eid_back|id_card)$/i;
 
 /** The name already on file for a partner: an explicit field, or a group row. */
 function knownPartnerName(data: Record<string, unknown>, index: number): string | null {
@@ -569,11 +589,39 @@ export interface PartnerCheck {
 export function partnerDocumentCheck(
   documentKey: string,
   data: Record<string, unknown>,
-  extracted: Record<string, unknown>
+  extracted: Record<string, unknown>,
+  opts: { holderName?: string | null } = {}
 ): PartnerCheck {
   const slot = partnerSlot(documentKey);
-  const found = personName(extracted);
-  if (!slot || !found) return { conflict: null, observedName: found };
+  const found = personName(extracted, opts.holderName);
+  if (!slot) return { conflict: null, observedName: found };
+  /**
+   * AND A CARD WE COULD NOT READ A NAME OFF IS A CARD WE DID NOT CHECK.
+   *
+   * The same reasoning as the unreadable company document: accepting it in
+   * silence claims a verification that did not happen, and this slot's entire
+   * purpose is to say WHO. Refusing would be wrong — a poor photograph of an
+   * Emirates ID is ordinary — so the customer is told, and the model is
+   * forbidden from calling it verified.
+   *
+   * Only where a name is the point. An MOA in a partner slot, a lease, a
+   * licence: those are checked as company documents elsewhere.
+   */
+  if (!found) {
+    if (!IDENTITY_SLOT.test(documentKey)) return { conflict: null, observedName: null };
+    const expectedName = knownPartnerName(data, slot.index) ?? seenPartnerName(data, slot.index);
+    if (!expectedName) return { conflict: null, observedName: null };
+    return {
+      observedName: null,
+      conflict: {
+        severity: "confirm",
+        reason:
+          `No name could be read off this document, so it could NOT be checked against partner ${slot.index}, ` +
+          `${expectedName}. Tell the customer that plainly — do not say it was verified — and ask them to confirm ` +
+          `the card is ${expectedName}'s, or to upload a clearer copy.`,
+      },
+    };
+  }
 
   if (!normaliseName(found)) return { conflict: null, observedName: found };
 
@@ -701,9 +749,10 @@ export interface OwnerDocCheck {
 export function ownerDocumentCheck(
   data: Record<string, unknown>,
   extracted: Record<string, unknown>,
-  kind: "Emirates ID" | "passport" = "Emirates ID"
+  kind: "Emirates ID" | "passport" = "Emirates ID",
+  opts: { holderName?: string | null } = {}
 ): OwnerDocCheck {
-  const found = raw(extracted, [...PERSON_NAME_FIELDS, "full_name", "name"]);
+  const found = personName(extracted, opts.holderName);
   if (!found) return { reject: null };
   const people = namedPeople(data);
   if (!people.length) return { reject: null };

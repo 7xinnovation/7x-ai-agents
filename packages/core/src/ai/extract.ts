@@ -124,6 +124,10 @@ export interface ExtractionResult {
    *  the caller reject a file uploaded into the wrong slot before any of its
    *  data is applied. Absent when classification failed. */
   docType?: DocType;
+  /** The person an IDENTITY document was issued to, as printed. Never applied to
+   *  the case — it is what the identity checks compare against. See
+   *  HOLDER_NAME_KEY. */
+  holderName?: string;
   note?: string;
 }
 
@@ -131,6 +135,28 @@ export interface ExtractionResult {
 const DOC_EXPIRY_KEY = "__document_expiry_date";
 const DOC_TYPE_KEY = "__document_type";
 const OWNER_ENTITY_KEY = "__owner_entity_type";
+/**
+ * WHOSE DOCUMENT IS THIS? — asked of every file, and never written to the case.
+ *
+ * EPGL, 15 September: a tester put Nida Zafar Awan's Emirates ID into partner
+ * 3's slot and it was accepted with a green tick. The same card into partner
+ * 1's slot, minutes earlier, was refused correctly. The difference was not the
+ * check — partnerDocumentCheck would have refused a stranger either way — it
+ * was that the check had no name to work with.
+ *
+ * Because the only place a person's name could land was the OWNER's fields.
+ * The instruction below used to say so outright: "map the card's ID number into
+ * it, and the holder's name into the matching owner fields". Partner 1 is the
+ * owner, so their name survived; partner 3 is not, so the model read the name,
+ * had nowhere to put it, and dropped it. The single most identifying thing on
+ * an identity document was discarded for everyone except one person.
+ *
+ * So it is asked for in its own right, as a fact about the FILE rather than a
+ * field of the application. Synthetic, like the expiry date and the document
+ * type beside it: it never reaches the case, and it exists so that the identity
+ * checks always have the one thing they are about.
+ */
+const HOLDER_NAME_KEY = "__document_holder_name";
 
 const ARABIC_RE = /[؀-ۿ]/;
 const LATIN_RE = /[A-Za-z]/;
@@ -167,7 +193,8 @@ export async function extractFieldsFromDocument(input: {
     .join("\n") +
     `\n  "${DOC_EXPIRY_KEY}": the expiry date printed on THIS document itself, if it has one (date)` +
     `\n  "${DOC_TYPE_KEY}": what THIS document IS — exactly one of: ${DOC_TYPES.join(", ")}` +
-    `\n  "${OWNER_ENTITY_KEY}": only when the document names a primary owner/partner — "individual" if that owner is a person, "corporate" if it is a company/legal entity`;
+    `\n  "${OWNER_ENTITY_KEY}": only when the document names a primary owner/partner — "individual" if that owner is a person, "corporate" if it is a company/legal entity` +
+    `\n  "${HOLDER_NAME_KEY}": on an identity document (Emirates ID, passport, driving licence, family book), the name of the PERSON it was issued to, exactly as printed in Latin script. Always return this for an identity document, whoever they are and whether or not they appear anywhere else in this list. Leave it out for documents that are not about one person (a trade licence, an MOA, a financial statement)`;
 
   const instruction =
     "You are examining an uploaded document for a UAE government service application.\n" +
@@ -200,6 +227,7 @@ export async function extractFieldsFromDocument(input: {
     "- A single phone number on the document can fill BOTH an owner-contact and a general contact-phone field if the document shows only one number for that person.\n" +
     "- If the document is an identity card (e.g. Emirates ID) and the fields describe an agent/representative, map the card's name, ID number and expiry to those agent fields only.\n" +
     "- If the document is an Emirates ID card and the fields include an owner/signatory Emirates ID field, map the card's ID number (format 784-YYYY-NNNNNNN-N) into it, and the holder's name/nationality into the matching owner fields when present.\n" +
+    "- WHOSE CARD IS IT: for ANY identity document, always return the holder's printed name in \"" + HOLDER_NAME_KEY + "\", even when the person is nobody you were told about and even when no owner or partner name field seems to fit. That key is how the application checks the document was issued to the right person; omitting it is how somebody else's Emirates ID gets accepted. It is never the company's name and never a name you inferred from the file name.\n" +
     "- If the document is NOT a type that carries application data (business_card, other), return ONLY the " + DOC_TYPE_KEY + " classification and nothing else.\n" +
     "- Respond with the JSON object only, no prose, no markdown fences.";
 
@@ -218,11 +246,19 @@ export async function extractFieldsFromDocument(input: {
     let docExpiryDate: string | undefined;
     let docType: DocType | undefined;
     let ownerEntity: string | undefined;
+    let holderName: string | undefined;
     for (const [k, v] of Object.entries(parsed)) {
       if (v === null || v === undefined || v === "") continue;
       if (k === DOC_EXPIRY_KEY) {
         const d = String(v).match(/^\d{4}-\d{2}-\d{2}/)?.[0];
         if (d) docExpiryDate = d;
+        continue;
+      }
+      if (k === HOLDER_NAME_KEY) {
+        const n = String(v).trim();
+        // A name, not a company and not a sentence. Two characters is a name;
+        // eighty is the model explaining itself into the wrong field.
+        if (n.length > 1 && n.length <= 80) holderName = n;
         continue;
       }
       if (k === DOC_TYPE_KEY) {
@@ -260,7 +296,7 @@ export async function extractFieldsFromDocument(input: {
       delete values.trade_license_number;
     }
 
-    return { values, docExpiryDate, docType };
+    return { values, docExpiryDate, docType, holderName };
   } catch (e) {
     return { values: {}, note: e instanceof Error ? e.message : "extraction_failed" };
   }

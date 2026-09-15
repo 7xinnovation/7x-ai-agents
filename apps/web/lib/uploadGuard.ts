@@ -162,6 +162,8 @@ export function collectedUploadGuard(
   // around the block can be talking about it.
   let deferred = false;
   let seen = "";
+  /** Whether a block has already gone out in this reply. */
+  let kept = false;
   const sawProse = (prose: string) => {
     if (deferred || !prose) return;
     seen = (seen + prose).slice(-2000);
@@ -181,6 +183,22 @@ export function collectedUploadGuard(
     if (!keys.length) return false;
     const offers = keys.map((k) => optional(k));
     if (offers.some((o) => !o)) return false; // something here is actually required
+    /**
+     * AND NEVER SECOND.
+     *
+     * The opening message of an EPGL new licence lists what to have ready —
+     * naming the MOA, correctly — and then emits two blocks: the trade licence,
+     * which it is asking for, and the MOA, which it is not. The prose names the
+     * MOA, so the rule above lets it stand, and the customer is capped at one
+     * control per message so the right one wins by being FIRST.
+     *
+     * Winning by arrival order is not winning. Swap the two blocks and the
+     * optional offer is the only box on a screen asking for a trade licence,
+     * which is the whole bug in a different coat. An optional document is never
+     * the point of a message that has already asked for something, so once a
+     * block has gone out, the offers stop.
+     */
+    if (kept) return true;
     return !offers.some((o) => namesDocument(seen, o!.aliases));
   };
 
@@ -211,7 +229,12 @@ export function collectedUploadGuard(
       // Already said it can wait, or already asked something else: the control
       // goes, the sentence and the buttons stay.
       const block = buf.slice(0, end - trailing.length);
-      out += deferred || unaskedOptional(block) ? "" : replaceCollected(block, collected) + trailing;
+      if (deferred || unaskedOptional(block)) {
+        // The sentence stays; only the control goes.
+      } else {
+        out += replaceCollected(block, collected) + trailing;
+        kept = true;
+      }
       buf = buf.slice(end);
       mode = "pass";
     }

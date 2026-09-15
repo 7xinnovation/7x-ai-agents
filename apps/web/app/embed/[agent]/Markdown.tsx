@@ -887,6 +887,37 @@ export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; 
   let lastPara = "";
   // Upload controls already rendered for THIS message (see uploadCtx.maxUploads).
   let uploadsShown = 0;
+  /**
+   * WHICH CONTROLS A CAPPED MESSAGE SHOWS, DECIDED BEFORE ANY OF THEM RENDER.
+   *
+   * EPGL cap uploads at one per message. Before this, the one shown was
+   * whichever block the model happened to emit first, and the opening message of
+   * a new licence emits two: the trade licence it is asking for, and the MOA it
+   * is merely listing. Today the licence comes first and the right box wins.
+   * Swap them and the optional offer is the only box on a screen asking for a
+   * trade licence — which is the bug reported twice on 15 September in a
+   * different coat.
+   *
+   * A message is a whole thing by the time it renders, so the choice does not
+   * have to be made in arrival order: MANDATORY outstanding documents claim the
+   * cap first, and optional ones take what is left. The server drops an optional
+   * block the prose never named (see uploadGuard); this decides the remaining
+   * case, where it was named in a preparation list that named everything.
+   */
+  const allowedUploads: Set<string> | null = (() => {
+    const cap = uploadCtx?.maxUploads;
+    if (!uploadCtx || cap === undefined) return null;
+    const keys: string[] = [];
+    for (let j = 0; j < lines.length; j++) {
+      if (!/^\s*```\s*upload\s*$/.test(lines[j]!)) continue;
+      const body: string[] = [];
+      for (j++; j < lines.length && !/^\s*```\s*$/.test(lines[j]!); j++) body.push(lines[j]!);
+      for (const key of resolveUploadKeys(body, uploadCtx)) if (!keys.includes(key)) keys.push(key);
+    }
+    if (keys.length <= cap) return null; // nothing to choose between
+    const rank = (key: string) => (uploadCtx.docs[key]?.requirement === "mandatory" ? 0 : 1);
+    return new Set([...keys].sort((a, b) => rank(a) - rank(b)).slice(0, cap));
+  })();
   while (i < lines.length) {
     const line = lines[i]!;
     // Fenced blocks: ```cards (choice cards) or ```upload (in-chat upload widget).
@@ -914,6 +945,7 @@ export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; 
             // FB-1565: one ask at a time. An agent that declares a per-message
             // cap shows at most that many upload controls, however many blocks
             // the model emitted; the extra documents are requested next turn.
+            if (allowedUploads && !allowedUploads.has(dkey)) continue;
             if (uploadCtx.maxUploads !== undefined && uploadsShown >= uploadCtx.maxUploads) break;
             uploadsShown++;
             nodes.push(<ChatUpload key={k++} dkey={dkey} ctx={uploadCtx} />);
