@@ -67,7 +67,7 @@ export function loadMapbox(): Promise<any> {
  * otherwise fully Arabic conversation, which is the one thing on that screen a
  * customer reading Arabic could not read.
  */
-const MAP_STR = {
+export const MAP_STR = {
   en: {
     browse: "Browse nearby branches on a map",
     finding: "Finding branches near you…",

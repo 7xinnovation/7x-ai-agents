@@ -74,7 +74,7 @@ function messageTime(at: string | null | undefined, locale: string): string {
   }
 }
 
-const STR = {
+export const STR = {
   en: {
     placeholder: "Type your message…",
     sources: "Sources",

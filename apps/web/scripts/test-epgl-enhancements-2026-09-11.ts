@@ -148,7 +148,12 @@ if (envAt !== -1) {
   check("8 — the legal form is captured", fieldKeys(J("new_license")).has("legal_form"));
   const moa = docs(J("new_license")).find((d: any) => d.key === "moa");
   check("8 — the MOA is skipped for a sole establishment", moa?.condition === "legal_form != 'Sole Establishment'", moa?.condition);
-  check("8 — the MOA is still mandatory otherwise", moa?.requirement === "mandatory");
+  // It WAS mandatory when this was written. EPGL's consolidated feedback later
+  // the same day asked for the MOA to be optional everywhere, so the condition
+  // below is now the only thing that varies by company type: for a sole
+  // establishment the slot does not appear at all, which is different from
+  // "you may skip it".
+  check("8 — the MOA is optional, per the consolidated feedback", moa?.requirement === "optional", moa?.requirement);
 
   // The conditions must actually hold up against the shared evaluator.
   const soleTrader = { partner_count: 1, partner_1_residence: "Non Resident", legal_form: "Sole Establishment" };
