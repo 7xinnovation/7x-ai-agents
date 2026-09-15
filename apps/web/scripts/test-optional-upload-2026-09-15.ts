@@ -109,5 +109,49 @@ check(
   /key:\s*moa/.test(run(`Next, the Memorandum of Association, if you have it:\n\n${B}upload\nkey: moa\n${B}\n`))
 );
 
+/**
+ * THE SAFETY NET THAT WAS THE REAL LEAK.
+ *
+ * The chat route appends upload blocks when a reply talks about uploading and
+ * carries none — FB-1425, the control that never appeared. It runs after this
+ * guard, so it ran AROUND it, and it was the author of every stray box reported
+ * on 15 September: the guard removed the model's block, the finished text then
+ * contained no block, and the net put two back.
+ *
+ * It needs to tell "never mentioned a document" from "block deliberately
+ * removed". These are the two signals it reads.
+ */
+{
+  const g = collectedUploadGuard(() => null, optional);
+  let out = "";
+  for (const ch of `Now I need his Emirates ID:\n\n${B}buttons\n- Type the number\n${B}\n\n${B}upload\nkey: moa\n${B}\n`) out += g.push(ch);
+  out += g.flush();
+  check("a dropped block is still a block that was seen", g.sawBlock());
+  check("...and the reply is marked as having asked something else", g.suppressed());
+  check("...so the net must not fire", !/key:\s*moa/.test(out) && g.sawBlock());
+}
+{
+  // "please upload his passport copy" — already in, rewritten, no block left in
+  // the text. This is the 11:53 report: the net appended the MOA beneath it.
+  const collected = (k: string) =>
+    k === "partner_1_passport" ? { label: "Partner 1 — passport copy", fileName: "p.pdf" } : null;
+  const g = collectedUploadGuard(collected, optional);
+  let out = "";
+  for (const ch of `Please upload his passport copy.\n\n${B}upload\nkey: partner_1_passport\n${B}\n`) out += g.push(ch);
+  out += g.flush();
+  check("an 'already uploaded' rewrite leaves no block in the text", !/```upload/.test(out));
+  check("...but the guard reports it saw one", g.sawBlock());
+  check("...and did not suppress anything", !g.suppressed());
+}
+{
+  // A reply that genuinely never mentioned a document: the net is what it is for.
+  const g = collectedUploadGuard(() => null, optional);
+  let out = "";
+  for (const ch of "Please upload your trade licence below.") out += g.push(ch);
+  out += g.flush();
+  check("no block seen when the model emitted none", !g.sawBlock());
+  check("...and nothing was suppressed", !g.suppressed());
+}
+
 console.log(failed ? `\n${failed} failing` : "\nall good");
 process.exit(failed ? 1 : 0);

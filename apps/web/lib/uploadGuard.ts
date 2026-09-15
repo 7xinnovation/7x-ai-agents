@@ -164,6 +164,23 @@ export function collectedUploadGuard(
   let seen = "";
   /** Whether a block has already gone out in this reply. */
   let kept = false;
+  /**
+   * Whether this reply contained an upload block AT ALL — kept, rewritten into
+   * "already uploaded", or dropped.
+   *
+   * The chat route has a second source of upload controls: when a reply mentions
+   * uploading and carries no block, it appends blocks for the pending documents
+   * so the control always renders where the assistant said it would (FB-1425).
+   * That appender runs AFTER this guard and therefore around it, and it was the
+   * real author of every stray box reported on 15 September — the guard dropped
+   * the model's block, the finished text then had no block in it, and the
+   * appender put two back, optional ones included.
+   *
+   * It has to know the difference between "this reply never mentioned a
+   * document" and "this reply's block was deliberately removed". That is what
+   * this reports.
+   */
+  let touched = false;
   const sawProse = (prose: string) => {
     if (deferred || !prose) return;
     seen = (seen + prose).slice(-2000);
@@ -229,6 +246,7 @@ export function collectedUploadGuard(
       // Already said it can wait, or already asked something else: the control
       // goes, the sentence and the buttons stay.
       const block = buf.slice(0, end - trailing.length);
+      touched = true;
       if (deferred || unaskedOptional(block)) {
         // The sentence stays; only the control goes.
       } else {
@@ -241,6 +259,14 @@ export function collectedUploadGuard(
   };
 
   return {
+    /** Did this reply carry an upload block of its own? See `touched`. */
+    sawBlock(): boolean {
+      return touched;
+    },
+    /** Did this reply ask something else, or defer? Then it is not the moment. */
+    suppressed(): boolean {
+      return deferred;
+    },
     push(delta: string): string {
       buf += delta;
       return step();

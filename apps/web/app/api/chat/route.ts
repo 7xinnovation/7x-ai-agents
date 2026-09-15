@@ -34,7 +34,7 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
-import { collectedUploadGuard } from "@/lib/uploadGuard";
+import { collectedUploadGuard, asksSomethingElse } from "@/lib/uploadGuard";
 import { epglDocumentLabel } from "@/lib/epglDocumentLabel";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale } from "@/lib/replyLocale";
@@ -2290,19 +2290,59 @@ export async function POST(req: NextRequest) {
         // active journey's still-pending documents ourselves — the widget then
         // always renders where the assistant said it would.
         const activeJourney = findJourney(agent.definition, finalState.journeyKey);
-        if (agent.definition.documentsInChat && activeJourney && !/```\s*upload/i.test(finalText)) {
+        /**
+         * THE SAFETY NET THAT BECAME THE LEAK.
+         *
+         * This exists for FB-1425: the assistant said "upload it below" and no
+         * control appeared, because the model had emitted a block naming nothing
+         * resolvable — or no block at all. So a reply that talks about uploading
+         * and carries no control gets one.
+         *
+         * It runs AFTER the streaming guard, which means it runs AROUND it, and
+         * on 15 September it was the author of every stray upload box reported
+         * that day. Three separate bug reports, all the same mechanism:
+         *
+         *   "Now I need his Emirates ID" + three buttons        → guard dropped
+         *   the model's block, correctly; text now had no block; this appended
+         *   the first TWO pending documents — the optional MOA among them.
+         *
+         *   "please upload his passport copy" (already in)      → guard rewrote
+         *   the block to "already uploaded"; text now had no block; this
+         *   appended the MOA and partner 1's Emirates ID beneath it.
+         *
+         * Each time the guard did its job and this undid it, because "the text
+         * contains no upload block" cannot tell a reply that never mentioned a
+         * document from one whose block was deliberately removed. Now it can:
+         * the guard reports what it saw.
+         *
+         * And what it adds is narrowed to what the net was ever for. ONE
+         * document, not two — this journey shows one control per message and
+         * two was always one too many. MANDATORY only: an optional document is
+         * an offer, and an offer nobody made is indistinguishable from a demand.
+         * And never in a message that asked something else, which is the same
+         * rule the guard applies to the model's own blocks.
+         */
+        const lateUploadsAllowed =
+          agent.definition.documentsInChat &&
+          activeJourney &&
+          !/```\s*upload/i.test(finalText) &&
+          !uploadGuard.sawBlock() &&
+          !uploadGuard.suppressed() &&
+          !asksSomethingElse(finalText);
+        if (lateUploadsAllowed) {
           const docStatus = new Map(finalState.documents.map((d) => [d.key, d.status]));
           const pendingDocs = activeJourney.steps
             .flatMap((s) => s.documents)
             .filter(
               (d) =>
+                d.requirement === "mandatory" &&
                 evalCondition(d.condition, finalState.data) &&
                 !["uploaded", "accepted"].includes(docStatus.get(d.key) ?? "")
             );
           const mentionsUpload = /upload|attach\b|attachment|ارفع|يرفع|برفع|رفع|حمّل|تحميل|إرفاق|أرفق|ارفاق/i.test(finalText);
           if (pendingDocs.length && mentionsUpload) {
             const blocks = pendingDocs
-              .slice(0, 2)
+              .slice(0, 1)
               .map((d) => `\n\n\`\`\`upload\nkey: ${d.key}\n\`\`\``)
               .join("");
             send({ type: "text", delta: blocks });
