@@ -131,5 +131,38 @@ console.log("\nAn unresolved block guesses at something the application needs");
   check("nothing outstanding and required: render nothing", noneRequired.length === 0, noneRequired);
 }
 
+console.log("\nA block naming two documents is about the required one");
+{
+  const ctx = {
+    docs: {
+      moa: { label: { en: "MOA" }, requirement: "optional", acceptedFormats: [], maxSizeMb: 10 },
+      lease_contract: { label: { en: "Lease" }, requirement: "optional", acceptedFormats: [], maxSizeMb: 10 },
+      partner_1_emirates_id: { label: { en: "Partner 1 EID" }, requirement: "mandatory", acceptedFormats: [], maxSizeMb: 10 },
+      partner_1_passport: { label: { en: "Partner 1 passport" }, requirement: "mandatory", acceptedFormats: [], maxSizeMb: 10 },
+    },
+    statuses: {},
+    pendingDocs: ["moa", "partner_1_emirates_id"],
+  } as never;
+
+  // The reported shape, verbatim from conversation 699d5f4a.
+  const paired = resolveUploadKeys(["key: moa", "key: partner_1_emirates_id"], ctx);
+  check("the optional MOA drops out", !paired.includes("moa"), paired);
+  check("...and the Emirates ID is what renders", paired.join() === "partner_1_emirates_id", paired);
+  check("order does not matter", resolveUploadKeys(["key: partner_1_emirates_id", "key: moa"], ctx).join() === "partner_1_emirates_id");
+
+  // The genuine pairing, which must survive.
+  const both = resolveUploadKeys(["key: partner_1_passport", "key: partner_1_emirates_id"], ctx);
+  check("two required documents both stay", both.length === 2, both);
+
+  // And an offer of optional things on its own IS the offer.
+  const offer = resolveUploadKeys(["key: moa", "key: lease_contract"], ctx);
+  check("a block of only optional documents is untouched", offer.length === 2, offer);
+  check("a single optional document still renders", resolveUploadKeys(["key: moa"], ctx).join() === "moa");
+
+  // A requirement already met is not a reason to drop the offer beside it.
+  const done = { ...(ctx as never as Record<string, never>), statuses: { partner_1_emirates_id: { status: "accepted" } } } as never;
+  check("an already-uploaded requirement does not suppress the offer", resolveUploadKeys(["key: moa", "key: partner_1_emirates_id"], done).includes("moa"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

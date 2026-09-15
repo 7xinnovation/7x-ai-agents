@@ -73,6 +73,36 @@ export function resolveUploadKeys(body: string[], ctx: UploadCtx): string[] {
    * urgently asking for it -- and offering two guesses doubles the chance that
    * one of them contradicts the sentence above it.
    */
+  /**
+   * A BLOCK THAT NAMES TWO DOCUMENTS IS ABOUT THE ONE THAT IS REQUIRED.
+   *
+   * Several keys in one block is a real pattern — an Emirates ID's front and
+   * back belong together. Two DIFFERENT documents do not, and EPGL's new-licence
+   * flow was pairing the optional MOA into every block it emitted:
+   *
+   *   [key: moa / key: partner_1_emirates_id]
+   *   [key: moa / key: partner_2_emirates_id]
+   *   [key: moa / key: partner_3_emirates_id]
+   *
+   * EPGL cap the controls at one per message, so the FIRST rendered — the MOA —
+   * and the Emirates ID the message was actually asking for never appeared. The
+   * customer was shown the same optional box at every step of a flow that had
+   * moved on three partners ago.
+   *
+   * So when a block names something still REQUIRED and something optional, the
+   * optional one goes: the message is about the requirement, and the offer can
+   * be made again when it is the only thing left. A block naming only optional
+   * documents is untouched — that IS the offer.
+   */
+  if (out.length > 1) {
+    const required = out.filter((k) => {
+      const st = ctx.statuses[k]?.status;
+      if (st === "uploaded" || st === "accepted") return false;
+      return ctx.docs[k]?.requirement === "mandatory";
+    });
+    if (required.length) return required;
+  }
+
   if (!out.length && ctx.pendingDocs?.length) {
     const required = ctx.pendingDocs.find((k) => ctx.docs[k]?.requirement === "mandatory");
     if (required) out.push(required);
