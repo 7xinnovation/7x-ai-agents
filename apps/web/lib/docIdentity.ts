@@ -723,12 +723,28 @@ export function partnerDocumentCheck(
 /** Everyone this application names: the owner, and every partner on file. */
 export function namedPeople(data: Record<string, unknown>, max = 12): { label: string; name: string }[] {
   const out: { label: string; name: string }[] = [];
-  const owner = raw(data, PERSON_NAME_FIELDS);
-  if (owner) out.push({ label: "the owner", name: owner });
+  /**
+   * ONE PERSON, ONE ENTRY.
+   *
+   * The owner is usually also partner 1, so a refusal read "this application
+   * names: Faisal Eissa Lutfi Ali Hussain, Faisal Eissa Lutfi Ali Hussain,
+   * Abdelaziz Mohamed Obaid, Valentina Mintah" — the applicant counting the
+   * names to work out whether we were confused. The partner label is the more
+   * useful of the two, so it wins where they are the same person.
+   */
+  const seen = new Set<string>();
+  const add = (label: string, name: string) => {
+    const k = normaliseName(name);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    out.push({ label, name });
+  };
   for (let i = 1; i <= max; i++) {
     const n = knownPartnerName(data, i) ?? seenPartnerName(data, i);
-    if (n) out.push({ label: `partner ${i}`, name: n });
+    if (n) add(`partner ${i}`, n);
   }
+  const owner = raw(data, PERSON_NAME_FIELDS);
+  if (owner) add("the owner", owner);
   return out;
 }
 

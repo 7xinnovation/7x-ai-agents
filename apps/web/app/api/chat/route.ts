@@ -331,10 +331,16 @@ function formatEpglProfileContext(p: Record<string, string>): string | undefined
   if (p.owner_emirates_id) parts.push(`Owner Emirates ID: ${p.owner_emirates_id}`);
   if (p.owner_nationality) parts.push(`Owner nationality: ${p.owner_nationality}`);
   if (p.contact_name || p.contact_email) parts.push(`Contact: ${[p.contact_name, p.contact_email, p.contact_phone].filter(Boolean).join(", ")}`);
-  const quarters = ["leviable_income_q1", "leviable_income_q2", "leviable_income_q3", "leviable_income_q4"]
-    .map((k, i) => (p[k] ? `Q${i + 1} ${p[k]}` : null))
-    .filter(Boolean);
-  if (quarters.length) parts.push(`Quarterly leviable income${p.financial_year ? ` for FY ${p.financial_year}` : ""} (from IDEP/company data): ${quarters.join(", ")}`);
+  /**
+   * The quarterly figures are NOT summarised back to the model any more.
+   *
+   * They were put here so a signed-in customer could confirm what EPGL already
+   * held rather than retype it. The renewal stopped collecting them on
+   * 15 September — they belong to the Form 9 returns filed on EPGL's own
+   * platform — so a case cannot carry them, and naming them in the context the
+   * model reads is how "let me confirm your quarterly figures" survives a
+   * journey that no longer has any.
+   */
   if (p.accountant_name || p.accountant_email) parts.push(`Accountant: ${[p.accountant_name, p.accountant_email, p.accountant_phone].filter(Boolean).join(", ")}`);
   if (parts.length === 0) return undefined;
   return (
@@ -1100,7 +1106,9 @@ export async function POST(req: NextRequest) {
           description:
             "Quarterly Form 9 revenue submissions already filed for a company, newest first, using the accountId returned by " +
             COMPANY_TOOL +
-            ". Each quarter carries its calendar quarter and year, the licence period start and end dates, and the leviable and non-leviable revenue. Use it to fill the renewal's financial summary and to work out which quarters the licence period covers — never ask the customer to type figures this returns.",
+            ". Each quarter carries its calendar quarter and year, the licence period start and end dates, and the leviable and non-leviable revenue. " +
+            "READ-ONLY, AND NOT PART OF THE RENEWAL (2026-09-15). The renewal no longer collects revenue figures of any kind — no quarterly leviable income, no reporting quarters, no financial year. " +
+            "Call this ONLY when the customer asks about their filed returns or their levy, and answer from what it returns. Never present its figures for confirmation as a step of the renewal, never ask the customer to fill a gap in them, and never say the renewal is waiting on them: Form 9 is filed on EPGL's own platform and EPGL state the payable amount in the payment request issued after the document review.",
           input_schema: {
             type: "object",
             properties: {
