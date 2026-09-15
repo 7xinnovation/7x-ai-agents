@@ -35,6 +35,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard } from "@/lib/uploadGuard";
+import { epglDocumentLabel } from "@/lib/epglDocumentLabel";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale } from "@/lib/replyLocale";
 import { narrationGuard } from "@/lib/narrationGuard";
@@ -348,57 +349,6 @@ function formatEpglProfileContext(p: Record<string, string>): string | undefined
  * (server-authoritative); turns, submissions, payments, and escalations are
  * persisted, audited, and emitted as standardized analytics events.
  */
-/**
- * One placeholder row per uploaded file, for the EPGL composite.
- *
- * Salesforce needs the name, the type and the SIZE, and the size only exists on
- * the stored blob -- so it is read here rather than guessed. A file whose bytes
- * have gone is left out: a placeholder with no file behind it is worse than no
- * placeholder, because the panel would then promise a document that never
- * arrives.
- */
-async function epglDocumentRows(
-  caseId: string,
-  stateDocs: { key: string; status: string; fileName?: string }[]
-): Promise<{ key: string; fileName: string; fileType: string; sizeBytes: number; fileId: string }[]> {
-  const wanted = new Set(
-    stateDocs.filter((d) => d.status === "uploaded" || d.status === "accepted").map((d) => d.key)
-  );
-  if (!wanted.size) return [];
-  try {
-    const rows = await getDb()
-      .select({
-        key: documentsTable.key,
-        fileName: documentsTable.fileName,
-        storageKey: documentsTable.storageKey,
-        sizeBytes: documentBlobs.sizeBytes,
-      })
-      .from(documentsTable)
-      .leftJoin(documentBlobs, eq(documentBlobs.storageKey, documentsTable.storageKey))
-      .where(eq(documentsTable.caseId, caseId));
-    // Newest row per key -- a re-upload replaces the earlier one.
-    const byKey = new Map<string, (typeof rows)[number]>();
-    for (const r of rows) if (wanted.has(r.key)) byKey.set(r.key, r);
-    return [...byKey.values()]
-      .filter((r) => r.storageKey && typeof r.sizeBytes === "number" && r.sizeBytes > 0)
-      .map((r) => {
-        const fileName = r.fileName || `${r.key}.pdf`;
-        return {
-          key: r.key,
-          fileName,
-          fileType: (fileName.split(".").pop() || "pdf").toLowerCase(),
-          sizeBytes: Number(r.sizeBytes),
-          // Their spec carries a UUID here; it is ours to mint, and it
-          // correlates the placeholder with the file uploaded afterwards.
-          fileId: randomUUID(),
-        };
-      });
-  } catch {
-    // A submission is worth more than its placeholders: never fail the save over
-    // this. The files still upload; only the panel stays empty.
-    return [];
-  }
-}
 
 /**
  * The case's uploaded files as base64, for Emirates Post's rental save.
@@ -717,7 +667,6 @@ export async function POST(req: NextRequest) {
     // The files this case holds, so the EPGL composite carries a placeholder row
     // per document. Read here rather than left to the model, which was asked for
     // them twice and sent none.
-    epglDocuments: await epglDocumentRows(session.caseId, session.state.documents),
     // The rental duration the customer chose, so the reservation is made for the
     // term they picked rather than the one the model remembers.
     // The rental's payment is opened on the backend's own N-Genius outlet, which
@@ -1094,9 +1043,21 @@ export async function POST(req: NextRequest) {
    * without the model having to remember it across a dozen turns.
    */
   const epglLicenceRecordId: { value: string | null } = { value: null };
-  const rememberLicenceRecordId = (c: { licenseRecordId?: string } | undefined) => {
+  /**
+   * The Account behind this application, when a lookup has already found it.
+   *
+   * API 5 takes either parent, or both. The licence request alone is enough and
+   * is what every upload carries; adding the company puts the same file on the
+   * company record too, which is where a renewal reviewer looks first. Null on a
+   * new licence until the composite creates the Account, and an absent parent is
+   * simply not sent.
+   */
+  const epglAccountId: { value: string | null } = { value: null };
+  const rememberLicenceRecordId = (c: { licenseRecordId?: string; accountId?: string } | undefined) => {
     const id = String(c?.licenseRecordId ?? "").trim();
     if (id) epglLicenceRecordId.value = id;
+    const acc = String(c?.accountId ?? "").trim();
+    if (/^[a-zA-Z0-9]{15,18}$/.test(acc)) epglAccountId.value = acc;
   };
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
@@ -2005,16 +1966,45 @@ export async function POST(req: NextRequest) {
         // The registration fee, put INTO the pre-payment card rather than left in
         // a sentence beneath it.
         // A file already in the case is not something to ask for again.
-        const docLabels = new Map<string, string>(
-          (findJourney(agent.definition, session.state.journeyKey)?.steps ?? [])
-            .flatMap((st) => st.documents)
-            .map((d) => [d.key, tr(d.label, body.locale)] as const)
+        const journeyDocs = (findJourney(agent.definition, session.state.journeyKey)?.steps ?? []).flatMap(
+          (st) => st.documents
         );
-        const uploadGuard = collectedUploadGuard((key) => {
-          const d = liveState.documents.find((x) => x.key === key);
-          if (!d || (d.status !== "uploaded" && d.status !== "accepted")) return null;
-          return { label: docLabels.get(key) ?? key, fileName: d.fileName ?? null };
-        });
+        const docLabels = new Map<string, string>(journeyDocs.map((d) => [d.key, tr(d.label, body.locale)] as const));
+        /**
+         * The names an OPTIONAL document goes by, for the offer rule.
+         *
+         * Both locales, because the message may be in either, plus whatever sits
+         * in brackets after the label — EPGL's MOA is listed as "Memorandum of
+         * Association (MOA)" and the model writes "MOA" far more often than it
+         * writes the whole thing. The key itself is included as a last resort
+         * ("lease_contract" reads as "lease contract").
+         */
+        const docAliases = new Map<string, string[]>(
+          journeyDocs
+            .filter((d) => d.requirement === "optional")
+            .map((d) => {
+              const names = new Set<string>();
+              for (const loc of ["en", "ar"]) {
+                const label = tr(d.label, loc as never);
+                if (!label) continue;
+                names.add(label.replace(/\s*\([^)]*\)\s*/g, " ").trim());
+                for (const m of label.matchAll(/\(([^)]+)\)/g)) names.add(m[1]!.trim());
+              }
+              names.add(d.key.replace(/_/g, " "));
+              return [d.key, [...names].filter((n) => n.length >= 3)] as const;
+            })
+        );
+        const uploadGuard = collectedUploadGuard(
+          (key) => {
+            const d = liveState.documents.find((x) => x.key === key);
+            if (!d || (d.status !== "uploaded" && d.status !== "accepted")) return null;
+            return { label: docLabels.get(key) ?? key, fileName: d.fileName ?? null };
+          },
+          (key) => {
+            const aliases = docAliases.get(key);
+            return aliases?.length ? { aliases } : null;
+          }
+        );
         const feeGuard = summaryFeeGuard(
           () => apiTools.getRegistrationFee(),
           // Only once the box is reserved: before that there is no total to
@@ -2508,8 +2498,8 @@ export async function POST(req: NextRequest) {
          *
          * So it is attempted on every later turn too, for whatever has not gone
          * yet, and the case records what has. A re-send costs nothing: EPGL's
-         * API 5 upserts on EPG_File_Id__c and answers `createdNewDocument:
-         * false` to the second push of the same file — measured, not assumed.
+         * API 5 matches on label__c under the same parent and answers
+         * `createdNewDocument: false` to the second push of the same slot.
          */
         const submittedReference =
           submittedRef ?? (finalState.status === "submitted" ? finalState.reference : null);
@@ -2567,19 +2557,55 @@ export async function POST(req: NextRequest) {
                  * still names the fields it no longer accepts, which is why this
                  * read as our bug for an hour.
                  *
-                 * EPG_File_Id__c is the document row's own id, so a retried push
-                 * updates the same record rather than filing the same file
-                 * twice: their handler answers `createdNewDocument: false` to
-                 * the second one. Measured, not assumed.
+                 * Their 2.0.0 contract, sent the same evening, then corrected
+                 * the rest of the body: see label__c below.
                  */
+                const label = epglDocumentLabel(d.key, {
+                  fallback: docLabels.get(d.key),
+                  partnerName: (n) => str(finalState.data[`partner_${n}_name`]) ?? undefined,
+                });
                 const res = await execIntegration(tool, {
                   body: {
                     EPG_License_Request__c: ref,
+                    ...(epglAccountId.value ? { EPG_Company__c: epglAccountId.value } : {}),
+                    /**
+                     * label__c IS THE SLOT, AND EPG_File_Id__c IS NOT OURS TO SET.
+                     *
+                     * Contract 2.0.0, 15 September. Two lines of it undo what we
+                     * were doing:
+                     *
+                     *   "EPG_Document__c.Name is the document slot and is taken
+                     *    from label__c... if it is omitted, each call with a
+                     *    different file name creates a separate document record."
+                     *
+                     *   "EPG_File_Id__c — leave it out unless the file also
+                     *    exists in an external system. When omitted Salesforce
+                     *    stores the Salesforce ContentDocumentId there, WHICH IS
+                     *    WHAT MARKS THE DOCUMENT AS UPLOADED."
+                     *
+                     * We were sending our own row id in EPG_File_Id__c, so their
+                     * record carried a uuid from our database where it expected
+                     * the id of the file it had just stored — a document whose
+                     * "uploaded" marker pointed at nothing they could open. And
+                     * with no label, every file landed in a slot of its own named
+                     * after itself rather than against the checklist entry that
+                     * was waiting for it.
+                     *
+                     * Re-sending is still safe, and better than it was: the same
+                     * label under the same parent UPDATES that document (HTTP 200,
+                     * createdNewDocument false) instead of upserting on an id of
+                     * our choosing.
+                     */
+                    label__c: label,
                     EPG_File_Name__c: fileName,
-                    EPG_File_Id__c: row.id,
-                    docType__c: ext,
-                    filetype__c: ext,
+                    // docType__c is the KIND of document; fileType__c is the file's
+                    // format. Both carried the extension, so every row on LR-37214
+                    // said its type was "pdf".
+                    docType__c: label,
+                    fileType__c: ext,
                     fileSize__c: stored.bytes.length,
+                    uploadBy__c: "Agent AI",
+                    uploadOn__c: new Date().toISOString(),
                     content: Buffer.from(stored.bytes).toString("base64"),
                   },
                 });

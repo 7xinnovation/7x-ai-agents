@@ -578,60 +578,39 @@ function priceOf(details: unknown, serviceType: string, criteria?: string): numb
   return typeof row?.totalAmount === "number" ? row.totalAmount : null;
 }
 
-export interface EpglDocumentRow {
-  key: string;
-  fileName: string;
-  fileType: string;
-  sizeBytes: number;
-  fileId: string;
-}
-
 /**
- * Add a placeholder record to the EPGL composite for every uploaded file.
+ * Take the documents OUT of the composite.
  *
- * Salesforce tracks an application's documents as EPG_Document__c rows -- one
- * per file -- and the Documents panel on the licence request lists THOSE, not
- * the files. Upload a file with no placeholder and it lands on the record while
- * the panel stays empty, which is exactly what LR-37176 and LR-37177 looked
- * like: both uploads returned 201, and both applications appeared to have no
- * documents. Their own spec shows the shape; the model was told to send it and
- * omitted it twice, so it is built here where it cannot be forgotten.
+ * They went in on 2 September because the portal's Documents panel lists
+ * EPG_Document__c rows, not files, and LR-37176 and LR-37177 both uploaded
+ * cleanly and both looked empty. A placeholder row per file fixed the panel.
+ *
+ * Salesforce replaced that arrangement on 15 September (contract 2.0.0, Fuad
+ * Alnsour): "The Agent does not send EPG_Document__c items inside
+ * compositeRequest; every file goes to API 5 as a separate call carrying the
+ * file bytes as base64." Their API 5 now creates the EPG_Document__c itself,
+ * matches it to the checklist entry by name, and attaches the file to it — so
+ * the row and the file arrive together instead of being assembled from two
+ * calls that had no key in common. The composite path still exists on their
+ * side, for the DET integration that supplies a file id for them to fetch; it
+ * is explicitly out of scope for us.
+ *
+ * So this STRIPS rather than adds. The instruction to send these rows was in
+ * the journey guidance for a fortnight and a model that has read it will keep
+ * emitting them; leaving one in would file a document record with no file
+ * behind it, which is the empty panel again with the blame reversed.
  */
-export function withEpglDocumentPlaceholders(
-  input: Record<string, unknown> | undefined,
-  docs: EpglDocumentRow[]
+export function withoutEpglDocuments(
+  input: Record<string, unknown> | undefined
 ): Record<string, unknown> | undefined {
-  if (!docs.length) return input;
   const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
   const items = Array.isArray(body.compositeRequest)
-    ? [...(body.compositeRequest as Record<string, unknown>[])]
+    ? (body.compositeRequest as Record<string, unknown>[])
     : [];
   if (!items.length) return input;
-  // A composite that already carries documents is the model's to own.
-  if (items.some((i) => /EPG_Document__c/i.test(String(i?.url ?? "")))) return input;
-  const accountItem = items.find((i) => /sobjects\/Account$/i.test(String(i?.url ?? "")));
-  if (!accountItem) return input;
-
-  const accountRef = String(accountItem.referenceId ?? "NewAccount");
-  const docItem = {
-    method: "POST",
-    referenceId: "NewDocument",
-    url: "/services/data/v66.0/sobjects/EPG_Document__c",
-    body: docs.map((d) => ({
-      EPG_Company__c: `@{${accountRef}.id}`,
-      EPG_File_Name__c: d.fileName,
-      docType__c: d.fileType,
-      fileType__c: d.fileType,
-      EPG_File_Id__c: d.fileId,
-      fileSize__c: d.sizeBytes,
-    })),
-  };
-  // After the Account it references, and before the licence request, so the
-  // request stays the last thing that happens.
-  const lrAt = items.findIndex((i) => /EPG_License_Request__c$/i.test(String(i?.url ?? "")));
-  if (lrAt === -1) items.push(docItem);
-  else items.splice(lrAt, 0, docItem);
-  body.compositeRequest = items;
+  const kept = items.filter((i) => !/sobjects\/EPG_Document__c$/i.test(String(i?.url ?? "")));
+  if (kept.length === items.length) return input;
+  body.compositeRequest = kept;
   return { ...input, body };
 }
 
@@ -911,17 +890,6 @@ export async function buildApiTools(
      * through the same turn, and a snapshot taken earlier has never seen it.
      */
     epglRequestFacts?: () => EpglRequestFacts;
-    /**
-     * The documents this case holds, for the EPGL composite's placeholder rows.
-     *
-     * Salesforce tracks an application's files as EPG_Document__c records — one
-     * per file — and the portal's Documents panel lists those, not the files
-     * themselves. Uploading a file without its placeholder puts it on the record
-     * but leaves the panel empty, which is exactly what LR-37176 and LR-37177
-     * looked like. The model was asked for these and left them out both times, so
-     * they are built here from what was actually uploaded.
-     */
-    epglDocuments?: EpglDocumentRow[];
     /**
      * The case's uploaded files, base64, for Emirates Post's rental save.
      *
@@ -2178,9 +2146,8 @@ export async function buildApiTools(
     }
 
     if (/submitlicenserequest$/i.test(toolName)) {
-      if ((opts.epglDocuments ?? []).length) {
-        input = withEpglDocumentPlaceholders(input, opts.epglDocuments ?? []) ?? input;
-      }
+      // Documents are API 5's, one call per file, and no longer travel here.
+      input = withoutEpglDocuments(input) ?? input;
       if (opts.epglRequestFacts) {
         input = withEpglRequestFields(input, opts.epglRequestFacts()) ?? input;
       }

@@ -66,6 +66,43 @@ export function asksSomethingElse(prose: string): boolean {
   return BUTTONS.test(prose);
 }
 
+/**
+ * AND AN OPTIONAL DOCUMENT IS AN OFFER, WHICH HAS TO BE MADE IN WORDS.
+ *
+ * The same EPGL message, reported again on 15 September with the guard already
+ * live: "Now I need his Emirates ID", three buttons, and an upload control for
+ * the Memorandum of Association underneath — and when the customer, reasonably,
+ * put a file in the only box on the screen, it was refused.
+ *
+ * The buttons rule above did fire. It was then FORGOTTEN, which is the bug
+ * below in flush(). But the deeper point stands on its own: the MOA is
+ * OPTIONAL, nothing is waiting on it, and a box for it appearing beside an
+ * unrelated question has no reading except "this is what I am being asked for".
+ *
+ * A mandatory document is different — it is outstanding whether or not the
+ * sentence remembers to mention it, and dropping its control strands the
+ * customer. So the rule is only about optional ones: a block asking for an
+ * optional document survives when the message NAMES that document, and goes
+ * when it does not. Saying "here is the MOA slot if you have it" costs the
+ * model one clause and is exactly what the guidance already asks for.
+ */
+export function namesDocument(prose: string, aliases: string[]): boolean {
+  for (const alias of aliases) {
+    const a = alias.trim();
+    if (a.length < 3) continue;
+    const pattern = a
+      .split(/\s+/)
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s\u2011-]+");
+    // Arabic has no \b, so the boundary is "not a letter of the same script".
+    const re = /^[\x00-\x7f]+$/.test(a)
+      ? new RegExp(`\\b${pattern}\\b`, "i")
+      : new RegExp(`(?<![\\p{L}])${pattern}(?![\\p{L}])`, "iu");
+    if (re.test(prose)) return true;
+  }
+  return false;
+}
+
 /** The longest tail of `s` that is a proper prefix of `OPEN`. */
 function heldTail(s: string): number {
   const max = Math.min(OPEN.length - 1, s.length);
@@ -100,7 +137,19 @@ export function replaceCollected(
   return lines.join("\n");
 }
 
-export function collectedUploadGuard(collected: (key: string) => CollectedDoc | null) {
+export interface OptionalDoc {
+  /** Every name this document goes by, in both languages, plus its key. */
+  aliases: string[];
+}
+
+export function collectedUploadGuard(
+  collected: (key: string) => CollectedDoc | null,
+  /**
+   * Non-null for a document nothing is waiting on. See namesDocument: an offer
+   * has to be made in words, or it is not an offer, it is a demand nobody made.
+   */
+  optional: (key: string) => OptionalDoc | null = () => null
+) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
   // Set by the prose we have already let through this reply. The deferring
@@ -117,6 +166,22 @@ export function collectedUploadGuard(collected: (key: string) => CollectedDoc | 
     if (deferred || !prose) return;
     seen = (seen + prose).slice(-2000);
     if (defersUpload(seen) || asksSomethingElse(seen)) deferred = true;
+  };
+
+  /**
+   * A block offering ONLY optional documents that the message never mentioned.
+   *
+   * Every key has to be optional for this to bite. A block pairing the MOA with
+   * a partner's passport is about the passport, and Markdown.tsx already drops
+   * the optional half of those; this is the other shape, where the optional
+   * document arrives alone with nothing in the sentence above it.
+   */
+  const unaskedOptional = (block: string): boolean => {
+    const keys = [...block.matchAll(/^[ \t]*(?:-[ \t]*)?key[ \t]*:[ \t]*([\w.-]+)[ \t]*$/gim)].map((m) => m[1]!);
+    if (!keys.length) return false;
+    const offers = keys.map((k) => optional(k));
+    if (offers.some((o) => !o)) return false; // something here is actually required
+    return !offers.some((o) => namesDocument(seen, o!.aliases));
   };
 
   const step = (): string => {
@@ -145,7 +210,8 @@ export function collectedUploadGuard(collected: (key: string) => CollectedDoc | 
       const trailing = close[1] ?? "";
       // Already said it can wait, or already asked something else: the control
       // goes, the sentence and the buttons stay.
-      out += deferred ? "" : replaceCollected(buf.slice(0, end - trailing.length), collected) + trailing;
+      const block = buf.slice(0, end - trailing.length);
+      out += deferred || unaskedOptional(block) ? "" : replaceCollected(block, collected) + trailing;
       buf = buf.slice(end);
       mode = "pass";
     }
@@ -156,12 +222,26 @@ export function collectedUploadGuard(collected: (key: string) => CollectedDoc | 
       buf += delta;
       return step();
     },
+    /**
+     * WHAT A REPLY HAS SAID, IT HAS SAID.
+     *
+     * flush() used to clear `deferred` and `seen`, on the reading that it ends a
+     * reply. It does not: the chat route flushes every guard whenever a
+     * NON-TEXT event arrives mid-turn — a case update, a citation, a tool
+     * result — and the model calls a tool between almost every pair of
+     * sentences. So EPGL's "Now I need his Emirates ID", its three buttons, a
+     * collect_field recording the answer, and then the MOA upload block, was:
+     * buttons seen, guard flushed, buttons forgotten, block emitted. The rule
+     * that a message asks for one thing held only for messages that made no
+     * tool calls, which in this flow is almost none of them.
+     *
+     * A guard is built per request (see the chat route), so this state belongs
+     * to one reply by construction and has nothing to reset between.
+     */
     flush(): string {
       const rest = buf;
       buf = "";
       mode = "pass";
-      deferred = false;
-      seen = "";
       return rest;
     },
   };

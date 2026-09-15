@@ -21,12 +21,20 @@ info:
       * API 8 - Read IDEP Quarterly Figures    (GET  /services/data/v62.0/query - SOQL, no custom Apex)
 
     Submission model (API 1 & 2): a single atomic call (allOrNone) sends the company
-    (Account) and everything attached to it – owners, contacts, portal user, members,
-    documents and the license request – in one composite-shaped payload. The Account is
+    (Account) and everything attached to it – owners, contacts, portal user, members
+    and the license request – in one composite-shaped payload. The Account is
     processed first; children reference it via @{NewAccount.id}. Each record is UPSERTED
     (matched & updated if it already exists, otherwise created), so duplicate handling
     lives in Salesforce. The portal User's login fields (username, alias, profile, locale)
-    are generated server-side. The document step is processed internally.
+    are generated server-side.
+
+    DOCUMENTS ARE NOT PART OF THIS CALL. The Agent does not send EPG_Document__c items
+    inside compositeRequest; every file goes to API 5 (POST /Document) as a separate
+    call carrying the file bytes as base64. Submit the license request first, then post
+    each document against the returned Account Id or License Request Id. (The composite
+    endpoint still accepts EPG_Document__c items for the DET integration, which supplies
+    a file id for Salesforce to fetch – that path is not available to the Agent and is
+    out of scope for this contract.)
 
     Agent-sourced requests (isAgentSource=true): every call through this API runs under
     the Agent integration user, so Salesforce evaluates isAgentSource = true server-side.
@@ -38,7 +46,25 @@ info:
 
     NOTE: The exact Apex REST resource paths below are placeholders to be confirmed by the
     Salesforce team; substitute the deployed paths before integration.
-  version: 1.2.0
+
+    CHANGES IN 2.0.0 (breaking, both affect the Agent):
+      * EPG_Document__c items removed from the API 1/2 composite payload. Documents are
+        now sent only through API 5.
+      * API 5 request body replaced. It now uses the EPG_Document__c field API names
+        (EPG_File_Name__c, EPG_Company__c, EPG_License_Request__c, label__c, ...) with
+        the bytes in "content". The previous licenseRequestId / fileName / versionData
+        body is no longer accepted, and API 5 now returns 200 when it updates an
+        existing document rather than always 201.
+      * Two field names corrected against the live org: Account.Local_Governmental_Entity__c
+        removed (no such field), and EPG_License_Request__c.Terms_Conditions_Accepted__c
+        replaced by the real field EPG_Terms_and_Conditions__c.
+      * Contact.Secondary_Contact corrected to Contact.Is_Secondary_Contact__c.
+      * API 6 aligned with the deployed PaymentNotification.cls: the identifier is
+        "salesforceId" (the Agent) or "applicationId" (other callers) - the
+        "licenseRequestSalesforceId" named by an earlier draft was never implemented.
+        The transaction currency field on the REQUEST is "responseCurrency"; the
+        endpoint renames it to "currency" only in the response.
+  version: 2.0.0
   contact:
     name: Salesforce Team
 
@@ -78,6 +104,9 @@ paths:
         (Account.Id, EPG_License_Request__c.Name and the equivalent identifiers on each
         child record are required in that case). With allOrNone=true the whole transaction
         rolls back on any failure.
+
+        Documents are NOT included here - post each file separately to API 5
+        (POST /Document) after this call returns.
       requestBody:
         required: true
         content:
@@ -85,7 +114,7 @@ paths:
             schema: { $ref: '#/components/schemas/CompositeRequest' }
             examples:
               issuance:
-                summary: New License Issuance (source of truth for fields & documents)
+                summary: New License Issuance (source of truth for fields; documents go to API 5)
                 value:
                   allOrNone: true
                   isAgentSource: true
@@ -135,7 +164,7 @@ paths:
                           EPG_Designation__c: Manager
                           AccountId: '@{NewAccount.id}'
                           EPG_Country_Code__c: UAE(+971)
-                          Secondary_Contact: 'True'
+                          Is_Secondary_Contact__c: 'True'
                     - method: POST
                       referenceId: NewUser
                       url: /services/data/v66.0/sobjects/User
@@ -152,16 +181,6 @@ paths:
                       body:
                         - AccountId__c: '@{NewAccount.id}'
                           Name: Test
-                    - method: POST
-                      referenceId: NewDocument
-                      url: /services/data/v66.0/sobjects/EPG_Document__c
-                      body:
-                        - EPG_Company__c: '@{NewAccount.id}'
-                          EPG_File_Name__c: NewRenewCommitmentForm.pdf
-                          docType__c: pdf
-                          fileType__c: pdf
-                          EPG_File_Id__c: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
-                          fileSize__c: 299756
                     - method: POST
                       referenceId: NewLicenseRequest
                       url: /services/data/v66.0/sobjects/EPG_License_Request__c
@@ -234,7 +253,7 @@ paths:
                           EPG_Designation__c: Manager
                           AccountId: '@{NewAccount.id}'
                           EPG_Country_Code__c: UAE(+971)
-                          Secondary_Contact: 'True'
+                          Is_Secondary_Contact__c: 'True'
                     - method: POST
                       referenceId: NewUser
                       url: /services/data/v66.0/sobjects/User
@@ -251,16 +270,6 @@ paths:
                       body:
                         - AccountId__c: '@{NewAccount.id}'
                           Name: Test
-                    - method: POST
-                      referenceId: NewDocument
-                      url: /services/data/v66.0/sobjects/EPG_Document__c
-                      body:
-                        - EPG_Company__c: '@{NewAccount.id}'
-                          EPG_File_Name__c: NewRenewCommitmentForm.pdf
-                          docType__c: pdf
-                          fileType__c: pdf
-                          EPG_File_Id__c: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
-                          fileSize__c: 299756
                     - method: POST
                       referenceId: NewLicenseRequest
                       url: /services/data/v66.0/sobjects/EPG_License_Request__c
@@ -318,7 +327,7 @@ paths:
                           Phone: '971501234567'
                           EPG_Designation__c: Accountant
                           EPG_Country_Code__c: UAE(+971)
-                          Secondary_Contact: 'True'
+                          Is_Secondary_Contact__c: 'True'
                     - method: POST
                       referenceId: NewLicenseRequest
                       url: /services/data/v66.0/sobjects/EPG_License_Request__c
@@ -331,16 +340,6 @@ paths:
                         Approved_Commitment_Form__c: true
                         Mandatory_integration_with_IDEP__c: true
                         EPG_Is_Financial_Statement_Submitted__c: true
-                    - method: POST
-                      referenceId: NewDocument
-                      url: /services/data/v66.0/sobjects/EPG_Document__c
-                      body:
-                        - EPG_Company__c: '@{NewAccount.id}'
-                          EPG_File_Name__c: NewRenewCommitmentForm.pdf
-                          docType__c: pdf
-                          fileType__c: pdf
-                          EPG_File_Id__c: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
-                          fileSize__c: 299756
                     - method: POST
                       referenceId: NewTrialBalance
                       url: /services/data/v66.0/sobjects/EPG_Finance_Summary__c
@@ -385,8 +384,6 @@ paths:
               * Items whose request body was an ARRAY fan out to one response entry per
                 element, with "_<index>" appended to the referenceId
                 (NewContact -> NewContact_0, NewTrialBalance -> NewTrialBalance_0..3).
-              * EPG_Document__c items sent as an array are processed internally and
-                OMITTED from the response.
               * A malformed JSON body or other top-level error also returns HTTP 200,
                 with a single item (referenceId=null) - see the "topLevelError" example.
           content:
@@ -396,8 +393,9 @@ paths:
                 issuanceSuccess:
                   summary: Issuance succeeded (matches the "issuance" request example)
                   description: >
-                    One entry per created record. Array-body items carry the _0 suffix;
-                    the NewDocument item is processed internally and omitted.
+                    One entry per created record. Array-body items carry the _0 suffix.
+                    Documents are not part of this call - post them to API 5 afterwards
+                    using the Account Id returned here.
                   value:
                     compositeResponse:
                       - referenceId: NewAccount
@@ -534,7 +532,7 @@ paths:
                   summary: Renewal succeeded (matches the "renewal" request example)
                   description: >
                     Account is updated in place; four EPG_Finance_Summary__c rows come back
-                    as NewTrialBalance_0..3. NewDocument is omitted (processed internally).
+                    as NewTrialBalance_0..3. Documents are posted separately via API 5.
                   value:
                     compositeResponse:
                       - referenceId: NewAccount
@@ -668,7 +666,7 @@ paths:
       description: >
         Returns the current status of a license request, located by the Agent-supplied the Salesforce record id.
       parameters:
-        - { name: id, in: query, required: false, schema: { type: string }, description: Salesforce EPG_License_Request__c record id }
+        - { name: id, in: query, required: true, schema: { type: string }, description: Salesforce EPG_License_Request__c record id }
       responses:
         '200':
           description: Current request status.
@@ -721,34 +719,168 @@ paths:
     post:
       operationId: uploadDocument
       tags: [Documents]
-      summary: Upload / attach a document to the License Request (API 5)
+      summary: Upload / attach a document (API 5)
       description: >
-        Uploads a file (base64) into Salesforce as a File (ContentVersion) and links it to
-        the License Request via ContentDocumentLink. Files are stored inside Salesforce;
-        no external document service is used.
+        Creates or updates one EPG_Document__c and stores the file against it. The Agent
+        sends the file bytes as base64 in "content"; Salesforce never fetches the file
+        from an external service. The file is saved as a ContentVersion and linked to the
+        EPG_Document__c record via ContentDocumentLink, which is the same shape a portal
+        upload produces, so agent-uploaded documents appear alongside the customer's own.
+
+        ONE DOCUMENT PER CALL. Send a separate request for each file.
+
+        Body shape: the EPG_Document__c field API names, plus "content" for the bytes.
+
+        REQUIRED FIELDS - the call is rejected with 400 if any is missing:
+          * EPG_File_Name__c  - the file name, including its extension
+          * content           - the file bytes, base64 encoded
+          * EPG_Company__c OR EPG_License_Request__c - at least one parent. Both may be
+            sent together, in which case the document is linked to both.
+
+        OPTIONAL FIELDS - docType__c, fileType__c, fileSize__c, EPG_File_Id__c, label__c,
+        uploadOn__c, uploadBy__c, location__c. Each is written ONLY when supplied, so
+        re-sending a document without them does not blank values already on the record.
+        fileType__c defaults to the file extension and fileSize__c to the decoded byte
+        length when omitted.
+
+        DEDUPLICATION - EPG_Document__c.Name is the document slot and is taken from
+        label__c, falling back to EPG_File_Name__c. A second call with the same
+        label__c under the same parent UPDATES the existing document (HTTP 200,
+        createdNewDocument=false) and attaches the new file, rather than creating a
+        duplicate. Send label__c matching the document checklist name
+        ("Trade License", "Lease Contract", "Memorandum of Association", ...) so the
+        upload is tied to the correct required-document slot; if it is omitted, each
+        call with a different file name creates a separate document record.
+
+        EPG_File_Id__c - leave it out unless the file also exists in an external system.
+        When omitted Salesforce stores the Salesforce ContentDocumentId there, which is
+        what marks the document as uploaded. When supplied, the value is stored as sent.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/DocumentUploadRequest' }
-            example:
-              licenseRequestId: a1A5f00000XXXXXAAA
-              fileName: NewRenewCommitmentForm.pdf
-              fileType: pdf
-              versionData: JVBERi0xLjQKJ... (base64)
+            examples:
+              minimal:
+                summary: Minimum required fields
+                value:
+                  EPG_License_Request__c: a11FW000XfaElH6YIK
+                  EPG_File_Name__c: NewRenewCommitmentForm.pdf
+                  content: JVBERi0xLjQKJeLjz9MKMyAwIG9iago8PC9UeXBlL1BhZ2U...
+              recommended:
+                summary: Recommended - label__c ties the file to the checklist slot
+                value:
+                  EPG_License_Request__c: a11FW000XfaElH6YIK
+                  label__c: Trade License
+                  EPG_File_Name__c: trade-license.pdf
+                  content: JVBERi0xLjQKJeLjz9MKMyAwIG9iago8PC9UeXBlL1BhZ2U...
+              full:
+                summary: Every supported field
+                value:
+                  EPG_License_Request__c: a11FW000XfaElH6YIK
+                  EPG_Company__c: 001FW00Cmx3RyVwYEK
+                  label__c: Trade License
+                  EPG_File_Name__c: trade-license.pdf
+                  content: JVBERi0xLjQKJeLjz9MKMyAwIG9iago8PC9UeXBlL1BhZ2U...
+                  docType__c: Trade license
+                  fileType__c: pdf
+                  fileSize__c: 399676
+                  EPG_File_Id__c: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
+                  uploadOn__c: '2025-10-24T10:13:52.887Z'
+                  uploadBy__c: Agent AI
+                  location__c: https://example.com/documents/v1/file/8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
+              accountOnly:
+                summary: Attach to the company before a licence request exists
+                value:
+                  EPG_Company__c: 001FW00Cmx3RyVwYEK
+                  label__c: Memorandum of Association
+                  EPG_File_Name__c: moa.pdf
+                  content: JVBERi0xLjQKJeLjz9MKMyAwIG9iago8PC9UeXBlL1BhZ2U...
       responses:
         '201':
-          description: Document stored and linked.
+          description: >
+            A NEW document record was created and the file stored against it.
+            createdNewDocument=true.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DocumentUploadResponse' }
               example:
-                contentDocumentId: 069XXXXXXXXXXXXAAA
-                contentVersionId: 068XXXXXXXXXXXXAAA
-                linkedTo: a1A5f00000XXXXXAAA
                 success: true
-        '400': { description: Invalid file or missing link target. }
-        '401': { description: Missing or invalid access token. }
+                documentId: a0vFW006Xl4pwvIYIQ
+                contentDocumentId: 069FW003vqaF8YmYAK
+                contentVersionId: 068FW003vqaF8YmYAK
+                linkedTo: a0vFW006Xl4pwvIYIQ
+                checklistId: a0u5f000001qDTFAA2
+                documentName: Trade License
+                fileName: trade-license.pdf
+                createdNewDocument: true
+        '200':
+          description: >
+            An EXISTING document with the same name under the same parent was updated and
+            the new file attached to it. createdNewDocument=false. documentId is the same
+            record returned by the earlier call; contentDocumentId is the new file.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentUploadResponse' }
+              example:
+                success: true
+                documentId: a0vFW006Xl4pwvIYIQ
+                contentDocumentId: 069FW003vzdPWYGYA4
+                contentVersionId: 068FW003vzdPWYGYA4
+                linkedTo: a0vFW006Xl4pwvIYIQ
+                checklistId: a0u5f000001qDTFAA2
+                documentName: Trade License
+                fileName: trade-license-v2.pdf
+                createdNewDocument: false
+        '400':
+          description: >
+            The request is rejected and nothing is written. "message" states the reason.
+            Causes: empty body; body that is not valid JSON; a missing required field
+            (EPG_File_Name__c, content, or both parents); an Id that is not a valid
+            Salesforce Id; an Id of the wrong object type; or "content" that is not
+            valid base64.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentUploadResponse' }
+              examples:
+                missingParent:
+                  summary: Neither parent supplied
+                  value:
+                    success: false
+                    message: Either licenseRequestId or accountId is required.
+                missingContent:
+                  summary: No file bytes
+                  value:
+                    success: false
+                    message: content (base64 file data) is required.
+                badId:
+                  summary: Malformed or wrong-type Id
+                  value:
+                    success: false
+                    message: EPG_License_Request__c is not a valid Salesforce Id.
+                badBase64:
+                  summary: content is not decodable
+                  value:
+                    success: false
+                    message: content is not valid base64 data.
+        '401':
+          description: Missing or invalid access token.
+        '500':
+          description: >
+            An unexpected server-side error; nothing usable was returned. Safe to retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentUploadResponse' }
+              example:
+                success: false
+                message: 'Unexpected error while uploading the document: ...'
+      x-errorLogging: >
+        Every non-2xx response is written to EPG_Integration_Log__c with
+        EPG_Source_System__c = 'Agent AI' and EPG_Method_Name__c =
+        'AgentDocumentUploadAPI.uploadDocument'. The row carries the failure message, the
+        request (with the base64 replaced by its length), the response returned to the
+        Agent, and the parent Id, so a failed upload can be traced without the Agent
+        re-sending it.
 
 
   # ---------------------------------------------------------------------------
@@ -757,10 +889,10 @@ paths:
   # automatically marked as Paid, after the request has been approved by the
   # Business Team and its status is set to In Process.
   #
-  # Review change: the previous "Application ID" (applicationId) reference has been
-  # replaced by the unique attribute licenseRequestSalesforceId (the License
-  # Request's Salesforce record Id), used consistently below. The Apex side still
-  # binds "applicationId" today and will be aligned in a separate deployment.
+  # Identifier: the deployed Apex (PaymentNotification.cls) binds exactly two names on
+  # notifyPayment - "applicationId" and "salesforceId". There is no
+  # "licenseRequestSalesforceId" member; an earlier draft of this contract invented it.
+  # THE AGENT SENDS "salesforceId" (the License Request's Salesforce record Id).
   # ---------------------------------------------------------------------------
   /services/apexrest/paymentNotification/:
     post:
@@ -776,11 +908,17 @@ paths:
         request. Unlike the paths above, this is the REAL deployed path (not a
         placeholder) - the endpoint already exists and is live in the org.
 
-        The request is located by notifyPayment.licenseRequestSalesforceId - the License
-        Request's Salesforce record Id, a globally unique identifier. This unique
-        attribute replaces the previous "Application ID" (applicationId) reference.
-        It is the same value the status API already returns as salesforceRecordId, so
-        the Agent holds it from submission onwards. On success Salesforce logs a Payment_Notification__c audit record,
+        THE AGENT SENDS notifyPayment.salesforceId - the License Request's Salesforce
+        record Id, a globally unique identifier. It is the same value the status API
+        returns as salesforceRecordId, so the Agent holds it from submission onwards.
+
+        The endpoint also accepts notifyPayment.applicationId (matching
+        EPG_License_Request__c.applicationId__c) for other callers. Send ONE of them:
+        applicationId takes precedence when both are present, and the call is rejected
+        when neither is. There is no "licenseRequestSalesforceId" field - an earlier
+        draft of this contract used that name and it was never implemented.
+
+        On success Salesforce logs a Payment_Notification__c audit record,
         sets the License Request to "Payment Verified", marks its payment advice
         (EPG_Transaction__c, record type Invoice) as "Paid" with the summed transaction
         amounts, and approves the related payment items.
@@ -823,9 +961,9 @@ paths:
                 desc: { code: '43020', en: Success, ar: "نجاح" }
                 message: { code: '83250-8635', en: Success, ar: "نجاح" }
                 correlationId: 75be3872-da72-4325-9957-36ddc708588a
-        '400': { description: Missing/invalid licenseRequestSalesforceId or malformed body. }
+        '400': { description: 'Neither salesforceId nor applicationId supplied, or malformed body.' }
         '401': { description: Missing or invalid access token. }
-        '404': { description: No License Request matches the supplied licenseRequestSalesforceId. }
+        '404': { description: No License Request matches the supplied salesforceId (or applicationId). }
 
   /services/data/v62.0/query:
     get:
@@ -843,6 +981,13 @@ paths:
         LegalEntity_Profile_Person_EmiratesID__c.
         (2) Contact.EPG_Designation__c is a multi-select picklist - values arrive
         semicolon-separated.
+        (2a) Use Account.License_Status__c, NOT Account.EPG_License_Status__c. Both are
+        formulas over the same source (EPG_License__r.License_status__c), but
+        EPG_License_Status__c is built for the Salesforce UI and returns HTML - e.g.
+        "&lt;img src=\"/resource/InactiveLicense\" ... /&gt; Inactive" - whereas
+        License_Status__c returns the bare value ("Active" / "Inactive" / "Cancelled").
+        EPG_License_Status__c also appends expiry text for active licences; the queries
+        below select EPG_License_Expiry_Date__c separately, so nothing is lost.
         (3) EPG_Finance_Summary__c records are keyed to the LICENCE
         (EPG_License_No__c), not the company; the financeSummariesByAccount example
         joins from the Account, so an accountId is still all you need.
@@ -864,7 +1009,7 @@ paths:
                 EPG_Trade_Name_in_Arabic__c, EPG_Trade_license_no__c,
                 EPG_Trade_license_Expiry_date__c, EPG_Trade_license_issuance_date__c,
                 EPG_TRN_No__c, EPG_Emirates__c, EPG_Regulator__c, EPG_License_Number__c,
-                EPG_License_Status__c, EPG_License_Expiry_Date__c,
+                License_Status__c, EPG_License_Expiry_Date__c,
                 (SELECT FirstName, LastName, Email, Phone, EPG_Emirates_Id__c,
                 EPG_Designation__c FROM Contacts)
                 FROM Account WHERE EPG_Trade_license_no__c = '2137129'
@@ -873,7 +1018,7 @@ paths:
               value: >-
                 SELECT AccountId, Account.Name, Account.EPG_Trade_license_no__c,
                 Account.EPG_Trade_Name_in_English__c, Account.EPG_License_Number__c,
-                Account.EPG_License_Status__c
+                Account.License_Status__c
                 FROM Contact WHERE EPG_Emirates_Id__c = '784194147908318'
             financeSummariesByAccount:
               summary: API 8 - quarterly leviable-income figures for a company
@@ -1060,20 +1205,124 @@ components:
         recommendedAction: { type: string, nullable: true }
     DocumentUploadRequest:
       type: object
-      description: API 5 – file stored as ContentVersion and linked to the License Request.
-      required: [licenseRequestId, fileName, versionData]
+      description: >
+        API 5 – one document. Uses the EPG_Document__c field API names, plus "content"
+        for the base64 bytes.
+
+        REQUIRED: EPG_File_Name__c, content, and at least one of EPG_Company__c /
+        EPG_License_Request__c. OpenAPI "required" below lists the two unconditional
+        fields; the at-least-one-parent rule is expressed by the anyOf underneath and
+        is enforced server-side (400 when neither is present).
+
+        Every other property is OPTIONAL and is written only when supplied — omitting
+        one on a re-upload leaves the existing value on the record untouched.
+      required: [EPG_File_Name__c, content]
+      anyOf:
+        - required: [EPG_Company__c]
+        - required: [EPG_License_Request__c]
       properties:
-        licenseRequestId: { type: string, description: EPG_License_Request__c Id to attach the file to }
-        fileName: { type: string, example: NewRenewCommitmentForm.pdf }
-        fileType: { type: string, example: pdf, description: 'Supported types [CONFIRM]' }
-        versionData: { type: string, format: byte, description: Base64-encoded file content }
+        EPG_File_Name__c:
+          type: string
+          example: trade-license.pdf
+          description: REQUIRED. File name including extension; also the Salesforce file title.
+        content:
+          type: string
+          format: byte
+          description: >
+            REQUIRED. Base64-encoded file content. Raw base64 only — no "data:" URI
+            prefix and no line breaks. Rejected with 400 if it cannot be decoded.
+        EPG_Company__c:
+          type: string
+          example: 001FW00Cmx3RyVwYEK
+          description: >
+            Account Id. Required unless EPG_License_Request__c is supplied. May be sent
+            together with EPG_License_Request__c to link the document to both.
+        EPG_License_Request__c:
+          type: string
+          example: a11FW000XfaElH6YIK
+          description: >
+            EPG_License_Request__c Id. Required unless EPG_Company__c is supplied.
+        label__c:
+          type: string
+          example: Trade License
+          description: >
+            Optional but STRONGLY RECOMMENDED. Becomes EPG_Document__c.Name and is the
+            deduplication key: re-sending the same label__c under the same parent updates
+            that document instead of creating a second one, and matches the upload to the
+            required-document checklist entry of the same name. Falls back to
+            EPG_File_Name__c when omitted.
+        docType__c:
+          type: string
+          example: Trade license
+          description: Optional. Free text document type.
+        fileType__c:
+          type: string
+          example: pdf
+          description: Optional. Defaults to the EPG_File_Name__c extension when omitted.
+        fileSize__c:
+          type: number
+          example: 399676
+          description: Optional. Defaults to the decoded byte length when omitted.
+        EPG_File_Id__c:
+          type: string
+          example: 8dfd84db-24aa-4e8f-bbd8-ad5c227b006e
+          description: >
+            Optional external file id. Leave it out unless the file also lives in another
+            system: when omitted Salesforce stores the ContentDocumentId here, which is
+            what marks the document as uploaded.
+        uploadOn__c:
+          type: string
+          format: date-time
+          example: '2025-10-24T10:13:52.887Z'
+          description: Optional ISO-8601 timestamp. Ignored (left null) if unparseable.
+        uploadBy__c:
+          type: string
+          example: Agent AI
+          description: Optional. Who supplied the document.
+        location__c:
+          type: string
+          nullable: true
+          description: Optional source URL.
     DocumentUploadResponse:
       type: object
+      description: >
+        Returned for success (201/200) and for handled failures (400/500). Always check
+        "success"; on failure "message" carries the reason and the document fields are absent.
       properties:
-        contentDocumentId: { type: string }
-        contentVersionId: { type: string }
-        linkedTo: { type: string, description: License Request Id }
-        success: { type: boolean }
+        success:
+          type: boolean
+          description: True only when the document was saved.
+        documentId:
+          type: string
+          description: EPG_Document__c record Id, created or updated.
+        contentDocumentId:
+          type: string
+          description: ContentDocument Id of the stored file.
+        contentVersionId:
+          type: string
+          description: ContentVersion Id of the stored file.
+        linkedTo:
+          type: string
+          description: The record the file is attached to — the EPG_Document__c Id.
+        checklistId:
+          type: string
+          nullable: true
+          description: >
+            EPG_Document_Checklist__c matched by name, or null when no active checklist
+            entry matches the document name.
+        documentName:
+          type: string
+          description: The resolved EPG_Document__c.Name (from label__c, else the file name).
+        fileName:
+          type: string
+          description: The stored file name.
+        createdNewDocument:
+          type: boolean
+          description: True when a new document record was created (201), false on update (200).
+        message:
+          type: string
+          nullable: true
+          description: Failure reason. Present on 400/500, absent on success.
 
     # ---- Target sObjects (from Appendix A) ----
     Account:
@@ -1099,7 +1348,6 @@ components:
         EPG_TRN_No__c: { type: string, nullable: true }
         EPG_PO_Box__c: { type: string }
         RecordTypeId: { type: string, example: 0125f000001xIheAAE }
-        Local_Governmental_Entity__c: { type: string, nullable: true }
         License_Expiry_Date__c: { type: string, format: date }
     EPGPartner:
       type: object
@@ -1125,10 +1373,10 @@ components:
         Email: { type: string, format: email, description: 'Required on Update (Agent-sourced) – matches the existing Contact under the Account.' }
         Phone: { type: string }
         Title: { type: string }
-        EPG_Designation__c: { type: string }
+        EPG_Designation__c: { type: string, description: 'Multi-select picklist – values are semicolon-separated.' }
         AccountId: { type: string, description: 'Account Id or @{NewAccount.id}' }
         EPG_Country_Code__c: { type: string, example: UAE(+971) }
-        Secondary_Contact: { type: string, enum: ['True', 'False'] }
+        Is_Secondary_Contact__c: { type: string, enum: ['True', 'False'] }
     User:
       type: object
       description: Portal applicant. Login fields (Username/Alias/Profile/locale) generated server-side.
@@ -1147,18 +1395,8 @@ components:
       properties:
         AccountId__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
         Name: { type: string, description: 'Required on Update (Agent-sourced) – matches the existing Member under the Account.' }
-    EPGDocument:
-      type: object
-      description: EPG_Document__c – document metadata (processed internally). Upsert key – EPG_File_Id__c.
-      required: [EPG_Company__c, EPG_File_Id__c]
-      properties:
-        EPG_Company__c: { type: string, description: 'Account Id or @{NewAccount.id}' }
-        EPG_File_Name__c: { type: string, example: NewRenewCommitmentForm.pdf }
-        docType__c: { type: string, example: pdf }
-        fileType__c: { type: string, example: pdf }
-        EPG_File_Id__c: { type: string }
-        fileSize__c: { type: integer }
-        location__c: { type: string, nullable: true }
+    # EPG_Document__c is no longer part of the composite payload. Documents are sent
+    # one per call to API 5 (POST /Document) – see DocumentUploadRequest.
     EPGLicenseRequest:
       type: object
       description: EPG_License_Request__c – the license request record.
@@ -1173,28 +1411,8 @@ components:
         serviceNameAR__c: { type: string }
         providerCode__c: { type: string, nullable: true, description: Defaults to EPG }
         submissionCount__c: { type: integer, example: 1 }
-        Activity_Codes__c:
-          type: string
-          example: '5320002,5320009'
-          description: >
-            NUMERIC postal activity codes, comma-separated - never descriptive text.
-            5320002 Letters & Post Items Delivery, 5320007 Documents Delivery,
-            5320009 Parcels Delivery. These are the postal activities APPLIED FOR,
-            not the company's trade-licence activities (EPGL, 2026-09-08).
-        # DIVERGENCE, 2026-09-08. This schema and this spec's own renewal example
-        # disagree: the example (see EPG_Terms_and_Conditions__c above, in the
-        # renewal request body) sets EPG_Terms_and_Conditions__c on the licence
-        # request, while this schema names Terms_Conditions_Accepted__c. Fuad
-        # Alnsour's review of LR-37214 resolves it -- rename it -- so we send
-        # EPG_Terms_and_Conditions__c and lib/epglFields.ts enforces that.
-        EPG_Terms_and_Conditions__c: { type: boolean, description: 'Terms acceptance. Per EPGL 2026-09-08 this, NOT Terms_Conditions_Accepted__c, is the field that drives the checkbox.' }
-        # Absent from the published spec, and confirmed by EPGL as the correct
-        # targets: "EPG_Current_Emirate__c and EPG_Current_Region__c were not in
-        # the swagger but are the correct targets." They are the LICENCE
-        # REQUEST's own emirate and region; the Account keeps EPG_Emirates__c and
-        # EPG_Region__c, which is why both pairs exist.
-        EPG_Current_Emirate__c: { type: string, example: Dubai, description: 'Text. The emirate on the REQUEST, not the Account.' }
-        EPG_Current_Region__c: { type: string, example: Al Mankhool, description: 'Text. The region on the REQUEST, not the Account.' }
+        Activity_Codes__c: { type: string, example: '5320002' }
+        EPG_Terms_and_Conditions__c: { type: boolean, description: Required for renewal. }
 
     # ---- Renewal-specific (Appendix B) ----
     Branch:
@@ -1227,15 +1445,28 @@ components:
         entityId: { type: string, description: Caller identifier (e.g. EPGL-CHAT). }
         notifyPayment:
           type: object
-          required: [licenseRequestSalesforceId, payment]
+          description: >-
+            Exactly one identifier is required: the Agent sends salesforceId.
+            applicationId exists for other callers and wins if both are supplied.
+          required: [payment]
+          anyOf:
+            - required: [salesforceId]
+            - required: [applicationId]
           properties:
-            # Renamed per review comment: unique attribute instead of "Application ID".
-            licenseRequestSalesforceId:
+            salesforceId:
+              type: string
+              example: a11FW000VmSctdoYIB
+              description: >-
+                THE FIELD THE AGENT SENDS. Salesforce record Id of the License Request
+                (EPG_License_Request__c.Id) - globally unique. Same value the status API
+                returns as salesforceRecordId, so the Agent holds it from submission
+                onwards.
+            applicationId:
               type: string
               description: >-
-                Salesforce record Id of the License Request (EPG_License_Request__c.Id) -
-                globally unique. Same value returned by the status API as salesforceRecordId.
-                Replaces the previous "Application ID" (applicationId) reference.
+                Alternative identifier matching EPG_License_Request__c.applicationId__c,
+                used by non-Agent callers. Takes precedence over salesforceId when both
+                are present. The Agent should omit it.
             payment:
               type: object
               properties:
@@ -1272,8 +1503,12 @@ components:
         itemId: { type: string }
         beneficiaryId: { type: string, description: Use EPG. }
         amount: { type: number, description: Amount in AED. Amounts across transactions are summed. }
-        currency:
+        responseCurrency:
           type: object
+          description: >-
+            Note the name. The REQUEST field is "responseCurrency" - that is what the
+            deployed Apex binds. The endpoint renames it to "currency" on the way OUT,
+            so a response shows "currency" while a request must send "responseCurrency".
           properties:
             en: { type: string }
             ar: { type: string }

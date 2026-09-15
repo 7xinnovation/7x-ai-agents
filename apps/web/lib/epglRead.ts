@@ -79,12 +79,35 @@ export interface EpglForm9Quarter {
   payableBalance?: number;
 }
 
-/** The org's licence status is a UI formula field: `<img ... alt="Inactive" ...>`. */
+/**
+ * The licence status, as a word.
+ *
+ * TWO FIELDS, ONE SOURCE. Account.License_Status__c and
+ * Account.EPG_License_Status__c are both formulas over
+ * EPG_License__r.License_status__c; the second is built for the Salesforce UI
+ * and returns markup. EPGL named the right one in contract 2.0.0 on
+ * 15 September, and a look at their org says it matters more than "returns
+ * HTML" suggests — a CANCELLED licence comes back as
+ *
+ *   <img src="/resource/InactiveLicense" alt="Inactive" .../> Cancelled
+ *
+ * so reading the alt text, which is what this did, reported a cancelled licence
+ * as merely inactive. We now select License_Status__c, which says "Cancelled".
+ *
+ * The HTML path stays as the fallback: it is the older field, it is what four
+ * weeks of this agent read, and stripping it is still better than showing
+ * someone an <img> tag.
+ */
 export function plainLicenseStatus(raw: unknown): string | undefined {
   if (typeof raw !== "string" || !raw) return undefined;
+  if (!/<[a-z]/i.test(raw)) return raw.trim() || undefined;
+  // The word is the text BESIDE the icon, not the icon's alt: the alt says
+  // "Inactive" on a cancelled licence, which is how this used to lose the
+  // difference between the two.
+  const text = raw.replace(/<[^>]*>/g, " ").replace(/&nbsp;?/gi, " ").replace(/\s+/g, " ").trim();
+  if (text) return text;
   const alt = /alt="([^"]+)"/i.exec(raw);
-  if (alt) return alt[1];
-  return /<[a-z]/i.test(raw) ? undefined : raw;
+  return alt ? alt[1] : undefined;
 }
 
 /** Escape a literal for a SOQL string, after it has been shape-validated. */
@@ -162,7 +185,7 @@ async function query<T>(agentId: string, env: EnvKey, soql: string): Promise<T[]
 const COMPANY_FIELDS =
   "Id, Name, EPG_Company_Name_Arabic__c, EPG_Trade_Name_in_English__c, EPG_Trade_Name_in_Arabic__c, " +
   "EPG_Trade_license_no__c, EPG_Trade_license_Expiry_date__c, EPG_Emirates__c, EPG_Regulator__c, " +
-  "EPG_License_Number__c, EPG_License__c, EPG_License_Status__c, EPG_License_Expiry_Date__c, " +
+  "EPG_License_Number__c, EPG_License__c, License_Status__c, EPG_License_Expiry_Date__c, " +
   "(SELECT FirstName, LastName, Email, Phone, EPG_Emirates_Id__c, LegalEntity_Profile_Person_EmiratesID__c, EPG_Designation__c FROM Contacts)";
 
 function toCompany(r: Record<string, any>): EpglCompany {
@@ -178,7 +201,7 @@ function toCompany(r: Record<string, any>): EpglCompany {
     regulator: r.EPG_Regulator__c ?? undefined,
     postalLicenseNumber: r.EPG_License_Number__c ?? undefined,
     licenseRecordId: r.EPG_License__c ?? undefined,
-    licenseStatus: plainLicenseStatus(r.EPG_License_Status__c),
+    licenseStatus: plainLicenseStatus(r.License_Status__c ?? r.EPG_License_Status__c),
     licenseExpiry: r.EPG_License_Expiry_Date__c ?? undefined,
     contacts: ((r.Contacts?.records ?? []) as Record<string, any>[]).map((c) => ({
       firstName: c.FirstName ?? undefined,

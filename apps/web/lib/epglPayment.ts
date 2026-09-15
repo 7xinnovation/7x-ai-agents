@@ -17,11 +17,23 @@ import { decryptSecret, isEncrypted } from "./crypto";
  * Backed by their Apex REST resource:
  *   POST /services/apexrest/paymentNotification/
  *
- * TWO WIRE QUIRKS, from their spec. `currency` and `desc` are reserved words in
- * Apex and are remapped internally, so those exact keys must appear on the wire —
- * renaming them to something tidier would silently drop the values. And the 400
- * body still names a legacy `applicationId` element; the field it means is
- * `notifyPayment.salesforceId`.
+ * WIRE QUIRKS, from their spec. `desc` is a reserved word in Apex and is
+ * remapped internally, so that exact key must appear on the wire — renaming it
+ * to something tidier would silently drop the value.
+ *
+ * The currency is the same quirk from the other end, and we had it backwards.
+ * Contract 2.0.0, 15 September: "Note the name. The REQUEST field is
+ * 'responseCurrency' — that is what the deployed Apex binds. The endpoint
+ * renames it to 'currency' on the way OUT, so a response shows 'currency' while
+ * a request must send 'responseCurrency'." We had been sending `currency`,
+ * which their class does not bind: the notification succeeded and the currency
+ * went nowhere.
+ *
+ * The record key is `notifyPayment.salesforceId`, which their 2.0.0 note
+ * confirms and pins: the deployed PaymentNotification.cls binds only
+ * `salesforceId` and `applicationId`, and the `licenseRequestSalesforceId` an
+ * earlier draft of their contract named was never implemented. A 400 body still
+ * mentions `applicationId`; the field it means for us is `salesforceId`.
  */
 
 const INTEGRATION_NAME = /epgl.*salesforce/i;
@@ -131,8 +143,9 @@ export async function notifyEpglPayment(
           {
             transactionId: input.transactionId ?? input.paymentId,
             amount: input.amount,
-            // Reserved word in Apex, remapped their side — must be `currency`.
-            currency: { en: input.currency ?? "AED", ar: "درهم" },
+            // NOT `currency`: their Apex binds `responseCurrency` on the way in
+            // and renames it to `currency` in the response. See above.
+            responseCurrency: { en: input.currency ?? "AED", ar: "درهم" },
           },
         ],
       },

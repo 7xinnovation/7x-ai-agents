@@ -96,5 +96,72 @@ console.log("\nThe one that actually caused FB-1722");
   ) === null);
 }
 
-console.log(`\n${pass} passed, ${fail} failed\n`);
+
+/**
+ * AND THE SECOND REPORT, the same afternoon: the MOA refused outright.
+ *
+ *   "This document's passport number (Z8G229333) does not match the one already
+ *    on this application (AA0413288)."
+ *
+ * Partner 1's passport had gone in first and put AA0413288 on the case. The MOA
+ * lists all three partners, and the extractor reported a different one of them
+ * as the owner. Two correct documents, one refusal.
+ */
+const WITH_PARTNER_1 = {
+  ...APPLICATION,
+  trade_license_number: "697670",
+  owner_passport_no: "AA0413288",
+  owner_name: "Faisal Eissa Lutfi Ali Hussain",
+  owner_nationality: "UAE",
+};
+
+check(
+  "the MOA is not refused for naming a different partner's passport",
+  entityMismatch(
+    WITH_PARTNER_1,
+    { trade_license_number: "697670", owner_passport_no: "Z8G229333", company_name: "YI FANG TAIWAN FRUIT TEA L.L.C" },
+    { documentKey: "moa" }
+  ) === null,
+  entityMismatch(
+    WITH_PARTNER_1,
+    { trade_license_number: "697670", owner_passport_no: "Z8G229333", company_name: "YI FANG TAIWAN FRUIT TEA L.L.C" },
+    { documentKey: "moa" }
+  )
+);
+
+check(
+  "nor for naming a different partner, or their nationality",
+  entityMismatch(
+    WITH_PARTNER_1,
+    {
+      trade_license_number: "697670",
+      company_name: "YI FANG TAIWAN FRUIT TEA L.L.C",
+      owner_name: "Valentina Mintah",
+      owner_nationality: "Ghana",
+    },
+    { documentKey: "moa" }
+  ) === null
+);
+
+// The company checks still carry the whole weight on exactly these documents.
+check(
+  "a genuinely different company's MOA is still refused",
+  entityMismatch(WITH_PARTNER_1, { trade_license_number: "111222" }, { documentKey: "moa" })?.severity === "block"
+);
+check(
+  "and a renamed company is still put to the customer",
+  entityMismatch(
+    WITH_PARTNER_1,
+    { trade_license_number: "697670", company_name: "YIFANG CAFE MIDDLE EAST L.L.C" },
+    { documentKey: "moa" }
+  )?.severity === "confirm"
+);
+// A card that IS one person's is still checked as one person's.
+check(
+  "an Emirates ID with the wrong passport number is still refused",
+  entityMismatch(WITH_PARTNER_1, { owner_passport_no: "Z8G229333" }, { documentKey: "emirates_id" })?.severity ===
+    "block"
+);
+
+console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

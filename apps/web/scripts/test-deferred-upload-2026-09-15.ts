@@ -72,16 +72,33 @@ console.log("\nStreaming and state");
   for (const chunk of [1, 4, 17, 500]) {
     check(`chunk size ${chunk} gives the same answer`, !run(reported, () => null, chunk).includes("```upload"), chunk);
   }
-  // The flag must not leak into the next reply.
+  /**
+   * WHAT A REPLY HAS SAID, IT HAS SAID — flush() is not a reply boundary.
+   *
+   * This pair used to assert the opposite: that flush() cleared the flag so the
+   * NEXT reply started fresh. It does not end a reply. The chat route flushes
+   * every guard whenever a non-text event arrives mid-turn — a case update, a
+   * citation, a tool result — and the model calls a tool between almost every
+   * pair of sentences, so clearing on flush meant the rule held only for
+   * messages that made no tool calls. EPGL's MOA box, reported twice on
+   * 15 September, arrived through exactly that gap.
+   *
+   * The reply boundary is the guard itself: the route builds one per request.
+   */
   const g = collectedUploadGuard(() => null);
   let a = "";
   for (const c of ["You can come back to it.\n\n", BLOCK]) a += g.push(c);
+  a += g.flush();                                   // a tool call, mid-reply
+  for (const c of ["Please upload it below.\n\n", BLOCK]) a += g.push(c);
   a += g.flush();
+  check("the control is dropped", !a.includes("```upload"), a);
+  check("...and stays dropped across a mid-reply flush", a.split("```upload").length === 1, a);
+  // A new reply is a new guard, and knows nothing of the last one.
+  const next = collectedUploadGuard(() => null);
   let b = "";
-  for (const c of ["Please upload it below.\n\n", BLOCK]) b += g.push(c);
-  b += g.flush();
-  check("the first reply drops the control", !a.includes("```upload"), a);
-  check("...and the next one keeps it", b.includes("```upload"), b);
+  for (const c of ["Please upload it below.\n\n", BLOCK]) b += next.push(c);
+  b += next.flush();
+  check("...while the next reply starts clean", b.includes("```upload"), b);
 }
 
 console.log("\nThe existing rule still holds");

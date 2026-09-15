@@ -41,15 +41,40 @@ console.log("\nThe upload is gone");
   check("...nor to list it among what to have ready", /do not list it among the documents they should have ready/.test(renewal.guidance));
 }
 
-console.log("\nEverything that reads the DATA stays");
+/**
+ * THE FIGURES WENT WITH IT, the same afternoon.
+ *
+ * This section used to assert the opposite — that removing the Form 9 PDF left
+ * everything reading its DATA in place. Emre's follow-up closed that: "the
+ * quarterly leviable details... i believe you referring this to form9 basically
+ * which should be based on what i mentioned about removing the form 9 from the
+ * flow." He is right. We had stopped asking for the document and gone on asking
+ * for everything printed on it, one quarter at a time, in a conversation that
+ * had just said the Form 9 is filed somewhere else.
+ */
+console.log("\nAnd so did the figures on it");
 {
   const g = J("renewal").guidance;
-  check("the figures come from the filed returns", /come from the Form 9 returns ALREADY FILED with EPGL/.test(g));
-  check("...through the history tool", /epgl_form9_history/.test(g));
-  check("a missing quarter is still asked for", /does not return for a quarter in the licence period/.test(g));
+  const keys = new Set(J("renewal").steps.flatMap((s: any) => s.fields).map((f: any) => f.key));
+  for (const k of [
+    "leviable_income_q1",
+    "leviable_income_q2",
+    "leviable_income_q3",
+    "leviable_income_q4",
+    "license_period_start_quarter",
+    "financial_year",
+  ])
+    check(`no ${k} field`, !keys.has(k), k);
+  check("the assistant is told to collect no revenue figures", /NO REVENUE FIGURES ARE COLLECTED ON A RENEWAL/.test(g));
+  check("...and not to present quarters for confirmation", /do not present quarters for confirmation/.test(g));
+  check("the quarter-walking instructions are gone", !/QUARTERS ARE CALENDAR QUARTERS/.test(g));
+  check("...as is the instruction to read four figures off a Form 9", !/READ THE FIGURES, DO NOT DICTATE THEM/.test(g));
+  check("the preparation list no longer promises them", !/the quarterly leviable-income figures come from IDEP/.test(g));
+  // What the levy IS, and who works it out, is unchanged: EPGL assess it from
+  // the returns they hold and state it in the payment request.
   check("the levy rules are untouched", /Quote levy figures only as read from the Form 9 record/.test(g));
-  check("the quarter derivation is untouched", /license_period_start_quarter/.test(g));
-  check("the financial fields still exist", new Set(J("renewal").steps.flatMap((s: any) => s.fields).map((f: any) => f.key)).has("leviable_income_q1"));
+  check("...and the flat licence fee with them", /AED 100,700/.test(g));
+  check("the history tool is still there to answer a question", /epgl_form9_history/.test(g));
 }
 
 console.log("\nWhat it says when somebody asks");

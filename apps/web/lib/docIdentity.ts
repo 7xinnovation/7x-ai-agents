@@ -217,10 +217,29 @@ export function entityMismatch(
   // mismatch until the test below caught it.
   // A partner's own documents are checked against each other elsewhere, never
   // against the owner's.
-  const otherPerson = isOtherPersonSlot(opts.documentKey);
-  const settled = { company: false, person: otherPerson };
+  /**
+   * AND A DOCUMENT THAT NAMES EVERY PARTNER NAMES NO ONE IN PARTICULAR.
+   *
+   * EPGL, 15 September. Partner 1's passport went in, the application recorded
+   * passport AA0413288, and the Memorandum of Association was then refused:
+   * "this document's passport number (Z8G229333) does not match the one already
+   * on this application (AA0413288)". Both numbers are correct and both belong
+   * to this company — the MOA's shareholder table lists all three partners, and
+   * the extractor reported whichever of them it read first as "the owner".
+   *
+   * A company-bearing document is evidence about the COMPANY. Which of the
+   * people printed on it is the owner is a question it was never asked, and
+   * answering it by lottery turned an applicant's own MOA into somebody else's
+   * paperwork. So the person checks are off for these, exactly as they are off
+   * for a partner's own slot, and the company checks below — the licence number,
+   * the names, the superseded-name rule — carry the whole weight. Which is the
+   * thing EPGL actually asked these documents to be checked for.
+   */
+  const key = String(opts.documentKey ?? "");
+  const manyPeople = isOtherPersonSlot(opts.documentKey) || COMPANY_BEARING.has(key);
+  const settled = { company: false, person: manyPeople };
   for (const f of ID_FIELDS) {
-    if (otherPerson && f.settles === "person") continue;
+    if (manyPeople && f.settles === "person") continue;
     const before = existing[f.key];
     const after = extracted[f.key];
     if (typeof before !== "string" || typeof after !== "string") continue;
@@ -332,7 +351,7 @@ export function entityMismatch(
    * we could not read the company name, so we could not check this is the
    * current version, is it? On the documents that always carry a name.
    */
-  if (known.length && !found.length && COMPANY_BEARING.has(String(opts.documentKey ?? ""))) {
+  if (known.length && !found.length && COMPANY_BEARING.has(key)) {
     return {
       severity: "confirm",
       reason:

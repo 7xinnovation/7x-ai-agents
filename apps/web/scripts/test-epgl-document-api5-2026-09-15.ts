@@ -18,6 +18,19 @@
  *   the same again with EPG_File_Id__c
  *     -> 200 success, createdNewDocument: FALSE — it upserts
  *
+ * Their written contract (2.0.0) arrived that evening and corrected the rest of
+ * the body. Two lines of it undo what the probe had settled for:
+ *
+ *   "EPG_Document__c.Name is the document slot and is taken from label__c...
+ *    if it is omitted, each call with a different file name creates a separate
+ *    document record."
+ *   "EPG_File_Id__c — leave it out unless the file also exists in an external
+ *    system. When omitted Salesforce stores the Salesforce ContentDocumentId
+ *    there, which is what marks the document as uploaded."
+ *
+ * So EPG_File_Id__c is THEIRS to fill, not ours, and the dedup key is the slot
+ * name. Documents also left the composite entirely in the same contract.
+ *
  * Run from apps/web:  npx tsx scripts/test-epgl-document-api5-2026-09-15.ts
  */
 import { readFileSync } from "node:fs";
@@ -29,7 +42,8 @@ const check = (n: string, ok: boolean, got?: unknown) => {
 };
 
 const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-const push = route.slice(route.indexOf("const res = await execIntegration(tool, {"), route.indexOf("const res = await execIntegration(tool, {") + 700);
+const at = route.indexOf("const res = await execIntegration(tool, {");
+const push = route.slice(at, route.indexOf("});", at));
 
 console.log("\nThe payload EPGL now accept");
 check("the file goes as `content`", /content: Buffer\.from\(stored\.bytes\)\.toString\("base64"\)/.test(push));
@@ -40,10 +54,19 @@ console.log("\nAnd the names they no longer accept are gone");
 for (const dead of ["versionData:", "licenseRequestId:", "fileName:", "fileType:"])
   check(`no \`${dead}\``, !new RegExp(dead.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(push), dead);
 
-console.log("\nThe metadata they asked for on the 14th");
-check("the document's own id, so a retry upserts", /EPG_File_Id__c: row\.id/.test(push));
-check("the type, twice, as they spell it", /docType__c: ext/.test(push) && /filetype__c: ext/.test(push));
+console.log("\nThe metadata their 2.0.0 contract asks for");
+check("the slot name goes as label__c", /label__c: label/.test(push));
+check("...built from the checklist mapping, not the file name", /epglDocumentLabel\(d\.key/.test(route));
+// The payload quotes their own wording about it in a comment, so the test is
+// for an assignment, not a mention.
+check("EPG_File_Id__c is left for Salesforce to fill", !/EPG_File_Id__c\s*:/.test(push));
+check("docType__c is the KIND of document", /docType__c: label/.test(push));
+check("fileType__c is the format, spelled with a capital T", /fileType__c: ext/.test(push) && !/filetype__c/.test(push));
 check("the size, from the bytes rather than guessed", /fileSize__c: stored\.bytes\.length/.test(push));
+check("and who sent it", /uploadBy__c: "Agent AI"/.test(push));
+
+console.log("\nDocuments no longer travel in the composite");
+check("the composite strips any document item", /withoutEpglDocuments\(input\)/.test(readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8")));
 
 console.log("\nWhat did not change");
 check("the push still happens after a successful submission", /if \(submittedReference && uploadDocTool && storageGet/.test(route));
