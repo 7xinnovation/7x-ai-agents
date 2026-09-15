@@ -89,11 +89,16 @@ console.log("\nAn old MOA is refused; a trade name is not");
   // Still not refused when it IS one of them.
   check("the registered name matches", entityMismatch(bothNames, { company_name: "YI FANG TAIWAN FRUIT TEA L.L.C" }) === null);
   check("the trade name matches", entityMismatch(bothNames, { company_name: "YIFANG CAFE MIDDLE EAST" }) === null);
-  // And an exact identifier still settles everything, as before.
-  check("a matching licence number settles it", entityMismatch(
+  // An exact identifier still settles WHOSE document it is — nothing is refused
+  // on a name when the licence number matches. It no longer settles WHEN:
+  // FB-1722 on 15 September was an old MOA carrying the right number under the
+  // company's former name, and this short-circuit swallowed it.
+  const sameNumber = entityMismatch(
     { ...bothNames, trade_license_number: "697670" },
     { company_name: "ANYTHING AT ALL", trade_license_number: "697670" }
-  ) === null);
+  );
+  check("a matching licence number never refuses", sameNumber?.severity !== "block", sameNumber);
+  check("...but a name that changed with it is raised", sameNumber?.severity === "confirm", sameNumber?.severity);
   // Two names that are really one name do not count as two.
   const sameTwice = { company_name: "YI FANG TAIWAN FRUIT TEA L.L.C", trade_name_en: "YI FANG TAIWAN FRUIT TEA" };
   check("one name written twice is still one name", entityMismatch(sameTwice, moa)?.severity === "confirm", entityMismatch(sameTwice, moa));
