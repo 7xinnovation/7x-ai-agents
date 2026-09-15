@@ -13,6 +13,33 @@ out by hand.
 
 ---
 
+## The sequence — every call we make, in order
+
+Reads are safe to repeat; writes are not, and the one that must never run twice
+is marked.
+
+| # | Call | Why |
+|---|---|---|
+| 1 | `GET /query` → `EPG_License_Request__c` **duplicate-check** | Is there already an open application for this licence? Asked before anything is written. |
+| 2 | **`epgl_company_lookup`** (SOQL on Account) | Gives us `accountId` and `EPG_License__c` — the licence RECORD id every finance row needs. Without this the composite fails on the Account's unique field. |
+| 3 | **`epgl_form9_history`** (SOQL on the filed returns) | The quarterly leviable figures. Since 15 September this is where they come from — we no longer take a Form 9 upload. |
+| 4 | **`POST /EPGL/LicenseRequest`** — the composite | ⚠️ **ONCE.** `allOrNone: true`. Account + Contact + LicenseRequest + Finance Summary in one call. `EPG_Finance_Summary__c` has no upsert key in your handler, so a second call duplicates every quarter. |
+| 5 | **`GET /EPGL/LicenseRequest/status?id=…`** | Reads back `requestIdentifier` — the LR- number we show the customer. |
+| 6 | **`POST /EPGL/Document`** × one per file | The bytes, after the composite, because it needs `EPG_License_Request__c`. Idempotent on `EPG_File_Id__c`. |
+| 7 | **`POST /paymentNotification/`** | After the card settles. Sent once per payment, keyed on the Salesforce record id. |
+| 8 | **`GET /EPGL/LicenseRequest/status?id=…`** on later turns | Whenever the customer asks where their application has got to. |
+
+**Nothing between 4 and 7 is retried on its own.** If step 4's response is
+unreadable we call step 5 to find out whether it landed, rather than submitting
+again.
+
+**Where it can stop:** step 2 returning no licence record means there is nothing
+to renew — we say so and offer a new application instead of submitting. A
+document refused at step 6 does not roll back step 4; the request stands and the
+file is re-sent.
+
+---
+
 ## 1. What we send
 
 `POST /services/apexrest/EPGL/LicenseRequest`
