@@ -31,6 +31,7 @@ import {
 import QRCode from "qrcode";
 import { tr, evalCondition, type CaseState, type Locale } from "@dialog/config";
 import { Microphone } from "@phosphor-icons/react";
+import { docSignature } from "@/lib/caseDocs";
 import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
@@ -655,6 +656,21 @@ export function Experience({
         inflightUploads.current -= 1;
         // Still uploading something else? That request commits after this one
         // and its response will carry both documents — let it do the update.
+        /**
+         * A REPLACEMENT IS AN UPLOAD, even when nothing about the case COUNTS
+         * differently afterwards.
+         *
+         * The effect below noticed uploads by counting them, and a Replace does
+         * not change any count: the slot was "uploaded" before and is "uploaded"
+         * after. So on 15 September a customer was asked for the current MOA,
+         * replaced the stale one, and the agent never spoke again — it was
+         * never told.
+         *
+         * An upload we performed ourselves does not have to be deduced. Said
+         * here, it also covers the one case a state comparison cannot see: the
+         * same file name replacing itself.
+         */
+        justUploaded.current = true;
         if (json.case && inflightUploads.current === 0) setCaseState(json.case);
       } catch {
         inflightUploads.current = Math.max(0, inflightUploads.current - 1);
@@ -1308,19 +1324,34 @@ export function Experience({
   // document instead of the rejection sitting silently in the widget. A baseline
   // is taken on first load so resuming a conversation with prior uploads never
   // triggers it.
-  const uploadedBaseline = useRef<{ up: number; rej: number } | null>(null);
+  /**
+   * WHAT THE DOCUMENTS ARE, not how many of them there are.
+   *
+   * This used to compare counts, which is blind to the one thing a Replace
+   * does: the slot reads "uploaded" before and after, so the count is
+   * unchanged and no turn fired. The customer replaced the stale MOA we had
+   * just asked them to replace, and the conversation stopped dead.
+   *
+   * A signature of every document's key, status, file name and rejection
+   * reason changes whenever any of them does — a new upload, a replacement, a
+   * rejection, a rejection cleared by a better copy.
+   */
+  const uploadedBaseline = useRef<string | null>(null);
   const pendingDocNotify = useRef(false);
+  const justUploaded = useRef(false);
   useEffect(() => {
     if (!resumed || !agent.documentsInChat) return;
     const docs = caseState?.documents ?? [];
-    const up = docs.filter((d) => d.status === "uploaded" || d.status === "accepted").length;
-    const rej = docs.filter((d) => d.status === "rejected").length;
+    const sig = docSignature(docs);
     if (uploadedBaseline.current === null) {
-      uploadedBaseline.current = { up, rej }; // establish baseline, do not fire
+      uploadedBaseline.current = sig; // establish baseline, do not fire
       return;
     }
-    const grew = up > uploadedBaseline.current.up || rej > uploadedBaseline.current.rej;
-    uploadedBaseline.current = { up, rej };
+    // An upload this widget performed is known, not deduced — it covers a file
+    // replacing itself under the same name, which no comparison can see.
+    const grew = sig !== uploadedBaseline.current || justUploaded.current;
+    justUploaded.current = false;
+    uploadedBaseline.current = sig;
     // A document that lands mid-turn must not be swallowed: dropping the
     // notification is why a second upload could complete and still be asked for
     // again. Remember it and fire once the current turn finishes.
