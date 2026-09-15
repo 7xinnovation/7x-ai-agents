@@ -191,6 +191,21 @@ function isOtherPersonSlot(documentKey: string | undefined): boolean {
   return !!documentKey && /^(partner|shareholder|agent)_\d+_/i.test(documentKey);
 }
 
+/**
+ * Document slots that ALWAYS belong to a named company.
+ *
+ * A Memorandum of Association, a trade licence, a Form 9 and a set of audited
+ * financial statements each print the company's name on their face. An Emirates
+ * ID, a passport and a lease do not, or not reliably, so they are not here.
+ */
+const COMPANY_BEARING = new Set([
+  "moa",
+  "trade_license",
+  "updated_trade_license",
+  "form_9",
+  "audited_financial_statement",
+]);
+
 export function entityMismatch(
   existing: Record<string, unknown>,
   extracted: Record<string, unknown>,
@@ -254,6 +269,39 @@ export function entityMismatch(
   // licence are both this company's names, and either may appear in either slot.
   const known = settled.company ? [] : names(existing);
   const found = names(extracted);
+  /**
+   * A DOCUMENT WE COULD NOT READ A COMPANY NAME OFF IS NOT A DOCUMENT WE
+   * CHECKED.
+   *
+   * FB-1722: "an old version of the MOA was uploaded but the system did not
+   * detect the change in the license name." Reproduced on 15 September — the
+   * current trade licence, then the 2020 MOA, accepted without a word. The name
+   * rule never disagreed with it; it never ran. The audit says what came back
+   * from that upload:
+   *
+   *   extracted: [partner_1_passport_no, partner_2_passport_no,
+   *               partner_3_passport_no, owner_passport_no]
+   *
+   * Four passport numbers and no company name, because the file is a scan whose
+   * partner table reads cleanly and whose letterhead does not. An empty set of
+   * names matches everything, so the check returned null and the document went
+   * through.
+   *
+   * Refusing it would be wrong — a poor scan is ordinary, and most of these are
+   * the right document. But accepting it SILENTLY claims a verification that did
+   * not happen, which is the whole of their complaint. So the customer is told:
+   * we could not read the company name, so we could not check this is the
+   * current version, is it? On the documents that always carry a name.
+   */
+  if (known.length && !found.length && COMPANY_BEARING.has(String(opts.documentKey ?? ""))) {
+    return {
+      severity: "confirm",
+      reason:
+        `No company name could be read off this document, so it could NOT be checked against this application. ` +
+        `Tell the customer that plainly — do not say it was verified — and ask them to confirm it is the CURRENT version for ` +
+        `"${raw(existing, NAME_FIELDS)}". If the company has been renamed, an older copy will still name it the old way and a fresh one is needed.`,
+    };
+  }
   if (!known.length || !found.length) return null;
   if (found.some((f) => known.some((k) => nameMatches(k, f)))) return null;
 
