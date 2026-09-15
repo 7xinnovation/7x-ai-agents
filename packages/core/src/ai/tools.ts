@@ -159,6 +159,23 @@ function isAgreement(value: unknown): boolean {
   return v === "true" || v === "yes" || v === "1" || v === "نعم";
 }
 
+/**
+ * One person's name written two ways, loosely enough for a registry and a
+ * licence to agree.
+ *
+ * Deliberately containment rather than the careful part-matching used for
+ * identity documents: this decides whether to TRUST a registry statement about
+ * somebody, and the registry is the stricter of the two sources. A name that
+ * does not clearly correspond simply falls back to asking the customer.
+ */
+export function sameHuman(a: string, b: string): boolean {
+  const n = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const x = n(a);
+  const y = n(b);
+  if (x.length < 4 || y.length < 4) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
 export function saysNonResident(message: string | undefined): boolean {
   const m = String(message ?? "").toLowerCase();
   if (!m) return false;
@@ -192,6 +209,16 @@ export interface DispatchInput {
    * decide it for them". Never for routing, never for content.
    */
   userMessage?: string;
+  /**
+   * People the Ministry of Economy's registry marks as NOT resident in the UAE,
+   * by name, for licences it names this customer on.
+   *
+   * The guard below exists because the model inferred non-residence from a
+   * passport. The registry stating `isManagerResidentofUAE: false` about a named
+   * person is not an inference — it is the better evidence, and it is the one
+   * source that can answer the question without asking anybody.
+   */
+  registryNonResidents?: () => string[];
   /**
    * A total the BACKEND has committed to for this transaction — the minimumAmount
    * on an Emirates Post hold. It outranks both the definition's price and the
@@ -524,7 +551,15 @@ export async function dispatchTool(
        */
       if (/^partner_\d+_residence$/.test(fieldKey) && String(input.value ?? "").toLowerCase() === "non resident") {
         const already = String(state.data[fieldKey] ?? "").toLowerCase() === "non resident";
-        if (!already && !saysNonResident(ctx.userMessage)) {
+        // Or the registry said so about this partner by name. Matched on the
+        // name we hold for that slot, so it cannot be claimed for a partner the
+        // registry never mentioned.
+        const slot = /^partner_(\d+)_residence$/.exec(fieldKey)?.[1];
+        const partnerName = slot ? String(state.data[`partner_${slot}_name`] ?? "") : "";
+        const registrySaysSo = partnerName
+          ? (ctx.registryNonResidents?.() ?? []).some((n) => sameHuman(n, partnerName))
+          : false;
+        if (!already && !registrySaysSo && !saysNonResident(ctx.userMessage)) {
           return {
             result:
               "NOT RECORDED. Only the customer can say a partner lives outside the UAE — a foreign passport does not make somebody a non-resident, and most UAE residents hold one. " +

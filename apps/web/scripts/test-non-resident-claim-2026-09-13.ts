@@ -93,5 +93,41 @@ console.log("\nAnd a document is never asked for it either");
   check("the declaration is not", !keys.includes("declaration_accepted"), keys);
 }
 
+console.log("\nOr the registry said so, which is better evidence than asking");
+{
+  const { sameHuman } = await import("@dialog/core");
+  check("the same name, spelled the same", sameHuman("Salah Salem Omair Alshamsi", "Salah Salem Omair Alshamsi"));
+  check("...with punctuation and case moved about", sameHuman("SALAH SALEM OMAIR AL-SHAMSI", "salah salem omair alshamsi"));
+  check("a shorter form of the same name", sameHuman("Salah Salem Omair Alshamsi", "Salah Salem Omair"));
+  check("an Arabic name matches itself", sameHuman("صلاح سالم عمير", "صلاح سالم عمير"));
+  check("a different person does not", !sameHuman("Salah Salem Omair Alshamsi", "Valentina Mintah"));
+  check("initials are not a name", !sameHuman("A B", "Abdelaziz Mohamed Obaid"));
+
+  const src = readFileSync(new URL("../../../packages/core/src/ai/tools.ts", import.meta.url), "utf8");
+  const g = src.slice(src.indexOf('case "collect_field"'), src.indexOf('case "collect_field"') + 3600);
+  check("the guard consults the registry", /ctx\.registryNonResidents\?\.\(\)/.test(g));
+  check("...matched against the name held for THAT partner", /partner_\$\{slot\}_name/.test(g));
+  check("...and a partner with no name on file cannot be claimed", /partnerName\s*\?/.test(g));
+  check("the customer's own words still work", /saysNonResident\(ctx\.userMessage\)/.test(g));
+
+  const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  const peopleBlock = route.slice(route.indexOf('...(holder === "match"'), route.indexOf('...(holder === "match"') + 1400);
+  check("only licences the registry names them on contribute", /isUaeResident\?: boolean \}\)\.isUaeResident === false/.test(peopleBlock), peopleBlock.slice(0, 120));
+  check("...and it is request-scoped, not written to the case", /writing to it from a tool handler would race/.test(route));
+  check("the getter reaches the turn", /registryNonResidents: \(\) => \[\.\.\.registryNonResidents\]/.test(route));
+}
+
+console.log("\nThe activities and the people reach the model at all");
+{
+  const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  check("activities are returned with their codes", /activities: l\.activities\.length/.test(route));
+  check("...in both languages", /nameEn: x\.nameEn, nameAr: x\.nameAr/.test(route));
+  check("owners and managers both count as people", /\[\.\.\.l\.owners, \.\.\.l\.managers\]/.test(route));
+  check("...with the registry's residency statement", /isUaeResident: \(pp as \{ isUaeResident\?: boolean \}\)\.isUaeResident/.test(route));
+  check("the model is told not to ask for the activities", /do NOT ask which postal services they provide/.test(route));
+  check("...nor to read an identity number back in full", /NEVER read an Emirates ID or passport number back to the customer in full/.test(route));
+  check("...and that an unnamed partner is still collected normally", /Anyone the registry does not name is still collected from the customer as usual/.test(route));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -1033,6 +1033,12 @@ export async function POST(req: NextRequest) {
   const COMPANY_BY_EID_TOOL = "epgl_company_by_emirates_id";
   const FORM9_TOOL = "epgl_form9_history";
   const MOE_TOOL = MOE_TOOL_NAME;
+  /**
+   * People the registry named as NOT resident, on a licence it names this
+   * customer on. Request-scoped on purpose: the case is owned by the turn and
+   * writing to it from a tool handler would race the turn's own save.
+   */
+  const registryNonResidents = new Set<string>();
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
         {
@@ -1620,6 +1626,53 @@ export async function POST(req: NextRequest) {
               // and never send them to Salesforce as an emirate or a regulator.
               moecEmirateCode: l.emirateCodeRaw,
               moecIssuingEntityCode: l.issuingEntityCode,
+              /**
+               * THE ACTIVITIES, WHICH WE HAVE BEEN PARSING AND THROWING AWAY.
+               *
+               * The registry returns each licensed activity with its code and
+               * its name in both languages, and this tool summarised them out of
+               * existence — so a signed-in applicant was asked which postal
+               * services their company provides while the answer sat in the
+               * response we had just read. EPGL raised the asking as FB-1723.
+               */
+              activities: l.activities.length
+                ? l.activities.map((x) => ({ code: x.code, nameEn: x.nameEn, nameAr: x.nameAr }))
+                : undefined,
+              /**
+               * And the people on the licence. `isUaeResident` is the registry's
+               * own statement, which is the one thing that can answer the
+               * non-resident question without asking: a partner it marks false
+               * has no Emirates ID to give, and one it marks true does.
+               *
+               * Only for a licence the registry names this customer on. These
+               * are other people's identity numbers, and the one thing that
+               * makes it their business to see them is being named on the same
+               * licence — `unknown` is not that, and `no-match` certainly is not.
+               */
+              ...(holder === "match"
+                ? {
+                    people: [...l.owners, ...l.managers]
+                      .filter((pp) => {
+                        // Remembered before the shape is trimmed, so the guard on
+                        // partner_N_residence can accept what the registry said
+                        // about somebody it actually named.
+                        if ((pp as { isUaeResident?: boolean }).isUaeResident === false) {
+                          for (const n of [pp.nameEn, pp.nameAr]) if (n) registryNonResidents.add(n);
+                        }
+                        return true;
+                      })
+                      .filter((pp) => pp.nameEn || pp.nameAr)
+                      .map((pp) => ({
+                        nameEn: pp.nameEn,
+                        nameAr: pp.nameAr,
+                        emiratesId: pp.emiratesId,
+                        nationality: pp.nationality,
+                        passportNo: (pp as { passportNo?: string }).passportNo,
+                        sharePercent: (pp as { sharePercent?: number }).sharePercent,
+                        isUaeResident: (pp as { isUaeResident?: boolean }).isUaeResident,
+                      })),
+                  }
+                : {}),
               ...epgl,
               ...(holder === "match" ? {} : { registryDoesNotNameThemAsHolder: holder }),
             };
@@ -1639,6 +1692,7 @@ export async function POST(req: NextRequest) {
           result:
             mockNote +
             `TRADE LICENCES REGISTERED TO THIS CUSTOMER (${licences.length}). Show these as CARDS and let them choose — do not pick one yourself. A licence marked knownToEpgl:true is already licensed by EPGL, so that is a RENEWAL and accountId is the account to use with ${FORM9_TOOL}; one marked false is a NEW application, and these details are what you pre-fill it with, asking the customer only to confirm them.\n` +
+            `ONCE THEY HAVE CHOSEN ONE, WHAT IS IN IT IS ANSWERED. \`activities\` is the registry's list of what that company is licensed to do, with MOEc's own codes — read the postal ones off it and do NOT ask which postal services they provide. \`people\` is who the registry names on the licence: use their names, Emirates ID numbers and nationalities to pre-fill the partners rather than asking, confirm rather than retype, and NEVER read an Emirates ID or passport number back to the customer in full. \`isUaeResident\` is the registry's own statement about each of them — false means that person has no Emirates ID to give and must not be asked for one; true means they do. It is evidence, not a guess from a passport, and it is the one source that settles the question without asking. Anyone the registry does not name is still collected from the customer as usual, and a licence with no \`people\` at all tells you nothing about anybody.\n` +
             JSON.stringify(rows) +
             capped,
         };
@@ -1934,6 +1988,7 @@ export async function POST(req: NextRequest) {
           businessOpen,
           customerContext,
           extraTools,
+          registryNonResidents: () => [...registryNonResidents],
           authoritativeAmount,
           holdBackedSaveTools,
           holdPresent,

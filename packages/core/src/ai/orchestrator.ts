@@ -162,6 +162,8 @@ export interface RunTurnInput {
    * after the preferences are recorded — needs what the customer just chose, not
    * what they had chosen when the request arrived.
    */
+  /** People the MoE registry marks as non-resident, for the residence guard. */
+  registryNonResidents?: () => string[];
   runExtraTool?: (
     name: string,
     input: Record<string, unknown>,
@@ -509,6 +511,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           locale,
           intent,
           userMessage: input.userMessage,
+          registryNonResidents: input.registryNonResidents,
           authoritativeAmount: input.authoritativeAmount?.() ?? null,
           holdBackedSaveTools: input.holdBackedSaveTools,
           holdPresent: input.holdPresent?.() ?? false,
