@@ -9,6 +9,10 @@
  *
  * Run from apps/web:  npx tsx scripts/test-renewal-no-form9-2026-09-15.ts --env <file>
  */
+// A file whose only imports are dynamic is not a module, and top-level await
+// then fails the type check — which is a build failure, not a test failure.
+export {};
+
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
   if (ok) { pass++; console.log(`  ok   ${n}`); }
