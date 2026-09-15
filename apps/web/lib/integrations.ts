@@ -675,6 +675,15 @@ export interface EpglRequestFacts {
   financeYear?: string;
   /** Account.EPG_License__c — an ID-type lookup, never the printed number. */
   licenceRecordId?: string;
+  /**
+   * Which EPGL service this request is, as constants from their spec.
+   *
+   * On LR-37172, a renewal that landed cleanly on 26 August, both came back
+   * NULL — the model sends them on a new licence and not on a renewal, from the
+   * same instruction. They are fixed per journey, so they are filled here.
+   */
+  serviceId?: string;
+  serviceNameEn?: string;
 }
 
 /**
@@ -764,6 +773,8 @@ export function withEpglRequestFields(
     EPG_Current_Emirate__c: facts.emirate,
     EPG_Current_Region__c: facts.region,
     Activity_Codes__c: postalActivityCodes(facts.activityCodes) ?? undefined,
+    serviceId__c: facts.serviceId,
+    ServiceNameEN__c: facts.serviceNameEn,
     EPG_Terms_and_Conditions__c: facts.termsAccepted === true ? true : undefined,
     EPG_Amount_Paid__c: facts.amountPaid,
     // EPG_Payment_Reference__c is NOT sent. Two answers arrived on 11 September

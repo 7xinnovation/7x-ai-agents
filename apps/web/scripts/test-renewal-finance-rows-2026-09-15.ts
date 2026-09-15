@@ -83,5 +83,20 @@ console.log("\nWhat it must not do");
   check("the licence id is omitted rather than faked when unknown", rowsOf(withEpglRequestFields(composite(), { ...FACTS, licenceRecordId: undefined })).every((r) => r.EPG_License_No__c === undefined));
 }
 
+console.log("\nThe service constants, which were null on a real renewal");
+{
+  const lrOf = (out: unknown) =>
+    (((out as { body?: { compositeRequest?: Record<string, unknown>[] } })?.body?.compositeRequest ?? [])
+      .find((i) => /EPG_License_Request__c$/.test(String(i.url ?? "")))?.body ?? {}) as Record<string, unknown>;
+  const lr = lrOf(withEpglRequestFields(composite(), { ...FACTS, serviceId: "S-EPG-000003", serviceNameEn: "Renew Postal Activity License" }));
+  check("serviceId__c is stated", lr.serviceId__c === "S-EPG-000003", lr.serviceId__c);
+  check("ServiceNameEN__c is stated", lr.ServiceNameEN__c === "Renew Postal Activity License", lr.ServiceNameEN__c);
+  // The model's own value still wins where it supplied one.
+  const already = {
+    body: { compositeRequest: [{ method: "POST", referenceId: "NewLicenseRequest", url: "/services/data/v66.0/sobjects/EPG_License_Request__c", body: { serviceId__c: "S-EPG-000002" } }] },
+  };
+  check("what the model sent is not overruled", lrOf(withEpglRequestFields(already, { serviceId: "S-EPG-000003" })).serviceId__c === "S-EPG-000002");
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

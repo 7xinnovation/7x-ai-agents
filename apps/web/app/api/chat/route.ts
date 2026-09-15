@@ -789,6 +789,14 @@ export async function POST(req: NextRequest) {
             // lookup, because the printed licence number fails the whole
             // composite with "id value of incorrect type".
             licenceRecordId: epglLicenceRecordId.value ?? undefined,
+            // EPGL's own constants for the two services. Both were null on
+            // LR-37172 — the model states them on a new licence and not on a
+            // renewal, from one instruction covering both.
+            ...(liveState.journeyKey === "renewal"
+              ? { serviceId: "S-EPG-000003", serviceNameEn: "Renew Postal Activity License" }
+              : liveState.journeyKey === "new_license"
+                ? { serviceId: "S-EPG-000002", serviceNameEn: "Issue Postal Activity License" }
+                : {}),
           })
         : undefined,
     // The same files, base64, for Emirates Post's rental save -- the trade licence
