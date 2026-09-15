@@ -1,4 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { personMatches } from "./docIdentity";
 import { getDb, agentIntegrations } from "@dialog/db";
 import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
@@ -657,6 +658,19 @@ export interface EpglRequestFacts {
   /** Account.EPG_License__c — an ID-type lookup, never the printed number. */
   licenceRecordId?: string;
   /**
+   * The partners AS THE TRADE LICENCE NAMES THEM, in order.
+   *
+   * LR-37377, 15 September: the licence and the MOA both name partner 2
+   * "Abdelaziz Mohamed Obaid". His Emirates ID names him "Mohamed Abdelaziz
+   * Mohamed Balhaif Alnuaimi" — the same man, as UAE names routinely are — and
+   * the model sent the card's version. EPGL's account now carries both, as two
+   * partners, and the next submission would add a third spelling.
+   *
+   * The licence is the document that says who the partners of a company ARE, so
+   * it is the one the partner record should agree with.
+   */
+  partnerNames?: (string | undefined)[];
+  /**
    * Which EPGL service this request is, as constants from their spec.
    *
    * On LR-37172, a renewal that landed cleanly on 26 August, both came back
@@ -813,6 +827,34 @@ export function withEpglRequestFields(
    * their CompositeHandler, so a row we add beside a row it sent is a duplicate
    * nobody can remove.
    */
+  /**
+   * ONE PERSON, ONE PARTNER ROW.
+   *
+   * Only where the two names are the SAME PERSON written differently —
+   * personMatches, the test that already knows "Abdelaziz Mohamed Obaid" and
+   * "Mohamed Abdelaziz Mohamed Balhaif Alnuaimi" are one man. A genuinely
+   * different name is left alone: that is a misfiled partner, a different
+   * problem, and silently renaming it would hide it.
+   *
+   * The index comes from the referenceId the model assigns (NewPartner1,
+   * NewPartner2...), which is how it builds these rows from partner_1..N in the
+   * first place.
+   */
+  for (const item of items) {
+    if (!/sobjects\/EPG_Partner__c$/i.test(String(item?.url ?? ""))) continue;
+    const n = Number(/(\d+)\s*$/.exec(String(item.referenceId ?? ""))?.[1]);
+    const onLicence = Number.isInteger(n) && n > 0 ? facts.partnerNames?.[n - 1] : undefined;
+    if (!onLicence) continue;
+    const rows = Array.isArray(item.body) ? item.body : [item.body];
+    for (const row of rows as Record<string, unknown>[]) {
+      const sent = String(row?.Name ?? "").trim();
+      if (!sent || sent === onLicence) continue;
+      if (!personMatches(onLicence, sent)) continue;
+      row.Name = onLicence;
+      patched = true;
+    }
+  }
+
   const licenceRequest = items.find((i) => /sobjects\/EPG_License_Request__c$/i.test(String(i?.url ?? "")));
   const hasFinance = items.some((i) => /sobjects\/EPG_Finance_Summary__c$/i.test(String(i?.url ?? "")));
   const quarters = facts.financeQuarters ?? [];

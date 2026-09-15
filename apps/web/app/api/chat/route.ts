@@ -760,6 +760,10 @@ export async function POST(req: NextRequest) {
               const v = Number(raw);
               return raw !== "" && Number.isFinite(v) ? v : null;
             }),
+            // Who the trade licence says the partners are, in order. The card in
+            // somebody's wallet may spell them differently; the licence is the
+            // document that says who a company's partners are.
+            partnerNames: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => str(liveState.data[`partner_${n}_name`]) ?? undefined),
             financeStartQuarter: str(liveState.data.license_period_start_quarter),
             financeYear: str(liveState.data.financial_year),
             // An ID-type lookup on every finance row. Latched from the company

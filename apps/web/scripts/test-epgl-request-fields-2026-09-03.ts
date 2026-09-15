@@ -98,5 +98,63 @@ const itemOf = (out: unknown, ref: string) =>
     itemOf(withEpglRequestFields(noLr, FACTS), "NewAccount").EPG_Regulator__c === "Dep. of Economic Development");
 }
 
+
+/**
+ * ONE PERSON, ONE PARTNER ROW.
+ *
+ * LR-37377, 15 September. The trade licence and the MOA both name partner 2
+ * "Abdelaziz Mohamed Obaid". His Emirates ID names him "Mohamed Abdelaziz
+ * Mohamed Balhaif Alnuaimi" — the same man, as UAE names routinely are — and
+ * the composite went out with the card's version. EPGL's account now carries
+ * both, as two partners, and the next submission would have added a third.
+ */
+{
+  const partnerItem = (referenceId: string, Name: string) => ({
+    method: "POST",
+    referenceId,
+    url: "/services/data/v66.0/sobjects/EPG_Partner__c",
+    body: { Name, EPG_Nationality__c: "United Arab Emirates" },
+  });
+  const composite = (...extra: unknown[]) => ({
+    body: {
+      allOrNone: true,
+      compositeRequest: [
+        { method: "POST", referenceId: "NewAccount", url: "/services/data/v66.0/sobjects/Account", body: { Name: "YI FANG" } },
+        ...extra,
+      ],
+    },
+  });
+  const onLicence = ["Faisal Eissa Lutfi Ali Hussain", "Abdelaziz Mohamed Obaid", "Valentina Mintah"];
+  const nameOf = (out: unknown, ref: string) =>
+    ((out as any)?.body?.compositeRequest ?? []).find((i: any) => i.referenceId === ref)?.body?.Name;
+
+  const out = withEpglRequestFields(
+    composite(
+      partnerItem("NewPartner1", "Faisal Eissa Lutfi Ali Hussain"),
+      partnerItem("NewPartner2", "Mohamed Abdelaziz Mohamed Balhaif Alnuaimi"),
+      partnerItem("NewPartner3", "Valentina Mintah")
+    ) as never,
+    { partnerNames: onLicence } as never
+  );
+  check("the Emirates ID spelling is replaced by the licence's", nameOf(out, "NewPartner2") === "Abdelaziz Mohamed Obaid", nameOf(out, "NewPartner2"));
+  check("...and the ones that already agreed are untouched", nameOf(out, "NewPartner1") === onLicence[0] && nameOf(out, "NewPartner3") === onLicence[2]);
+
+  // A genuinely different person is a MISFILED partner, not a spelling — left
+  // alone, because silently renaming it would hide the mistake.
+  const stranger = withEpglRequestFields(
+    composite(partnerItem("NewPartner2", "Nida Zafar Awan")) as never,
+    { partnerNames: onLicence } as never
+  );
+  check("a different person is left alone", nameOf(stranger, "NewPartner2") === "Nida Zafar Awan", nameOf(stranger, "NewPartner2"));
+
+  // No licence name for that slot: nothing to correct against.
+  const noName = withEpglRequestFields(
+    composite(partnerItem("NewPartner7", "Someone Else")) as never,
+    { partnerNames: onLicence } as never
+  );
+  check("a partner the licence never named is left alone", nameOf(noName, "NewPartner7") === "Someone Else");
+}
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

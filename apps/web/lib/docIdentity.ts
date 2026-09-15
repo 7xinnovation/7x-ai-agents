@@ -110,7 +110,7 @@ function nameMatches(a: string, b: string): boolean {
  * parts appear in the longer one. Two parts minimum, because "Mohamed" alone is
  * shared by half the country and one part in common is not evidence of anything.
  */
-function personMatches(a: string, b: string): boolean {
+export function personMatches(a: string, b: string): boolean {
   // Split on punctuation as well as spaces: "Al-Mansoori" is two parts, and
   // treating it as one made a hyphen enough to turn a man into a stranger.
   const partsOf = (s: string) =>
