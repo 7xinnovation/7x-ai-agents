@@ -133,8 +133,18 @@ console.log("\nOr the registry said so, which is better evidence than asking");
 console.log("\nThe activities and the people reach the model at all");
 {
   const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-  check("activities are returned with their codes", /activities: l\.activities\.length/.test(route));
+  check("activities are returned with their codes", /activities: \[\.\.\.l\.activities\]/.test(route));
   check("...in both languages", /nameEn: x\.nameEn, nameAr: x\.nameAr/.test(route));
+  check("...capped, so ten licences are not fifty kilobytes", /\.slice\(0, 12\)/.test(route));
+  check("...with the postal ones sorted in front of the cap", /Number\(looksPostal\(y\)\) - Number\(looksPostal\(x\)\)/.test(route));
+  check("...and the true count stated when it is truncated", /activitiesTotal: l\.activities\.length/.test(route));
+
+  const fn = route.slice(route.indexOf("function looksPostal("), route.indexOf("function looksPostal(") + 600);
+  check("what counts as postal covers the English words", /courier\|mail\|parcel\|delivery/.test(fn));
+  check("...and the Arabic", /بريد\|طرود\|شحن/.test(fn));
+  check("...and MOEc's own 532 prefix", /startsWith\("532"\)/.test(fn));
+  // The reason lives in the doc comment above the function, not inside it.
+  check("it only ever orders, never decides", /never to decide anything/.test(route));
   check("owners and managers both count as people", /\[\.\.\.l\.owners, \.\.\.l\.managers\]/.test(route));
   check("...with the registry's residency statement", /isUaeResident: \(pp as \{ isUaeResident\?: boolean \}\)\.isUaeResident/.test(route));
   check("the model is told not to ask for the activities", /do NOT ask which postal services they provide/.test(route));

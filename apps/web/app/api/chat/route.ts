@@ -106,6 +106,23 @@ function isTrue(v: unknown): boolean {
 /** Declared once: the customerContext above names it before the tool list is built. */
 const MOE_TOOL_NAME = "epgl_licences_for_customer";
 
+/**
+ * Is this licensed activity one EPGL would call postal?
+ *
+ * Used only to ORDER a list before it is capped, never to decide anything: a
+ * false positive costs a line in a tool result and a false negative costs
+ * nothing at all, because the whole list is still counted and the customer can
+ * still be asked. MOEc name them in words rather than by any code we hold.
+ */
+function looksPostal(a: { code?: string; nameEn?: string; nameAr?: string }): boolean {
+  const t = `${a.nameEn ?? ""} ${a.nameAr ?? ""}`.toLowerCase();
+  return (
+    /\b(post|postal|courier|mail|parcel|delivery|deliver|freight|shipment|shipping|logistic|transport)\b/.test(t) ||
+    /(بريد|طرود|شحن|توصيل|نقل)/.test(t) ||
+    String(a.code ?? "").startsWith("532")
+  );
+}
+
 const PAYMENT_SETTLED_DIRECTIVE =
   "(System: the customer just completed the payment in the secure gateway window — this is an internal notification, not a message they typed. " +
   "1) Warmly confirm the payment was received. " +
@@ -1635,9 +1652,26 @@ export async function POST(req: NextRequest) {
                * services their company provides while the answer sat in the
                * response we had just read. EPGL raised the asking as FB-1723.
                */
-              activities: l.activities.length
-                ? l.activities.map((x) => ({ code: x.code, nameEn: x.nameEn, nameAr: x.nameAr }))
-                : undefined,
+              /**
+               * Capped, and the postal ones first.
+               *
+               * A real licence carries thirty-six activities — LIWA PETROLEUM
+               * lists everything from oil-well chemicals to kitchen furniture —
+               * and ten licences of those would be fifty kilobytes of tool
+               * result for the sake of the two lines that matter. The ones that
+               * look postal are sorted to the front so the cap can never hide
+               * them, and the true count is stated so nobody reads a truncated
+               * list as the whole licence.
+               */
+              ...(l.activities.length
+                ? {
+                    activities: [...l.activities]
+                      .sort((x, y) => Number(looksPostal(y)) - Number(looksPostal(x)))
+                      .slice(0, 12)
+                      .map((x) => ({ code: x.code, nameEn: x.nameEn, nameAr: x.nameAr })),
+                    ...(l.activities.length > 12 ? { activitiesTotal: l.activities.length } : {}),
+                  }
+                : {}),
               /**
                * And the people on the licence. `isUaeResident` is the registry's
                * own statement, which is the one thing that can answer the
