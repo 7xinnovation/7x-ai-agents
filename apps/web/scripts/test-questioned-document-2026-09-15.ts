@@ -32,8 +32,15 @@ function collectedFor(caseData: Record<string, unknown>, uploaded: Record<string
     return { label: "Memorandum of Association (MOA)", fileName };
   };
 }
+/** The chat route's OTHER callback: which documents are mere offers. */
+function optionalFor(caseData: Record<string, unknown>) {
+  return (key: string) => {
+    if (caseData[NAME_CONFLICT_DOC_KEY] === key) return null;
+    return key === "moa" ? { aliases: ["Memorandum of Association", "MOA"] } : null;
+  };
+}
 function run(caseData: Record<string, unknown>, uploaded: Record<string, string>, reply: string) {
-  const g = collectedUploadGuard(collectedFor(caseData, uploaded), () => null);
+  const g = collectedUploadGuard(collectedFor(caseData, uploaded), optionalFor(caseData));
   let out = "";
   for (const ch of reply) out += g.push(ch);
   return out + g.flush();
@@ -72,6 +79,25 @@ console.log("\nA document never uploaded is unaffected either way");
 {
   const out = run({ [NAME_CONFLICT_DOC_KEY]: "moa" }, {}, REPLY);
   check("the control renders", /key:\s*moa/.test(out));
+}
+
+/**
+ * AND THE SENTENCE NEED NOT NAME IT.
+ *
+ * Live on staging, minutes after the first fix: "That's great — please go ahead
+ * and upload it here." — and nothing to upload with. The optional-offer rule
+ * drops a block for a document the message never names, and "it" is not a name.
+ * A document we are disputing was demanded, not offered.
+ */
+console.log("\nThe ask that says 'it'");
+{
+  const vague = `That's great — please go ahead and upload it here.\n\n${B}upload\nkey: moa\n${B}\n`;
+  const out = run({ [NAME_CONFLICT_DOC_KEY]: "moa" }, ON_FILE, vague);
+  check("the control renders even though the sentence names nothing", /key:\s*moa/.test(out), out);
+  // With no question outstanding it is an offer again, and an offer has to be
+  // made in words.
+  const asOffer = run({}, {}, vague);
+  check("...but an unprompted offer still has to name itself", !/key:\s*moa/.test(asOffer), asOffer);
 }
 
 console.log(failed ? `\n${failed} failing` : "\nall good");

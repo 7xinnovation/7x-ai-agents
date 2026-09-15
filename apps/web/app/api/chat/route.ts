@@ -2201,6 +2201,21 @@ export async function POST(req: NextRequest) {
             return { label: docLabels.get(key) ?? key, fileName: d.fileName ?? null };
           },
           (key) => {
+            /**
+             * A DOCUMENT UNDER QUESTION IS NOT AN OFFER.
+             *
+             * The optional rule drops a block for a document nobody asked for.
+             * A document we are disputing is the opposite of that — we asked
+             * for a replacement and the customer said they had one — but the
+             * MOA is configured optional, so the rule applied anyway, and the
+             * reply "That's great — please go ahead and upload it here" arrived
+             * with nothing to upload it with. The sentence said "it" rather
+             * than naming the document, which is all the rule had to go on.
+             *
+             * While the question stands, the document is required in the only
+             * sense that matters here: it was demanded, not offered.
+             */
+            if (liveState.data[NAME_CONFLICT_DOC_KEY] === key) return null;
             const aliases = docAliases.get(key);
             return aliases?.length ? { aliases } : null;
           }
