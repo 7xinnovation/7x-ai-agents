@@ -70,5 +70,31 @@ console.log("\nNothing that worked before has changed");
   check("the first document is not interrogated", entityMismatch({}, THE_OLD_MOA, { documentKey: "moa" }) === null);
 }
 
+console.log("\nThe one that actually caused FB-1722");
+{
+  // The real audit line from the third reproduction, 15 September:
+  //   held     "YI FANG TAIWAN FRUIT TEA L.L.C"
+  //   document "YIFANG CAFE MIDDLE EAST L.L.C"
+  //   verdict  clear
+  const held = { ...APPLICATION, trade_license_number: "697670" };
+  const oldMoa = {
+    company_name: "YIFANG CAFE MIDDLE EAST L.L.C",
+    company_name_ar: "اي فانغ كافيه ميدل ايست ذ.م.م",
+    trade_license_number: "697670",
+  };
+  const r = entityMismatch(held, oldMoa, { documentKey: "moa" });
+  check("the same licence number no longer excuses a different name", r !== null, r);
+  check("...and it is raised as a possible rename", /RENAMED/.test(r?.reason ?? ""), r?.reason);
+  check("...but never refused — it IS this company", r?.severity === "confirm", r?.severity);
+  check("...and the model may not call it verified", /do not describe the document as verified/.test(r?.reason ?? ""));
+  check("...and the other-registered-name explanation is left open", /other registered name/.test(r?.reason ?? ""));
+  // The 3 September fix, which this must not undo.
+  check("the same company under the same name is still silent", entityMismatch(
+    held,
+    { company_name: "YI FANG TAIWAN FRUIT TEA", trade_license_number: "697670" },
+    { documentKey: "moa" }
+  ) === null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

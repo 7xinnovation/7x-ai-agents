@@ -39,12 +39,27 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
   ) === null);
 }
 
-// 2. A matching trade licence NUMBER settles it. Names are a spelling exercise;
-//    the number is an identifier.
+// 2. A matching trade licence NUMBER settles WHOSE document it is. Names are a
+//    spelling exercise; the number is an identifier.
+//
+//    It does NOT settle whether the document is current (FB-1722, 15 September):
+//    the 2020 MOA carried the same licence number and named the company
+//    "YIFANG CAFE MIDDLE EAST L.L.C", and was accepted in silence. An old
+//    document for the same company naturally carries the same number while
+//    naming the company as it was then. So it is still never REFUSED on the
+//    strength of a name — the 3 September fix stands — and the disagreement is
+//    now put to the customer instead of swallowed.
 {
   const application = { company_name: "YI FANG TAIWAN FRUIT TEA L.L.C", trade_license_number: "CN-1234567" };
   const moa = { company_name: "YIFANG CAFE MIDDLE EAST L.L.C", trade_license_number: "cn1234567" };
-  check("a matching licence number accepts any name", entityMismatch(application, moa) === null, entityMismatch(application, moa));
+  const settled = entityMismatch(application, moa);
+  check("a matching licence number never refuses", settled?.severity !== "block", settled);
+  check("...but a changed name is raised, not swallowed", settled?.severity === "confirm", settled);
+  check("...as a possible rename", /RENAMED/.test(settled?.reason ?? ""), settled?.reason);
+  check("...and the same name under the same number is silent", entityMismatch(
+    application,
+    { company_name: "YI FANG TAIWAN FRUIT TEA", trade_license_number: "cn1234567" }
+  ) === null);
 }
 
 // 3. A genuinely different company is still refused -- the client's sheet wants

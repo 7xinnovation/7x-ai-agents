@@ -267,6 +267,45 @@ export function entityMismatch(
 
   // Names, compared as SETS. A legal name on the MOA and a trade name on the
   // licence are both this company's names, and either may appear in either slot.
+  /**
+   * A MATCHING LICENCE NUMBER SETTLES WHOSE DOCUMENT IT IS. IT DOES NOT SETTLE
+   * WHETHER IT IS CURRENT.
+   *
+   * FB-1722, third reproduction and the real one. The audit line:
+   *
+   *   held:     "YI FANG TAIWAN FRUIT TEA L.L.C"
+   *   document: "YIFANG CAFE MIDDLE EAST L.L.C"
+   *   verdict:  clear
+   *
+   * The 2020 MOA DID name its company, and named it differently — and was
+   * accepted anyway, because it carries the same trade licence number and a
+   * matching exact identifier ends the question outright. That short-circuit was
+   * written on 3 September to stop a correct MOA being refused, and it is right
+   * about the thing it decides: this is the same company. It says nothing at all
+   * about WHEN, and an old document for the same company naturally carries the
+   * same licence number while naming the company as it was then.
+   *
+   * So the identifier still settles the company — no refusal, the 3 September
+   * fix stands — and the disagreement is put to the customer instead of being
+   * swallowed. Which is the whole of what EPGL asked for: "ensure the system
+   * validates and identifies any changes in the submitted document".
+   */
+  if (settled.company) {
+    const heldNames = names(existing);
+    const docNames = names(extracted);
+    if (heldNames.length && docNames.length && !docNames.some((f) => heldNames.some((k) => nameMatches(k, f)))) {
+      return {
+        severity: "confirm",
+        reason:
+          `This document is for the same company — the licence number matches — but it NAMES it differently: ` +
+          `"${raw(extracted, NAME_FIELDS)}" here, against "${raw(existing, NAME_FIELDS)}" on the application. ` +
+          `That usually means the company has been RENAMED and this is an older copy issued under the previous name. ` +
+          `Say so plainly, do not describe the document as verified, and ask whether they have the current version. ` +
+          `If the older name is simply the company's other registered name, they can confirm that and it stands.`,
+      };
+    }
+  }
+
   const known = settled.company ? [] : names(existing);
   const found = names(extracted);
   /**
