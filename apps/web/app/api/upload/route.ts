@@ -15,7 +15,7 @@ import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
-import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, ownerDocumentCheck, PARTNER_NAMES_KEY } from "@/lib/docIdentity";
+import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, ownerDocumentCheck, PARTNER_NAMES_KEY, NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
 
 /**
  * Which classified document types are acceptable for a given document slot,
@@ -487,8 +487,15 @@ export async function POST(req: NextRequest) {
     // A name disagreement the customer has to settle. Bookkeeping, not a field:
     // the "__" prefix keeps it out of the case panel and out of any submission.
     const data: Record<string, unknown> = { ...next.data, [DOC_FIELDS_KEY]: docFields };
-    if (nameQuery) data[NAME_CONFLICT_KEY] = nameQuery;
-    else delete data[NAME_CONFLICT_KEY];
+    if (nameQuery) {
+      data[NAME_CONFLICT_KEY] = nameQuery;
+      data[NAME_CONFLICT_DOC_KEY] = key;
+    } else {
+      delete data[NAME_CONFLICT_KEY];
+      // Only THIS document's question is answered by THIS upload. Another
+      // document landing cleanly says nothing about the one still in doubt.
+      if (data[NAME_CONFLICT_DOC_KEY] === key) delete data[NAME_CONFLICT_DOC_KEY];
+    }
     // Remember whose name this partner's documents carry, so the second document
     // of a pair can be matched against the first even when the licence named
     // nobody. Not recorded when the name is already disputed -- storing it would

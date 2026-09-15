@@ -47,6 +47,7 @@ import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard, asksSomethingElse } from "@/lib/uploadGuard";
 import { epglDocumentLabel } from "@/lib/epglDocumentLabel";
+import { NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale } from "@/lib/replyLocale";
@@ -2181,6 +2182,22 @@ export async function POST(req: NextRequest) {
           (key) => {
             const d = liveState.documents.find((x) => x.key === key);
             if (!d || (d.status !== "uploaded" && d.status !== "accepted")) return null;
+            /**
+             * A DOCUMENT WE HAVE QUESTIONED IS NOT A DOCUMENT THAT IS DONE.
+             *
+             * The stale-MOA check keeps the file and asks about it, so the slot
+             * still reads "uploaded" — and this callback is what turns
+             * "uploaded" into "nothing to do here". The customer pressed "I
+             * have the current MOA, I'll upload it" and was told there was
+             * nothing to upload, in the same message that asked them to.
+             *
+             * So while a document's identity is unresolved, its control renders
+             * as normal: uploaded, with the file named and a Replace button,
+             * which is exactly the affordance the moment calls for. It only
+             * appears when the model has decided to ask for it, so a question
+             * left hanging costs nothing.
+             */
+            if (liveState.data[NAME_CONFLICT_DOC_KEY] === key) return null;
             return { label: docLabels.get(key) ?? key, fileName: d.fileName ?? null };
           },
           (key) => {

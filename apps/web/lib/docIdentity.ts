@@ -499,6 +499,30 @@ export function formatGulfDate(d: Date): string {
 /** The names seen on documents so far, keyed by partner slot. Bookkeeping. */
 export const PARTNER_NAMES_KEY = "__partner_names";
 
+/**
+ * WHICH document an outstanding identity question is about.
+ *
+ * A document questioned rather than refused stays "uploaded" — that is the
+ * whole point of `confirm`: a stale MOA is KEPT and the customer is asked about
+ * it. But "uploaded" is also what tells the streaming guard a document is
+ * COLLECTED, and a collected document's upload block is rewritten to "already
+ * uploaded, nothing to do here".
+ *
+ * So on 15 September the agent asked for the current MOA, the customer pressed
+ * "I have the current MOA — I'll upload it", and the reply was:
+ *
+ *   Please go ahead and upload the current MOA here:
+ *   Already uploaded: Memorandum of Association — Yi Fang MOA 2020 (old).pdf.
+ *   Nothing to do here.
+ *
+ * Two sentences in one message contradicting each other, and no way to upload
+ * the replacement we had just asked for.
+ *
+ * The reason string is prose for the model to relay. This is the KEY, so the
+ * guard can tell the one document under question from every other on file.
+ */
+export const NAME_CONFLICT_DOC_KEY = "__name_conflict_doc";
+
 /** `partner_2_passport` -> { index: 2, kind: "passport" }. */
 export function partnerSlot(documentKey: string): { index: number; kind: string } | null {
   const m = /^partner_(\d+)_(.+)$/i.exec(documentKey);
