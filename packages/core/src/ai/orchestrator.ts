@@ -175,6 +175,8 @@ export interface RunTurnInput {
    * Post hold quotes the real price), so this is a getter, not a value.
    */
   authoritativeAmount?: () => number | null;
+  /** A server-side addend for the payment, with a label. See ToolCtx.extraCharge. */
+  extraCharge?: () => { amount: number; label: string } | null;
   /** Save tools that need a backend reservation, and whether one exists right now. */
   holdBackedSaveTools?: string[];
   holdPresent?: () => boolean;
@@ -513,6 +515,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           userMessage: input.userMessage,
           registryNonResidents: input.registryNonResidents,
           authoritativeAmount: input.authoritativeAmount?.() ?? null,
+          extraCharge: input.extraCharge?.() ?? null,
           holdBackedSaveTools: input.holdBackedSaveTools,
           holdPresent: input.holdPresent?.() ?? false,
         });

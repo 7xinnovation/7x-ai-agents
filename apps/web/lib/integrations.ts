@@ -638,6 +638,8 @@ export interface EpglRequestFacts {
   termsAccepted?: boolean;
   /** What actually settled, fee included. */
   amountPaid?: number;
+  /** How much of that was approved penalties rather than the licence fee. */
+  penaltiesPaid?: number;
   paymentReference?: string;
   /** "gateway" or "viban" — how the applicant chose to pay. */
   paymentMethod?: string;
@@ -756,6 +758,15 @@ export function withEpglRequestFields(
     ServiceNameEN__c: facts.serviceNameEn,
     EPG_Terms_and_Conditions__c: facts.termsAccepted === true ? true : undefined,
     EPG_Amount_Paid__c: facts.amountPaid,
+    /**
+     * The penalty portion of what was collected, on their own field for it.
+     *
+     * EPG_Penalty_Paid_Amount__c exists on the request and we were leaving it
+     * null while charging the customer for penalties inside EPG_Amount_Paid__c.
+     * Finance reconciling a payment would have had no way to tell the licence
+     * fee from the penalties in one figure.
+     */
+    EPG_Penalty_Paid_Amount__c: facts.penaltiesPaid,
     /**
      * THE LICENCE THIS REQUEST IS ABOUT.
      *

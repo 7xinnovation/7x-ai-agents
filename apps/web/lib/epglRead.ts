@@ -450,3 +450,149 @@ export async function form9ByAccountId(
     payableBalance: r.Payable_Balance_For_Customer__c ?? undefined,
   }));
 }
+
+/* ------------------------------------------------------------------------- *
+ * Penalties, itemised — and which of them a renewal may actually charge.
+ * ------------------------------------------------------------------------- */
+
+export interface EpglPenalty {
+  id: string;
+  name?: string;
+  /** "Form-9 Non Submission" | "Missing transaction" | "Non Compliance" | "Renewal" */
+  type?: string;
+  quarter?: string;
+  year?: string;
+  amount: number;
+  /** Draft | Approved | Cancelled | On Hold | Rejected | Paid | Submitted For Approval */
+  status?: string;
+  /** Draft | Open | Paid | Under verification | Cancelled | Rejected */
+  paymentStatus?: string;
+  licenseNumber?: string;
+}
+
+/**
+ * The penalties recorded against a company, newest first.
+ *
+ * Read per company rather than taken from the rollups, because the rollups
+ * cannot say WHICH penalties they are made of and the charge depends on exactly
+ * that — one approved and one still in Draft roll up into the same number.
+ */
+export async function penaltiesForAccount(
+  agentId: string,
+  env: EnvKey,
+  accountId: string,
+  limit = 50
+): Promise<EpglPenalty[]> {
+  const v = soqlLiteral(assertShape(accountId, SF_ID, "account id"));
+  const n = Math.min(Math.max(Math.trunc(limit), 1), 200);
+  const rows = await query<Record<string, any>>(
+    agentId, env,
+    "SELECT Id, Name, EPG_Penalty_type__c, EPG_Quarter__c, EPG_Year__c, EPG_Penalty_amount__c, " +
+    "EPG_Penalty_Status__c, EPG_Payment_Status__c, EPG_LicenseNumber__c " +
+    `FROM EPG_Penalty__c WHERE EPG_Company__c = '${v}' ORDER BY CreatedDate DESC LIMIT ${n}`
+  );
+  return rows.map((r) => ({
+    id: String(r.Id),
+    name: r.Name ?? undefined,
+    type: r.EPG_Penalty_type__c ?? undefined,
+    quarter: r.EPG_Quarter__c ?? undefined,
+    year: r.EPG_Year__c ?? undefined,
+    amount: typeof r.EPG_Penalty_amount__c === "number" ? r.EPG_Penalty_amount__c : 0,
+    status: r.EPG_Penalty_Status__c ?? undefined,
+    paymentStatus: r.EPG_Payment_Status__c ?? undefined,
+    licenseNumber: r.EPG_LicenseNumber__c ?? undefined,
+  }));
+}
+
+/**
+ * WHICH PENALTIES A RENEWAL MAY CHARGE FOR.
+ *
+ * Emre's decision, 15 September: charge the approved ones, state the rest.
+ *
+ * `EPG_Penalty_Status__c` must be exactly "Approved". The picklist also holds
+ * Draft, On Hold, Submitted For Approval, Rejected, Cancelled and Paid; only
+ * one of those is a penalty EPGL have decided is owed, and charging a customer
+ * for a figure their own regulator has not approved is not a thing to do by
+ * inference.
+ *
+ * `EPG_Is_CEO_Approved__c` is deliberately NOT part of the gate. It reads false
+ * on all 223 approved penalties in their org — measured, not assumed — so
+ * requiring it would collect nothing, ever, while looking like it worked.
+ *
+ * The PAYMENT status then decides whether it is still owed. Paid is done.
+ * Cancelled and Rejected are not owed. "Under verification" means money is
+ * already in flight against it, and charging that again is a double charge —
+ * the one outcome here worse than under-collecting. Draft, Open and an empty
+ * value are outstanding.
+ */
+const CHARGEABLE_PAYMENT_STATE = new Set(["draft", "open", ""]);
+
+export interface PenaltySplit {
+  /** Approved and still owed — added to the renewal charge. */
+  chargeable: EpglPenalty[];
+  chargeableTotal: number;
+  /** Real, outstanding, and NOT approved yet — stated, never charged. */
+  pending: EpglPenalty[];
+  pendingTotal: number;
+}
+
+export function splitPenalties(list: EpglPenalty[]): PenaltySplit {
+  const chargeable: EpglPenalty[] = [];
+  const pending: EpglPenalty[] = [];
+  for (const p of list) {
+    if (!(p.amount > 0)) continue;
+    const pay = String(p.paymentStatus ?? "").trim().toLowerCase();
+    if (!CHARGEABLE_PAYMENT_STATE.has(pay)) continue; // paid, cancelled, rejected, in flight
+    const status = String(p.status ?? "").trim().toLowerCase();
+    if (status === "approved") chargeable.push(p);
+    else if (status === "draft" || status === "on hold" || status === "submitted for approval") pending.push(p);
+    // Cancelled, Rejected and Paid are neither owed nor pending.
+  }
+  const sum = (xs: EpglPenalty[]) => Math.round(xs.reduce((t, x) => t + x.amount, 0) * 100) / 100;
+  return { chargeable, chargeableTotal: sum(chargeable), pending, pendingTotal: sum(pending) };
+}
+
+/** "Form 9 non-submission, Q1 2026" — what a line on the summary should read. */
+export function penaltyLabel(p: EpglPenalty): string {
+  const kind = p.type ?? p.name ?? "Penalty";
+  const period = [p.quarter, p.year].filter(Boolean).join(" ");
+  return period ? `${kind} (${period})` : kind;
+}
+
+/**
+ * What to tell the agent about the penalties, given the split.
+ *
+ * Two lists, and the difference between them is the whole point: one is added
+ * to what the customer pays, the other is stated and not charged. Saying so in
+ * the same breath is what stops "you owe 23,000" appearing beside a card for
+ * 118,700.
+ *
+ * The chargeable total is named but NOT added to the licence fee here — the
+ * server does that arithmetic when the payment is opened, and a model that has
+ * been handed a grand total will quote it in the summary whether or not it
+ * matches what the gateway was given.
+ */
+export function penaltyNotice(split: PenaltySplit | null): string | null {
+  if (!split || (!split.chargeable.length && !split.pending.length)) return null;
+  const out: string[] = [];
+  if (split.chargeable.length) {
+    out.push(
+      `PENALTIES EPGL HAVE APPROVED AND ARE STILL OWED — AED ${split.chargeableTotal.toLocaleString("en-AE")} in total:`
+    );
+    for (const p of split.chargeable) out.push(`  - ${penaltyLabel(p)}: AED ${p.amount.toLocaleString("en-AE")}`);
+    out.push(
+      "THESE ARE ADDED TO THE RENEWAL PAYMENT. Tell the customer BEFORE they pay: give the licence fee, then these as separate lines with what each is for, then the total. " +
+        "The payment card is built server-side and already includes them, so quote the same figures — do NOT work out your own total from other numbers, and do NOT open the payment without having said what is in it."
+    );
+  }
+  if (split.pending.length) {
+    out.push(
+      `PENALTIES NOT YET APPROVED — AED ${split.pendingTotal.toLocaleString("en-AE")}, NOT charged and NOT part of the total:`
+    );
+    for (const p of split.pending) out.push(`  - ${penaltyLabel(p)}: AED ${p.amount.toLocaleString("en-AE")}`);
+    out.push(
+      "Say these are on their record but still going through EPGL's approval, so they are not being collected now and EPGL will be in touch about them. Never add them to the total and never imply the renewal settles them."
+    );
+  }
+  return out.join("\n");
+}

@@ -17,7 +17,18 @@ import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
-import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId, outstandingSummary, type EpglCompany } from "@/lib/epglRead";
+import {
+  companyByEmiratesId,
+  companyByTradeLicense,
+  form9ByAccountId,
+  outstandingSummary,
+  penaltiesForAccount,
+  penaltyNotice,
+  penaltyLabel,
+  splitPenalties,
+  type EpglCompany,
+  type PenaltySplit,
+} from "@/lib/epglRead";
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { notifyEpglPayment } from "@/lib/epglPayment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
@@ -730,6 +741,13 @@ export async function POST(req: NextRequest) {
                 : undefined,
             paymentReference:
               liveState.payment.status === "paid" ? liveState.payment.reference ?? undefined : undefined,
+            // How much of the settled amount was penalties rather than the
+            // licence fee. Only once it is actually paid: before that it is a
+            // figure we intend to charge, not one Finance can reconcile.
+            penaltiesPaid:
+              liveState.payment.status === "paid" && (epglPenalties.value?.chargeableTotal ?? 0) > 0
+                ? epglPenalties.value!.chargeableTotal
+                : undefined,
             /**
              * The renewal's quarterly figures, straight off the case.
              *
@@ -1091,6 +1109,30 @@ export async function POST(req: NextRequest) {
   const renewalInProgress = () => /renew/i.test(String(liveState.journeyKey ?? session.state.journeyKey ?? ""));
 
   /**
+   * The penalties this renewal will charge for, latched at lookup.
+   *
+   * Emre's decision, 15 September: the renewal collects the APPROVED penalties
+   * alongside the licence fee, and states the ones still awaiting approval
+   * without charging them. Read once, when the company is identified, and held
+   * for the payment — the figure the summary quotes and the figure the card
+   * charges have to be the same number, and the only way to guarantee that is
+   * for there to be one number.
+   */
+  const epglPenalties: { value: PenaltySplit | null } = { value: null };
+  const loadPenalties = async (accountId: string | undefined) => {
+    if (!accountId) return;
+    try {
+      epglPenalties.value = splitPenalties(
+        await penaltiesForAccount(agent.id, agent.definition.activeEnvironment ?? "production", accountId)
+      );
+    } catch (e) {
+      // A penalty we could not read is a penalty we do not charge for.
+      log.error("epgl_penalties_failed", e, { agentId: agent.id });
+      epglPenalties.value = null;
+    }
+  };
+
+  /**
    * The company, plus what EPGL's records say is outstanding against it.
    *
    * The figures travel inside the company JSON already; this puts the statement
@@ -1098,8 +1140,9 @@ export async function POST(req: NextRequest) {
    * way are not something to leave a model to interpret. outstandingSummary
    * does the wording and, deliberately, none of the arithmetic.
    */
-  const withOutstanding = (company: EpglCompany) => {
-    const note = outstandingSummary(company.fees);
+  const withOutstanding = async (company: EpglCompany) => {
+    await loadPenalties(company.accountId);
+    const note = penaltyNotice(epglPenalties.value) ?? outstandingSummary(company.fees);
     return note ? `${note}\n\n${JSON.stringify(company)}` : JSON.stringify(company);
   };
 
@@ -1899,7 +1942,7 @@ export async function POST(req: NextRequest) {
           rememberLicenceRecordId(found[0]);
           const stop = await blockedNotice(found[0]!);
           if (stop) return { result: stop };
-          return { result: withOutstanding(found[0]!) };
+          return { result: await withOutstanding(found[0]!) };
         }
         if (name === COMPANY_TOOL) {
           const found = await companyByTradeLicense(agent.id, env, String(input.tradeLicenseNumber ?? ""));
@@ -1924,7 +1967,7 @@ export async function POST(req: NextRequest) {
                 JSON.stringify(found),
             };
           }
-          return { result: withOutstanding(found[0]!) };
+          return { result: await withOutstanding(found[0]!) };
         }
         const quarters = await form9ByAccountId(agent.id, env, String(input.accountId ?? ""));
         return {
@@ -2194,6 +2237,23 @@ export async function POST(req: NextRequest) {
           extraTools,
           registryNonResidents: () => [...registryNonResidents],
           authoritativeAmount,
+          /**
+           * The approved penalties, added to the renewal by the server.
+           *
+           * Not by the model: a total the model passes is a total the model
+           * composed, and the summary it wrote a moment earlier was composed
+           * separately. One number, computed once, used by both the card and
+           * the figure the agent is told to quote.
+           */
+          extraCharge: () => {
+            const split = epglPenalties.value;
+            if (!split || split.chargeableTotal <= 0) return null;
+            if (!/renew/i.test(String(liveState.journeyKey ?? ""))) return null;
+            return {
+              amount: split.chargeableTotal,
+              label: split.chargeable.length === 1 ? penaltyLabel(split.chargeable[0]!) : "Approved penalties",
+            };
+          },
           holdBackedSaveTools,
           holdPresent,
           runExtraTool,

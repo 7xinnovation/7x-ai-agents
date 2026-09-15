@@ -227,6 +227,14 @@ export interface DispatchInput {
    */
   authoritativeAmount?: number | null;
   /**
+   * An amount the SERVER adds to this journey's fee, with a name for it.
+   *
+   * For EPGL's renewal: the penalties Salesforce holds as approved and unpaid.
+   * Read per company at lookup time, so it cannot live in the journey's
+   * configuration, and never left to the model to add.
+   */
+  extraCharge?: { amount: number; label: string } | null;
+  /**
    * Save tools that record against a reservation the backend issued earlier, and
    * whether such a reservation currently exists. Kept as data rather than a
    * prepared message because the decision needs the journey as it is AT THE MOMENT
@@ -869,7 +877,24 @@ export async function dispatchTool(
         sub.processingFee && state.payment.status !== "paid" && typeof state.payment.baseAmount === "number"
           ? state.payment.baseAmount
           : undefined;
-      const base = backendAmount ?? remembered ?? chargeableAmount(sub, state.data, overrideAmount);
+      /**
+       * A CHARGE THE BACKEND ADDS, NOT ONE THE CONFIGURATION KNOWS.
+       *
+       * EPGL's renewal process map: "System calculates renewal fees and
+       * penalties if any" then "Client makes payment accordingly". The penalty
+       * is a live figure read off Salesforce for this one company, so it is
+       * neither the journey's configured amount nor a surcharge with a `when`
+       * — both of those are fixed numbers decided at configuration time.
+       *
+       * It is added here rather than passed as `amount` by the model, because
+       * the model passing a total is how a summary saying 100,700 ends up
+       * beside a card charging 118,700. `remembered` is respected first for the
+       * same reason it exists: once a total has been quoted on this case, the
+       * addend is already inside it and adding again compounds across reissued
+       * links.
+       */
+      const extra = remembered === undefined && ctx.extraCharge && ctx.extraCharge.amount > 0 ? ctx.extraCharge : null;
+      const base = toFils((backendAmount ?? remembered ?? chargeableAmount(sub, state.data, overrideAmount)) + (extra?.amount ?? 0));
       const fee = processingFeeFor(sub, state.data, base);
       const amount = toFils(base + fee.amount);
       const applicable = applicableSurcharges(sub, state.data);
@@ -895,11 +920,12 @@ export async function dispatchTool(
       events.push({ type: "case", state });
       const surchargeTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
       const parts = [
+        ...(extra ? [`${extra.label} ${extra.amount} ${currency}`] : []),
         ...applicable.map((s) => `${s.label.en} ${s.amount} ${currency}`),
         ...(fee.amount > 0 ? [`${fee.label?.en ?? "Processing fee"} ${fee.amount} ${currency} (${fee.percent}%)`] : []),
       ];
       const breakdown = parts.length
-        ? ` The total includes ${parts.join(" + ")} on top of ${toFils(amount - surchargeTotal - fee.amount)} ${currency} — state this breakdown to the customer so no fee is a surprise.`
+        ? ` The total includes ${parts.join(" + ")} on top of ${toFils(amount - surchargeTotal - fee.amount - (extra?.amount ?? 0))} ${currency} — state this breakdown to the customer so no fee is a surprise.`
         : "";
       return {
         result: `Payment ${res.reference} initiated for ${amount} ${currency}.${breakdown} A secure "Pay now" card is now displayed to the customer inside the chat — do NOT paste any payment link or URL. Briefly tell them to complete the payment using the secure payment card shown below your message, then wait for payment confirmation before calling submit_case.`,
