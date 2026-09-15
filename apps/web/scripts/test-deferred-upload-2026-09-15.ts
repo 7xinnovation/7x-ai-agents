@@ -1,0 +1,94 @@
+/**
+ * A reply that says "come back to it" does not also put the box back.
+ *
+ * EPGL, 15 September: a Form 9 was refused as another company's document, the
+ * customer said "do I need to upload that right now? I don't have one on me",
+ * and the reply agreed — "you can come back to it… you don't need to upload it
+ * right now" — with the upload control underneath it and the same rejection
+ * repeated in red. The words said later, the interface said now, and the red
+ * paragraph reads as a second rejection of a second attempt.
+ *
+ * Run from apps/web:  npx tsx scripts/test-deferred-upload-2026-09-15.ts
+ */
+import { collectedUploadGuard, defersUpload } from "../lib/uploadGuard";
+
+let pass = 0, fail = 0;
+const check = (n: string, ok: boolean, got?: unknown) => {
+  if (ok) { pass++; console.log(`  ok   ${n}`); }
+  else { fail++; console.log(`  FAIL ${n}${got === undefined ? "" : `\n         ${JSON.stringify(got)}`}`); }
+};
+
+/** Streamed in awkward chunks, as the model actually writes it. */
+function run(text: string, collected: (k: string) => null = () => null, chunk = 9): string {
+  const g = collectedUploadGuard(collected);
+  let out = "";
+  for (let i = 0; i < text.length; i += chunk) out += g.push(text.slice(i, i + chunk));
+  return out + g.flush();
+}
+
+const BLOCK = "```upload\nkey: form_9\n```";
+
+console.log("\nThe reported reply");
+{
+  const reported =
+    "No problem — you can come back to it. The Form 9 is mandatory for the renewal, so the application can't be submitted without it, but you don't need to upload it right now.\n\n" +
+    "Let's keep moving with what you do have. What's your **postal license number**?\n\n" + BLOCK;
+  const out = run(reported);
+  check("the upload control goes", !/```upload/.test(out), out);
+  check("the reassurance stays", /you can come back to it/.test(out), out);
+  check("...and so does the next question", /postal license number/.test(out), out);
+}
+
+console.log("\nA genuine ask is untouched");
+{
+  const asking = "Let's start with the trade licence. Please upload it below.\n\n```upload\nkey: trade_license\n```";
+  check("the control survives", run(asking).includes("```upload"), run(asking));
+  const afterReject =
+    "The Form 9 you uploaded belongs to TFM EXPRESS SHIPPING L.L.C, not YI FANG TAIWAN FRUIT TEA L.L.C. Please upload the Form 9 for the correct company.\n\n" + BLOCK;
+  check("a rejection still offers a retry", run(afterReject).includes("```upload"), run(afterReject));
+}
+
+console.log("\nWhat counts as deferring");
+for (const s of [
+  "you can come back to it",
+  "you don't need to upload it right now",
+  "no need to upload anything yet — whenever you have it",
+  "no rush, we can carry on",
+  "لا داعي الآن، يمكنك رفعه لاحقاً",
+  "يمكنك العودة إليه عندما يتوفر",
+]) check(`"${s.slice(0, 44)}"`, defersUpload(s), s);
+
+for (const s of [
+  "Please upload the Form 9 for the correct company.",
+  "Let's start with the trade licence.",
+  "This document names another company.",
+  "يرجى رفع النموذج 9 الخاص بالشركة الصحيحة.",
+]) check(`NOT deferring: "${s.slice(0, 40)}"`, !defersUpload(s), s);
+
+console.log("\nStreaming and state");
+{
+  const reported = "No problem — you can come back to it, you don't need to upload it right now.\n\n" + BLOCK;
+  for (const chunk of [1, 4, 17, 500]) {
+    check(`chunk size ${chunk} gives the same answer`, !run(reported, () => null, chunk).includes("```upload"), chunk);
+  }
+  // The flag must not leak into the next reply.
+  const g = collectedUploadGuard(() => null);
+  let a = "";
+  for (const c of ["You can come back to it.\n\n", BLOCK]) a += g.push(c);
+  a += g.flush();
+  let b = "";
+  for (const c of ["Please upload it below.\n\n", BLOCK]) b += g.push(c);
+  b += g.flush();
+  check("the first reply drops the control", !a.includes("```upload"), a);
+  check("...and the next one keeps it", b.includes("```upload"), b);
+}
+
+console.log("\nThe existing rule still holds");
+{
+  const already = "Here you go.\n\n```upload\nkey: trade_license\n```";
+  const out = run(already, (() => ({ label: "Trade License", fileName: "tl.pdf" })) as never);
+  check("a collected document is still answered, not asked for", /Already uploaded/.test(out) && !/```upload/.test(out), out);
+}
+
+console.log(`\n${pass} passed, ${fail} failed\n`);
+process.exit(fail ? 1 : 0);
