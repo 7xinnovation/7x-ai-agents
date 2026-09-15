@@ -158,7 +158,8 @@ console.log("\nA Virtual IBAN application is submitted, not held");
   check("the value is settable, since it is a picklist", /process\.env\.EPGL_VIBAN_STATUS/.test(intg));
   check("an empty setting turns it off entirely", /&& vibanStatus \? vibanStatus : undefined/.test(intg));
   check("a card payment gets no such status", /=== "viban" && vibanStatus/.test(intg));
-  check("the chosen method reaches the facts", /paymentMethod: str\(session\.state\.data\.payment_method\)/.test(route));
+  check("the chosen method reaches the facts", /paymentMethod: str\(liveState\.data\.payment_method\)/.test(route));
+  check("...read at the submit, not when the tools were built", /epglRequestFacts:\s*\n\s*agent\.definition\.tenantSlug === "epgl"\s*\n\s*\? \(\) => \(\{/.test(route));
   check("it never overwrites a status the model set", /Never overwrite what the model read off the documents/.test(intg));
 }
 

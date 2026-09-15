@@ -756,22 +756,40 @@ export async function POST(req: NextRequest) {
     // Payment Info empty and Terms and Conditions unticked.
     epglRequestFacts:
       agent.definition.tenantSlug === "epgl"
-        ? {
-            emirate: str(session.state.data.emirate),
-            region: str(session.state.data.region),
-            activityCodes: str(session.state.data.activity_codes),
+        ? () => ({
+            emirate: str(liveState.data.emirate),
+            region: str(liveState.data.region),
+            activityCodes: str(liveState.data.activity_codes),
             // Decides whether the request is submitted as awaiting a transfer.
-            paymentMethod: str(session.state.data.payment_method),
-            regulator: str(session.state.data.regulator),
+            paymentMethod: str(liveState.data.payment_method),
+            regulator: str(liveState.data.regulator),
             termsAccepted:
-              isTrue(session.state.data.terms_accepted) || isTrue(session.state.data.declaration_accepted),
+              isTrue(liveState.data.terms_accepted) || isTrue(liveState.data.declaration_accepted),
             amountPaid:
-              session.state.payment.status === "paid" && typeof session.state.payment.amount === "number"
-                ? session.state.payment.amount
+              liveState.payment.status === "paid" && typeof liveState.payment.amount === "number"
+                ? liveState.payment.amount
                 : undefined,
             paymentReference:
-              session.state.payment.status === "paid" ? session.state.payment.reference ?? undefined : undefined,
-          }
+              liveState.payment.status === "paid" ? liveState.payment.reference ?? undefined : undefined,
+            /**
+             * The renewal's quarterly figures, straight off the case.
+             *
+             * q1 is the FIRST quarter of the licence period, not January — the
+             * journey collects them in period order and the calendar quarters
+             * are walked from license_period_start_quarter.
+             */
+            financeQuarters: [1, 2, 3, 4].map((n) => {
+              const raw = String(liveState.data[`leviable_income_q${n}`] ?? "").replace(/[^\d.-]/g, "");
+              const v = Number(raw);
+              return raw !== "" && Number.isFinite(v) ? v : null;
+            }),
+            financeStartQuarter: str(liveState.data.license_period_start_quarter),
+            financeYear: str(liveState.data.financial_year),
+            // An ID-type lookup on every finance row. Latched from the company
+            // lookup, because the printed licence number fails the whole
+            // composite with "id value of incorrect type".
+            licenceRecordId: epglLicenceRecordId.value ?? undefined,
+          })
         : undefined,
     // The same files, base64, for Emirates Post's rental save -- the trade licence
     // and the agent's ID pages travel inside that payload rather than in a
@@ -1056,6 +1074,19 @@ export async function POST(req: NextRequest) {
    * writing to it from a tool handler would race the turn's own save.
    */
   const registryNonResidents = new Set<string>();
+  /**
+   * Account.EPG_License__c for the company this renewal is for.
+   *
+   * An ID-type lookup that every EPG_Finance_Summary__c row needs; the printed
+   * licence number fails the whole composite with "id value of incorrect type".
+   * Latched from whichever company read returned it, so the submit can carry it
+   * without the model having to remember it across a dozen turns.
+   */
+  const epglLicenceRecordId: { value: string | null } = { value: null };
+  const rememberLicenceRecordId = (c: { licenseRecordId?: string } | undefined) => {
+    const id = String(c?.licenseRecordId ?? "").trim();
+    if (id) epglLicenceRecordId.value = id;
+  };
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
         {
@@ -1763,10 +1794,12 @@ export async function POST(req: NextRequest) {
                 JSON.stringify(found),
             };
           }
+          rememberLicenceRecordId(found[0]);
           return { result: JSON.stringify(found[0]) };
         }
         if (name === COMPANY_TOOL) {
           const found = await companyByTradeLicense(agent.id, env, String(input.tradeLicenseNumber ?? ""));
+          if (found.length === 1) rememberLicenceRecordId(found[0]);
           if (!found.length) {
             return {
               result:

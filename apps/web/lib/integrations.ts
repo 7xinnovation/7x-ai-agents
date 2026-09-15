@@ -662,6 +662,39 @@ export interface EpglRequestFacts {
   paymentReference?: string;
   /** "gateway" or "viban" — how the applicant chose to pay. */
   paymentMethod?: string;
+  /**
+   * The renewal's quarterly figures, and the licence record they hang off.
+   *
+   * Four quarters of leviable income in the order the journey collects them —
+   * q1 is the FIRST quarter of the licence period, not January.
+   */
+  financeQuarters?: (number | null)[];
+  /** The calendar quarter the licence period starts in: "Q1".."Q4". */
+  financeStartQuarter?: string;
+  /** The year that starting quarter falls in. */
+  financeYear?: string;
+  /** Account.EPG_License__c — an ID-type lookup, never the printed number. */
+  licenceRecordId?: string;
+}
+
+/**
+ * The quarters a licence period covers, walked forward from where it starts.
+ *
+ * "Q3 of 2023" followed by three more quarters is Q4 2023, Q1 2024, Q2 2024 —
+ * the year rolls after Q4. This is arithmetic, which is why it is here rather
+ * than in a prompt: the guidance has described the walk since 11 August and the
+ * rows it describes have never once been created.
+ */
+export function financePeriod(startQuarter: string, year: string, count = 4): { quarter: string; year: string }[] {
+  const q0 = Number(/^Q([1-4])$/.exec(String(startQuarter).trim().toUpperCase())?.[1]);
+  const y0 = Number(String(year).trim());
+  if (!Number.isFinite(q0) || !Number.isFinite(y0) || y0 < 1900) return [];
+  const out: { quarter: string; year: string }[] = [];
+  for (let i = 0; i < count; i++) {
+    const n = q0 - 1 + i;
+    out.push({ quarter: `Q${(n % 4) + 1}`, year: String(y0 + Math.floor(n / 4)) });
+  }
+  return out;
 }
 
 export function withEpglRequestFields(
@@ -740,6 +773,60 @@ export function withEpglRequestFields(
     // all. We were sending a reference nobody could receive.
   }) || patched;
 
+  /**
+   * THE QUARTERLY FIGURES, WHICH HAVE NEVER ONCE REACHED SALESFORCE.
+   *
+   * Measured 15 September: five renewals submitted by this agent, every one at
+   * "Under document review" with all four mandatory flags true and an accountant
+   * contact on the account — and `EPG_Finance_Summary__c` rows in the whole org:
+   * ZERO. Not rejected: `allOrNone` would have rolled the licence request back
+   * with them, and the requests exist. They were never sent.
+   *
+   * The instructions for them are complete and have been since 11 August — one
+   * row per quarter, the real calendar quarter walked forward from the licence
+   * period's start, the licence RECORD id in EPG_License_No__c. All of it left
+   * to the model, none of it ever emitted. The whole financial summary step the
+   * journey collects went nowhere.
+   *
+   * So they are built here, like the document placeholders beside them. Only
+   * when the model sent NONE: `EPG_Finance_Summary__c` has no upsert key in
+   * their CompositeHandler, so a row we add beside a row it sent is a duplicate
+   * nobody can remove.
+   */
+  const licenceRequest = items.find((i) => /sobjects\/EPG_License_Request__c$/i.test(String(i?.url ?? "")));
+  const hasFinance = items.some((i) => /sobjects\/EPG_Finance_Summary__c$/i.test(String(i?.url ?? "")));
+  const quarters = facts.financeQuarters ?? [];
+  if (
+    licenceRequest &&
+    !hasFinance &&
+    facts.financeStartQuarter &&
+    facts.financeYear &&
+    quarters.some((q) => typeof q === "number")
+  ) {
+    const period = financePeriod(facts.financeStartQuarter, facts.financeYear, quarters.length || 4);
+    const rows = period
+      .map((p, i) => ({ p, amount: quarters[i] }))
+      .filter((x): x is { p: { quarter: string; year: string }; amount: number } => typeof x.amount === "number")
+      .map(({ p, amount }) => ({
+        EPG_License_Request__c: `@{${String(licenceRequest.referenceId ?? "NewLicenseRequest")}.id}`,
+        Quarter__c: p.quarter,
+        EPG_Year__c: p.year,
+        Name: `${p.quarter} ${p.year}`,
+        EPG_Leviable_Income__c: amount,
+        EPG_Non_Leviable_Income__c: 0,
+        ...(facts.licenceRecordId ? { EPG_License_No__c: facts.licenceRecordId } : {}),
+      }));
+    if (rows.length) {
+      items.push({
+        method: "POST",
+        referenceId: "NewTrialBalance",
+        url: "/services/data/v66.0/sobjects/EPG_Finance_Summary__c",
+        body: rows,
+      });
+      patched = true;
+    }
+  }
+
   if (!patched) return input;
   body.compositeRequest = items;
   return { ...input, body };
@@ -807,7 +894,12 @@ export async function buildApiTools(
      * which fields it carries varies run to run, and the ones it drops are the
      * ones nobody notices until the record is reviewed.
      */
-    epglRequestFacts?: EpglRequestFacts;
+    /**
+     * Read at the moment of the submit, not when the tools were built: the
+     * licence record id these rows need is latched by the company lookup partway
+     * through the same turn, and a snapshot taken earlier has never seen it.
+     */
+    epglRequestFacts?: () => EpglRequestFacts;
     /**
      * The documents this case holds, for the EPGL composite's placeholder rows.
      *
@@ -2079,7 +2171,7 @@ export async function buildApiTools(
         input = withEpglDocumentPlaceholders(input, opts.epglDocuments ?? []) ?? input;
       }
       if (opts.epglRequestFacts) {
-        input = withEpglRequestFields(input, opts.epglRequestFacts) ?? input;
+        input = withEpglRequestFields(input, opts.epglRequestFacts()) ?? input;
       }
       // Last, so it corrects the model's fields and ours alike.
       input = withEpglFieldNames(input) ?? input;
