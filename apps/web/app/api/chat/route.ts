@@ -17,7 +17,7 @@ import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
 import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
-import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId } from "@/lib/epglRead";
+import { companyByEmiratesId, companyByTradeLicense, form9ByAccountId, outstandingSummary, type EpglCompany } from "@/lib/epglRead";
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { notifyEpglPayment } from "@/lib/epglPayment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
@@ -1090,6 +1090,19 @@ export async function POST(req: NextRequest) {
    */
   const renewalInProgress = () => /renew/i.test(String(liveState.journeyKey ?? session.state.journeyKey ?? ""));
 
+  /**
+   * The company, plus what EPGL's records say is outstanding against it.
+   *
+   * The figures travel inside the company JSON already; this puts the statement
+   * of them in front of it, because ten currency rollups named the Salesforce
+   * way are not something to leave a model to interpret. outstandingSummary
+   * does the wording and, deliberately, none of the arithmetic.
+   */
+  const withOutstanding = (company: EpglCompany) => {
+    const note = outstandingSummary(company.fees);
+    return note ? `${note}\n\n${JSON.stringify(company)}` : JSON.stringify(company);
+  };
+
   /** The list, read safely: an unreadable list matches nobody. */
   const blockedCompany = async (company: {
     tradeLicenseNumber?: unknown;
@@ -1886,7 +1899,7 @@ export async function POST(req: NextRequest) {
           rememberLicenceRecordId(found[0]);
           const stop = await blockedNotice(found[0]!);
           if (stop) return { result: stop };
-          return { result: JSON.stringify(found[0]) };
+          return { result: withOutstanding(found[0]!) };
         }
         if (name === COMPANY_TOOL) {
           const found = await companyByTradeLicense(agent.id, env, String(input.tradeLicenseNumber ?? ""));
@@ -1911,7 +1924,7 @@ export async function POST(req: NextRequest) {
                 JSON.stringify(found),
             };
           }
-          return { result: JSON.stringify(found[0]) };
+          return { result: withOutstanding(found[0]!) };
         }
         const quarters = await form9ByAccountId(agent.id, env, String(input.accountId ?? ""));
         return {

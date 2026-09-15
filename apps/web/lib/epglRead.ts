@@ -95,6 +95,50 @@ export interface EpglCompany {
   }[];
 }
 
+/**
+ * What EPGL's records say is OUTSTANDING against a licence, in words.
+ *
+ * The figures arrive as ten currency rollups with names only Salesforce loves,
+ * and handing a model ten numbers and hoping is how "your total is 121,700"
+ * gets said to somebody. So the numbers are turned into a statement of fact
+ * here, with the arithmetic deliberately NOT done: the agent may say what is
+ * outstanding and what each amount is for, and may not total it or present it
+ * as the amount to pay.
+ *
+ * That restraint is EPGL's, not caution for its own sake. A penalty in their org
+ * carries an approval state — EPG_Penalty_Status__c, EPG_Is_CEO_Approved__c, a
+ * legal-action flag — and some sit in Draft. The payable figure is the one
+ * Licensing put in the payment request they issue after the document review, and
+ * it is the only one that has been through that.
+ *
+ * Returns null when nothing is outstanding, so a clean licence produces no
+ * paragraph at all rather than a row of zeroes.
+ */
+export function outstandingSummary(fees: EpglCompany["fees"]): string | null {
+  if (!fees) return null;
+  const lines: string[] = [];
+  const add = (label: string, v: number | undefined) => {
+    if (typeof v === "number" && v > 0) lines.push(`${label}: AED ${v.toLocaleString("en-AE")}`);
+  };
+  add("Form 9 non-submission penalties", fees.form9Penalties);
+  add("Late renewal penalty", fees.renewalPenalty);
+  add("Non-compliance penalties", fees.nonCompliance);
+  add("Pending fines", fees.pendingFines);
+  // The rollups overlap — the account-level total is only worth saying when the
+  // itemised lines did not already account for it.
+  if (!lines.length) add("Penalties and fines outstanding", fees.pendingPenalties);
+  add("Total due on the licence, EPGL's figure", fees.totalDue);
+  if (!lines.length) return null;
+  return (
+    "OUTSTANDING ON THIS LICENCE, from EPGL's own records:\n" +
+    lines.map((l) => `  - ${l}`).join("\n") +
+    "\nTELL THE CUSTOMER THIS BEFORE THEY PAY, plainly, as EPGL's record rather than as your own calculation, and say what each amount is for. " +
+    "Do NOT add these together, do NOT add them to the licence fee, and do NOT present any figure as the amount they must pay: penalties carry an approval state in EPGL's system and some are not yet approved. " +
+    "The payable total is the one EPGL state in the payment request they issue after the document review — say so. " +
+    "If the customer asks you to work out a total, explain that EPGL confirm the exact amount and you do not want to quote them a figure that turns out to be wrong."
+  );
+}
+
 export interface EpglForm9Quarter {
   name?: string;
   year?: string;
