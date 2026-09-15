@@ -58,7 +58,25 @@ export function resolveUploadKeys(body: string[], ctx: UploadCtx): string[] {
     const hit = known.get(norm(line));
     if (hit && !out.includes(hit)) out.push(hit);
   }
-  if (!out.length && ctx.pendingDocs?.length) out.push(...ctx.pendingDocs.slice(0, 2));
+  /**
+   * THE FALLBACK GUESSES, SO IT MUST GUESS WELL.
+   *
+   * It exists because a mis-emitted block used to render nothing at all
+   * (FB-1425). On 15 September it rendered the wrong thing instead, which is
+   * worse: a message asking for Partner 2's Emirates ID, with three buttons to
+   * answer it, and beneath them an upload control for the Memorandum of
+   * Association marked "(optional)". The text and the box disagreed, and the box
+   * is the part people press.
+   *
+   * So: only MANDATORY outstanding documents, and only ONE of them. An optional
+   * document is never what an unresolved block was reaching for -- nothing is
+   * urgently asking for it -- and offering two guesses doubles the chance that
+   * one of them contradicts the sentence above it.
+   */
+  if (!out.length && ctx.pendingDocs?.length) {
+    const required = ctx.pendingDocs.find((k) => ctx.docs[k]?.requirement === "mandatory");
+    if (required) out.push(required);
+  }
   return out;
 }
 

@@ -10,7 +10,8 @@
  *
  * Run from apps/web:  npx tsx scripts/test-deferred-upload-2026-09-15.ts
  */
-import { collectedUploadGuard, defersUpload } from "../lib/uploadGuard";
+import { collectedUploadGuard, defersUpload, asksSomethingElse } from "../lib/uploadGuard";
+import { resolveUploadKeys } from "../app/embed/[agent]/Markdown";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -88,6 +89,46 @@ console.log("\nThe existing rule still holds");
   const already = "Here you go.\n\n```upload\nkey: trade_license\n```";
   const out = run(already, (() => ({ label: "Trade License", fileName: "tl.pdf" })) as never);
   check("a collected document is still answered, not asked for", /Already uploaded/.test(out) && !/```upload/.test(out), out);
+}
+
+console.log("\nA message asks for one thing");
+{
+  // The reported reply, verbatim in shape.
+  const eid =
+    "Partner 2's passport is in — picked up passport number ending 0887.\n\n" +
+    "Now I need Partner 2's Emirates ID. Does Abdelaziz live in the UAE, or is he based outside the UAE?\n\n" +
+    "```buttons\n- Upload the Emirates ID\n- Type the number\n- This partner lives outside the UAE\n```\n\n" +
+    "```upload\nkey: moa\n```";
+  const out = run(eid);
+  check("the stray upload control goes", !/```upload/.test(out), out);
+  check("the question stays", /based outside the UAE/.test(out), out);
+  check("...and so do its three answers", /This partner lives outside the UAE/.test(out), out);
+
+  check("buttons are recognised as the question", asksSomethingElse("```buttons\n- Yes\n```"));
+  check("cards are not", !asksSomethingElse("```cards\ntitle: MyBox\n```"));
+  check("prose is not", !asksSomethingElse("Please upload the trade licence."));
+
+  // The genuine pairing reads the other way round and must survive.
+  const pairing = "Please upload it below.\n\n```upload\nkey: form_9\n```\n\n```buttons\n- I don't have it yet\n```";
+  check("upload-then-buttons is left alone", run(pairing).includes("```upload"), run(pairing));
+}
+
+console.log("\nAn unresolved block guesses at something the application needs");
+{
+  const ctx = {
+    docs: {
+      moa: { label: { en: "MOA" }, requirement: "optional", acceptedFormats: [], maxSizeMb: 10 },
+      partner_2_emirates_id: { label: { en: "Partner 2 EID" }, requirement: "mandatory", acceptedFormats: [], maxSizeMb: 10 },
+    },
+    pendingDocs: ["moa", "partner_2_emirates_id"],
+  } as never;
+  check("a resolvable key still wins", resolveUploadKeys(["key: partner_2_emirates_id"], ctx).join() === "partner_2_emirates_id");
+  const guessed = resolveUploadKeys(["key: nonsense"], ctx);
+  check("an optional document is never the guess", !guessed.includes("moa"), guessed);
+  check("...the mandatory one is", guessed.join() === "partner_2_emirates_id", guessed);
+  check("and only one guess is made", guessed.length <= 1, guessed);
+  const noneRequired = resolveUploadKeys(["key: nonsense"], { docs: { moa: { label: { en: "MOA" }, requirement: "optional", acceptedFormats: [], maxSizeMb: 10 } }, pendingDocs: ["moa"] } as never);
+  check("nothing outstanding and required: render nothing", noneRequired.length === 0, noneRequired);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

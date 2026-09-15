@@ -43,6 +43,29 @@ export function defersUpload(prose: string): boolean {
   return DEFERS.test(prose) || DEFERS_AR.test(prose);
 }
 
+/**
+ * AND A MESSAGE ASKS FOR ONE THING.
+ *
+ * EPGL, 15 September: "Now I need Partner 2's Emirates ID. Does Abdelaziz live
+ * in the UAE, or is he based outside the UAE?", three buttons to answer it —
+ * and underneath, an upload control for the Memorandum of Association, marked
+ * optional. The guidance has forbidden this since August ("never put an upload
+ * block in the same message as a question about something else"); a rule only
+ * the model enforces is a rule that holds most of the time.
+ *
+ * A ```buttons block IS the question. Anything asking for a file underneath it
+ * is asking for something the customer was not asked about, so it goes — and
+ * the buttons, which are what the message is actually for, stay.
+ *
+ * Only when the buttons come FIRST. "Upload it below, or tell me you don't have
+ * it yet" is a genuine pairing and reads in that order.
+ */
+const BUTTONS = /```[ \t]*buttons\b/i;
+
+export function asksSomethingElse(prose: string): boolean {
+  return BUTTONS.test(prose);
+}
+
 /** The longest tail of `s` that is a proper prefix of `OPEN`. */
 function heldTail(s: string): number {
   const max = Math.min(OPEN.length - 1, s.length);
@@ -93,7 +116,7 @@ export function collectedUploadGuard(collected: (key: string) => CollectedDoc | 
   const sawProse = (prose: string) => {
     if (deferred || !prose) return;
     seen = (seen + prose).slice(-2000);
-    if (defersUpload(seen)) deferred = true;
+    if (defersUpload(seen) || asksSomethingElse(seen)) deferred = true;
   };
 
   const step = (): string => {
@@ -120,7 +143,8 @@ export function collectedUploadGuard(collected: (key: string) => CollectedDoc | 
       if (!close) return out;
       const end = OPEN.length + close.index + close[0].length;
       const trailing = close[1] ?? "";
-      // Already said it can wait: the control goes, the sentence stays.
+      // Already said it can wait, or already asked something else: the control
+      // goes, the sentence and the buttons stay.
       out += deferred ? "" : replaceCollected(buf.slice(0, end - trailing.length), collected) + trailing;
       buf = buf.slice(end);
       mode = "pass";
