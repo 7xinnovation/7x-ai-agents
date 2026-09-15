@@ -244,7 +244,15 @@ inside an application.
 **Test** — ask *"how long does it take?"*. Expect *"1 business day (8 working
 hours)"*, and «خلال يوم عمل واحد (8 ساعات عمل)» in Arabic.
 
-## The login requirement — there isn't one
+## The login requirement
+
+> **Corrected 15 September.** What follows was right about the configuration and
+> wrong about the requirement. EPGL have since confirmed that a **renewal
+> requires signing in** — it is mandatory now, enforced on starting the journey
+> and on taking the payment, and the prompt appears on its own. A **new licence
+> is still optional**, exactly as described below.
+
+### For a new licence, there isn't one
 
 You asked us to clarify it. Measured: **neither journey requires
 authentication** — not the intent, not any step, and not the submission. A

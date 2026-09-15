@@ -105,8 +105,12 @@ if (envAt !== -1) {
   check("...and the IBAN's destination is named", /added to their workspace/.test(J("new_license").guidance));
   check("identity numbers are not repeated in chat", /IDENTITY NUMBERS ARE NOT REPEATED IN FULL/.test(J("new_license").guidance));
   check("a non-resident is asked for no Emirates ID NUMBER either", /AND NOT THE NUMBER EITHER/.test(J("new_license").guidance));
-  check("signing in is named as optional, not asked for", /SIGNING IN IS OPTIONAL HERE/.test(J("new_license").guidance) && /SIGNING IN IS OPTIONAL HERE/.test(J("renewal").guidance));
-  check("...and the journeys really are auth-free", J("new_license").requiresAuth === false && J("renewal").requiresAuth === false);
+  // 15 September: EPGL confirmed a RENEWAL requires signing in. The measurement
+  // on the 11th was right about the configuration and wrong about the
+  // requirement, so the configuration changed rather than the guard.
+  check("a new licence still does not require signing in", /SIGNING IN IS OPTIONAL FOR A NEW LICENCE/.test(J("new_license").guidance) && J("new_license").requiresAuth !== true);
+  check("a renewal does", /SIGNING IN IS REQUIRED FOR A RENEWAL/.test(J("renewal").guidance) && J("renewal").requiresAuth === true);
+  check("...and the 11 September rule is gone from both", !/SIGNING IN IS OPTIONAL HERE/.test(J("new_license").guidance + J("renewal").guidance));
 
   const moa = docs(J("new_license")).find((d: any) => d.key === "moa");
   check("the MOA is optional", moa?.requirement === "optional", moa?.requirement);
