@@ -1078,14 +1078,26 @@ export async function POST(req: NextRequest) {
    * uploaded, the renewal continues. The failure mode of a missing list has to
    * be that business carries on, never that every renewal stops.
    */
-  const blockedNotice = async (company: {
+  /**
+   * And the gate is the RENEWAL's, not every journey's.
+   *
+   * The list is "companies whose renewal Licensing handle themselves", and that
+   * is the only question their map asks it. The same company applying for a NEW
+   * licence — a second trade licence, a different entity — is not what the list
+   * is about, and stopping them would be us inventing a rule Licensing never
+   * wrote. So the stop only fires on a renewal; elsewhere the match is recorded
+   * and the journey continues.
+   */
+  const renewalInProgress = () => /renew/i.test(String(liveState.journeyKey ?? session.state.journeyKey ?? ""));
+
+  /** The list, read safely: an unreadable list matches nobody. */
+  const blockedCompany = async (company: {
     tradeLicenseNumber?: unknown;
     postalLicenseNumber?: unknown;
     name?: unknown;
-  }): Promise<string | null> => {
-    let hit: BlockedMatch | null = null;
+  }): Promise<BlockedMatch | null> => {
     try {
-      hit = await findBlocked(agent.id, {
+      return await findBlocked(agent.id, {
         tradeLicenseNumber: company.tradeLicenseNumber,
         postalLicenseNumber: company.postalLicenseNumber,
         companyName: company.name,
@@ -1094,20 +1106,32 @@ export async function POST(req: NextRequest) {
       log.error("blocklist_lookup_failed", e, { agentId: agent.id });
       return null;
     }
+  };
+
+  const blockedNotice = async (company: {
+    tradeLicenseNumber?: unknown;
+    postalLicenseNumber?: unknown;
+    name?: unknown;
+  }): Promise<string | null> => {
+    const hit = await blockedCompany(company);
     if (!hit) return null;
+    const stops = renewalInProgress();
     await audit({
       agentId: agent.id,
       conversationId: session.conversationId,
       actor: "system",
-      action: "renewal_blocked_company",
+      action: stops ? "renewal_blocked_company" : "blocked_company_seen",
       payload: {
         matchedOn: hit.matchedOn,
         tradeLicenseNumber: hit.tradeLicenseNumber,
         postalLicenseNumber: hit.postalLicenseNumber,
         companyName: hit.companyName,
         reason: hit.reason,
+        journeyKey: liveState.journeyKey ?? session.state.journeyKey ?? null,
+        stopped: stops,
       },
     }).catch(() => {});
+    if (!stops) return null;
     return (
       "STOP — THIS COMPANY CANNOT RENEW THROUGH THIS SERVICE. It is on the list Licensing maintain of companies whose renewal they handle themselves. " +
       "Tell the customer, in one short and courteous message, that their renewal cannot be completed here and that the EPGL Licensing team will contact them directly about it. " +
@@ -1792,11 +1816,13 @@ export async function POST(req: NextRequest) {
          */
         const blockedHere: string[] = [];
         for (const r of rows as Record<string, unknown>[]) {
-          const stop = await blockedNotice({
+          // Marked whatever the journey is: the customer has not chosen one yet
+          // at this point, and the marker only bites if they pick a renewal.
+          const hit = await blockedCompany({
             tradeLicenseNumber: r.licenseNumber ?? r.tradeLicenseNumber,
             name: r.nameEn ?? r.name,
           });
-          if (!stop) continue;
+          if (!hit) continue;
           r.renewalHandledByLicensingTeam = true;
           blockedHere.push(String(r.nameEn ?? r.name ?? "this company"));
         }
