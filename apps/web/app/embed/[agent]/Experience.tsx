@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PaperPlaneRight,
+  Stop,
   GlobeSimple,
   SignIn,
   UserCircleCheck,
@@ -116,6 +117,7 @@ export const STR = {
     expand: "Expand",
     collapse: "Collapse",
     reset: "New chat",
+    stop: "Stop",
     documents: "Documents",
     details: "Details",
     activity: "What has been done",
@@ -171,6 +173,7 @@ export const STR = {
     expand: "توسيع",
     collapse: "تصغير",
     reset: "محادثة جديدة",
+    stop: "إيقاف",
     documents: "المستندات",
     details: "التفاصيل",
     activity: "ما تم تنفيذه نيابةً عنك",
@@ -547,6 +550,8 @@ export function Experience({
   useEffect(() => setVoiceReady(true), []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const convId = useRef<string | null>(null);
+  // Aborts the in-flight turn so the customer can stop the agent mid-reply.
+  const abortRef = useRef<AbortController | null>(null);
   const storageKey = `dlg-conv-${agent.slug}`;
 
   const t = STR[locale];
@@ -1207,9 +1212,12 @@ export function Experience({
     lastDelta.current = Date.now();
     setQuiet(false);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug: agent.slug,
@@ -1363,19 +1371,35 @@ export function Experience({
         }
       }
     } catch (err) {
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (!last) return prev;
-        const next = prev.slice();
-        next[next.length - 1] = { ...last, content: `${last.content}\n\n⚠ ${err instanceof Error ? err.message : "error"}` };
-        return next;
-      });
+      // The customer stopped the turn: keep whatever was generated so far, and
+      // drop a still-empty assistant bubble so nothing dangles. Not an error.
+      if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && last.role === "assistant" && !last.content.trim() && !last.payment) return prev.slice(0, -1);
+          return prev;
+        });
+      } else {
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (!last) return prev;
+          const next = prev.slice();
+          next[next.length - 1] = { ...last, content: `${last.content}\n\n⚠ ${err instanceof Error ? err.message : "error"}` };
+          return next;
+        });
+      }
     } finally {
+      abortRef.current = null;
       setStreaming(false);
       setToolStatus(null);
       setQuiet(false);
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
+
+  /** Stop the agent mid-reply — aborts the in-flight turn (see abortRef in send). */
+  const stopStreaming = useCallback(() => {
+    try { abortRef.current?.abort(); } catch { /* ignore */ }
+  }, []);
 
   /**
    * Watch for a silent stretch inside a turn that has already said something.
@@ -1824,9 +1848,17 @@ export function Experience({
                   <Microphone size={18} weight={voice.active ? "fill" : iconWeight} />
                 </button>
               ) : null}
-              <button className="dlg-send" onClick={() => void send()} disabled={streaming || !input.trim()} aria-label="Send">
-                <PaperPlaneRight size={18} weight="fill" />
-              </button>
+              {streaming ? (
+                // While the agent is replying, the send control becomes a stop
+                // control — same spot — so the customer can halt it mid-reply.
+                <button className="dlg-send is-stop" onClick={stopStreaming} aria-label={t.stop} title={t.stop}>
+                  <Stop size={17} weight="fill" />
+                </button>
+              ) : (
+                <button className="dlg-send" onClick={() => void send()} disabled={!input.trim()} aria-label="Send">
+                  <PaperPlaneRight size={18} weight="fill" />
+                </button>
+              )}
             </div>
           </div>
         </section>

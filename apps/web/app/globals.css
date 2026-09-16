@@ -1708,6 +1708,15 @@ body {
   opacity: 0.4;
   cursor: default;
 }
+/* Stop control: the send button while the agent is replying. A calm neutral
+   fill (not the brand blue) so it reads as "halt", not "send". */
+.dlg-send.is-stop {
+  background: color-mix(in srgb, var(--c-text) 82%, var(--c-surface));
+  color: var(--c-surface);
+}
+.dlg-send.is-stop:hover {
+  background: var(--c-text);
+}
 /* Quiet footer line under the composer — assistant disclosure + send hint. */
 .dlg-input-hint {
   display: flex;
