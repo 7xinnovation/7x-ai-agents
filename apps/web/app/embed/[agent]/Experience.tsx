@@ -1429,9 +1429,12 @@ export function Experience({
       if (streaming && i === messages.length - 1) return; // still arriving in the current language
       const key = `${i}:${locale}`;
       if (xlate[key] || xlateInflight.current.has(key)) return;
-      const hasArabic = /[؀-ۿ]/.test(text);
-      const hasLatin = /[A-Za-z]/.test(text);
-      const mismatched = wantArabic ? (!hasArabic && hasLatin) : hasArabic;
+      // Translate anything carrying words in the OTHER language, so a mixed
+      // message (Arabic prose with English card labels, or vice versa) is fully
+      // converted, not just wholly-other-language ones. To Arabic: any English
+      // word. To English: any Arabic. The endpoint returns already-target text
+      // unchanged, and results are cached per message+locale.
+      const mismatched = wantArabic ? /[A-Za-z]{2,}/.test(text) : /[؀-ۿ]/.test(text);
       if (mismatched) batch.push({ key, text: m.content });
     });
     if (!batch.length) return;

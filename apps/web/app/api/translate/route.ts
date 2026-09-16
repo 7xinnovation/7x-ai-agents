@@ -35,10 +35,13 @@ export async function POST(req: NextRequest) {
   const instruction =
     `Translate each message in the JSON array into ${target}, for a UAE postal/government-service chat. ` +
     "Return ONLY a JSON array of the translated strings, same length and order.\n" +
+    "Translate EVERYTHING a person reads into " + target + ", in natural, correct phrasing: prose, and inside fenced ```blocks the card/summary/button/toggle titles, labels AND values — including a detail card's row labels like \"Box Number\", \"Emirate\", \"Bundle\", \"Status\", \"Expires\".\n" +
     "Rules:\n" +
-    `- Translate all human-readable text (prose, and inside fenced blocks the VALUES after a colon and the button/card/summary labels) into ${target}, in natural, correct phrasing.\n` +
-    "- PRESERVE STRUCTURE EXACTLY: keep every fenced block's opening/closing ``` lines and the key names before a colon (title:, price:, desc:, badge:, confirm:, key:, total:, etc.) unchanged — translate only the value after the colon. Keep markdown (**, ###, -, >, tables, links) intact.\n" +
-    "- DO NOT translate or alter: numbers, prices, dates, reference numbers, box numbers, licence numbers, emails, phone numbers, URLs, document keys inside ```upload blocks, or masked values that contain asterisks (leave the stars and spacing exactly as-is).\n" +
+    "- KEEP THE FENCE LINES exactly: the opening line (```cards, ```buttons, ```summary, ```toggles, ```upload, ```map, ```locate) and the closing ```.\n" +
+    "- KEEP ONLY THESE EXACT KEY WORDS before a colon unchanged — the app parses them: `title`, `price`, `desc`, `badge`, `confirm`, `key`, `total`. Translate their VALUE after the colon (except values covered below). EVERY OTHER label before a colon is human-readable — translate the label too.\n" +
+    "- Inside a ```upload block, keep the whole `key: <value>` line byte-for-byte (it is a document id, not text).\n" +
+    "- Keep markdown intact (**, ###, -, >, tables, links).\n" +
+    "- DO NOT translate or alter these values: numbers, prices, dates, reference numbers, box numbers, licence numbers, emails, phone numbers, URLs, product/bundle names (e.g. MyHome, MyBox), and masked values containing asterisks (leave the stars and spacing exactly as-is).\n" +
     "- If a message is already fully in " + target + ", return it unchanged.\n" +
     "- Never add, remove, summarise, or comment — translate 1:1.";
 
