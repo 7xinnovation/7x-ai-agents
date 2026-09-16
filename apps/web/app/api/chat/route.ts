@@ -2611,7 +2611,17 @@ export async function POST(req: NextRequest) {
         // and the fallback still covers the cards, in case they never get that far.
         const chosen = apiTools.getChosenHall();
         const halls = chosen ? [chosen] : [];
-        if (halls.length && !/Important Notice/i.test(finalText)) {
+        // Show the hall notice ONCE per conversation. getChosenHall() stays
+        // truthy after the customer picks a hall, so a guard that only checked
+        // THIS turn re-appended the notice (and its accept/choose buttons) on
+        // every later turn — e.g. stapled onto the key-collection question,
+        // giving the customer a second, duplicate set of buttons for something
+        // they had already acknowledged. Suppress it if the notice already
+        // appeared in this reply OR in any earlier assistant message.
+        const noticeAlreadyShown =
+          /Important Notice/i.test(finalText) ||
+          session.history.some((m) => m.role === "assistant" && /Important Notice/i.test(m.content));
+        if (halls.length && !noticeAlreadyShown) {
           const alt = halls.find((h) => h.alternative)?.alternative ?? "the designated operational branch";
           const named = halls.map((h) => h.name).filter(Boolean).join(", ");
           const notice =
