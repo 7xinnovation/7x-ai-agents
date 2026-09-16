@@ -19,7 +19,7 @@
  * Idempotent. Run from apps/web:
  *   npx tsx scripts/epgl-renewal-requires-signin-2026-09-15.ts --env <file> [--apply]
  */
-import { databaseUrlFrom } from "./lib/envFile";
+import { databaseUrlFromArgs } from "./lib/envFile";
 
 const arg = (n: string) => {
   const i = process.argv.indexOf(n);
@@ -27,7 +27,6 @@ const arg = (n: string) => {
 };
 const ENV = arg("--env");
 const APPLY = process.argv.includes("--apply");
-if (!ENV) throw new Error("--env <envfile> is required");
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
@@ -45,7 +44,7 @@ const NEW_LICENCE_RULE =
   "SIGNING IN IS OPTIONAL FOR A NEW LICENCE (2026-09-15): a first application does not require an account — not to start it, not to pay, not to submit — so never put a sign-in in the customer's way. Mention it ONCE, in the opening message, as the plain benefit it is: it links the application to their account so they can track it afterwards, and it saves them typing, because their name, email and registered companies come with it. Then carry on regardless of what they do about it. If they ASK to sign in, that is when the prompt is surfaced. A renewal is the opposite and says so in its own journey. ";
 
 async function main() {
-  const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
+  const pool = new pg.Pool({ connectionString: databaseUrlFromArgs() });
   const db = drizzle(pool, { schema: { agents } });
   const changes: string[] = [];
   try {

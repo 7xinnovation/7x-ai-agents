@@ -28,3 +28,19 @@ export function databaseUrlFrom(file: string): string {
   if (!m) throw new Error(`No DATABASE_URL in ${path}`);
   return m[1]!;
 }
+
+/**
+ * The database an operator tool should act on.
+ *
+ * `--env <file>` names one by its env file; without it, an inherited
+ * DATABASE_URL is used. The second form exists because a production URL is a
+ * credential: piping it in for one command leaves nothing on disk to forget
+ * about afterwards.
+ */
+export function databaseUrlFromArgs(argv: string[] = process.argv): string {
+  const i = argv.indexOf("--env");
+  if (i !== -1) return databaseUrlFrom(argv[i + 1] ?? "");
+  const inherited = process.env.DATABASE_URL?.trim();
+  if (inherited) return inherited;
+  throw new Error("--env <file>, or a DATABASE_URL in the environment, is required");
+}

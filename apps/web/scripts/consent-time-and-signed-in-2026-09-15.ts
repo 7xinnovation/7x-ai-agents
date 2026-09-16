@@ -20,7 +20,7 @@
  * Idempotent. Run from apps/web:
  *   npx tsx scripts/consent-time-and-signed-in-2026-09-15.ts --env <file> [--apply]
  */
-import { databaseUrlFrom } from "./lib/envFile";
+import { databaseUrlFromArgs } from "./lib/envFile";
 
 const arg = (n: string) => {
   const i = process.argv.indexOf(n);
@@ -28,7 +28,6 @@ const arg = (n: string) => {
 };
 const ENV = arg("--env");
 const APPLY = process.argv.includes("--apply");
-if (!ENV) throw new Error("--env <envfile> is required");
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
@@ -74,7 +73,7 @@ const SIGNED_IN_RULE =
   "A SIGNED-IN APPLICANT HAS ALREADY TOLD US WHO THEY ARE (2026-09-15): UAE PASS hands over their name and their email at sign-in, and both are on the application before you say a word. NEVER open by asking for them. Show what you have, once, as a single confirmation — \"I have you as <name>, <email> — is that right for this application?\" — and move on from the answer. If they correct one, record the correction with collect_field and use it from then on; if they confirm, say nothing further about it. The applicant is the person signing in, which on a renewal is NOT the accountant: contact_name / contact_email / contact_phone are the applicant, accountant_name / accountant_email / accountant_phone are the accountant, and the two are collected separately even when they turn out to be the same person. ";
 
 async function main() {
-  const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
+  const pool = new pg.Pool({ connectionString: databaseUrlFromArgs() });
   const db = drizzle(pool, { schema: { agents } });
   const changes: string[] = [];
   try {

@@ -10,7 +10,7 @@
  * Idempotent (CREATE TABLE IF NOT EXISTS). Run from apps/web:
  *   npx tsx scripts/create-blocklist-tables-2026-09-15.ts --env <file> [--apply]
  */
-import { databaseUrlFrom } from "./lib/envFile";
+import { databaseUrlFromArgs } from "./lib/envFile";
 
 const arg = (n: string) => {
   const i = process.argv.indexOf(n);
@@ -18,7 +18,6 @@ const arg = (n: string) => {
 };
 const ENV = arg("--env");
 const APPLY = process.argv.includes("--apply");
-if (!ENV) throw new Error("--env <envfile> is required");
 
 import pg from "pg";
 
@@ -53,7 +52,7 @@ const DDL = [
 ];
 
 async function main() {
-  const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
+  const pool = new pg.Pool({ connectionString: databaseUrlFromArgs() });
   try {
     const { rows } = await pool.query(
       `SELECT table_name FROM information_schema.tables

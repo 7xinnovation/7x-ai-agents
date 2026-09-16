@@ -24,7 +24,7 @@
  * Idempotent. Run from apps/web:
  *   npx tsx scripts/epgl-kb-renewal-no-figures-2026-09-15.ts --env <file> [--apply]
  */
-import { databaseUrlFrom } from "./lib/envFile";
+import { databaseUrlFromArgs } from "./lib/envFile";
 
 const arg = (n: string) => {
   const i = process.argv.indexOf(n);
@@ -32,7 +32,6 @@ const arg = (n: string) => {
 };
 const ENV = arg("--env");
 const APPLY = process.argv.includes("--apply");
-if (!ENV) throw new Error("--env <envfile> is required");
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
@@ -86,7 +85,7 @@ const ADDITIONS: { docTitle: string; marker: string; content: string }[] = [
 ];
 
 async function main() {
-  const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
+  const pool = new pg.Pool({ connectionString: databaseUrlFromArgs() });
   const db = drizzle(pool, { schema: { agents, kbChunks, kbDocuments } });
   const changes: string[] = [];
   try {
