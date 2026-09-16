@@ -86,5 +86,36 @@ const stream = (text: string, size = 7) => {
   check("a pay block is never held back or altered", stream(pay).includes("url: https://paypage.example/v2?code=abc"), stream(pay));
 }
 
+/**
+ * A plan withdrawn in front of the person it was announced to (16 September).
+ *
+ * "Since this is a Sole Establishment, there's no MOA needed. Next, I'll need
+ * the Memorandum of Association — actually, scratch that, no MOA for a sole
+ * establishment." The answer was in the first sentence; the second asks for a
+ * document, takes it back, and repeats the reason.
+ */
+console.log("\nA reversal said out loud");
+{
+  const said =
+    "Since this is a Sole Establishment, there's no MOA needed. " +
+    "Next, I'll need the Memorandum of Association — actually, scratch that, no MOA for a sole establishment. " +
+    "Let me ask about the region. Which area of Dubai is the office in?";
+  const out = stream(said);
+  check("the reversal is gone", !/scratch that/i.test(out), out);
+  check("...and so is the document it took back", !/Next, I'll need the Memorandum/i.test(out), out);
+  check("the announcement of a question is gone", !/Let me ask about/i.test(out), out);
+  check("the question itself survives", /Which area of Dubai is the office in\?/.test(out), out);
+  check("and the fact that settled it survives", /no MOA needed/.test(out), out);
+}
+
+console.log("\n...without taking honest sentences with it");
+for (const kept of [
+  "Let me fetch the branches for you.",
+  "Let me know if that is the right one.",
+  "Actually renting the box happens after payment.",
+  "No MOA is needed for a sole establishment.",
+  "Which area of Dubai is the office in?",
+]) check(JSON.stringify(kept), stream(kept) === kept, stream(kept));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -32,6 +32,33 @@ const PLANNING =
   /\bI need to (price|fetch|call|get|run|prepare)\b|\blet me (price|prepare)\b.{0,40}\b(first|and also)\b|\bI'?ll (call|invoke) \w+\b/i;
 
 /**
+ * A PLAN WITHDRAWN IN FRONT OF THE PERSON IT WAS ANNOUNCED TO.
+ *
+ * 16 September, an EPGL sole establishment, verbatim: "Since this is a Sole
+ * Establishment, there's no MOA needed. Next, I'll need the Memorandum of
+ * Association — actually, scratch that, no MOA for a sole establishment."
+ *
+ * The right answer was in the first sentence. The second asks for a document,
+ * takes it back, and gives the reason a third time — the model correcting
+ * itself out loud, which reads as an assistant that does not know what it
+ * needs. A reversal has nothing in it for the customer: whatever survives the
+ * correction was already said, or is about to be.
+ */
+const RETRACTION =
+  /\b(scratch that|ignore that|disregard that|strike that|never ?mind that)\b|\bactually,? no\b|\bwait,? no\b|\bon second thought/i;
+
+/**
+ * Announcing a question instead of asking it.
+ *
+ * "Let me ask about the region." followed by "Which area of Dubai is the office
+ * in?" — the first sentence is the model telling itself what to do next, and
+ * the customer reads a preamble to a question that is right there. Distinct
+ * from "let me fetch the branches for you", which reports work being done on
+ * their behalf and is deliberately allowed.
+ */
+const ANNOUNCED_QUESTION = /\blet me (ask|check with you|confirm with you|clarify)\b/i;
+
+/**
  * Split on sentence ends, keeping the delimiters so rejoining is lossless.
  * Deliberately simple: this runs on chat prose, not on prose with citations.
  */
@@ -45,6 +72,8 @@ export function isInternalNarration(sentence: string): boolean {
   if (!s) return false;
   if (INTERNAL_NAMES.test(s)) return true;
   if (THIRD_PERSON.test(s) && !/\byou\b|\byour\b/i.test(s)) return true;
+  if (RETRACTION.test(s)) return true;
+  if (ANNOUNCED_QUESTION.test(s)) return true;
   return PLANNING.test(s);
 }
 
