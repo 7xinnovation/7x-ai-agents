@@ -207,11 +207,27 @@ export async function receiptFacts(conversationId: string, agentId: string | nul
 export function shouldOfferReceipt(
   before: { status?: string; reference?: string | null } | null | undefined,
   after: { status?: string; reference?: string | null } | null | undefined,
-  userMessage?: string | null
+  userMessage?: string | null,
+  /**
+   * Whether the application was SUBMITTED on this turn.
+   *
+   * EPGL settles the card payment one turn before the confirmation is written —
+   * the money arrives, the applicant sends one more message, and the assistant
+   * answers with "APPLICATION CONFIRMED". By then the payment is no longer new,
+   * so the one message the customer reads as the end of the journey was the one
+   * message with no receipt on it. A submission is the other moment a receipt
+   * belongs to, and it happens once.
+   */
+  submittedThisTurn?: boolean
 ): boolean {
   if (after?.status !== "paid" || !after.reference) return false;
   const justArrived = before?.status !== "paid" || before.reference !== after.reference;
-  return justArrived || /\b(receipt|invoice)\b|إيصال|فاتورة/i.test(userMessage ?? "");
+  return justArrived || Boolean(submittedThisTurn) || /\b(receipt|invoice)\b|إيصال|فاتورة/i.test(userMessage ?? "");
+}
+
+/** Where a receipt for this payment lives, inside this conversation. */
+export function receiptHref(reference: string, conversationId: string): string {
+  return `/api/receipt/${encodeURIComponent(reference)}?c=${encodeURIComponent(conversationId)}`;
 }
 
 /**

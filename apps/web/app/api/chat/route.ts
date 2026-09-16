@@ -10,8 +10,9 @@ import { getAgentBySlug, getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, VERIFIED_EID_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
-import { sendEmail, textToHtml } from "@/lib/email";
+import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
+import { completionEmail, completionRecipient } from "@/lib/completionEmail";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
@@ -40,7 +41,7 @@ import { payFenceGuard } from "@/lib/payFence";
 import { internalIdFilter } from "@/lib/internalIds";
 import { summaryFeeGuard } from "@/lib/summaryFee";
 import { proseTotalGuard } from "@/lib/proseTotal";
-import { shouldOfferReceipt, exactAmount } from "@/lib/receiptFacts";
+import { shouldOfferReceipt, receiptHref, exactAmount } from "@/lib/receiptFacts";
 import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
@@ -1037,6 +1038,8 @@ export async function POST(req: NextRequest) {
   // is explicit about success vs failure, so the model can only claim "sent"
   // after a real send — and can re-call it to resend.
   const EMAIL_TOOL_NAME = "send_confirmation_email";
+  /** Set when the assistant sent one itself this turn — see the completion email. */
+  let emailToolSent = false;
   const emailTool: Anthropic.Tool = {
     name: EMAIL_TOOL_NAME,
     description:
@@ -1998,6 +2001,8 @@ export async function POST(req: NextRequest) {
     // Sent as both: the text part unchanged, plus an HTML rendering so the details
     // read as details rather than as one undifferentiated block.
     const res = await sendEmail({ to, subject, text: bodyText, html: textToHtml(bodyText, subject) });
+    // So the completion email below does not arrive on top of this one.
+    if (res.ok) emailToolSent = true;
     await audit({ ...a, actor: "agent", action: res.ok ? "email_sent" : "email_send_failed", payload: { to, subject, reason: res.reason } });
     if (res.ok) {
       return {
@@ -2246,7 +2251,18 @@ export async function POST(req: NextRequest) {
               null,
             branch: str(liveState.data.branch) ?? null,
           }),
-          body.locale
+          body.locale,
+          // THE RECEIPT, WHERE THE CONFIRMATION IS. The link is appended to the
+          // turn the payment arrives and lives permanently in the application
+          // panel — and EPGL settles the card one turn BEFORE the confirmation
+          // is written, so the message a customer actually reads as "done" was
+          // the one message without it (reported 16 September, with an arrow
+          // drawn from the panel to the card). Offered only for a payment that
+          // has settled, and only onto a card reporting a finished transaction.
+          () =>
+            liveState.payment.status === "paid" && liveState.payment.reference
+              ? receiptHref(liveState.payment.reference, session.conversationId)
+              : null
         );
         // And the total in the SENTENCE beside the card. The card's footer and
         // the pay button are stamped with the real charge; the paragraph under
@@ -2727,8 +2743,11 @@ export async function POST(req: NextRequest) {
         // So it appears on the turn the payment ARRIVES, and when they ask for
         // it. The application panel carries a permanent link either way, which
         // is where "I want it again" is properly answered.
-        if (shouldOfferReceipt(session.state.payment, finalState.payment, effectiveMessage) && !finalText.includes("/api/receipt/")) {
-          const receiptUrl = `/api/receipt/${encodeURIComponent(finalState.payment.reference ?? "")}?c=${encodeURIComponent(session.conversationId)}`;
+        if (
+          shouldOfferReceipt(session.state.payment, finalState.payment, effectiveMessage, Boolean(submittedRef)) &&
+          !finalText.includes("/api/receipt/")
+        ) {
+          const receiptUrl = receiptHref(finalState.payment.reference ?? "", session.conversationId);
           const receiptLine =
             body.locale === "ar" ? `\n\n[تنزيل الإيصال](${receiptUrl})` : `\n\n[Download your receipt](${receiptUrl})`;
           send({ type: "text", delta: receiptLine });
@@ -3094,6 +3113,66 @@ export async function POST(req: NextRequest) {
             await audit({ ...a, actor: "system", action: "survey_offered", payload: { service: pulseService, transactionId: String(purchase.reference) } });
           }
         }
+        // THE CONFIRMATION EMAIL, SENT BY THE COMPLETION RATHER THAN BY THE MODEL.
+        //
+        // Reported 16 September: the email arrives "sometimes, not every single
+        // time". The only sender was the send_confirmation_email tool, which the
+        // assistant calls at its discretion — Emirates Post's guidance tells it to
+        // OFFER one, EPGL's never mentions email — so "sometimes" was the design
+        // working as written.
+        //
+        // Fired from the same moment the survey is: the transaction settled and
+        // the application in the system of record. Once per case, whatever else
+        // the conversation goes on to do, and skipped when the assistant has
+        // already sent one this turn so nobody receives two.
+        //
+        // The body is the assistant's own confirmation message. A second summary
+        // written here would be a parallel copy of every journey's completion
+        // wording — including its review SLA — and the two would drift.
+        const emailTo = completionRecipient(finalState.data);
+        if (purchase?.reference && !finalState.confirmationEmailedAt && emailTo && emailConfigured()) {
+          const customerRef = String(finalState.referenceLabel ?? finalState.reference ?? purchase.reference);
+          const receiptPath =
+            finalState.payment.status === "paid" && finalState.payment.reference
+              ? receiptHref(finalState.payment.reference, session.conversationId)
+              : null;
+          // A relative link is unusable in an inbox. Azure sits behind a proxy, so
+          // the forwarded host is the name the customer's browser actually used.
+          const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+          const proto = req.headers.get("x-forwarded-proto") ?? "https";
+          const baseUrl = host ? `${proto}://${host}` : process.env.PUBLIC_BASE_URL ?? null;
+          const mail = completionEmail({
+            agentName: agent.definition.name,
+            locale: body.locale,
+            reference: customerRef,
+            contactName: str(finalState.data.contact_name) ?? null,
+            replyText: finalText,
+            baseUrl,
+            receiptPath,
+          });
+          // Stamped now, not on success: a retry loop that re-sends a confirmation
+          // every turn is worse than one that failed once and said so in the audit.
+          finalState = { ...finalState, confirmationEmailedAt: new Date().toISOString() };
+          if (emailToolSent) {
+            await audit({ ...a, actor: "system", action: "confirmation_email_skipped", payload: { to: emailTo, reason: "already_sent_by_assistant" } });
+          } else {
+            deferred.push(async () => {
+              const res = await sendEmail({
+                to: emailTo,
+                subject: mail.subject,
+                text: mail.text,
+                html: textToHtml(mail.text, mail.subject),
+              });
+              await audit({
+                ...a,
+                actor: "system",
+                action: res.ok ? "confirmation_email_sent" : "confirmation_email_failed",
+                payload: { to: emailTo, reference: customerRef, reason: res.reason },
+              });
+            });
+          }
+        }
+
         // The courier the card sold, written down. Without this the choice lives
         // only inside the turn that made it, and the next turn prices the box
         // again as though it had never been offered.

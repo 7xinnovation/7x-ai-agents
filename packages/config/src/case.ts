@@ -179,6 +179,13 @@ export const CaseState = z.object({
    */
   surveyIssuedAt: z.string().nullable().default(null),
   /**
+   * When the confirmation email went out for this case. One completed
+   * transaction, one email: the send fires from the completion itself rather
+   * than from the assistant deciding to offer it, so without this a later turn
+   * on a finished case would send it again.
+   */
+  confirmationEmailedAt: z.string().nullable().default(null),
+  /**
    * Companies this case saw come back from the GSB licence lookups — trade
    * licence numbers and names, normalised. Emirates Post distinguishes a
    * corporate rental whose company details it supplied from one the customer
@@ -220,6 +227,7 @@ export function emptyCase(): CaseState {
     gatewayPayment: null,
     pulsedAt: null,
     surveyIssuedAt: null,
+    confirmationEmailedAt: null,
     gsbCompanies: [],
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null },

@@ -194,7 +194,12 @@ export function summaryFeeGuard(
   courierPriced: () => boolean = () => true,
   /** The box and branch the customer picked, for a card that left them out. */
   facts: () => SummaryFacts = () => ({}),
-  locale?: string
+  locale?: string,
+  /**
+   * The receipt for a payment that has already settled, or null. Supplied only
+   * for a settled payment — see insertReceiptRow.
+   */
+  receipt: () => string | null = () => null
 ) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
@@ -228,6 +233,9 @@ export function summaryFeeGuard(
       if (extrasNamedIn(fixed).keyDelivery && !courierPriced()) fixed = dropCourier(fixed);
       const charge = total(extrasNamedIn(fixed));
       if (charge !== null && Number.isFinite(charge) && charge > 0) fixed = correctTotal(fixed, charge);
+      // Last, and only on a card that is reporting a finished transaction.
+      const url = receipt();
+      if (url) fixed = insertReceiptRow(fixed, url, locale);
       out += fixed + trailing;
       buf = buf.slice(end);
       mode = "pass";
@@ -247,4 +255,43 @@ export function summaryFeeGuard(
       return rest;
     },
   };
+}
+
+/**
+ * THE RECEIPT BELONGS IN THE CARD TOO.
+ *
+ * Reported 16 September, with an arrow drawn from the panel's "Download receipt"
+ * to the confirmation card in the chat: the link exists, in the application
+ * panel, on the right, which is not where a customer reading "APPLICATION
+ * CONFIRMED" is looking. In the chat it appears only on the turn the payment
+ * arrives — and EPGL settles the card payment one turn BEFORE the confirmation
+ * is written, so the message that confirms the application is the one message
+ * that never carried it.
+ *
+ * So it is put where the confirmation is, as a row of the card, the same way the
+ * registration fee and the box number are. Never on a card that is still asking
+ * the customer to confirm something: a receipt for a payment that has not
+ * happened is worse than no receipt at all, which is why the caller supplies the
+ * URL only for a settled payment and this only accepts a card that is reporting
+ * a finished transaction.
+ */
+const RECEIPT_ROW = /^[ \t]*-[ \t]+[^\n:]*(?:receipt|إيصال)[^\n:]*:/im;
+/** A card REPORTING a completed transaction, not one asking to start one. */
+const REPORTS_COMPLETION =
+  /^[ \t]*-[ \t]+[^\n:]*(?:reference|مرجع)[^\n:]*:[ \t]*\S/im;
+const SAYS_SETTLED = /\bpaid\b|\bsubmitted\b|مدفوع|تم الإرسال|تم الدفع/i;
+
+export function insertReceiptRow(block: string, url: string, locale?: string): string {
+  if (!url || block.includes("/api/receipt/")) return block;
+  const close = /\n[ \t]*```[ \t]*$/.exec(block);
+  if (!close) return block;
+  const body = block.slice(OPEN.length, close.index);
+  // Only a card that actually lists rows; a bare fenced word is not a summary.
+  if (!/^[ \t]*-[ \t]+\S/m.test(body)) return block;
+  if (!REPORTS_COMPLETION.test(body) && !SAYS_SETTLED.test(body)) return block;
+  if (RECEIPT_ROW.test(body)) return block;
+  const ar = locale === "ar";
+  const row = `- ${ar ? "الإيصال" : "Receipt"}: [${ar ? "تحميل الإيصال" : "Download receipt"}](${url})`;
+  // Last, below any total: the receipt is not one of the things being bought.
+  return OPEN + `${body.replace(/\n+$/, "")}\n${row}` + block.slice(close.index);
 }
