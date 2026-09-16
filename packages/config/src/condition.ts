@@ -17,6 +17,7 @@
  *   key != 'value'      string inequality
  *   key >= 2            numeric (also <= < > == !=)
  *   key                 truthy
+ *   !key                empty — nothing has filled it
  *   a && b              every part holds
  */
 
@@ -84,6 +85,27 @@ export function evalCondition(expr: string | undefined, data: Record<string, unk
       case "==": return actual === want;
       default: return actual !== want;
     }
+  }
+
+  /**
+   * A REQUIREMENT THE DOCUMENT ALREADY ANSWERED IN THE OTHER SCRIPT.
+   *
+   * ECONOMIC ADVANTAGE INFORMATION TECHNOLOGY CONSULTANTS, 16 September: the
+   * trade licence prints its address in Arabic only, so the Arabic address
+   * field was filled from the document and the English one — required, and with
+   * nothing on the licence to fill it — was still outstanding. The applicant
+   * was asked to produce an English street address their own licence does not
+   * carry, and offered a map pin for it.
+   *
+   * `!key` is how a journey says "needed only if nothing else supplied this".
+   * Deliberately not `||`: the requirement still has exactly one condition and
+   * one reading, and the field that waives it is named in the journey rather
+   * than inferred.
+   */
+  const negated = expr.match(/^\s*!\s*([\w.]+)\s*$/);
+  if (negated) {
+    const v = data[negated[1]!];
+    return Array.isArray(v) ? v.length === 0 : !v;
   }
 
   return Boolean(data[expr.trim()]);

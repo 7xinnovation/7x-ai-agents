@@ -81,5 +81,25 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
   check("quoted values are still string-compared", evalCondition("n == '5'", { n: 5 }));
 }
 
+// 7. "!key" — needed only if nothing else supplied this (16 September).
+//
+// The trade licence prints its address in Arabic only. The Arabic field was
+// filled off the document and the English one, required, was still outstanding
+// — so the applicant was asked for an English street address their own licence
+// does not carry.
+{
+  const c = "!address_street_ar";
+  check("empty means required", evalCondition(c, {}));
+  check("filled waives it", !evalCondition(c, { address_street_ar: "شارع الشيخ زايد" }));
+  check("an empty string is still empty", evalCondition(c, { address_street_ar: "" }));
+  check("an empty array is still empty", evalCondition(c, { address_street_ar: [] }));
+  check("a non-empty array is not", !evalCondition(c, { address_street_ar: ["x"] }));
+  check("whitespace around it is fine", evalCondition(" ! address_street_ar ", {}));
+  check("it composes with &&", evalCondition("!address_street_ar && emirate == 'Dubai'", { emirate: "Dubai" }));
+  check("...and the other half still binds", !evalCondition("!address_street_ar && emirate == 'Dubai'", { emirate: "Sharjah" }));
+  // A field whose NAME starts with a bang is not a thing; nothing else changes.
+  check("a bare key is unaffected", evalCondition("address_street_ar", { address_street_ar: "x" }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
