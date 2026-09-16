@@ -47,6 +47,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard, asksSomethingElse } from "@/lib/uploadGuard";
+import { docKeyGuard } from "@/lib/docKeyGuard";
 import { epglDocumentLabels } from "@/lib/epglDocumentLabel";
 import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
@@ -2297,6 +2298,14 @@ export async function POST(req: NextRequest) {
             return aliases?.length ? { aliases } : null;
           }
         );
+        /**
+         * A FIELD KEY IS NOT A NAME THE CUSTOMER KNOWS. `partner_1_passport`
+         * reached an applicant on 16 September inside a sentence about our own
+         * readiness calculation. Swapped for the label they were shown when they
+         * uploaded it — see docKeyGuard, which touches backticked keys only and
+         * never the `key:` line an upload block is addressed by.
+         */
+        const keyGuard = docKeyGuard((k) => docLabels.get(k));
         const feeGuard = summaryFeeGuard(
           () => apiTools.getRegistrationFee(),
           // Only once the box is reserved: before that there is no total to
@@ -2413,13 +2422,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))));
+            const out = keyGuard.push(mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = mapOffer.push(links.push(branchNarration.push(narration.push(
+            const held = keyGuard.push(mapOffer.push(links.push(branchNarration.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -2428,7 +2437,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            ))));
+            )))));
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -2551,7 +2560,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(
+          const rest = keyGuard.push(mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -2559,7 +2568,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush();
+          ) + idFilter.flush()) + narration.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 
