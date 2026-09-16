@@ -48,7 +48,7 @@ import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard, asksSomethingElse } from "@/lib/uploadGuard";
 import { epglDocumentLabels } from "@/lib/epglDocumentLabel";
-import { NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
+import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale, historyLocale } from "@/lib/replyLocale";
@@ -2439,7 +2439,11 @@ export async function POST(req: NextRequest) {
             language: body.locale,
             journeyType: finalState.journeyKey ?? undefined,
           };
-          if (ev.type === "case") finalState = liveState = ev.state;
+          // A PARTNER THAT IS A COMPANY HAS NO PASSPORT. Marked as the names
+          // arrive, because the per-partner identity documents are conditioned on
+          // it and the customer is asked for them in the same turn — see
+          // withPartnerTypes.
+          if (ev.type === "case") finalState = liveState = withPartnerTypes(ev.state);
           else if (ev.type === "done") {
             finalState = liveState = ev.state;
             // Fall back to the round's text only if nothing was streamed.
