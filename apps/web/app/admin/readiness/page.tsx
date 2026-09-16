@@ -41,11 +41,16 @@ interface ServiceRef { id: string; agentSlug: string; journeyKey: string; name: 
 interface ServiceResult { service: ServiceRef; score: number; environment: string; criteria: CriterionResult[] }
 interface Criterion { id: string; domain: string; domainAr: string; requirement: string; requirementAr: string; evidenceArtefact: string }
 interface Suggestion { criterionId: string; domain: string; services: string[]; fix: string; impact: number; severity: "critical" | "high" | "medium" }
+interface EntityPosition {
+  criterionId: string; check?: string; asked: string; stated: string;
+  by: string; on: string; ref: string; kind: "confirmed" | "committed" | "question";
+}
 interface Report {
   generatedAt: string; overall: number; band: string;
   services: ServiceResult[];
   byCriterion: { criterion: Criterion; score: number; status: Status; servicesComplete: number; artefact?: { file: string; received: string } }[];
   suggestions: Suggestion[];
+  positions?: EntityPosition[];
   signals: Record<string, number | string>;
   notes: string[];
 }
@@ -786,6 +791,30 @@ export default function ReadinessPage() {
               </div>
             </div>
 
+            {/* Positions the entity gave against the CRITERION rather than one of
+                its checks — a commitment to change wording, say. */}
+            {(data?.positions ?? []).filter((p) => p.criterionId === sel.criterion.id && !p.check).length > 0 && (
+              <div className="grid gap-2 px-6 pb-4">
+                {(data?.positions ?? [])
+                  .filter((p) => p.criterionId === sel.criterion.id && !p.check)
+                  .map((p) => (
+                    <div key={p.ref + p.stated} className="rounded-lg border border-[var(--color-line)] bg-canvas px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                          p.kind === "confirmed" ? "bg-[#ecfdf3] text-[#067647]"
+                            : p.kind === "committed" ? "bg-[#fffaeb] text-[#b54708]"
+                              : "bg-[#eff4ff] text-[#004eeb]")}>
+                          {p.kind === "question" ? "asked back" : p.kind}
+                        </span>
+                        <span className="text-[11px] text-muted">{p.by} · {p.on} · {p.ref}</span>
+                      </div>
+                      <p className="mt-1 text-[12.5px] leading-relaxed text-muted">{p.asked}</p>
+                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink">“{p.stated}”</p>
+                    </div>
+                  ))}
+              </div>
+            )}
+
             <ul className="divide-y divide-line-soft px-6">
               {selChecks.map((row) => {
                 const applied = row.pass.length + row.fail.length + row.na.length;
@@ -842,6 +871,26 @@ export default function ReadinessPage() {
                             <p className="text-[12.5px] leading-relaxed text-[#93370d]">{row.fix}</p>
                           </div>
                         )}
+
+                        {/* WHAT THE ENTITY SAID ABOUT THIS ONE. Their answer sits
+                            beside the measurement rather than in a feedback tool,
+                            and never in place of it: a statement moves nothing. */}
+                        {(data?.positions ?? [])
+                          .filter((p) => p.criterionId === sel.criterion.id && p.check === row.label)
+                          .map((p) => (
+                            <div key={p.ref + p.stated} className="mt-2 rounded-lg border border-[var(--color-line)] bg-canvas px-3 py-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                  p.kind === "confirmed" ? "bg-[#ecfdf3] text-[#067647]"
+                                    : p.kind === "committed" ? "bg-[#fffaeb] text-[#b54708]"
+                                      : "bg-[#eff4ff] text-[#004eeb]")}>
+                                  {p.kind === "question" ? "asked back" : p.kind}
+                                </span>
+                                <span className="text-[11px] text-muted">{p.by} · {p.on} · {p.ref}</span>
+                              </div>
+                              <p className="mt-1 text-[12.5px] leading-relaxed text-ink">“{p.stated}”</p>
+                            </div>
+                          ))}
                       </div>
                     </div>
                   </li>

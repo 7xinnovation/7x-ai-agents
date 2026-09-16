@@ -1,3 +1,4 @@
+import type { HandoverContext } from "../ai/handover";
 import type { CaseState } from "@dialog/config";
 
 /**
@@ -28,7 +29,20 @@ export interface CRMAdapter {
   /** Create a human callback request. */
   createCallback(
     ctx: AdapterContext,
-    input: { name: string; phone: string; email?: string; reason: string; userRef?: string }
+    input: {
+      name: string;
+      phone: string;
+      email?: string;
+      reason: string;
+      userRef?: string;
+      /**
+       * The journey context that travels WITH the callback — summary, last
+       * completed step, consents, payment and the do-not-re-ask list. Without it
+       * the officer picks up a name and a sentence and the customer explains
+       * everything again. See handoverContext.
+       */
+      context?: HandoverContext;
+    }
   ): Promise<{ reference: string }>;
   /** Detect an existing active request for the same entity (duplicate guard). */
   findDuplicate?(

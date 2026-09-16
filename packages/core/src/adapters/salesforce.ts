@@ -1,3 +1,4 @@
+import { renderHandover } from "../ai/handover";
 import { registerAdapter } from "./registry";
 import type { AdapterContext, CRMAdapter } from "./types";
 
@@ -87,7 +88,11 @@ export const salesforceCrm: CRMAdapter = {
       method: "POST",
       body: JSON.stringify({
         Subject: "Callback request",
-        Description: input.reason,
+        // The officer opens the case, not our console: the journey context goes
+        // in the description under the customer's own words. See handoverContext.
+        Description: input.context
+          ? `${input.reason}\n\n--- Context from the assistant ---\n${renderHandover(input.context)}`
+          : input.reason,
         Origin: cfg.caseOrigin,
         SuppliedName: input.name,
         SuppliedPhone: input.phone,

@@ -122,6 +122,133 @@ export const EVIDENCE_FILES: Record<string, { file: string; received: string }> 
 };
 
 /**
+ * WHAT THE ENTITY SAYS ABOUT EACH GAP.
+ *
+ * The product owner went through this checklist line by line on 16 September and
+ * answered every open requirement (feedback round "Readiness checklist - Mohamed
+ * Ali", FB-1737 to FB-1743). Three kinds of answer came back, and they are not
+ * the same kind of thing at all:
+ *
+ *   confirmed  — "this already exists". Recorded, and then MEASURED: where the
+ *                claim holds the check was corrected to see it; where the system
+ *                does not do it yet the check still fails and both readings sit
+ *                side by side. A statement never moves a score on its own; that
+ *                is the تأكيد وصفي the guide rules out.
+ *   committed  — "we will add this". Recorded with its owner. Still a gap.
+ *   question   — asked back to us, and unanswered until someone answers it.
+ *
+ * They are shown against the check they speak to so a reviewer reads the
+ * entity's position and the measurement in one place, rather than finding the
+ * answers in a feedback tool nobody opens.
+ */
+export interface EntityPosition {
+  criterionId: string;
+  /** The check label this answers, where it answers one. */
+  check?: string;
+  /** What the checklist asked for. */
+  asked: string;
+  /** The entity's answer, in their words. */
+  stated: string;
+  by: string;
+  on: string;
+  ref: string;
+  kind: "confirmed" | "committed" | "question";
+}
+
+export const ENTITY_POSITIONS: EntityPosition[] = [
+  {
+    criterionId: "governance",
+    check: "Identity or verified ownership precedes the transaction",
+    asked: "Require UAE PASS sign-in for this journey, or add a backend lookup that proves the applicant holds the record before the request is committed.",
+    stated: "UAE Pass is implemented over all the services",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1737", kind: "confirmed",
+  },
+  {
+    criterionId: "governance",
+    check: "Permission withdrawable in one step",
+    asked: "Add a one-tap withdraw-permission control that revokes consent, stops any pending action and tells the customer what was erased.",
+    stated: "Add stop agent button to stop the activity and cancel the action done, and tell customer what has been done and what has been erased.",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1737", kind: "committed",
+  },
+  {
+    criterionId: "transparency",
+    check: "That log is readable BY THE CUSTOMER",
+    asked: "Give the customer a plain-language history of what the assistant did on their behalf, inside their own conversation.",
+    stated: "All of that is mentioned as part of the journey",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1738", kind: "confirmed",
+  },
+  {
+    criterionId: "transparency",
+    asked: "Add the artefact's wording to the EPGL greeting and guidance: the final regulatory decision is issued by the authorised entity or officer, never by the assistant.",
+    stated: "We can add that consent at the greeting section \"the final regulatory decision is issued by the authorised entity or officer, never by the assistant\"",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1738", kind: "committed",
+  },
+  {
+    criterionId: "approvals",
+    check: "Approval is timestamped for audit",
+    asked: "Stamp the server time alongside each acceptance so the moment of consent is auditable.",
+    stated: "Add time stamp for each conversation section",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1739", kind: "committed",
+  },
+  {
+    criterionId: "approvals",
+    check: "Consent names the data shared and its recipient",
+    asked: "State the data used, the data shared and the recipient in each consent, following the consent-log artefact's schema.",
+    stated: "We do that throughout the journey",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1739", kind: "confirmed",
+  },
+  {
+    criterionId: "human-handover",
+    check: "The callback record itself carries the journey context",
+    asked: "Attach the journey summary, last successful step and a do-not-re-ask list to the callback record, per the context-transfer artefact.",
+    stated: "Last step is logged in the chat today — confirm whether the summary and do-not-re-ask list also need to be added to the callback record, or if the chat log is considered sufficient.",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1740", kind: "question",
+  },
+  {
+    criterionId: "payment",
+    check: "The amount is quoted live, not held in configuration",
+    asked: "Quote the fee from the entity's pricing service so a tariff change reaches the customer immediately.",
+    stated: "The fees are pulled directly from a dynamic pricing module and we use direct connection through API for the pricing, any change reflects automatically",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1741", kind: "confirmed",
+  },
+  {
+    criterionId: "payment",
+    check: "A paid case cannot be charged twice",
+    asked: "Refuse request_payment when the case already holds a confirmed payment for the same submission, and route to completion of the paid request instead.",
+    stated: "This mechanism is being followed as per the current payment gateway process… on our side, button to pay is disabled once payment process is in action",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1741", kind: "confirmed",
+  },
+  {
+    criterionId: "outcome-appeal",
+    check: "A named route to appeal a decision",
+    asked: "Add an explicit appeal route against a decision, separate from a general callback, with its own reference and published service level.",
+    stated: "No change needed — the current setup builds a case with a reference, which we consider sufficient for appeals. Confirm whether this case reference should be treated as the appeal route, or whether a separate appeal path with its own published service level is still required.",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1742", kind: "question",
+  },
+  {
+    criterionId: "testing",
+    check: "Running against production backends",
+    asked: "Switch the connected integrations to the entity's production environment and re-run the measurement.",
+    stated: "Done as part of the production promotion process",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1743", kind: "confirmed",
+  },
+  {
+    criterionId: "testing",
+    check: "Impact compared against a documented baseline",
+    asked: "Record the current journey's handling time, completion rate and satisfaction as a baseline, then publish the comparison.",
+    stated: "Confirm whether the backend admin layer already captures these metrics, and who is responsible for producing and publishing the comparison.",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1743", kind: "question",
+  },
+  {
+    criterionId: "testing",
+    check: "Tested with customers outside the delivery team",
+    asked: "Run a moderated test with real applicants who have never seen the service, and record where they hesitate.",
+    stated: "Will happen in the UX Lab during this month",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1743", kind: "committed",
+  },
+];
+
+/**
  * The payment artefact documents the entity's official interim position:
  * "بوابة الدفع الحالية هي Network International ... سداد الإمارات: قيد التأكيد".
  * The Sadad check accepts this documented position for the gateways it names,
@@ -177,6 +304,8 @@ export interface ReadinessReport {
   services: ServiceResult[];
   byCriterion: { criterion: Criterion; score: number; status: CriterionResult["status"]; servicesComplete: number; artefact?: { file: string; received: string } }[];
   suggestions: Suggestion[];
+  /** What the entity has said about each open requirement — see ENTITY_POSITIONS. */
+  positions: EntityPosition[];
   signals: Record<string, number | string>;
   /** Non-scoring context so a reader can judge the numbers. */
   notes: string[];
@@ -212,6 +341,8 @@ const band = (s: number): CriterionResult["status"] => (s >= 85 ? "complete" : s
 export interface CodeProbe {
   refusesSecondPayment: boolean;
   recordsDeclinedConsent: boolean;
+  /** Whether a callback leaves with the journey attached to it. */
+  callbackCarriesContext: boolean;
   /** Why a probe could not run, when it could not. */
   note?: string;
 }
@@ -255,7 +386,7 @@ const probeCase = (over: Partial<CaseState>): CaseState =>
   }) as unknown as CaseState;
 
 export async function runCodeProbe(): Promise<CodeProbe> {
-  const out: CodeProbe = { refusesSecondPayment: false, recordsDeclinedConsent: false };
+  const out: CodeProbe = { refusesSecondPayment: false, recordsDeclinedConsent: false, callbackCarriesContext: false };
   try {
     // 1. A settled case must not reach the gateway at all.
     let reached = false;
@@ -300,6 +431,47 @@ export async function runCodeProbe(): Promise<CodeProbe> {
       | { outcome?: string; halted?: string; at?: string }
       | undefined;
     out.recordsDeclinedConsent = Boolean(ev?.outcome && ev?.halted && ev?.at);
+
+    // 3. A callback must leave with the journey attached to it — the officer
+    //    opens the case, not this console. The CRM here is a stub that records
+    //    what it was handed, so a refactor that drops the context fails the
+    //    probe rather than quietly going back to "a name and a sentence".
+    let handed: Record<string, unknown> | undefined;
+    await dispatchTool(
+      "request_escalation",
+      { name: "Probe Customer", phone: "0500000000", reason: "probe" },
+      {
+        agent: PROBE_AGENT,
+        agentId: "probe",
+        caseId: "probe",
+        locale: "en",
+        state: probeCase({
+          data: { terms_accepted: true, terms_accepted_at: "2026-09-16T00:00:00Z", contact_name: "Probe Customer" },
+          documents: [{ key: "trade_license", status: "uploaded", fileName: "tl.pdf" }],
+          payment: { status: "paid", reference: "PROBE-1", amount: 100, currency: "AED", link: null, baseAmount: 100 },
+          reference: "PROBE-REF",
+        } as Partial<CaseState>),
+        adapters: {
+          crm: {
+            createCallback: async (_c: unknown, input: Record<string, unknown>) => {
+              handed = input;
+              return { reference: "PROBE-CB" };
+            },
+          },
+        },
+      } as never
+    );
+    const carried = handed?.context as
+      | { summary?: string; lastStep?: string; doNotReAsk?: string[]; payment?: string; consents?: string[] }
+      | undefined;
+    out.callbackCarriesContext = Boolean(
+      carried &&
+        carried.summary &&
+        carried.lastStep &&
+        carried.payment &&
+        Array.isArray(carried.doNotReAsk) &&
+        carried.doNotReAsk.length > 0
+    );
   } catch (e) {
     out.note = e instanceof Error ? e.message : String(e);
   }
@@ -347,6 +519,24 @@ const priceSource = (j?: Journey) =>
   j?.submission?.apiFlow?.pricingTool ? "backend" : j?.submission?.amount ? "fixed" : "none";
 /** Does the request actually get written into the system of record by a real API? */
 const realWriteBack = (j?: Journey) => Boolean(j?.submission?.apiFlow?.saveTool);
+
+/**
+ * Is the charge the ENTITY'S figure on the day, or ours from a config file?
+ *
+ * A declared pricing call is the clean answer and the renewals have one. The
+ * rentals do not, and read from the journey definition alone they look like a
+ * fixed 300 — which is how this check reported them, and it was wrong: the
+ * price of a rental is whatever Emirates Post's bundle and hold responses say,
+ * and our own figure is CORRECTED to theirs before anything is charged.
+ *
+ * That correction leaves a record, so the evidence is the audit log rather than
+ * a field in a config file: rental_save_amount_corrected and
+ * registration_fee_observed are written when their number replaces ours. Where
+ * neither exists — EPGL's statutory 1,000, which has no pricing endpoint at all
+ * — the check still fails, and should.
+ */
+const liveChargeEvidence = (c: Ctx) =>
+  (c.auditActions.rental_save_amount_corrected ?? 0) + (c.auditActions.registration_fee_observed ?? 0);
 
 // ── One evaluator per criterion. Structural evidence first. ──────────────────
 const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
@@ -606,8 +796,13 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
     // journey's resume point and a "do not re-ask" list. Today the callback
     // sends name, phone and reason; the rest lives in the admin console but is
     // not attached to the case the officer is assigned.
-    { label: "The callback record itself carries the journey context", weight: 2, ok: false,
-      detail: "createCallback sends the name, phone and stated reason; the summary, completed steps, consents, payment status, resume point and do-not-re-ask list are visible in the console but not attached to the callback case",
+    // Closed 2026-09-16, and verified by execution rather than asserted: the
+    // probe calls request_escalation against a stub CRM and reads what the
+    // adapter was actually handed.
+    { label: "The callback record itself carries the journey context", weight: 2, ok: c.probe.callbackCarriesContext,
+      detail: c.probe.callbackCarriesContext
+        ? "Verified by execution at assessment time: the callback was handed the journey summary, the last completed step, the consents with their timestamps, the payment position and a do-not-re-ask list of everything already provided — all of it on the record the officer opens, not in this console"
+        : "createCallback sends the name, phone and stated reason; the summary, completed steps, consents, payment status, resume point and do-not-re-ask list are visible in the console but not attached to the callback case",
       fix: "Attach the journey summary, last successful step and a do-not-re-ask list to the callback record, per the context-transfer artefact." },
   ],
 
@@ -640,10 +835,13 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Fees disclosed before the choice that incurs them", weight: 2, ok: true,
         detail: `Add-on fees are shown on the option itself and itemised again in the pre-payment summary${(j?.submission?.surcharges?.length ?? 0) > 0 ? `; ${j!.submission!.surcharges.length} conditional surcharge(s) declared and applied deterministically` : ""}`,
         fix: "Show every fee at the point of the choice that incurs it." },
-      { label: "The amount is quoted live, not held in configuration", weight: 2, ok: src === "backend",
+      { label: "The amount is quoted live, not held in configuration", weight: 2,
+        ok: src === "backend" || (isChargeable(j) && liveChargeEvidence(c) > 0),
         detail: src === "backend"
           ? "The charge is the figure returned by the entity's pricing service on the day"
-          : `The charge is a fixed ${j?.submission?.amount} ${j?.submission?.currency} held in configuration; a tariff change would not reach the customer until the configuration is edited`,
+          : liveChargeEvidence(c) > 0
+            ? `No pricing call is declared on this journey, but the charge is not the configured ${j?.submission?.amount} either: the entity's own bundle and hold responses supply it and our figure is corrected to theirs before anything is taken — ${plural(liveChargeEvidence(c), "such correction")} recorded in the audit log`
+            : `The charge is a fixed ${j?.submission?.amount} ${j?.submission?.currency} held in configuration; a tariff change would not reach the customer until the configuration is edited`,
         fix: "Quote the fee from the entity's pricing service so a tariff change reaches the customer immediately." },
       { label: "Explicit recorded approval precedes the charge", weight: 2, ok: fields(j).some((f) => /terms_accepted|declaration_accepted/.test(f.key)),
         detail: "Terms acceptance is enforced server-side before a payment can be initiated - the gate is in code, not in the prompt",
@@ -883,6 +1081,7 @@ export async function assessReadiness(): Promise<ReadinessReport> {
     services,
     byCriterion,
     suggestions,
+    positions: ENTITY_POSITIONS,
     signals: {
       conversations: events["conversation.started"] ?? 0,
       journeysStarted: events["journey.started"] ?? 0,

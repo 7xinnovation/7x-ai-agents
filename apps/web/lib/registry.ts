@@ -1,4 +1,4 @@
-import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery, registerSalesforceAdapter, registerNgeniusAdapter, registerUaePassAdapter } from "@dialog/core";
+import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery, registerSalesforceAdapter, registerNgeniusAdapter, registerUaePassAdapter, renderHandover } from "@dialog/core";
 import type { CRMAdapter, KBAdapter, KBResult, StorageAdapter } from "@dialog/core";
 import { getDb, kbChunks, kbDocuments, documentBlobs, cases, conversations } from "@dialog/db";
 import { and, desc, eq, sql, inArray } from "drizzle-orm";
@@ -207,12 +207,17 @@ export function ensureAdapters() {
       // in a mailbox of ours: their contact form raises a case on /nextApi/case
       // and hands the customer a case number they can quote. Try that first.
       const [firstName, ...rest] = String(input.name ?? "").trim().split(/\s+/);
+      // The journey travels with the request. Their case form takes one message
+      // field, so the context goes under the customer's own words rather than
+      // instead of them — the officer reads why they called, then what has
+      // already happened and what not to ask for again.
+      const context = input.context ? `\n\n--- Context from the assistant ---\n${renderHandover(input.context)}` : "";
       const epCase = await raiseEpCase({
         firstName: firstName || "Customer",
         lastName: rest.join(" ") || "-",
         mobile: String(input.phone ?? ""),
         email: input.email,
-        message: String(input.reason ?? ""),
+        message: `${String(input.reason ?? "")}${context}`,
       }).catch((e) => ({ ok: false as const, reason: "unreachable" as const, detail: String(e) }));
 
       if (epCase.ok) return { reference: epCase.caseNumber };
@@ -231,7 +236,7 @@ export function ensureAdapters() {
         subject: `[${reference}] Callback requested via the assistant`,
         text:
           `Reference: ${reference}\nName: ${input.name}\nPhone: ${input.phone}\nEmail: ${input.email ?? "-"}\n` +
-          `Customer: ${input.userRef ?? "guest"}\n\nReason:\n${input.reason}\n\n` +
+          `Customer: ${input.userRef ?? "guest"}\n\nReason:\n${input.reason}\n${context}\n\n` +
           `(Not raised on emiratespost.ae: ${epCase.reason} — ${epCase.detail})`,
       });
       if (!res.ok) throw new Error(`Could not pass the callback to the team (${res.reason})`);

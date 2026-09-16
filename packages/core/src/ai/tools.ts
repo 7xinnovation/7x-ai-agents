@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { tr, type AgentDefinition, type CaseState, type Journey, type LocalizedString, type Locale } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
+import { handoverContext } from "./handover";
 import { adapterContext } from "../adapters/registry";
 import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition } from "../case/engine";
 
@@ -779,6 +780,12 @@ export async function dispatchTool(
           email: input.email as string | undefined,
           reason: String(input.reason ?? ""),
           userRef: ctx.userRef,
+          // THE CONTEXT GOES WITH IT. The artefact asks that the request, its
+          // context and the actions already taken transfer to the officer; what
+          // transferred was a name, a number and the customer's own sentence,
+          // with everything else in a console the person taking the call does
+          // not open. The cost of that is the customer explaining it twice.
+          context: handoverContext(agent, state),
         }));
       } catch (e) {
         return {
