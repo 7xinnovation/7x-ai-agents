@@ -58,7 +58,9 @@ console.log("\nThe reply, as plain text");
   check("bold markers are gone", !out.includes("**") && out.includes("What happens next:"));
   check("no fences leak into the email", !out.includes(B), out);
   check("the button is dropped — an email cannot honour a tap", !out.includes("Check application status"), out);
-  check("the receipt link becomes an address someone can open", out.includes(`Download receipt: https://agent.7x.ae${RECEIPT}`), out);
+  check("the receipt link becomes an address someone can open", out.includes(`  Receipt: https://agent.7x.ae${RECEIPT}`), out);
+  check("...without saying 'receipt' twice", !out.includes("Receipt: Download receipt"), out);
+  check("the card's title sits in a block of its own, so the rows read as a table", /\n\nAPPLICATION CONFIRMED[^\n]*\n\n  Application reference/.test(out), out);
 }
 {
   const relative = plainFromReply(`See [here](/x) and [there](https://e.ae/y).`, null);

@@ -73,9 +73,18 @@ export function plainFromReply(text: string, baseUrl?: string | null): string {
     for (const b of body) {
       const meta = b.match(/^\s*(title|total)\s*:\s*(.+?)\s*$/i);
       const row = b.match(/^\s*-\s+(.+?)\s*:\s*(.+?)\s*$/);
-      if (meta && /^title$/i.test(meta[1] ?? "")) out.push("", inlineText(meta[2] ?? "", baseUrl));
+      // The title is left as a block of its own: textToHtml reads a RUN of
+      // "label: value" lines as a detail table, and one line without a colon at
+      // the top of the run turns the whole card back into a paragraph.
+      if (meta && /^title$/i.test(meta[1] ?? "")) out.push("", inlineText(meta[2] ?? "", baseUrl), "");
       else if (meta) out.push(inlineText(`Total: ${meta[2] ?? ""}`.replace(/^Total: Total:/i, "Total:"), baseUrl));
-      else if (row) out.push(inlineText(`  ${row[1]}: ${row[2]}`, baseUrl));
+      else if (row) {
+        // A row whose whole value is a link already has a label of its own —
+        // "Receipt: Download receipt: https://…" says it twice.
+        const only = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(row[2] ?? "");
+        const value = only ? links(`[ ](${only[2]})`, baseUrl).trim().replace(/^:\s*/, "") : inlineText(row[2] ?? "", baseUrl);
+        out.push(`  ${row[1]}: ${value}`);
+      }
       else if (b.trim()) out.push(inlineText(b, baseUrl));
     }
     out.push("");
