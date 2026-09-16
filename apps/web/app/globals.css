@@ -4452,3 +4452,72 @@ body {
 .dlg-locate .mapboxgl-map {
   max-width: 100%;
 }
+
+/* WHAT WAS DONE IN THE CUSTOMER'S NAME, in the panel under the details.
+
+   The pre-launch checklist asks for an understandable log of what the assistant
+   did on the customer's behalf -- who asked, who executed, what consent covered
+   it, and the reference it produced. It reads as a record rather than as a step,
+   so it is closed until asked for and it renders oldest first: a log is read
+   forwards.
+
+   Each line carries its own dir: an Arabic action with a Latin reference in it,
+   or the reverse, otherwise lays the two out against each other. */
+.dlg-activity-open {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--c-border) 70%, transparent);
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 10px;
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.dlg-activity-open:hover {
+  background: var(--c-surface-muted);
+  color: var(--c-text);
+}
+.dlg-activity-empty {
+  font-size: 12.5px;
+  color: var(--c-text-muted);
+  padding: 4px 2px;
+}
+.dlg-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dlg-activity li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 2px 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-border) 55%, transparent);
+  border-inline-start: 2px solid var(--c-success, #0f9d58);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.dlg-activity li:last-child {
+  border-bottom: 0;
+}
+.dlg-activity li.failed {
+  border-inline-start-color: var(--c-danger, #d23f31);
+}
+.dlg-activity li.refused {
+  border-inline-start-color: var(--c-warning, #e8a100);
+}
+.dlg-activity-when {
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+.dlg-activity-what {
+  color: var(--c-text);
+}
+.dlg-activity-meta {
+  font-size: 11px;
+  color: var(--c-text-muted);
+}

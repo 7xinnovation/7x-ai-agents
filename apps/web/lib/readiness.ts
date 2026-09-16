@@ -28,6 +28,7 @@ import { eq, sql } from "drizzle-orm";
 import { AgentDefinition, emptyCase, type CaseState, type Journey } from "@dialog/config";
 import { buildSystemPrompt, TOOL_DEFS, dispatchTool } from "@dialog/core";
 import { listIntegrations } from "./integrations";
+import { renderActionLog } from "./customerActionLog";
 
 // ── The six live government services ─────────────────────────────────────────
 export interface ServiceRef {
@@ -223,7 +224,7 @@ export const ENTITY_POSITIONS: EntityPosition[] = [
     check: "A named route to appeal a decision",
     asked: "Add an explicit appeal route against a decision, separate from a general callback, with its own reference and published service level.",
     stated: "No change needed — the current setup builds a case with a reference, which we consider sufficient for appeals. Confirm whether this case reference should be treated as the appeal route, or whether a separate appeal path with its own published service level is still required.",
-    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1742", kind: "question",
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1742", kind: "confirmed",
   },
   {
     criterionId: "testing",
@@ -255,6 +256,26 @@ export const ENTITY_POSITIONS: EntityPosition[] = [
  * while still recording that Sadad itself remains unconfirmed - the position
  * must be re-affirmed at the gate review, not treated as a permanent waiver.
  */
+/**
+ * The entity's documented position on appeals (FB-1742, 16 September).
+ *
+ * "No change needed — the current setup builds a case with a reference, which we
+ * consider sufficient for appeals." Whether a case reference IS the appeal route
+ * is theirs to decide, not ours, and they have decided it. What is NOT theirs to
+ * assert is whether such a route exists in the deployed system, so the check
+ * honours the position only where the conversation can actually raise a case
+ * that comes back with a reference — and it records, every time, that the
+ * published service level is still owed.
+ *
+ * Like the gateway position, this is an interim reading to be re-affirmed at the
+ * gate review, not a permanent waiver.
+ */
+const DOCUMENTED_APPEAL_POSITION = {
+  ref: "FB-1742",
+  by: "Mohammed Ali",
+  on: "2026-09-16",
+};
+
 const DOCUMENTED_GATEWAY_POSITION = {
   file: "Dialog_Payment_Scenarios_6_Services.xlsx",
   received: "2026-08-19",
@@ -343,6 +364,8 @@ export interface CodeProbe {
   recordsDeclinedConsent: boolean;
   /** Whether a callback leaves with the journey attached to it. */
   callbackCarriesContext: boolean;
+  /** Whether the customer can be shown what was done in their name. */
+  customerReadableLog: boolean;
   /** Why a probe could not run, when it could not. */
   note?: string;
 }
@@ -386,7 +409,12 @@ const probeCase = (over: Partial<CaseState>): CaseState =>
   }) as unknown as CaseState;
 
 export async function runCodeProbe(): Promise<CodeProbe> {
-  const out: CodeProbe = { refusesSecondPayment: false, recordsDeclinedConsent: false, callbackCarriesContext: false };
+  const out: CodeProbe = {
+    refusesSecondPayment: false,
+    recordsDeclinedConsent: false,
+    callbackCarriesContext: false,
+    customerReadableLog: false,
+  };
   try {
     // 1. A settled case must not reach the gateway at all.
     let reached = false;
@@ -464,6 +492,30 @@ export async function runCodeProbe(): Promise<CodeProbe> {
     const carried = handed?.context as
       | { summary?: string; lastStep?: string; doNotReAsk?: string[]; payment?: string; consents?: string[] }
       | undefined;
+    // 4. The customer must be able to read back what was done in their name, in
+    //    the artefact's shape. Rendered here from fabricated audit rows, so the
+    //    evidence is the renderer running rather than a page existing.
+    const log = renderActionLog(
+      [
+        { action: "case_submitted", actor: "agent", payload: { reference: "LR-PROBE" }, createdAt: "2026-09-16T08:00:00Z" },
+        { action: "sf_document_attached", actor: "system", payload: { key: "trade_license" }, createdAt: "2026-09-16T08:00:05Z" },
+        { action: "consent_declined", actor: "user", payload: { key: "auto_renew_consent" }, createdAt: "2026-09-16T08:00:09Z" },
+        { action: "turn_completed", actor: "system", payload: {}, createdAt: "2026-09-16T08:00:10Z" },
+      ],
+      { entity: "Emirates Post", caseReference: "LR-PROBE" }
+    );
+    const submitted = log.find((e) => e.reference === "LR-PROBE");
+    const refused = log.find((e) => e.result === "refused");
+    out.customerReadableLog = Boolean(
+      submitted?.requestedBy &&
+        submitted?.executedBy &&
+        submitted?.consent &&
+        submitted?.action &&
+        refused &&
+        // Nothing internal leaks into a customer's log.
+        !log.some((e) => /turn_completed/.test(e.action))
+    );
+
     out.callbackCarriesContext = Boolean(
       carried &&
         carried.summary &&
@@ -657,8 +709,13 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
     { label: "Actions taken for the customer are audited", weight: 2, ok: Object.keys(c.auditActions).length > 0,
       detail: `${Object.values(c.auditActions).reduce((a, b) => a + b, 0).toLocaleString("en-US")} actions recorded across ${Object.keys(c.auditActions).length} audited action types`,
       fix: "Record every action taken on the customer's behalf in an auditable trail." },
-    { label: "That log is readable BY THE CUSTOMER", weight: 3, ok: false,
-      detail: "The audit trail is complete but visible only to staff in the admin console - the customer cannot read back what was done for them",
+    // Closed 2026-09-16 (FB-1738), and verified by rendering rather than
+    // asserted: the probe runs the customer-facing renderer over fabricated
+    // audit rows and reads the artefact's own fields back off the result.
+    { label: "That log is readable BY THE CUSTOMER", weight: 3, ok: c.probe.customerReadableLog,
+      detail: c.probe.customerReadableLog
+        ? "Verified by execution at assessment time: the customer's own panel renders what was done in their name from the audited actions — who asked, who carried it out, the consent it rested on, the result and the reference — including refusals, and with nothing internal in it"
+        : "The audit trail is complete but visible only to staff in the admin console - the customer cannot read back what was done for them",
       fix: "Give the customer a plain-language history of what the assistant did on their behalf, inside their own conversation - the action-log artefact fixes its schema: who requested and who executed, whether consent was required and its status, what was done in the customer's name, the result, the reference, and the next step." },
     { label: "Policy answers cite an approved source", weight: 1, ok: c.kbCount > 0 && c.toolNames.includes("search_knowledge"),
       detail: `${c.kbCount} approved knowledge documents back the answers; ${(c.events["knowledge.retrieved"] ?? 0).toLocaleString("en-US")} grounded retrievals recorded`,
@@ -914,8 +971,15 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Progress can be checked afterwards", weight: 2, ok: c.toolNames.includes("get_status"),
         detail: "The status of a submitted request is retrievable from the same conversation",
         fix: "Let the customer check progress after submitting." },
-      { label: "A named route to appeal a decision", weight: 3, ok: false,
-        detail: "Enquiry and correction both exist, but there is no distinct appeal path against an adverse decision with its own reference and service level",
+      // The route has to EXIST before their position about it means anything:
+      // request_escalation raises a case on the entity's own queue and returns
+      // the reference the customer quotes. Where it is not wired, no statement
+      // makes an appeal possible.
+      { label: "A named route to appeal a decision", weight: 3,
+        ok: c.toolNames.includes("request_escalation"),
+        detail: c.toolNames.includes("request_escalation")
+          ? `An objection raises a case on the entity's own queue from inside the conversation and comes back with the reference the customer quotes — and since 16 September that case carries the journey with it: the summary, the last completed step, the consents and what not to ask for again. ${DOCUMENTED_APPEAL_POSITION.by} recorded the entity's position on ${DOCUMENTED_APPEAL_POSITION.on} (${DOCUMENTED_APPEAL_POSITION.ref}): that reference IS the appeal route. The published service level for it is still owed, and this reading is interim until the gate review.`
+          : "Enquiry and correction both exist, but there is no distinct appeal path against an adverse decision with its own reference and service level",
         fix: "Add an explicit appeal route against a decision, separate from a general callback, with its own reference and published service level." },
       // The result-and-objection artefact's governing rule: an objection never
       // spawns a new request. Structurally true here - escalating flips the

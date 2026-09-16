@@ -97,6 +97,10 @@ export const STR = {
     reset: "New chat",
     documents: "Documents",
     details: "Details",
+    activity: "What has been done",
+    activityEmpty: "Nothing has been done on your behalf yet.",
+    activityConsent: "Your approval",
+    activityLoad: "Show what has been done",
     online: "Online",
     upload: "Upload",
     uploading: "Uploading…",
@@ -148,6 +152,10 @@ export const STR = {
     reset: "محادثة جديدة",
     documents: "المستندات",
     details: "التفاصيل",
+    activity: "ما تم تنفيذه نيابةً عنك",
+    activityEmpty: "لم يُنفَّذ أي إجراء نيابةً عنك بعد.",
+    activityConsent: "موافقتك",
+    activityLoad: "عرض ما تم تنفيذه",
     online: "متصل",
     upload: "رفع",
     uploading: "جارٍ الرفع…",
@@ -467,6 +475,21 @@ export function Experience({
   const [authReason, setAuthReason] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
   const [toolStatus, setToolStatus] = useState<string | null>(null);
+  /**
+   * THE CUSTOMER'S OWN ACCOUNT OF WHAT WAS DONE FOR THEM.
+   *
+   * The audit trail has always been complete and always been ours. The checklist
+   * asks for it the other way round — an understandable log of what the
+   * assistant did in the customer's name — so the panel reads it back from the
+   * actions already recorded, in their language, with the consent beside each
+   * one. Loaded when they ask for it rather than on every turn: it is a thing
+   * you go and look at, and the conversation above is the live version.
+   */
+  const [activity, setActivity] = useState<
+    { at: string; requestedBy: string; executedBy: string; action: string; consent: string; result: string; reference?: string }[] | null
+  >(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityBusy, setActivityBusy] = useState(false);
   /** Nothing has arrived for a couple of seconds and the turn is still open. */
   const [quiet, setQuiet] = useState(false);
   const lastDelta = useRef(0);
@@ -1334,6 +1357,24 @@ export function Experience({
    * Polled rather than timed off each delta: a timer per token is a timer reset
    * a thousand times a reply, and this needs to be right to about a second.
    */
+  /** Fetch the log when it is opened, and again once the turn that changed it ends. */
+  useEffect(() => {
+    if (!activityOpen || !convId.current || streaming) return;
+    let live = true;
+    setActivityBusy(true);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/activity/${convId.current}?agent=${encodeURIComponent(agent.slug)}&locale=${locale}`);
+        if (live && res.ok) setActivity((await res.json()).entries ?? []);
+      } catch {
+        /* the panel shows what it has; a log is never worth an error in the chat */
+      } finally {
+        if (live) setActivityBusy(false);
+      }
+    })();
+    return () => { live = false; };
+  }, [activityOpen, streaming, agent.slug, locale, caseState]);
+
   useEffect(() => {
     if (!streaming) return;
     // 2.5s: long enough that the tail of a turn — saving the case, minting a
@@ -1847,6 +1888,44 @@ export function Experience({
                         )}
                       </div>
                     ))}
+                  </div>
+                ) : null}
+
+                {/* WHAT WAS DONE IN THEIR NAME. The conversation above is the
+                    live account; this is the one you go back to a week later,
+                    with the consent beside each action and the reference it
+                    produced. Closed by default — it is a record, not a step. */}
+                {caseState ? (
+                  <div className="dlg-card">
+                    <h3>
+                      <ListChecks size={15} weight="bold" /> {t.activity}
+                    </h3>
+                    {!activityOpen ? (
+                      <button type="button" className="dlg-activity-open" onClick={() => setActivityOpen(true)}>
+                        {t.activityLoad}
+                      </button>
+                    ) : activityBusy && !activity ? (
+                      <div className="dlg-activity-empty">…</div>
+                    ) : !activity?.length ? (
+                      <div className="dlg-activity-empty">{t.activityEmpty}</div>
+                    ) : (
+                      <ol className="dlg-activity">
+                        {activity.map((a, i) => (
+                          <li key={i} className={a.result === "ok" ? "ok" : a.result === "refused" ? "refused" : "failed"}>
+                            <span className="dlg-activity-when">
+                              {new Date(a.at).toLocaleString(locale === "ar" ? "ar-AE" : "en-GB", {
+                                day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                              })}
+                            </span>
+                            <span className="dlg-activity-what" dir="auto">{a.action}</span>
+                            <span className="dlg-activity-meta" dir="auto">
+                              {a.requestedBy} → {a.executedBy} · {t.activityConsent}: {a.consent}
+                              {a.reference ? ` · ${a.reference}` : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
                   </div>
                 ) : null}
 

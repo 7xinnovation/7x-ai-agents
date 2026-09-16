@@ -32,9 +32,13 @@ console.log("\nEvery answer is attached to something real");
   check("every position is dated and attributed", ENTITY_POSITIONS.every((p) => p.by && /^\d{4}-\d{2}-\d{2}$/.test(p.on) && /^FB-\d+$/.test(p.ref)));
   check("every position quotes what was asked as well as the answer", ENTITY_POSITIONS.every((p) => p.asked.length > 20 && p.stated.length > 5));
   check("the three kinds are all used", new Set(ENTITY_POSITIONS.map((p) => p.kind)).size === 3);
-  // A question asked back is not an answer, and must never read as one.
+  // A question asked back is not an answer, and must never read as one. Two of
+  // the three still stand: FB-1742's was answered on 16 September — the entity
+  // decided the case reference IS the appeal route — and the check honours that
+  // decision only where the route it describes actually exists.
   const questions = ENTITY_POSITIONS.filter((p) => p.kind === "question");
-  check("the questions asked back are kept as questions", questions.length === 3, questions.map((q) => q.ref));
+  check("the questions asked back are kept as questions", questions.length === 2, questions.map((q) => q.ref));
+  check("...and the one they answered is not still listed as a question", !questions.some((q) => q.ref === "FB-1742"));
 }
 
 if (!process.env.DATABASE_URL) {
@@ -59,22 +63,28 @@ if (!process.env.DATABASE_URL) {
   // executing the tool, and the live charge, read from the entity's own
   // corrections in the audit log. The other two are not true of the deployed
   // system yet, and stay failing however firmly they were stated.
+  // A statement alone still closes nothing: this one was stated on 16 September
+  // and is still open, because no consent yet names the data it shares.
   check(
-    "a stated position never silently closes a gap: the customer-readable log is still open",
-    failing.has("That log is readable BY THE CUSTOMER")
-  );
-  check(
-    "...and so is the consent's data and recipient",
+    "a stated position never silently closes a gap",
     failing.has("Consent names the data shared and its recipient")
   );
-  check(
-    "what WAS closed was closed by code, not by a claim: the callback context",
-    !failing.has("The callback record itself carries the journey context")
-  );
-  // And the evidence for it is execution, not the position record.
-  const handover = r.services[0]?.criteria.find((c) => c.criterionId === "human-handover")
-    ?.checks.find((c) => c.label === "The callback record itself carries the journey context");
-  check("...and it says so in its own evidence", /Verified by execution/.test(handover?.detail ?? ""), handover?.detail);
+  // What WAS closed was closed by code. Each of these says "Verified by
+  // execution" in its own evidence, which is the probe having run, not a claim.
+  const evidenceFor = (criterionId: string, label: string) =>
+    r.services[0]?.criteria.find((c) => c.criterionId === criterionId)?.checks.find((c) => c.label === label)?.detail ?? "";
+  for (const [criterionId, label] of [
+    ["human-handover", "The callback record itself carries the journey context"],
+    ["transparency", "That log is readable BY THE CUSTOMER"],
+  ] as const) {
+    check(`closed by code, not by a claim: ${label}`, !failing.has(label));
+    check("...and it says so in its own evidence", /Verified by execution/.test(evidenceFor(criterionId, label)), evidenceFor(criterionId, label));
+  }
+  // The appeal route is the one place an entity DECISION is honoured — and only
+  // because the route it describes exists and was checked for.
+  const appeal = evidenceFor("outcome-appeal", "A named route to appeal a decision");
+  check("the appeal position is honoured only alongside the route itself", /raises a case on the entity's own queue/.test(appeal), appeal);
+  check("...and the service level it still owes is stated", /service level for it is still owed/.test(appeal));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
