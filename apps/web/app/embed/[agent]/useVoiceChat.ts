@@ -386,10 +386,18 @@ export function useVoiceChat(opts: {
     setError("");
     spokenRef.current = messages.length - 1;
     // Unlock audio output on this user gesture so streamed replies can play.
+    // CRITICAL: open it at 24 kHz — the rate the gpt-realtime PCM actually is.
+    // This context is created HERE, before speakRealtime runs, so if we opened it
+    // at the device default (48 kHz) every 24 kHz chunk would be resampled
+    // independently and the chunk boundaries would sit under the speech as a
+    // periodic beep. Matching the rate means the buffers play sample-for-sample.
     try {
       const AC: typeof AudioContext | undefined =
         (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (AC && !audioCtxRef.current) audioCtxRef.current = new AC();
+      if (AC && !audioCtxRef.current) {
+        try { audioCtxRef.current = new AC({ sampleRate: 24000 }); }
+        catch { audioCtxRef.current = new AC(); }
+      }
       if (audioCtxRef.current?.state === "suspended") void audioCtxRef.current.resume();
     } catch { /* ignore */ }
     try {
