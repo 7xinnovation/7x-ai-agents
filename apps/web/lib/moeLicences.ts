@@ -465,12 +465,29 @@ async function post(cfg: MoeConfig, path: string, body: unknown): Promise<unknow
  */
 const SUCCESS_STATUS = new Set(["100", "101"]);
 
+/**
+ * "No Data Found" is an ANSWER.
+ *
+ * 102 is the registry saying it holds nothing against that Emirates ID, and it
+ * was being thrown as a failure — so a renewal on 16 September told the customer
+ * "the registry lookup hit an error just now" when the registry had in fact
+ * replied, promptly and correctly. The two readings send the conversation to
+ * different places: a failure means try again later, an empty answer means the
+ * licence is held some other way and we should ask for it.
+ *
+ * The caution that surrounds SUCCESS_STATUS still stands for everything else:
+ * any other non-success code with nothing returned is a refusal, and must never
+ * be reported to a customer as "you own no companies".
+ */
+const NO_DATA_STATUS = new Set(["102"]);
+
 function assertRegistryAnswered(r: {
   licences: MoeLicence[];
   rawCount: number;
   statusCode?: string;
   statusText?: string;
 }): void {
+  if (r.statusCode && NO_DATA_STATUS.has(r.statusCode)) return; // answered: nothing on file
   if (r.statusCode && !SUCCESS_STATUS.has(r.statusCode) && !r.licences.length) {
     throw new Error(`Registry lookup refused (${r.statusCode}${r.statusText ? `: ${r.statusText}` : ""})`);
   }

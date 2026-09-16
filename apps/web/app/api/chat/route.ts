@@ -1801,9 +1801,15 @@ export async function POST(req: NextRequest) {
       try {
         const licences = await licencesByEmiratesId(eid);
         if (!licences.length) {
+          // AND OFFER THE DOCUMENT, NOT JUST THE QUESTION. Reported 16 September:
+          // the assistant asked for the trade licence number with nothing to
+          // upload, so the customer had to ask for the box before they could hand
+          // over the licence they were already holding.
+          const docKey = /renew/i.test(String(liveState.journeyKey ?? "")) ? "updated_trade_license" : "trade_license";
           return {
             result:
-              "NOTHING IS REGISTERED to that Emirates ID in the Ministry of Economy registry. This is a normal answer, not a failure — plenty of applicants hold no licence in their own name, and a licence held through a partner or another emirate's authority may not appear. Do not tell the customer their licence does not exist. Ask for the trade licence number and continue as usual.",
+              "NOTHING IS REGISTERED to that Emirates ID in the Ministry of Economy registry. This is a normal answer, not a failure — plenty of applicants hold no licence in their own name, and a licence held through a partner or another emirate's authority may not appear. Do not tell the customer their licence does not exist, and do not say the lookup failed. " +
+              `Offer them BOTH ways to continue in one message: type the trade licence number, or upload the licence and you will read the number off it. Emit the upload block for it — \`\`\`upload with key: ${docKey} — alongside the question, naming the document in the sentence so the box is self-explanatory.`,
           };
         }
         // Each licence is reconciled against EPGL's own records, because the two
@@ -1963,9 +1969,34 @@ export async function POST(req: NextRequest) {
           };
         }
         log.error("moe_licence_lookup_failed", err, { ...a, tool: name });
+        /**
+         * A DEAD END IS NOT THE ONLY ANSWER WHEN THE REGISTRY IS DOWN.
+         *
+         * Reported 16 September on a renewal: "the registry lookup hit an error
+         * just now… please share the trade licence number" — and nothing to
+         * upload, so the customer had to ASK for the box before they could hand
+         * over the licence they were holding. Typing a licence number off a PDF
+         * is the worst of the two ways to give us the same fact, and it is the
+         * only one that was offered.
+         *
+         * The failing document upload the journey needs is named here so the
+         * assistant offers BOTH: type it, or let us read it.
+         *
+         * The daily cap is called out separately because it is not a fault and
+         * it clears: EPGL's wrapper allows 200 invocations a day across every
+         * caller sharing the key, and a customer told "something went wrong"
+         * about a quota is being told the wrong thing.
+         */
+        const message = err instanceof Error ? err.message : String(err);
+        const rateLimited = /HTTP 429|Maximum number of allowed invocations|too many requests/i.test(message);
+        const renewal = /renew/i.test(String(liveState.journeyKey ?? ""));
+        const docKey = renewal ? "updated_trade_license" : "trade_license";
         return {
           result:
-            "THE LICENCE REGISTRY LOOKUP FAILED. This says nothing about whether the customer holds a licence, so do not tell them none was found. Ask for the trade licence number and continue as normal.",
+            (rateLimited
+              ? "THE LICENCE REGISTRY HAS HIT ITS DAILY LIMIT for this service — a cap on the number of lookups, not a fault with the customer or their licence. Say plainly that the automatic lookup is unavailable right now, without blaming their record and without technical detail. "
+              : "THE LICENCE REGISTRY LOOKUP FAILED. This says nothing about whether the customer holds a licence, so do not tell them none was found. ") +
+            `Then offer them BOTH ways to continue, in one message: they can type the trade licence number, or upload the licence itself and you will read the number off it. Emit the upload block for it — \`\`\`upload with key: ${docKey} — alongside the question, and name the document in the sentence so it is clear what the box is for. Carry on as normal from whichever they give you.`,
           isError: true,
         };
       }
