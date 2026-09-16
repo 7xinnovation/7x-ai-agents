@@ -47,7 +47,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard, asksSomethingElse } from "@/lib/uploadGuard";
-import { epglDocumentLabel } from "@/lib/epglDocumentLabel";
+import { epglDocumentLabels } from "@/lib/epglDocumentLabel";
 import { NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
@@ -2841,6 +2841,21 @@ export async function POST(req: NextRequest) {
           const attachedDocs = finalState.documents.filter(
             (d) => (d.status === "uploaded" || d.status === "accepted") && !alreadySent.has(d.key)
           );
+          // NAMED FROM THE WHOLE CASE, NOT FROM THIS BATCH.
+          //
+          // EPGL's checklist has one "Passport copy-Partner" entry and we collect
+          // one passport per partner, so the first partner holding a document
+          // takes the checklist name and the rest carry their own name beside it
+          // (see epglDocumentLabel). "First" has to mean the same thing on every
+          // turn — documents go over several — so it is decided from every
+          // document on the case, including the ones already sent.
+          const docLabelsForEpgl = epglDocumentLabels(
+            finalState.documents.map((doc) => doc.key),
+            {
+              fallback: (key) => docLabels.get(key),
+              partnerName: (n) => str(finalState.data[`partner_${n}_name`]) ?? undefined,
+            }
+          );
           const sctx = adapterContext(agent.definition, agent.definition.integrations.storage);
           deferred.push(async () => {
             // Recorded so a later turn knows what is left rather than sending
@@ -2887,10 +2902,7 @@ export async function POST(req: NextRequest) {
                  * Their 2.0.0 contract, sent the same evening, then corrected
                  * the rest of the body: see label__c below.
                  */
-                const label = epglDocumentLabel(d.key, {
-                  fallback: docLabels.get(d.key),
-                  partnerName: (n) => str(finalState.data[`partner_${n}_name`]) ?? undefined,
-                });
+                const label = docLabelsForEpgl.get(d.key) ?? d.key;
                 const res = await execIntegration(tool, {
                   body: {
                     EPG_License_Request__c: ref,

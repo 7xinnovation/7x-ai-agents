@@ -149,6 +149,8 @@ Everything here is a consequence of contract 2.0.0 and is live.
 
 All eight returned **201 Created**, `createdNewDocument: true`, and each has its file attached (verified via `ContentDocumentLink` on the `EPG_Document__c` record).
 
+The labels below are **what this run sent, on 15 September**. They changed on 16 September in the light of your checklist names — see the table under *Answered* further down.
+
 | `label__c` sent | `checklistId` returned |
 |---|---|
 | `TRADE LICENSE` | `a0u5f000001qDT9AAM` ✅ |
@@ -160,19 +162,45 @@ All eight returned **201 Created**, `createdNewDocument: true`, and each has its
 | `PASSPORT — Valentina Mintah` | **null** |
 | `Emirates ID — Valentina Mintah` | **null** |
 
-### The one question we need answered
+### Answered — 16 September
 
-Your contract makes `label__c` both the **checklist key** and the **deduplication key**, and for documents we collect once per partner those two pull in opposite directions.
+You sent the active checklist names, with the point we had missed:
 
-Your checklist has a single `PASSPORT` entry. We collect one passport per partner. If we send all three as `PASSPORT`, the second call updates the first document and the third updates the second — the application ends up holding **one** passport with no sign that two more were sent. So we append whose it is, which keeps all three, and the cost is the `checklistId: null` above.
+> "below are the active checklist documents names that you can match on them to avoid overriding existing documents, like for passport we have 3 passport document names: **Passport**, **Passport copy-Partner** and **Passport (Of All Branch Partners)**"
 
-**How would you like repeating documents named** so they both dedupe correctly and match a checklist entry? Options as we see them:
+That settles the half of the question that mattered most: an owner's passport and a partner's passport are **different slots**, and we had been sending both under one name. Two of our labels moved as a result, and they are live now:
 
-1. A checklist entry per partner (`PASSPORT 1`, `PASSPORT 2`, …) and we send those names.
-2. `label__c` stays the checklist name and the dedup key becomes `label__c` + a discriminator we supply (a new field, or `EPG_File_Id__c`).
-3. You are content with `checklistId: null` on per-partner documents, and the checklist is satisfied some other way.
+| Document | Was | **Now sending** |
+|---|---|---|
+| Trade licence | `TRADE LICENSE` | **`Trade License`** |
+| MOA | `Memorandum of Association` | `Memorandum of Association` (unchanged) |
+| Lease contract | `Lease Contract` | `Lease Contract` (unchanged) |
+| Owner's passport | — | **`Passport`** |
+| Owner's Emirates ID | `Emirates ID` | **`Emirates Id`** |
+| Partner's passport | `PASSPORT — <name>` | **`Passport copy-Partner`** |
+| Partner's Emirates ID | `Emirates ID — <name>` | **`Emirates ID-Partner`** |
+| Updated trade licence (renewal) | `Updated Trade License` | `Updated Trade License` (unchanged) |
+| Audited financial statement | `Last Fiscal Year Audited Financial Statement` | unchanged |
+| Acknowledgement letter | `Acknowledgement Letter for Submitting the Financial Statement` | unchanged |
+| Trial balance | `Trail Balance for the License Period` | unchanged |
 
-We will match whichever you pick.
+`TRADE LICENSE` came from your own data — it is the most-used spelling of `EPG_Document__c.Name` in PreProd, 482 records — so if your checklist keys on `Trade License` exactly, that is worth knowing on your side too.
+
+### Still open: three partners, one checklist entry
+
+Your list has **one** `Passport copy-Partner`. A new licence can carry up to eight partners, and `label__c` is still the deduplication key — so three passports sent under that one name would leave partner 3's file standing where partner 1's was, and the application would arrive holding one passport with no sign the other two were ever sent.
+
+Until you tell us otherwise, we do this:
+
+| Document | `label__c` we send |
+|---|---|
+| Partner 1's passport | `Passport copy-Partner` |
+| Partner 2's passport | `Passport copy-Partner - Abdelaziz Mohamed Obaid` |
+| Partner 3's passport | `Passport copy-Partner - Valentina Mintah` |
+
+The first fills the checklist slot; the rest keep their own record and say whose they are. No two documents share a label, so nothing overwrites anything. The partner's name is the one **from the trade licence**, not from their Emirates ID — see §5.
+
+If you would rather have one record per partner properly, **a per-partner slot on the checklist is the clean answer** and we will send whatever you name them. If instead you want exactly one `Passport copy-Partner` record per application, tell us which partner's it should be — but be aware the other seven files then have nowhere to go.
 
 ---
 

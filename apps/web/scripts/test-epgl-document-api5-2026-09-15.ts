@@ -56,7 +56,7 @@ for (const dead of ["versionData:", "licenseRequestId:", "fileName:", "fileType:
 
 console.log("\nThe metadata their 2.0.0 contract asks for");
 check("the slot name goes as label__c", /label__c: label/.test(push));
-check("...built from the checklist mapping, not the file name", /epglDocumentLabel\(d\.key/.test(route));
+check("...built from the checklist mapping, not the file name", /docLabelsForEpgl\.get\(d\.key\)/.test(route) && /epglDocumentLabels\(/.test(route));
 // The payload quotes their own wording about it in a comment, so the test is
 // for an assignment, not a mention.
 check("EPG_File_Id__c is left for Salesforce to fill", !/EPG_File_Id__c\s*:/.test(push));
