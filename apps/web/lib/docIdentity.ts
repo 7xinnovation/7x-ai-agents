@@ -767,6 +767,24 @@ export function namedPeople(data: Record<string, unknown>, max = 12): { label: s
     const n = knownPartnerName(data, i) ?? seenPartnerName(data, i);
     if (n) add(`partner ${i}`, n);
   }
+  /**
+   * AND THE LICENCE MEMBERS, WHO ARE ON THE LICENCE WITHOUT HOLDING SHARES.
+   *
+   * JNT's trade licence, 16 September: a "License Members / الاطراف" table under
+   * the partners, naming ZHAO ZHAO — China, Manager, no share. He is printed on
+   * the licence and his Emirates ID was in the document pack, and to this
+   * function he was a stranger: an upload in his name would have been refused as
+   * "not named on this application", which is the opposite of true.
+   *
+   * A member is not a partner and gets no partner slot. What they get is
+   * recognition — their documents belong to this licence.
+   */
+  for (let i = 1; i <= max; i++) {
+    const n = raw(data, [`member_${i}_name`, `member_${i}_name_ar`]);
+    if (!n) continue;
+    const role = raw(data, [`member_${i}_role`]);
+    add(role ? `${role.toLowerCase()} on the licence` : `licence member ${i}`, n);
+  }
   const owner = raw(data, PERSON_NAME_FIELDS);
   if (owner) add("the owner", owner);
   return out;
@@ -807,3 +825,12 @@ export function ownerDocumentCheck(
       `The licence names: ${list}. Please upload the ${kind} for one of them.`,
   };
 }
+
+/**
+ * Re-exported from @dialog/config, where the engine can reach it.
+ *
+ * The types have to be settled BEFORE readiness is computed — the identity
+ * documents are conditioned on them — and readiness is computed in the case
+ * engine, which cannot import from the app. See packages/config/src/partners.ts.
+ */
+export { corporatePartner, withPartnerTypes } from "@dialog/config";

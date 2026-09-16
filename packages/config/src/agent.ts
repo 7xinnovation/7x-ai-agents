@@ -83,6 +83,18 @@ export const AgentDefinition = z.object({
   // upload page (feedback: state up-front that documents are team-verified and
   // the customer should ensure accurate data for the fastest processing).
   documentsDisclaimer: LocalizedString.optional(),
+  /**
+   * How a customer reaches a human when the assistant cannot pass the request on.
+   *
+   * It was Emirates Post's 600 599 999, hardcoded, for every agent — so an EPGL
+   * licensing submission that failed on 16 September sent the applicant to the PO
+   * Box helpline about a postal activity licence. Whoever answers there cannot
+   * help with it and should not have been given it.
+   *
+   * Left unset, the assistant names the entity and no number: an entity that has
+   * not given us a contact route is not one we may invent a route to.
+   */
+  supportContact: z.string().optional(),
   // When true, document uploads happen INLINE in the conversation (the agent
   // requests one document at a time and emits an in-chat upload widget), and the
   // case panel's Documents section is suppressed. When false (default) uploads

@@ -365,6 +365,26 @@ export function processingFeeFor(
 
 /** Which document supplied each field. Written by the upload route. */
 export const DOC_FIELDS_KEY = "__doc_fields";
+
+/**
+ * How to tell a customer to reach a person, for THIS entity.
+ *
+ * Emirates Post's 600 599 999 was written into both of these, for every agent,
+ * so an EPGL licensing failure on 16 September sent the applicant to the PO Box
+ * helpline about a postal activity licence. Whoever answers there cannot help
+ * with it.
+ *
+ * An entity that has given us a contact route gets it quoted; one that has not
+ * gets its name and no number, because inventing a phone number for a government
+ * service is worse than admitting we do not have one.
+ */
+function supportRoute(agent: { name: string; supportContact?: string; theme?: { brandName?: string } }): string {
+  const who = agent.theme?.brandName?.trim() || agent.name;
+  const contact = agent.supportContact?.trim();
+  return contact
+    ? `Give them ${who}'s contact route so they can reach someone themselves: ${contact}.`
+    : `Tell them to contact ${who} directly through their usual channel — do NOT invent a phone number, email address or link for them.`;
+}
 /** Set once the customer edits a detail their trade licence had supplied. */
 export const LICENCE_CHANGED_KEY = "__licence_changed";
 
@@ -792,7 +812,7 @@ export async function dispatchTool(
           result:
             `The callback could not be arranged: ${e instanceof Error ? e.message : "the request could not be passed on"}. ` +
             `Do NOT give the customer a reference — nobody has received this. Say plainly that you cannot arrange a callback right now, ` +
-            `and give them Emirates Post's contact number 600 599 999 so they can reach someone themselves. ` +
+            `${supportRoute(agent)} ` +
             `Anything already completed in this conversation still stands: if a payment or a booking succeeded, say so and do not suggest it failed.`,
           state,
           events,
@@ -1078,7 +1098,7 @@ export async function dispatchTool(
           result:
             `The request could not be recorded: ${e instanceof Error ? e.message : "it could not be passed on"}. ` +
             `Do NOT give the customer a reference and do not tell them it is submitted — nobody has received it. ` +
-            `Say plainly that you could not file it, and give them Emirates Post's contact number 600 599 999. ` +
+            `Say plainly that you could not file it. ${supportRoute(agent)} ` +
             `Anything already completed in this conversation still stands and must not be described as failed.`,
           state,
           events,

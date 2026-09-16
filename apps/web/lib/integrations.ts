@@ -658,6 +658,21 @@ export interface EpglRequestFacts {
   /** Account.EPG_License__c — an ID-type lookup, never the printed number. */
   licenceRecordId?: string;
   /**
+   * The Salesforce Account id EPGL's own lookup returned for this company.
+   *
+   * JNT's renewal, 16 September. The composite carried
+   * `"Id": "0015f00000XwXwXAAV"` on the Account — an id that does not exist.
+   * JNT's is 0015f00000ic9okAAA, and the lookup had returned it minutes
+   * earlier. Salesforce answered "invalid cross reference id | portal account
+   * owner must have a role", allOrNone rolled the whole thing back, and the
+   * applicant was told EPGL had a configuration problem. EPGL did not: we sent a
+   * made-up key.
+   *
+   * A record id is never the model's to write. Where the lookup gave us one, it
+   * is stamped over whatever the composite says.
+   */
+  accountId?: string;
+  /**
    * The partners AS THE TRADE LICENCE NAMES THEM, in order.
    *
    * LR-37377, 15 September: the licence and the MOA both name partner 2
@@ -726,8 +741,50 @@ export function withEpglRequestFields(
     return changed;
   };
 
+  /**
+   * A RECORD ID IS NEVER THE MODEL'S TO WRITE.
+   *
+   * JNT's renewal, 16 September: the composite's Account item carried
+   * `"Id": "0015f00000XwXwXAAV"`. JNT's account is 0015f00000ic9okAAA and the
+   * lookup had returned it minutes before. Salesforce answered "invalid cross
+   * reference id | portal account owner must have a role" — the first half is
+   * the whole story — allOrNone rolled back six records, and the applicant was
+   * told EPGL had a configuration problem they do not have.
+   *
+   * So where the lookup gave us the id, it is stamped over whatever the
+   * composite says — this one OVERWRITES, unlike everything else here, because
+   * the model's version of a key is not a reading off a document. Every
+   * reference to it in the same composite is corrected with it.
+   */
+  const account = items.find((i) => /sobjects\/Account$/i.test(String(i?.url ?? "")));
   let patched = false;
-  patched = fill(items.find((i) => /sobjects\/Account$/i.test(String(i?.url ?? ""))), {
+  if (facts.accountId && /^[a-zA-Z0-9]{15,18}$/.test(facts.accountId)) {
+    const wrong = new Set<string>();
+    if (account) {
+      const b = { ...((account.body ?? {}) as Record<string, unknown>) };
+      const had = String(b.Id ?? "").trim();
+      if (had && had !== facts.accountId) wrong.add(had);
+      if (had !== facts.accountId) {
+        b.Id = facts.accountId;
+        account.body = b;
+        patched = true;
+      }
+    }
+    // The children point at the account by id or by @{reference}. An id that was
+    // wrong on the parent is wrong wherever it was copied to.
+    for (const item of items) {
+      const b = { ...((item?.body ?? {}) as Record<string, unknown>) };
+      let changed = false;
+      for (const key of ["EPG_Company__c", "EPG_Account__c", "AccountId__c", "AccountId"]) {
+        const v = String(b[key] ?? "").trim();
+        if (!v || !wrong.has(v)) continue;
+        b[key] = facts.accountId;
+        changed = true;
+      }
+      if (changed) { item.body = b; patched = true; }
+    }
+  }
+  patched = fill(account, {
     EPG_Regulator__c: facts.regulator,
     EPG_Emirates__c: facts.emirate,
   }) || patched;

@@ -156,5 +156,58 @@ const itemOf = (out: unknown, ref: string) =>
 }
 
 
+
+/**
+ * AN ACCOUNT ID IS NOT THE MODEL'S TO INVENT.
+ *
+ * JNT's renewal, 16 September. The composite's Account item carried
+ * "Id": "0015f00000XwXwXAAV" — an id that does not exist. JNT's account is
+ * 0015f00000ic9okAAA and EPGL's own lookup had returned it minutes earlier.
+ * Salesforce answered "invalid cross reference id | portal account owner must
+ * have a role", allOrNone rolled back all six records, and the applicant was
+ * told EPGL had a configuration problem they do not have.
+ */
+{
+  const REAL = "0015f00000ic9okAAA";
+  const INVENTED = "0015f00000XwXwXAAV";
+  const composite = () => ({
+    body: {
+      allOrNone: true,
+      compositeRequest: [
+        { method: "POST", referenceId: "Account", url: "/services/data/v66.0/sobjects/Account", body: { Id: INVENTED, Name: "JNT EXPRESS COURIER SERVICES L.L.C" } },
+        { method: "POST", referenceId: "NewPartner1", url: "/services/data/v66.0/sobjects/EPG_Partner__c", body: { Name: "GLOBAL JET EXPRESS AE FZCO", EPG_Company__c: INVENTED } },
+        { method: "POST", referenceId: "NewMember1", url: "/services/data/v66.0/sobjects/Members__c", body: { Name: "ZHAO ZHAO", AccountId__c: INVENTED } },
+        { method: "POST", referenceId: "NewLicenseRequest", url: "/services/data/v66.0/sobjects/EPG_License_Request__c", body: { EPG_Account__c: "@{Account.id}" } },
+      ],
+    },
+  });
+  const itemBody = (out: unknown, ref: string) =>
+    ((out as any)?.body?.compositeRequest ?? []).find((i: any) => i.referenceId === ref)?.body ?? {};
+
+  const out = withEpglRequestFields(composite() as never, { accountId: REAL } as never);
+  check("the invented account id is replaced", itemBody(out, "Account").Id === REAL, itemBody(out, "Account").Id);
+  check("...wherever it was copied to", itemBody(out, "NewPartner1").EPG_Company__c === REAL, itemBody(out, "NewPartner1"));
+  check("...including the member row", itemBody(out, "NewMember1").AccountId__c === REAL, itemBody(out, "NewMember1"));
+  check("a @{reference} is left alone", itemBody(out, "NewLicenseRequest").EPG_Account__c === "@{Account.id}");
+  check("nothing else on the account is touched", itemBody(out, "Account").Name === "JNT EXPRESS COURIER SERVICES L.L.C");
+
+  // The id we hold is the one the LOOKUP returned. With none, nothing is stamped
+  // — a new company has no account yet and inventing one here is the same fault.
+  const none = withEpglRequestFields(composite() as never, {} as never);
+  check("no known account, no rewrite", itemBody(none, "Account").Id === INVENTED);
+  const rubbish = withEpglRequestFields(composite() as never, { accountId: "not-an-id" } as never);
+  check("and a malformed id is not stamped either", itemBody(rubbish, "Account").Id === INVENTED);
+
+  // An id that was already right stays right, and its children are untouched.
+  const already = {
+    body: { allOrNone: true, compositeRequest: [
+      { method: "POST", referenceId: "UpdateAccount", url: "/services/data/v66.0/sobjects/Account", body: { Id: REAL } },
+      { method: "POST", referenceId: "Partner1", url: "/services/data/v66.0/sobjects/EPG_Partner__c", body: { EPG_Company__c: REAL } },
+    ] },
+  };
+  const same = withEpglRequestFields(already as never, { accountId: REAL } as never);
+  check("a correct composite is left as it is", itemBody(same, "UpdateAccount").Id === REAL && itemBody(same, "Partner1").EPG_Company__c === REAL);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
