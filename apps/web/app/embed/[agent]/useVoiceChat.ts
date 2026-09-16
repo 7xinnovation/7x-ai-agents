@@ -93,6 +93,11 @@ export function useVoiceChat(opts: {
   const streamingRef = useRef(false);
   const speakingRef = useRef(false);
   streamingRef.current = streaming;
+  // The parent hands a fresh `send` closure every render; hold it in a ref so the
+  // callback graph (listenOnce, the watchdog interval) stays stable instead of
+  // being rebuilt and re-armed on every render.
+  const sendRef = useRef(send);
+  sendRef.current = send;
   const micRef = useRef<MediaStream | null>(null);
   const recRef = useRef<any>(null); // SpeechRecognition
   const busyRef = useRef(false); // an utterance is being recognized/transcribed
@@ -100,6 +105,11 @@ export function useVoiceChat(opts: {
   const audioCtxRef = useRef<AudioContext | null>(null); // playback of gpt-realtime audio
   const ttsAbortRef = useRef<AbortController | null>(null); // in-flight /speak stream
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]); // scheduled audio nodes
+  // Barge-in: an analyser on the LIVE mic (never routed to output) whose energy
+  // we watch while the assistant speaks, so the customer can talk over it.
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const vadBufRef = useRef<Float32Array | null>(null);
+  const vadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const supported =
     typeof window !== "undefined" &&
@@ -157,13 +167,13 @@ export function useVoiceChat(opts: {
       }
       if (!text) text = fallback; // graceful fallback to on-device recognition
       busyRef.current = false;
-      if (text) send(text);
+      if (text) sendRef.current(text);
       // If nothing was sent, keep listening; otherwise the effect resumes after the reply.
       if (!text && activeRef.current && !speakingRef.current && !streamingRef.current) listenOnce();
     };
     setListening(true);
     try { rec.start(); } catch { busyRef.current = false; recRef.current = null; setListening(false); }
-  }, [locale, send]);
+  }, [locale]);
 
   const stopRealtimeAudio = useCallback(() => {
     try { ttsAbortRef.current?.abort(); } catch { /* ignore */ }
@@ -283,6 +293,48 @@ export function useVoiceChat(opts: {
     } catch { done(); }
   }, [locale]);
 
+  // ── Barge-in: while the assistant speaks, watch the live mic; a sustained
+  //    voice above the floor stops playback so the customer can interrupt. Echo
+  //    cancellation keeps our own audio from self-triggering; the constants are
+  //    the thing to tune on-device if bleed causes false interrupts. ───────────
+  const BARGE_RMS = 0.055;
+  const BARGE_SUSTAIN_MS = 260;
+  const VAD_INTERVAL_MS = 60;
+  const rms = useCallback((): number => {
+    const an = analyserRef.current;
+    const buf = vadBufRef.current;
+    if (!an || !buf) return 0;
+    an.getFloatTimeDomainData(buf as any);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) { const v = buf[i] ?? 0; sum += v * v; }
+    return Math.sqrt(sum / buf.length);
+  }, []);
+  const stopVadMonitor = useCallback(() => {
+    if (vadTimerRef.current) { clearInterval(vadTimerRef.current); vadTimerRef.current = null; }
+  }, []);
+  const startVadMonitor = useCallback(() => {
+    if (vadTimerRef.current || !analyserRef.current) return;
+    let over = 0;
+    vadTimerRef.current = setInterval(() => {
+      if (!speakingRef.current) { over = 0; return; }
+      if (rms() > BARGE_RMS) {
+        over += VAD_INTERVAL_MS;
+        if (over >= BARGE_SUSTAIN_MS) {
+          over = 0;
+          // The customer interrupted: silence ourselves and start listening. The
+          // in-flight speak()'s done() then resumes as a harmless no-op.
+          stopRealtimeAudio();
+          try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+          speakingRef.current = false;
+          setSpeaking(false);
+          if (activeRef.current && !streamingRef.current) listenOnce();
+        }
+      } else {
+        over = 0;
+      }
+    }, VAD_INTERVAL_MS);
+  }, [rms, stopRealtimeAudio, listenOnce]);
+
   const speak = useCallback((text: string) => {
     const clean = forSpeech(text, locale === "ar" ? "ar" : "en");
     if (!clean) { listenOnce(); return; }
@@ -308,13 +360,16 @@ export function useVoiceChat(opts: {
   const cleanup = useCallback(() => {
     stopRecognition();
     stopRealtimeAudio();
+    stopVadMonitor();
+    try { analyserRef.current?.disconnect(); } catch { /* ignore */ }
+    analyserRef.current = null;
     micRef.current?.getTracks().forEach((t) => t.stop());
     micRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     speakingRef.current = false;
     setSpeaking(false);
     setListening(false);
-  }, [stopRecognition, stopRealtimeAudio]);
+  }, [stopRecognition, stopRealtimeAudio, stopVadMonitor]);
 
   const toggle = useCallback(async () => {
     if (!supported) return;
@@ -334,12 +389,27 @@ export function useVoiceChat(opts: {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
       micRef.current = mic;
+      // Wire the live mic into an analyser for barge-in energy detection (analyser
+      // only, never to destination, so it can never feed back into playback).
+      try {
+        const ctx = audioCtxRef.current;
+        if (ctx) {
+          const srcNode = ctx.createMediaStreamSource(mic);
+          const an = ctx.createAnalyser();
+          an.fftSize = 1024;
+          an.smoothingTimeConstant = 0.5;
+          srcNode.connect(an);
+          analyserRef.current = an;
+          vadBufRef.current = new Float32Array(an.fftSize);
+          startVadMonitor();
+        }
+      } catch { /* barge-in unavailable; turn-taking still works */ }
       listenOnce();
     } catch {
       setError("Microphone access is needed. Allow it and try again.");
       // keep active so the error stays visible; user taps Turn off
     }
-  }, [supported, messages.length, cleanup, listenOnce]);
+  }, [supported, messages.length, cleanup, listenOnce, startVadMonitor]);
 
   // Pause the mic while the agent responds; speak each new reply.
   useEffect(() => {
@@ -354,6 +424,20 @@ export function useVoiceChat(opts: {
       listenOnce();
     }
   }, [active, streaming, messages, speak, listenOnce, stopRecognition]);
+
+  // Resume watchdog: never leave the mic stranded. If nothing is happening (not
+  // speaking, thinking, or capturing), reopen it. A backstop for any missed
+  // state transition (a stalled TTS, an interrupted turn).
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => {
+      if (!activeRef.current) return;
+      if (speakingRef.current || streamingRef.current || busyRef.current) return;
+      if (recRef.current) return; // already listening
+      if (micRef.current) listenOnce();
+    }, 1500);
+    return () => clearInterval(id);
+  }, [active, listenOnce]);
 
   useEffect(() => () => {
     activeRef.current = false;
