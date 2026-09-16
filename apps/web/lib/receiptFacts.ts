@@ -204,25 +204,40 @@ export async function receiptFacts(conversationId: string, agentId: string | nul
  * panel carries a permanent link either way, which is where "I want it again"
  * is properly answered.
  */
+export interface ReceiptMoment {
+  /**
+   * Whether the application was SUBMITTED on this turn.
+   *
+   * EPGL settles the card payment on a poll, a turn or more before the
+   * confirmation is written — the money arrives, the applicant sends one more
+   * message, and the assistant answers "APPLICATION CONFIRMED". By then the
+   * payment is no longer new, so the one message the customer reads as the end
+   * of the journey was the one message with no receipt on it.
+   */
+  submittedThisTurn?: boolean;
+  /**
+   * Whether the transaction is finished: the system of record has it and the
+   * money has settled. True on the confirming turn AND on every turn after it,
+   * which is why it is paired with alreadyOffered.
+   */
+  caseComplete?: boolean;
+  /** Whether this case has already been given the link once. */
+  alreadyOffered?: boolean;
+}
+
 export function shouldOfferReceipt(
   before: { status?: string; reference?: string | null } | null | undefined,
   after: { status?: string; reference?: string | null } | null | undefined,
   userMessage?: string | null,
-  /**
-   * Whether the application was SUBMITTED on this turn.
-   *
-   * EPGL settles the card payment one turn before the confirmation is written —
-   * the money arrives, the applicant sends one more message, and the assistant
-   * answers with "APPLICATION CONFIRMED". By then the payment is no longer new,
-   * so the one message the customer reads as the end of the journey was the one
-   * message with no receipt on it. A submission is the other moment a receipt
-   * belongs to, and it happens once.
-   */
-  submittedThisTurn?: boolean
+  moment: ReceiptMoment = {}
 ): boolean {
   if (after?.status !== "paid" || !after.reference) return false;
+  if (/\b(receipt|invoice)\b|إيصال|فاتورة/i.test(userMessage ?? "")) return true;
   const justArrived = before?.status !== "paid" || before.reference !== after.reference;
-  return justArrived || Boolean(submittedThisTurn) || /\b(receipt|invoice)\b|إيصال|فاتورة/i.test(userMessage ?? "");
+  if (justArrived || moment.submittedThisTurn) return true;
+  // The completed transaction, once. Without the "once" this is the old rule
+  // that put "Download your receipt" under an answer about issuing authorities.
+  return Boolean(moment.caseComplete && !moment.alreadyOffered);
 }
 
 /** Where a receipt for this payment lives, inside this conversation. */

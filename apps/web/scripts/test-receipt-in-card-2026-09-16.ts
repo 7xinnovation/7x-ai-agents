@@ -96,12 +96,34 @@ console.log("\nAnd the turn the message carries no card at all");
   const PAID = { status: "paid", reference: "pay-1" };
   check(
     "a submission this turn offers the receipt even though the money arrived earlier",
-    shouldOfferReceipt(PAID, PAID, "ok", true)
+    shouldOfferReceipt(PAID, PAID, "ok", { submittedThisTurn: true })
   );
-  check("...and without a submission it does not", !shouldOfferReceipt(PAID, PAID, "ok", false));
+  check("...and a bare later turn does not", !shouldOfferReceipt(PAID, PAID, "ok", {}));
   check("the turn the payment arrives still offers it", shouldOfferReceipt({ status: "none", reference: null }, PAID, "ok"));
   check("asking for it still offers it", shouldOfferReceipt(PAID, PAID, "can I have the receipt?"));
-  check("an unpaid case never offers one", !shouldOfferReceipt(null, { status: "initiated", reference: "p" }, "ok", true));
+  check("an unpaid case never offers one", !shouldOfferReceipt(null, { status: "initiated", reference: "p" }, "ok", { submittedThisTurn: true }));
+
+  // LR-37381, 16 September. Submitted at 11:22, the money settled on a poll, and
+  // the confirmation was written at 11:24 with no card in it. Every earlier rule
+  // had already passed by then: the payment was not new, nothing was submitted
+  // THIS turn, and the customer had not asked. So the chat had no receipt at all
+  // while the email that went out two minutes later carried one.
+  check(
+    "the completed transaction offers it, whichever turn confirmed",
+    shouldOfferReceipt(PAID, PAID, "ok", { caseComplete: true, alreadyOffered: false })
+  );
+  check(
+    "...and having offered it once, never again",
+    !shouldOfferReceipt(PAID, PAID, "ok", { caseComplete: true, alreadyOffered: true })
+  );
+  check(
+    "...but they can still ask for it back",
+    shouldOfferReceipt(PAID, PAID, "send me the receipt again", { caseComplete: true, alreadyOffered: true })
+  );
+  check(
+    "a case that never reached the system of record is not complete",
+    !shouldOfferReceipt(PAID, PAID, "ok", { caseComplete: false, alreadyOffered: false })
+  );
 }
 
 console.log("\nWired into the turn");
@@ -109,7 +131,9 @@ console.log("\nWired into the turn");
   const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
   check("the guard is given the receipt for a settled payment", /liveState\.payment\.status === "paid" && liveState\.payment\.reference/.test(route));
   check("...built with the shared helper", /receiptHref\(liveState\.payment\.reference, session\.conversationId\)/.test(route));
-  check("the trailing link knows about submissions", /shouldOfferReceipt\(session\.state\.payment, finalState\.payment, effectiveMessage, Boolean\(submittedRef\)\)/.test(route));
+  check("the trailing link knows the transaction is finished", /caseComplete: Boolean\(submittedRef \|\| finalState\.reference\)/.test(route));
+  check("...and that it has been offered before", /alreadyOffered: Boolean\(session\.state\.receiptOfferedAt\)/.test(route));
+  check("...and records the offer however it was made", /finalText\.includes\("\/api\/receipt\/"\) && !finalState\.receiptOfferedAt/.test(route));
   check("...and is still skipped when the card already carries one", /!finalText\.includes\("\/api\/receipt\/"\)/.test(route));
 }
 

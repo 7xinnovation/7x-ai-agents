@@ -186,6 +186,17 @@ export const CaseState = z.object({
    */
   confirmationEmailedAt: z.string().nullable().default(null),
   /**
+   * When the receipt link was put in the chat for this case.
+   *
+   * The link used to be offered on the turn the payment ARRIVED, which sounds
+   * like the same moment as the confirmation and is not: EPGL's payment settles
+   * from a poll, so by the time the assistant writes "Payment received — your
+   * application is confirmed" the money is old news and the rule had already
+   * passed. Offering it on completion instead needs a memory, or every later
+   * reply would carry one.
+   */
+  receiptOfferedAt: z.string().nullable().default(null),
+  /**
    * Companies this case saw come back from the GSB licence lookups — trade
    * licence numbers and names, normalised. Emirates Post distinguishes a
    * corporate rental whose company details it supplied from one the customer
@@ -228,6 +239,7 @@ export function emptyCase(): CaseState {
     pulsedAt: null,
     surveyIssuedAt: null,
     confirmationEmailedAt: null,
+    receiptOfferedAt: null,
     gsbCompanies: [],
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null },

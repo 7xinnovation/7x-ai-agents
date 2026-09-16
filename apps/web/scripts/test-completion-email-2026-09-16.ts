@@ -15,7 +15,8 @@
  * Run from apps/web:  npx tsx scripts/test-completion-email-2026-09-16.ts
  */
 import { completionEmail, completionRecipient, plainFromReply } from "../lib/completionEmail";
-import { readFileSync } from "node:fs";
+import { textToHtml, emailLogoUrl } from "../lib/email";
+import { existsSync, readFileSync } from "node:fs";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -108,6 +109,42 @@ console.log("\nThe email itself");
   check("Arabic footer", ar.text.includes("هذه رسالة آلية"));
 }
 
+console.log("\nThe logo at the top of it");
+{
+  // SVG DOES NOT RENDER IN MAIL. Gmail drops it, Outlook drops it — the customer
+  // gets alt text and an empty box — so the mark is sent as the PNG rasterised
+  // beside it in /public.
+  check("an svg is swapped for its email png", emailLogoUrl("/epgl-logo.svg", "https://agent.7x.ae") === "https://agent.7x.ae/epgl-logo-email.png");
+  check("...and the file is actually there", existsSync(new URL("../public/epgl-logo-email.png", import.meta.url)));
+  check("...for Emirates Post too", existsSync(new URL("../public/emiratespost-logo-email.png", import.meta.url)));
+  check("a png is left alone", emailLogoUrl("/brand.png", "https://agent.7x.ae") === "https://agent.7x.ae/brand.png");
+  check("another host is left alone", emailLogoUrl("https://cdn.example.ae/a.svg") === "https://cdn.example.ae/a-email.png");
+  check("a relative logo with nowhere to resolve against is dropped", emailLogoUrl("/epgl-logo.svg") === "");
+  check("no logo, no image", emailLogoUrl(null, "https://agent.7x.ae") === "");
+
+  const html = textToHtml("Dear Emre,\n\n  Reference: LR-37381\n  Payment: AED 1,000 — paid", "EPGL — confirmation (LR-37381)", {
+    name: "EPGL",
+    logoUrl: "/epgl-logo.svg",
+    primary: "#0167cc",
+    baseUrl: "https://agent.7x.ae",
+  });
+  check("the mark is in the html", html.includes('src="https://agent.7x.ae/epgl-logo-email.png"'), html.slice(0, 400));
+  check("...sized in attributes, which is all Outlook reads", /<img [^>]*width="106" height="56"/.test(html));
+  check("...with the brand as alt text for a client that blocks images", /alt="EPGL"/.test(html));
+  check("...above a rule in the brand colour", html.includes("border-bottom:2px solid #0167cc"));
+  check("...and above the heading, not inside it", html.indexOf("epgl-logo-email.png") < html.indexOf("EPGL — confirmation"));
+  check("the details still read as a table", html.includes("<table"), html);
+
+  // No CSS filter anywhere: the receipt knocks the mark out to white on screen,
+  // and a mail client that strips the filter would render navy on navy.
+  check("nothing depends on a css filter", !/filter:/i.test(html));
+
+  const noLogo = textToHtml("Hello", "Subject", { name: "EPG Collections", primary: "#0052a3" });
+  check("an agent with no logo gets its name instead", noLogo.includes(">EPG Collections</div>"), noLogo.slice(0, 300));
+  check("an unbranded email is unchanged", !textToHtml("Hello", "Subject").includes("border-bottom:2px solid"));
+  check("a colour that is not a colour cannot reach the markup", textToHtml("Hi", "S", { name: "X", primary: "red;}</style><script>" }).includes("#0052a3"));
+}
+
 console.log("\nWho it goes to");
 check("the contact email on the case", completionRecipient({ contact_email: "a@b.ae" }) === "a@b.ae");
 check("trimmed", completionRecipient({ contact_email: "  a@b.ae " }) === "a@b.ae");
@@ -127,8 +164,16 @@ console.log("\nFired by the completion, not by the model");
   check("...audited either way", /res\.ok \? "confirmation_email_sent" : "confirmation_email_failed"/.test(block));
   check("...quoting the reference the CUSTOMER holds", /finalState\.referenceLabel \?\? finalState\.reference/.test(block));
   check("...with the reply as the body", /replyText: finalText/.test(block));
-  check("...and an absolute link built from the forwarded host", /x-forwarded-host/.test(block));
+  check("...and an absolute link", /baseUrl,/.test(block));
+  // Azure sits behind a proxy: `host` there is the internal name, so a receipt
+  // link built from it would be unreachable from an inbox.
+  check("...resolved against the FORWARDED host", /const fwdHost = req\.headers\.get\("x-forwarded-host"\)/.test(route));
   check("the tool marks its own send", /if \(res\.ok\) emailToolSent = true;/.test(route));
+  check("...and the assistant's own email is branded too", /textToHtml\(bodyText, subject, emailBrand\)/.test(route));
+  check("the completion email is branded", /textToHtml\(mail\.text, mail\.subject, emailBrand\)/.test(route));
+  // "EPGL Dialog — confirmation (LR-37381)" went out on 16 September. The record
+  // is called that; the customer has never heard of it.
+  check("...and signed with the brand, not the agent record's name", /agentName: brandName/.test(route) && /brandName = agent\.definition\.theme\?\.brandName/.test(route));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

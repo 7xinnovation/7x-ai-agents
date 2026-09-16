@@ -1031,6 +1031,26 @@ export async function POST(req: NextRequest) {
         : body.userMessage;
 
   const a = { agentId: agent.id, conversationId: session.conversationId };
+  /**
+   * Where this deployment answers, and who it answers as.
+   *
+   * A chat link can be relative — the widget resolves it against its own host —
+   * but an inbox cannot, so anything an email carries is absolutised against the
+   * FORWARDED host: Azure sits behind a proxy and `host` there is the internal
+   * name. The brand is the theme's, not the agent's: the record is called "EPGL
+   * Dialog" and the customer has never heard of it.
+   */
+  const fwdHost = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  const baseUrl = fwdHost
+    ? `${req.headers.get("x-forwarded-proto") ?? "https"}://${fwdHost}`
+    : process.env.PUBLIC_BASE_URL ?? null;
+  const brandName = agent.definition.theme?.brandName?.trim() || agent.definition.name;
+  const emailBrand = {
+    name: brandName,
+    logoUrl: agent.definition.theme?.logoUrl ?? null,
+    primary: agent.definition.theme?.colors?.primary ?? null,
+    baseUrl,
+  };
   const startJourney = session.state.journeyKey;
 
   // Transactional email as a first-class tool (Round-2 feedback FB-1426: the
@@ -2000,7 +2020,7 @@ export async function POST(req: NextRequest) {
     const bodyText = String(input.body ?? "");
     // Sent as both: the text part unchanged, plus an HTML rendering so the details
     // read as details rather than as one undifferentiated block.
-    const res = await sendEmail({ to, subject, text: bodyText, html: textToHtml(bodyText, subject) });
+    const res = await sendEmail({ to, subject, text: bodyText, html: textToHtml(bodyText, subject, emailBrand) });
     // So the completion email below does not arrive on top of this one.
     if (res.ok) emailToolSent = true;
     await audit({ ...a, actor: "agent", action: res.ok ? "email_sent" : "email_send_failed", payload: { to, subject, reason: res.reason } });
@@ -2744,7 +2764,15 @@ export async function POST(req: NextRequest) {
         // it. The application panel carries a permanent link either way, which
         // is where "I want it again" is properly answered.
         if (
-          shouldOfferReceipt(session.state.payment, finalState.payment, effectiveMessage, Boolean(submittedRef)) &&
+          shouldOfferReceipt(session.state.payment, finalState.payment, effectiveMessage, {
+            submittedThisTurn: Boolean(submittedRef),
+            // Finished: the system of record has it and the money settled. On
+            // EPGL those are two different turns and neither is the turn the
+            // customer reads as "done", so completion is what the offer hangs
+            // on — and receiptOfferedAt is what stops it repeating.
+            caseComplete: Boolean(submittedRef || finalState.reference),
+            alreadyOffered: Boolean(session.state.receiptOfferedAt),
+          }) &&
           !finalText.includes("/api/receipt/")
         ) {
           const receiptUrl = receiptHref(finalState.payment.reference ?? "", session.conversationId);
@@ -2752,6 +2780,12 @@ export async function POST(req: NextRequest) {
             body.locale === "ar" ? `\n\n[تنزيل الإيصال](${receiptUrl})` : `\n\n[Download your receipt](${receiptUrl})`;
           send({ type: "text", delta: receiptLine });
           finalText += receiptLine;
+        }
+        // However it got there — appended here, or inserted as a row of the
+        // confirmation card by the summary guard — the case remembers, so the
+        // next turn does not offer it again.
+        if (finalText.includes("/api/receipt/") && !finalState.receiptOfferedAt) {
+          finalState = { ...finalState, receiptOfferedAt: new Date().toISOString() };
         }
 
         // AND WHERE TO GO WITH A QUESTION. Emirates Post asked for their FAQ to
@@ -3148,13 +3182,8 @@ export async function POST(req: NextRequest) {
             finalState.payment.status === "paid" && finalState.payment.reference
               ? receiptHref(finalState.payment.reference, session.conversationId)
               : null;
-          // A relative link is unusable in an inbox. Azure sits behind a proxy, so
-          // the forwarded host is the name the customer's browser actually used.
-          const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
-          const proto = req.headers.get("x-forwarded-proto") ?? "https";
-          const baseUrl = host ? `${proto}://${host}` : process.env.PUBLIC_BASE_URL ?? null;
           const mail = completionEmail({
-            agentName: agent.definition.name,
+            agentName: brandName,
             locale: body.locale,
             reference: customerRef,
             contactName: str(finalState.data.contact_name) ?? null,
@@ -3173,7 +3202,7 @@ export async function POST(req: NextRequest) {
                 to: emailTo,
                 subject: mail.subject,
                 text: mail.text,
-                html: textToHtml(mail.text, mail.subject),
+                html: textToHtml(mail.text, mail.subject, emailBrand),
               });
               await audit({
                 ...a,
