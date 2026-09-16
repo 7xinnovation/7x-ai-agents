@@ -773,6 +773,10 @@ export async function POST(req: NextRequest) {
             // lookup, because the printed licence number fails the whole
             // composite with "id value of incorrect type".
             licenceRecordId: epglLicenceRecordId.value ?? undefined,
+            // And the account the lookup found. Never the model's to invent —
+            // JNT's renewal rolled back on "0015f00000XwXwXAAV", an id that does
+            // not exist. See withEpglRequestFields.
+            accountId: epglAccountId.value ?? undefined,
             // EPGL's own constants for the two services. Both were null on
             // LR-37172 — the model states them on a new licence and not on a
             // renewal, from one instruction covering both.

@@ -27,7 +27,7 @@ function journeyFields(journey: Journey): FieldDef[] {
  * here because that is where everything already imports it from.
  */
 export { evalCondition } from "@dialog/config";
-import { evalCondition } from "@dialog/config";
+import { evalCondition, withPartnerTypes } from "@dialog/config";
 
 export interface FieldValidationError {
   key: string;
@@ -99,7 +99,19 @@ export function setDocument(
 }
 
 /** Recompute submission readiness against the active journey (PRD readiness check). */
-export function recomputeReadiness(agent: AgentDefinition, state: CaseState): CaseState {
+export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): CaseState {
+  /**
+   * WHO IS A COMPANY IS SETTLED BEFORE ANYTHING IS ASKED FOR.
+   *
+   * The per-partner identity documents are conditioned on partner_N_type, and
+   * the type is derived from the name on the licence. Derived in the route, as
+   * it first was, it landed AFTER this ran: the readiness list was computed
+   * without it, and a corporate partner went on being asked for a passport for
+   * the rest of the application. JNT's renewal, 16 September — "the system still
+   * flags partner_1_passport as missing" — with GLOBAL JET EXPRESS AE FZCO in
+   * the field it was asking about.
+   */
+  const state = withPartnerTypes(stateIn);
   const journey = findJourney(agent, state.journeyKey);
   if (!journey) {
     return { ...state, readiness: { complete: false, missing: [] } };

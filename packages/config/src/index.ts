@@ -7,3 +7,4 @@ export * from "./integrations";
 export * from "./agent";
 export * from "./case";
 export * from "./condition";
+export * from "./partners";
