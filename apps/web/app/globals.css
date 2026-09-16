@@ -278,6 +278,15 @@ body {
   background: color-mix(in srgb, var(--c-danger) 11%, var(--c-surface));
   color: color-mix(in srgb, var(--c-danger) 82%, var(--c-text));
 }
+/* Withdraw permission — neutral at rest so it never nags, warns on hover to
+   mark it as the consequential one in the row. */
+.dlg-chip.icon-only.is-withdraw:hover {
+  background: color-mix(in srgb, var(--c-danger) 12%, var(--c-surface));
+  color: color-mix(in srgb, var(--c-danger) 84%, var(--c-text));
+}
+.dlg-chip.icon-only.is-withdraw:disabled {
+  opacity: 0.55;
+}
 /* Language toggle: ghost like the icon buttons (globe + short label) so the whole
    header action row reads as one calm toolbar, not a bordered pill among icons. */
 .dlg-chip.lang {

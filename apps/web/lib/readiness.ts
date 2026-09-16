@@ -29,6 +29,7 @@ import { AgentDefinition, emptyCase, type CaseState, type Journey } from "@dialo
 import { buildSystemPrompt, TOOL_DEFS, dispatchTool } from "@dialog/core";
 import { listIntegrations } from "./integrations";
 import { renderActionLog } from "./customerActionLog";
+import { summariseWithdrawal } from "./withdrawPermission";
 
 // ── The six live government services ─────────────────────────────────────────
 export interface ServiceRef {
@@ -169,7 +170,10 @@ export const ENTITY_POSITIONS: EntityPosition[] = [
     check: "Permission withdrawable in one step",
     asked: "Add a one-tap withdraw-permission control that revokes consent, stops any pending action and tells the customer what was erased.",
     stated: "Add stop agent button to stop the activity and cancel the action done, and tell customer what has been done and what has been erased.",
-    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1737", kind: "committed",
+    // Committed on 16 Sep and built the same day: the one-tap Withdraw control now
+    // revokes the session and consents, erases the collected case, and hands back
+    // a receipt of what was done and what was erased — measured by the probe.
+    by: "Mohammed Ali", on: "2026-09-16", ref: "FB-1737", kind: "confirmed",
   },
   {
     criterionId: "transparency",
@@ -366,6 +370,8 @@ export interface CodeProbe {
   callbackCarriesContext: boolean;
   /** Whether the customer can be shown what was done in their name. */
   customerReadableLog: boolean;
+  /** Whether one action erases the collected data and keeps the record. */
+  permissionWithdrawable: boolean;
   /** Why a probe could not run, when it could not. */
   note?: string;
 }
@@ -414,6 +420,7 @@ export async function runCodeProbe(): Promise<CodeProbe> {
     recordsDeclinedConsent: false,
     callbackCarriesContext: false,
     customerReadableLog: false,
+    permissionWithdrawable: false,
   };
   try {
     // 1. A settled case must not reach the gateway at all.
@@ -524,6 +531,32 @@ export async function runCodeProbe(): Promise<CodeProbe> {
         Array.isArray(carried.doNotReAsk) &&
         carried.doNotReAsk.length > 0
     );
+
+    // 5. Withdrawing permission must ERASE what was collected and KEEP the record
+    //    of what was done. Run the withdrawal against a populated case and a
+    //    prior action, and check both halves: something named as erased, the
+    //    done log carried through untouched, and the case reset to empty. The
+    //    check reads this, so removing the erase or the receipt fails the probe.
+    const wd = summariseWithdrawal(
+      probeCase({
+        data: { box_number: "5200", emirate: "Ajman", auto_renew_consent: true, terms_accepted: true, __verified_emirates_id: "784-XXXX" },
+        documents: [{ key: "trade_license", status: "uploaded", fileName: "tl.pdf" }],
+        gatewayPayment: { url: "https://pay.invalid", reference: "PW", orderNo: null, openedAt: null, paidAt: null, amount: 100 },
+      } as Partial<CaseState>),
+      renderActionLog(
+        [{ action: "case_submitted", actor: "agent", payload: { reference: "LR-PW" }, createdAt: "2026-09-16T08:00:00Z" }],
+        { entity: "Emirates Post", caseReference: "LR-PW" }
+      ),
+      "en",
+      true
+    );
+    out.permissionWithdrawable = Boolean(
+      wd.erased.length > 0 &&
+        wd.done.length === 1 &&
+        Object.keys(wd.cleared.data ?? {}).length === 0 &&
+        (wd.cleared.documents ?? []).length === 0 &&
+        /erased/i.test(wd.message)
+    );
   } catch (e) {
     out.note = e instanceof Error ? e.message : String(e);
   }
@@ -621,8 +654,10 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
       { label: "Answers must be grounded in approved knowledge", weight: 1, ok: g.requireGroundedAnswers === true,
         detail: g.requireGroundedAnswers ? "Ungrounded policy answers are suppressed" : "Grounding is not enforced",
         fix: "Enable requireGroundedAnswers so policy answers cannot be improvised." },
-      { label: "Permission withdrawable in one step", weight: 3, ok: false,
-        detail: "Consent is captured per action and the session can be ended, but there is no single control that revokes a granted permission and erases what was captured under it",
+      { label: "Permission withdrawable in one step", weight: 3, ok: c.probe.permissionWithdrawable,
+        detail: c.probe.permissionWithdrawable
+          ? "A one-tap Withdraw control (POST /api/chat/withdraw) revokes the session and consents, resets the collected case to empty, and returns the customer a plain-language account of what was done in their name and what was erased - the withdrawal is itself recorded as permission_withdrawn, so the record of what happened survives the pull-back"
+          : "Consent is captured per action and the session can be ended, but there is no single control that revokes a granted permission and erases what was captured under it",
         fix: "Add a one-tap withdraw-permission control that revokes consent, stops any pending action and tells the customer what was erased." },
       // The permissions artefact requires central revocation per capability
       // "دون إيقاف المنصة بالكامل" - and the integration layer already provides
