@@ -71,6 +71,9 @@ interface ChatMessage {
   payment?: PaymentInfo;
   /** When this message was said, ISO. Absent on older persisted messages. */
   at?: string | null;
+  /** The proactive account pulse — a long visual summary. Voice mode speaks only
+   *  its intro line rather than reading the whole snapshot aloud. */
+  pulse?: boolean;
 }
 
 /**
@@ -466,6 +469,11 @@ export function Experience({
 }) {
   const uaePass = useRef<string | undefined>(uaePassToken);
   const [locale, setLocale] = useState<Locale>(initialLocale);
+  // On a language switch, the messages already on screen are translated into the
+  // new language too (display-only, best-effort) so the whole conversation
+  // follows — keyed by `${index}:${locale}`, original kept for switching back.
+  const [xlate, setXlate] = useState<Record<string, string>>({});
+  const xlateInflight = useRef<Set<string>>(new Set());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [caseState, setCaseState] = useState<CaseState | null>(null);
 
@@ -1192,7 +1200,7 @@ export function Experience({
     setMessages((prev) => [
       ...prev,
       ...(silent ? [] : [{ role: "user" as const, content: text, at: said }]),
-      { role: "assistant" as const, content: "", citations: [], at: said },
+      { role: "assistant" as const, content: "", citations: [], at: said, ...(proactive ? { pulse: true } : {}) },
     ]);
     setStreaming(true);
     setToolStatus(null);
@@ -1406,6 +1414,54 @@ export function Experience({
   // chat messages (see useVoiceChat). Layered on the normal chat, not a separate
   // agent — voice input goes through the same send().
   const voice = useVoiceChat({ agentSlug: agent.slug, locale, messages, streaming, send: (t) => void send(t) });
+
+  // Translate the on-screen transcript when the session language changes: any
+  // message written in the other script is sent to /api/translate for the
+  // current locale and shown translated. Best-effort — on failure the original
+  // stays, so it can never blank a message or break the card/button flow.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const wantArabic = locale === "ar";
+    const batch: { key: string; text: string }[] = [];
+    messages.forEach((m, i) => {
+      const text = m.content?.trim();
+      if (!text) return;
+      if (streaming && i === messages.length - 1) return; // still arriving in the current language
+      const key = `${i}:${locale}`;
+      if (xlate[key] || xlateInflight.current.has(key)) return;
+      const hasArabic = /[؀-ۿ]/.test(text);
+      const hasLatin = /[A-Za-z]/.test(text);
+      const mismatched = wantArabic ? (!hasArabic && hasLatin) : hasArabic;
+      if (mismatched) batch.push({ key, text: m.content });
+    });
+    if (!batch.length) return;
+    batch.forEach((b) => xlateInflight.current.add(b.key));
+    void (async () => {
+      try {
+        const res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texts: batch.map((b) => b.text), to: locale }),
+        });
+        if (res.ok) {
+          const { texts } = (await res.json()) as { texts?: string[] };
+          if (Array.isArray(texts)) {
+            setXlate((prev) => {
+              const next = { ...prev };
+              batch.forEach((b, k) => { const v = texts[k]; if (v && v !== b.text) next[b.key] = v; });
+              return next;
+            });
+          }
+        }
+      } catch { /* best-effort: originals remain */ } finally {
+        batch.forEach((b) => xlateInflight.current.delete(b.key));
+      }
+    })();
+  }, [locale, messages, streaming, xlate]);
+
+  /** The message text to show now: a translation for the current locale if one
+   *  has been fetched, otherwise the original as sent. */
+  const displayContent = useCallback((i: number, m: ChatMessage) => xlate[`${i}:${locale}`] ?? m.content, [xlate, locale]);
 
   // Tap-to-select: clicking an option card sends its title as the customer's
   // choice, so they can pick without typing. Ignored while a turn is streaming.
@@ -1669,9 +1725,9 @@ export function Experience({
                   ) : null}
                   {m.content ? (
                     m.role === "assistant" ? (
-                      <TypewriterMarkdown text={m.content} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={uploadCtx} locale={locale} />
+                      <TypewriterMarkdown text={displayContent(i, m)} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={uploadCtx} locale={locale} />
                     ) : (
-                      m.content
+                      displayContent(i, m)
                     )
                   ) : null}
                   {streaming && i === messages.length - 1

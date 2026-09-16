@@ -15,7 +15,14 @@ import type { Locale } from "@dialog/config";
  *  - TTS: each new assistant reply is spoken with SpeechSynthesis; the mic is
  *    paused while it streams/speaks (no echo) and resumes after.
  */
-interface Msg { role: string; content: string }
+interface Msg { role: string; content: string; pulse?: boolean }
+
+/** The account pulse is a long visual summary; spoken aloud it is a monologue.
+ *  Voice reads only its intro sentence and lets the panel/cards carry the rest. */
+function pulseIntro(text: string): string {
+  const m = text.match(/^[\s\S]*?[.!?؟۔](\s|$)/);
+  return (m ? m[0] : text.split(/\n/)[0] ?? text).trim();
+}
 
 /**
  * The reply, as something to say out loud rather than something to render.
@@ -419,7 +426,9 @@ export function useVoiceChat(opts: {
     const last = messages[idx];
     if (last && last.role === "assistant" && last.content.trim() && idx > spokenRef.current) {
       spokenRef.current = idx;
-      speak(last.content);
+      // The account pulse is a long visual summary — voice speaks only its intro
+      // line ("Here is a snapshot of your account.") and leaves the rest to read.
+      speak(last.pulse ? pulseIntro(last.content) : last.content);
     } else if (!speakingRef.current && !busyRef.current && micRef.current) {
       listenOnce();
     }
