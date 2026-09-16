@@ -103,6 +103,7 @@ export const STR = {
     placeholder: "Type your message…",
     sources: "Sources",
     case: "Your application",
+    caseSub: "Builds itself as you talk",
     emptyTitle: "Nothing to assemble yet",
     emptyBody: "As we talk, your application takes shape here: details, documents, and what's left.",
     missing: "Submission readiness",
@@ -162,6 +163,7 @@ export const STR = {
     placeholder: "اكتب رسالتك…",
     sources: "المصادر",
     case: "طلبك",
+    caseSub: "يُبنى أثناء حديثك",
     emptyTitle: "لا يوجد ما يُجمع بعد",
     emptyBody: "أثناء المحادثة، يتشكّل طلبك هنا: التفاصيل والمستندات وما تبقّى.",
     missing: "جاهزية الإرسال",
@@ -1944,7 +1946,15 @@ export function Experience({
               <button className="dlg-back-chat" onClick={() => setMobileCaseOpen(false)} aria-label={t.backToChat}>
                 <CaretLeft size={14} weight="bold" /> {t.backToChat}
               </button>
-              <h2>{t.case}</h2>
+              <div className="dlg-case-head-main">
+                <span className="dlg-case-head-icon">
+                  <FileText size={16} weight={iconWeight} />
+                </span>
+                <div className="dlg-case-head-text">
+                  <h2>{t.case}</h2>
+                  <span className="dlg-case-sub">{t.caseSub}</span>
+                </div>
+              </div>
               {caseState && hasCase ? <span className={`dlg-status ${caseState.status}`}>{t.caseStatus[caseState.status] ?? caseState.status}</span> : null}
             </div>
 
