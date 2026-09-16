@@ -6,7 +6,6 @@ import {
   GlobeSimple,
   SignIn,
   UserCircleCheck,
-  ChatsCircle,
   TextAlignLeft,
   FileText,
   ListChecks,
@@ -38,6 +37,25 @@ import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
 import { maskForDisplay } from "@/lib/maskIdentity";
 import { openExternal, isNative, postNative, nativeToken, nativeHandoff, type ExternalWindow } from "./nativeBridge";
+
+/** Aisha's brand azure (from the AISHA wordmark) — the single accent, applied
+ *  across every tenant so the assistant reads as Aisha, not the host brand. */
+const AISHA_BLUE = "#2b90ee";
+
+/** The Aisha presence: a small layered sphere (styled by .dlg-orb in globals). */
+function Orb({ size = 25, state = "idle" }: { size?: number; state?: "idle" | "thinking" | "speaking" }) {
+  return (
+    <span className="dlg-orb" style={{ ["--orb-size" as string]: `${size}px` }} data-state={state} aria-hidden="true">
+      <span className="dlg-orb-bloom" />
+      <span className="dlg-orb-body">
+        <span className="dlg-orb-flow a" />
+        <span className="dlg-orb-flow b" />
+        <span className="dlg-orb-sheen" />
+        <span className="dlg-orb-spec" />
+      </span>
+    </span>
+  );
+}
 
 interface PaymentInfo {
   reference: string;
@@ -1475,8 +1493,10 @@ export function Experience({
 
   const fallbackFont = "'SF Pro Display', -apple-system, 'Segoe UI', system-ui, sans-serif";
   const rootStyle = {
-    ["--c-primary" as string]: c.primary,
-    ["--c-primary-fg" as string]: c.primaryForeground,
+    // Aisha's azure overrides the tenant primary so the orb, buttons, links,
+    // progress and selected states all read as Aisha.
+    ["--c-primary" as string]: AISHA_BLUE,
+    ["--c-primary-fg" as string]: "#ffffff",
     ["--c-surface" as string]: c.surface,
     ["--c-surface-muted" as string]: c.surfaceMuted,
     ["--c-text" as string]: c.text,
@@ -1506,19 +1526,9 @@ export function Experience({
     <div className={`dlg-root ${full ? "is-full" : ""} ${mobileCaseOpen ? "is-mobile-case" : ""}`} dir={dir} style={rootStyle}>
       <header className="dlg-header">
         <div className="dlg-brand">
-          {agent.theme.logoUrl ? (
-            <img className="dlg-header-logo" src={agent.theme.logoUrl} alt={agent.theme.brandName || agent.name} />
-          ) : (
-            <span className="dlg-avatar">
-              <ChatsCircle size={19} weight="fill" />
-            </span>
-          )}
-          <span className="dlg-brand-text">
-            {!agent.theme.logoUrl && <span className="dlg-brand-name">{agent.theme.brandName || agent.name}</span>}
-            <span className="dlg-brand-status">
-              <span className="dlg-dot" /> {t.online}
-            </span>
-          </span>
+          {/* Aisha wordmark — the assistant's identity across every tenant. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="dlg-header-logo" src="/aisha-onlight.jpg" alt="Aisha" />
         </div>
         <div className="dlg-actions">
           {agent.locales.length > 1 ? (
@@ -1613,7 +1623,7 @@ export function Experience({
           ) : null}
           <div className="dlg-messages" ref={scrollRef}>
             <div className="dlg-msg assistant">
-              <span className="dlg-orb" aria-hidden="true" />
+              <Orb size={25} />
               {/* Greeting gets onSelect so a ```buttons service list in it is
                   tappable (feedback FB-1434: structured options, not prose). */}
               <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} locale={locale} /></div>
@@ -1640,7 +1650,7 @@ export function Experience({
             {messages.map((m, i) => (
               <div key={i} className={`dlg-msg ${m.role}`}>
                 {m.role === "assistant" ? (
-                  <span className="dlg-orb" aria-hidden="true" />
+                  <Orb size={25} />
                 ) : null}
                 {/* EACH BUBBLE DECIDES ITS OWN DIRECTION.
                     The panel is right-to-left for an Arabic session, and an
