@@ -112,6 +112,19 @@ export const AgentDefinition = z.object({
    */
   progressPlacement: z.enum(["panel", "top"]).default("panel"),
   /**
+   * Whether the case panel carries "What has been done" — the plain-language
+   * record of every action taken in the customer's name, with the consent
+   * beside each one.
+   *
+   * Built for EPGL, where a licence application commits the applicant to
+   * declarations and a payment and the artefact requires a readable action log.
+   * It was rendered for every agent, which put it on the Emirates Post PO Box
+   * widget too: a box rental does nothing on anyone's behalf worth a ledger,
+   * and an empty "Nothing has been done on your behalf yet" is a question the
+   * customer never asked. Off unless an agent is asked for it.
+   */
+  showActivityLog: z.boolean().default(false),
+  /**
    * Hard cap on how many in-chat upload controls one assistant message may show
    * (FB-1565: the next step must be a single, unambiguous ask). The prompt has
    * always told the agent to request one document at a time, but at the opening

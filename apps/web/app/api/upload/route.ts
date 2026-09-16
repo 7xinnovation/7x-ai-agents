@@ -172,10 +172,12 @@ export async function POST(req: NextRequest) {
 
   // Locate the document requirement across the agent's journeys.
   let req_: DocumentRequirement | undefined;
+  /** The journey this slot belongs to — needed when the case has not picked one yet. */
+  let reqJourney: string | undefined;
   for (const j of agent.definition.journeys)
     for (const s of j.steps) {
       const found = s.documents.find((d) => d.key === key);
-      if (found) req_ = found;
+      if (found) { req_ = found; reqJourney = j.key; }
     }
   if (!req_) return NextResponse.json({ error: "unknown_document" }, { status: 400 });
 
@@ -229,18 +231,75 @@ export async function POST(req: NextRequest) {
   const sessionLocale = ((await getDb().query.conversations.findFirst({ where: eq(conversations.id, conversationId) }))?.locale ?? agent.definition.locales?.[0] ?? "en") as "en" | "ar";
   const reqLabel = typeof req_.label === "string" ? req_.label : (req_.label[sessionLocale] ?? req_.label.en ?? key);
   let extraction: Awaited<ReturnType<typeof extractFieldsFromDocument>> = { values: {} };
+  let extractionError: string | null = null;
+  const journeyForExtraction = caseRow.state.journeyKey || reqJourney;
   try {
     extraction = await extractFieldsFromDocument({
       agent: agent.definition,
-      state: caseRow.state,
+      /**
+       * READ IT AGAINST THE JOURNEY THE SLOT BELONGS TO, NOT THE ONE THE CASE
+       * HAPPENS TO BE ON.
+       *
+       * extractFieldsFor takes its field list from the case's journey and
+       * returns [] when there isn't one — and an empty field list makes the
+       * extractor return `{}` without ever looking at the document. No error,
+       * no audit, nothing: the file is stored, ticked green, and not one value
+       * is read from it.
+       *
+       * 16 September, a signed-in EPGL applicant: the company came off their
+       * UAE PASS profile, the assistant offered the licence upload straight
+       * away — before calling set_journey — and an EXPIRED 2021 trade licence
+       * went in unread and was accepted. The expiry check had nothing to check
+       * (`expiredLicence` reads the extracted values), so the only thing that
+       * questioned the file was the model noticing the word "old" in its
+       * filename. Both uploads in that conversation audit as `extracted: []`.
+       *
+       * The slot itself always knows its journey — this route already found the
+       * requirement by walking every journey to get here — so use that when the
+       * case has not chosen one yet.
+       */
+      state: { ...caseRow.state, journeyKey: journeyForExtraction ?? null },
       locale: sessionLocale,
       fileName: file.name,
       contentType: file.type || "application/octet-stream",
       bytes,
       expected: { key, label: reqLabel },
     });
-  } catch {
-    /* extraction is best-effort */
+  } catch (e) {
+    /* extraction is best-effort — but never silent again: see below. */
+    extractionError = e instanceof Error ? e.message : "unknown error";
+  }
+
+  /**
+   * A DOCUMENT THAT YIELDED NOTHING IS NOT A DOCUMENT THAT WAS READ.
+   *
+   * Every check downstream of here — the expiry, the entity match, the partner
+   * identity — works off `extraction.values`. An empty one silently turns all
+   * of them into no-ops, and the upload still goes green. The only trace it
+   * left was `extracted: []` buried in a later audit line, which reads exactly
+   * like a document that legitimately printed nothing we wanted.
+   *
+   * So say it plainly, with the reason: threw, no journey to read against, or
+   * read and found nothing.
+   */
+  if (!Object.keys(extraction.values ?? {}).length) {
+    await audit({
+      agentId: agent.id,
+      conversationId,
+      actor: "system",
+      action: "document_not_read",
+      payload: {
+        key,
+        fileName: file.name,
+        reason: extractionError
+          ? `extraction failed: ${extractionError}`
+          : !journeyForExtraction
+            ? "no journey to read the document against"
+            : "the model returned no values",
+        journeyKey: journeyForExtraction ?? null,
+        docType: extraction.docType ?? null,
+      },
+    });
   }
 
   // Document TYPE validation (Round-1-internal FB-1443/1449/1451/1452/1455):
@@ -311,7 +370,18 @@ export async function POST(req: NextRequest) {
   // right place for it is here: the licence copy is the evidence, so this is the
   // moment we can see the date rather than take it from the conversation. Refusing
   // at submission instead would be after the customer had done all the work.
-  const stale = expiredLicence(extraction.values ?? {});
+  /**
+   * The licence's OWN printed expiry, read as a fact about the file rather than
+   * as a field of the application. `license_expiry_date` is what the model was
+   * asked to map into the case and it can legitimately come back empty — on an
+   * Initial Approval, say — while `__document_expiry_date` is asked of every
+   * document there is. Either one being in the past is the same refusal.
+   */
+  const printedExpiry =
+    extraction.docType === "trade_license" && extraction.docExpiryDate
+      ? { license_expiry_date: extraction.docExpiryDate }
+      : {};
+  const stale = expiredLicence({ ...printedExpiry, ...(extraction.values ?? {}) });
   if (stale) {
     const on = formatGulfDate(stale.expiredOn);
     const reason =

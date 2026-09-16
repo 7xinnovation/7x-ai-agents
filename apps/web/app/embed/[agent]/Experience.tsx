@@ -2080,7 +2080,7 @@ export function Experience({
                     live account; this is the one you go back to a week later,
                     with the consent beside each action and the reference it
                     produced. Closed by default — it is a record, not a step. */}
-                {caseState ? (
+                {caseState && agent.showActivityLog ? (
                   <div className="dlg-card">
                     <h3>
                       <ListChecks size={15} weight="bold" /> {t.activity}

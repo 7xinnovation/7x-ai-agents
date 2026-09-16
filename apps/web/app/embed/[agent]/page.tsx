@@ -31,6 +31,7 @@ export default async function EmbedPage({
     documentsInChat: d.documentsInChat,
     progressPlacement: d.progressPlacement ?? "panel",
     uploadsPerMessage: d.uploadsPerMessage,
+    showActivityLog: d.showActivityLog ?? false,
     journeys: d.journeys.map((j) => ({
       key: j.key,
       title: j.title,

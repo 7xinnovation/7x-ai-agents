@@ -747,8 +747,14 @@ const EVALUATORS: Record<string, (c: Ctx) => Check[]> = {
     // Closed 2026-09-16 (FB-1738), and verified by rendering rather than
     // asserted: the probe runs the customer-facing renderer over fabricated
     // audit rows and reads the artefact's own fields back off the result.
-    { label: "That log is readable BY THE CUSTOMER", weight: 3, ok: c.probe.customerReadableLog,
-      detail: c.probe.customerReadableLog
+    // ...and only where the panel actually carries it. The renderer working is
+    // half the claim; the other half is whether this agent shows it. EPGL does,
+    // by request; Emirates Post's PO Box widget was showing an empty ledger for
+    // a box rental and had it turned off on 16 September.
+    { label: "That log is readable BY THE CUSTOMER", weight: 3, ok: c.probe.customerReadableLog && c.def.showActivityLog === true,
+      detail: !c.def.showActivityLog
+        ? "The renderer works, but this agent's panel does not carry the action log - the customer has nothing to read it in"
+        : c.probe.customerReadableLog
         ? "Verified by execution at assessment time: the customer's own panel renders what was done in their name from the audited actions — who asked, who carried it out, the consent it rested on, the result and the reference — including refusals, and with nothing internal in it"
         : "The audit trail is complete but visible only to staff in the admin console - the customer cannot read back what was done for them",
       fix: "Give the customer a plain-language history of what the assistant did on their behalf, inside their own conversation - the action-log artefact fixes its schema: who requested and who executed, whether consent was required and its status, what was done in the customer's name, the result, the reference, and the next step." },

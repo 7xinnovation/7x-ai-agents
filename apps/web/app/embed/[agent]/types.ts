@@ -49,6 +49,9 @@ export interface PublicAgent {
   progressPlacement?: "panel" | "top";
   // Cap on upload controls shown per assistant message (FB-1565).
   uploadsPerMessage?: number;
+  // Whether the case panel shows the "What has been done" action log. EPGL's
+  // artefact asks for it; a PO Box rental has no ledger worth showing.
+  showActivityLog?: boolean;
   journeys: PublicJourney[];
   // Origins permitted to embed this agent. Also the allow-list for the host
   // handoff: a postMessage carrying a session token is only read when it comes
