@@ -1,5 +1,5 @@
 import { getDb, cases, conversations, messages, auditLog, agents } from "@dialog/db";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { CaseState } from "@dialog/config";
 
 /**
@@ -113,6 +113,16 @@ export interface RequestDetail extends RequestRow {
   }[];
   /** The confirmation email, if one went out. */
   emails: { at: string; action: string; to: string | null; subject: string | null; reason: string | null }[];
+  /**
+   * The conversation that produced all of it.
+   *
+   * Asked for on 16 September: opening a request should show "a nice pop-up of
+   * the conversations it's related to". The summary answers what was agreed and
+   * the calls answer what we sent; when those two disagree the answer is always
+   * in what was actually said, and having to leave the tab to read it is how a
+   * reconciliation stops halfway.
+   */
+  messages: { role: "user" | "assistant"; content: string; at: string }[];
 }
 
 /** Audit rows that record an outbound write, in the order they happened. */
@@ -289,12 +299,15 @@ export async function requestDetail(agentId: string, caseId: string): Promise<Re
   // a summary card. Later beats earlier — a licence application confirms once,
   // but a conversation that corrected something confirms twice and the second
   // one is the truth.
-  const assistant = await db
-    .select({ content: messages.content })
+  // The whole conversation, oldest first, for the panel — and its assistant
+  // messages, newest first, for the card hunt below.
+  const transcript = await db
+    .select({ role: messages.role, content: messages.content, createdAt: messages.createdAt })
     .from(messages)
-    .where(and(eq(messages.conversationId, row.conversationId), eq(messages.role, "assistant")))
-    .orderBy(desc(messages.createdAt))
-    .limit(60);
+    .where(and(eq(messages.conversationId, row.conversationId), inArray(messages.role, ["user", "assistant"])))
+    .orderBy(asc(messages.createdAt))
+    .limit(400);
+  const assistant = transcript.filter((m) => m.role === "assistant").reverse();
   let confirmation: SummaryCard | null = null;
   let confirmationText: string | null = null;
   let confirmationKind: RequestDetail["confirmationKind"] = "latest";
@@ -373,6 +386,11 @@ export async function requestDetail(agentId: string, caseId: string): Promise<Re
           ok: !/failed/.test(a.action),
         };
       }),
+    messages: transcript.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+      at: new Date(m.createdAt).toISOString(),
+    })),
     emails: auditRows
       .filter((a) => isEmail(a.action))
       .map((a) => {

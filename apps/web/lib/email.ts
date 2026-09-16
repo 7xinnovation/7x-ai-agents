@@ -160,7 +160,30 @@ export function textToHtml(text: string, heading?: string, brand?: EmailBrand): 
     escaped.replace(/https?:\/\/[^\s<>"]+/g, (u) =>
       `<a href="${u}" style="color:#1330F0;word-break:break-all">${u}</a>`
     );
-  const row = /^\s*([A-Za-z][^:]{0,44}):\s*(.+?)\s*$/;
+  /**
+   * A "Label: value" line, in ANY script.
+   *
+   * It used to require a Latin first letter, so an Arabic confirmation never
+   * formed a detail table — every row fell through to the paragraph branch and
+   * the customer got a wall of lines where an English customer got a table.
+   */
+  const row = /^\s*(\p{L}[^:]{0,44}):\s*(.+?)\s*$/u;
+  /**
+   * RIGHT-TO-LEFT, AND THE NUMBERS INSIDE IT.
+   *
+   * "16-09-2026" in an Arabic paragraph renders as "2026-09-16": the digits are
+   * three separate left-to-right runs and the hyphens between them are neutral,
+   * so the bidi algorithm lays the runs out right to left and the date reads
+   * backwards. Reported on LR-37385, where the email said 2026-09-16 and the
+   * text it was built from said 16-09-2026.
+   *
+   * So a value with no Arabic in it — a date, an amount, a reference, an
+   * address, a URL — is isolated as left-to-right wherever it sits.
+   */
+  const rtl = /[\u0600-\u06ff]/.test(text.replace(/[^\p{L}]/gu, "").slice(0, 400));
+  const hasArabic = (v: string) => /[\u0600-\u06ff]/.test(v);
+  const isolate = (escaped: string, raw: string) =>
+    rtl && !hasArabic(raw) ? `<span dir="ltr" style="unicode-bidi:isolate">${escaped}</span>` : escaped;
 
   const blocks = text.replace(/\r\n/g, "\n").split(/\n\s*\n/).map((b) => b.split("\n").filter((l) => l.trim()));
   const parts: string[] = [];
@@ -169,13 +192,16 @@ export function textToHtml(text: string, heading?: string, brand?: EmailBrand): 
     const matched = lines.map((l) => l.match(row));
     // Two or more label/value lines read as a detail block, not as prose.
     if (matched.filter(Boolean).length >= 2 && matched.every(Boolean)) {
+      const labelPad = rtl ? "padding:8px 0 8px 16px" : "padding:8px 16px 8px 0";
+      const valuePad = rtl ? "padding:8px 0;text-align:left" : "padding:8px 0;text-align:right";
       const cells = matched
         .map(
           (m) =>
-            `<tr><td style="padding:8px 16px 8px 0;color:#5b6472;white-space:nowrap;border-bottom:1px solid #edf0f4">${esc(
+            `<tr><td style="${labelPad};color:#5b6472;white-space:nowrap;border-bottom:1px solid #edf0f4">${esc(
               m![1]!
-            )}</td><td style="padding:8px 0;font-weight:600;color:#111827;text-align:right;word-break:break-word;border-bottom:1px solid #edf0f4">${link(
-              esc(m![2]!)
+            )}</td><td style="${valuePad};font-weight:600;color:#111827;word-break:break-word;border-bottom:1px solid #edf0f4">${isolate(
+              link(esc(m![2]!)),
+              m![2]!
             )}</td></tr>`
         )
         .join("");
@@ -183,7 +209,9 @@ export function textToHtml(text: string, heading?: string, brand?: EmailBrand): 
       continue;
     }
     parts.push(
-      `<p style="margin:14px 0;line-height:1.55;color:#111827;font-size:14px">${lines.map((l) => link(esc(l))).join("<br>")}</p>`
+      `<p style="margin:14px 0;line-height:1.55;color:#111827;font-size:14px">${lines
+        .map((l) => isolate(link(esc(l)), l))
+        .join("<br>")}</p>`
     );
   }
 
@@ -207,7 +235,7 @@ export function textToHtml(text: string, heading?: string, brand?: EmailBrand): 
       }</div>`
     : "";
   return [
-    `<div style="margin:0;padding:24px;background:#f6f7f9">`,
+    `<div style="margin:0;padding:24px;background:#f6f7f9"${rtl ? ' dir="rtl"' : ""}>`,
     `<div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e8ee;border-radius:14px;padding:28px;`,
     `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">`,
     header,

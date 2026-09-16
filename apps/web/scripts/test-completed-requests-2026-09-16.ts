@@ -137,6 +137,12 @@ for (const a of all) {
       check("the collected fields are readable", d.fields.every((f) => f.label && f.value));
       check("no internal keys leak into the panel", d.fields.every((f) => !f.key.startsWith("__")), d.fields.map((f) => f.key));
       check("the calls carry what was sent", d.calls.every((c) => "request" in c && typeof c.ok === "boolean"));
+      // The conversation travels with the request: the panel opens it beside the
+      // summary rather than sending anyone to a second tab.
+      check("the transcript comes with it", d.messages.length > 0, d.messages.length);
+      check("...oldest first, the way it was said", d.messages.every((m, k) => k === 0 || d.messages[k - 1]!.at <= m.at));
+      check("...both sides of it", new Set(d.messages.map((m) => m.role)).size === 2, [...new Set(d.messages.map((m) => m.role))]);
+      check("...and nothing but the two", d.messages.every((m) => m.role === "user" || m.role === "assistant"));
       if (withCard) {
         check("the confirmation came from the transcript", (withCard.confirmation?.rows.length ?? 0) > 0, withCard.confirmation);
         check("...and the panel is told which card it is holding", ["confirmation", "latest"].includes(withCard.confirmationKind), withCard.confirmationKind);
@@ -161,6 +167,12 @@ console.log("\nWired into the admin panel");
   check("...and renders the manager", /tab === "Requests" &&/.test(editor));
   const route = readFileSync(new URL("../app/api/admin/agents/[slug]/requests/route.ts", import.meta.url), "utf8");
   check("the endpoint is scoped to the caller's agents", /const denied = await denyAgent\(slug\);/.test(route));
+  const ui = readFileSync(new URL("../app/admin/[slug]/RequestsManager.tsx", import.meta.url), "utf8");
+  check("the detail opens as a modal, not a panel under the table", /role="dialog"\n\s+aria-modal="true"/.test(ui) || /aria-modal="true"/.test(ui));
+  check("...closed by Escape", /e\.key === "Escape"/.test(ui));
+  check("...and by the backdrop", /onClick=\{\(\) => setOpen\(null\)\}/.test(ui));
+  check("the transcript is rendered beside the summary", /Conversation/.test(ui) && /detail\.messages\.map/.test(ui));
+  check("...with the widget's controls taken out", /function readable\(text: string\)/.test(ui));
   check("...serves one request in full", /requestDetail\(agent\.id, caseId\)/.test(route));
   check("...and exports the list as CSV", /format"\) === "csv"/.test(route));
   check("the CSV opens in Excel with Arabic names intact", /\\ufeff|﻿/.test(route));

@@ -9,7 +9,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-reply-locale-2026-09-10.ts
  */
-import { messageLocale } from "../lib/replyLocale";
+import { messageLocale, historyLocale } from "../lib/replyLocale";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -78,6 +78,28 @@ check("...and so does asking for it outright", messageLocale("can we continue in
 console.log("\nDigits and punctuation are not letters");
 check("a box number with Arabic around it is Arabic", messageLocale("الصندوق 2290 من فضلك") === "ar");
 check("a bare number decides nothing", messageLocale("392028") === null);
+
+console.log("\nThe language the conversation has been held in");
+{
+  const ar = [
+    { role: "assistant", content: "مرحباً! كيف يمكنني مساعدتك اليوم في رخص النشاط البريدي؟" },
+    { role: "user", content: "التقدّم بطلب رخصة" },
+    { role: "assistant", content: "ممتاز، لنبدأ. العملية بسيطة وتمر بثلاث مراحل: رفع المستندات، مراجعة البيانات، ثم الدفع." },
+  ];
+  const en = [
+    { role: "assistant", content: "Hello! How can I help you with postal activity licensing today?" },
+    { role: "assistant", content: "Great — let's start. The process has three stages: documents, details, then payment." },
+  ];
+  check("an Arabic transcript reads as Arabic", historyLocale(ar) === "ar");
+  check("an English one as English", historyLocale(en) === "en");
+  check("the customer's own messages do not decide it", historyLocale([{ role: "user", content: "أريد رخصة" }, ...en]) === "en");
+  check("a transcript too short to tell decides nothing", historyLocale([{ role: "assistant", content: "تم." }]) === null, historyLocale([{ role: "assistant", content: "تم." }]));
+  check("an empty history decides nothing", historyLocale([]) === null && historyLocale(undefined) === null);
+  // THE REPORTED CASE: the interface says English, the transcript is Arabic, and
+  // the model mirrors what it reads unless something says otherwise.
+  check("a switch is visible as a disagreement", historyLocale(ar) !== "en");
+}
+
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

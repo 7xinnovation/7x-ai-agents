@@ -134,10 +134,29 @@ const PAY_METHOD: Record<string, { en: string; ar: string }> = {
   card: { en: "Card payment", ar: "الدفع بالبطاقة" },
 };
 
-const money = (amount: number | null | undefined, currency: string | null | undefined) =>
-  typeof amount === "number" && Number.isFinite(amount) && amount > 0
-    ? `${currency || "AED"} ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : "";
+/** "card" as the customer would read it, in their language. */
+export function payMethodLabel(method: string | null | undefined, locale?: string): string {
+  const key = String(method ?? "").trim().toLowerCase();
+  if (!key) return "";
+  const known = PAY_METHOD[key];
+  return known ? (locale === "ar" ? known.ar : known.en) : String(method).trim();
+}
+
+/** An amount the way each language writes one: "AED 1,000.00" / "1,000.00 درهم". */
+const money = (amount: number | null | undefined, currency: string | null | undefined, locale?: string) => {
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return "";
+  const n = amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const ccy = currency || "AED";
+  return locale === "ar" ? `${n} ${ccy === "AED" ? "درهم" : ccy}` : `${ccy} ${n}`;
+};
+
+/** A bare date in either spelling, as DAY-MONTH-YEAR. Empty for anything else. */
+export function normaliseDate(value: string): string {
+  const v = value.trim();
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+  return /^\d{2}-\d{2}-\d{4}$/.test(v) ? v : "";
+}
 
 /** 16-09-2026 — the format the journeys show dates in, in both languages. */
 export function emailDate(d: Date = new Date()): string {
@@ -182,7 +201,7 @@ export function summaryRows(facts: CaseFacts, locale?: string): { label: string;
   // What was paid, or how it is going to be. An unpaid Virtual IBAN application
   // must not read as though money has changed hands.
   const method = PAY_METHOD[String(facts.data.payment_method ?? "").toLowerCase()];
-  const amount = money(facts.payment.amount, facts.payment.currency);
+  const amount = money(facts.payment.amount, facts.payment.currency, locale);
   const paid = facts.payment.status === "paid";
   const payValue = paid
     ? `${amount || (ar ? "مدفوع" : "paid")}${amount ? (ar ? " — مدفوع" : " — paid") : ""}`
@@ -202,7 +221,10 @@ export function summaryRows(facts: CaseFacts, locale?: string): { label: string;
  */
 export function nextSteps(reply: string): string[] {
   const clean = plainFromReply(reply);
-  const at = clean.search(/^[^\n]*(what happens next|ما الذي يحدث|الخطوات التالية|ماذا يحدث)[^\n]*$/im);
+  // The Arabic heading is the model's own wording and it varies: "ما الذي سيحدث
+  // بعد ذلك", "ماذا يحدث الآن", "الخطوات التالية". All of them, and the future
+  // tense that LR-37385 used, which the first pattern missed.
+  const at = clean.search(/^[^\n]*(what happens next|here'?s what happens|الخطوات التالية|ما(?:ذا)? ?(?:الذي )?س?يحدث)[^\n]*$/im);
   if (at === -1) return [];
   const after = clean.slice(at).split("\n").slice(1);
   const out: string[] = [];
@@ -225,6 +247,10 @@ const STR = {
     date: "Date",
     next: "What happens next:",
     receipt: "Download your receipt",
+    receiptHead: "Your receipt",
+    receiptNo: "Receipt no.",
+    amountPaid: "Amount paid",
+    method: "Payment method",
     foot: "This is an automated message — please do not reply to it.",
   },
   ar: {
@@ -236,6 +262,10 @@ const STR = {
     date: "التاريخ",
     next: "الخطوات التالية:",
     receipt: "تحميل الإيصال",
+    receiptHead: "إيصال الدفع",
+    receiptNo: "رقم الإيصال",
+    amountPaid: "المبلغ المدفوع",
+    method: "طريقة الدفع",
     foot: "هذه رسالة آلية — يُرجى عدم الرد عليها.",
   },
 } as const;
@@ -254,6 +284,16 @@ export interface CompletionEmailInput {
   baseUrl?: string | null;
   /** The receipt path for a settled payment, or null. */
   receiptPath?: string | null;
+  /**
+   * The payment itself, when one settled.
+   *
+   * Asked for on 16 September: "in the email it should also include the receipt
+   * details if payment was made". A link to a receipt is not a receipt — it is a
+   * request that the customer go and look, from an inbox, possibly on a phone,
+   * for a figure they already paid. The numbers travel with the mail; the link
+   * stays for the printable version.
+   */
+  receipt?: { reference: string; amount?: number | null; currency?: string | null; method?: string | null } | null;
 }
 
 export function completionEmail(input: CompletionEmailInput): { subject: string; text: string } {
@@ -267,12 +307,31 @@ export function completionEmail(input: CompletionEmailInput): { subject: string;
   const rows = card?.rows.length ? card.rows : summaryRows(input.facts, input.locale);
   const headline = card?.title?.trim() || (input.facts.payment.status === "paid" ? s.confirmed : s.submitted);
 
-  const receipt =
-    input.receiptPath && base
-      ? `${s.receipt}: ${base}${input.receiptPath}`
-      : input.receiptPath
-        ? `${s.receipt}: ${input.receiptPath}`
-        : "";
+  const link = input.receiptPath ? `${s.receipt}: ${base ? `${base}${input.receiptPath}` : input.receiptPath}` : "";
+  /**
+   * The receipt, as facts rather than as an errand.
+   *
+   * Its own block, below the summary: what was paid, what it was paid against,
+   * and how — then the link, for the printable copy. Only where money actually
+   * settled, so a Virtual IBAN application still says how it WILL be paid and
+   * claims no receipt.
+   */
+  const r = input.receipt;
+  const receiptBlock = r
+    ? [
+        `${s.receiptHead}:`,
+        "",
+        [
+          `${s.receiptNo}: ${r.reference}`,
+          ...(typeof r.amount === "number" && r.amount > 0
+            ? [`${s.amountPaid}: ${money(r.amount, r.currency, input.locale)}`]
+            : []),
+          ...(payMethodLabel(r.method, input.locale) ? [`${s.method}: ${payMethodLabel(r.method, input.locale)}`] : []),
+          ...(link ? [link] : []),
+        ].join("\n"),
+      ].join("\n")
+    : "";
+  const receipt = link;
 
   // A block of "Label: value" lines, which is what textToHtml renders as a
   // detail table. The reference leads it: an email about an application that
@@ -283,11 +342,21 @@ export function completionEmail(input: CompletionEmailInput): { subject: string;
       // The reference leads the block, so the card's own row for it — "Application
       // reference: LR-37380" — would say it twice under two different names.
       .filter((r) => !/reference|مرجع/i.test(r.label) && r.value.trim() !== input.reference.trim())
-      // The receipt is offered once, at the bottom, as an address that works
-      // from an inbox. The card's row carries the chat-relative path.
-      .filter((r) => !(receipt && /receipt|إيصال/i.test(r.label)))
+      // The receipt is offered once, below, as an address that works from an
+      // inbox. The card's row carries the chat-relative path.
+      .filter((row) => !(receipt && /receipt|إيصال/i.test(row.label)))
+      // And where the receipt block states the amount, the summary does not say
+      // it again under a second label.
+      .filter((row) => !(r && /payment|amount|paid|الدفع|المبلغ/i.test(row.label)))
+      // A bare ISO date is not the format these journeys show dates in — and in
+      // an Arabic email the bidi algorithm lays its three numbers out
+      // right-to-left, so it reads backwards as well as wrong.
+      .map((row) => ({ ...row, value: normaliseDate(row.value) || row.value }))
       .map((r) => `${r.label}: ${stripLinks(r.value)}`),
-    `${s.date}: ${emailDate()}`,
+    // Today, unless the summary already carries today's date under some label of
+    // its own — a card that says "Issued: 16-09-2026" does not need "Date:
+    // 16-09-2026" under it.
+    ...(rows.some((row) => normaliseDate(row.value) === emailDate()) ? [] : [`${s.date}: ${emailDate()}`]),
   ].join("\n");
 
   const steps = nextSteps(input.replyText);
@@ -297,8 +366,8 @@ export function completionEmail(input: CompletionEmailInput): { subject: string;
     headline,
     "",
     detail,
+    ...(receiptBlock ? ["", receiptBlock] : receipt ? ["", receipt] : []),
     ...(steps.length ? ["", s.next, ...steps.map((b) => `- ${b}`)] : []),
-    ...(receipt ? ["", receipt] : []),
     "",
     s.foot,
   ]

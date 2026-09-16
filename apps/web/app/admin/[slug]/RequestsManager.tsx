@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Download, RefreshCw, Search, ExternalLink, ChevronRight, FileText, Mail, Send } from "lucide-react";
+import { Download, RefreshCw, Search, ExternalLink, ChevronRight, FileText, Mail, Send, X, MessagesSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/field";
@@ -27,6 +27,7 @@ interface Row {
   authenticated: boolean;
   completedAt: string;
 }
+interface Msg { role: "user" | "assistant"; content: string; at: string }
 interface Detail extends Row {
   confirmation: { title: string | null; rows: { label: string; value: string }[]; total: string | null } | null;
   confirmationKind: "confirmation" | "latest";
@@ -35,6 +36,7 @@ interface Detail extends Row {
   docs: { key: string; label: string; status: string; fileName: string | null; rejectionReason: string | null }[];
   calls: { at: string; action: string; tool: string | null; method: string | null; path: string | null; request: unknown; response: string | null; ok: boolean }[];
   emails: { at: string; action: string; to: string | null; subject: string | null; reason: string | null }[];
+  messages: Msg[];
 }
 
 const when = (iso: string) =>
@@ -42,6 +44,30 @@ const when = (iso: string) =>
 const money = (v: number | null, ccy: string) =>
   typeof v === "number" ? `${ccy} ${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
 const journeyName = (k: string | null) => (k ? k.replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()) : "—");
+const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * A chat message as it reads OUTSIDE the widget.
+ *
+ * The transcript is full of controls the widget renders and a reader does not
+ * need: upload slots, button rows, payment widgets. The summary cards are worth
+ * keeping — they are what the customer was shown — so they are flattened into
+ * their own lines rather than dropped with the rest.
+ */
+function readable(text: string): string {
+  return text
+    .replace(/```[ \t]*summary[ \t]*\n([\s\S]*?)\n[ \t]*```/gi, (_m, body: string) =>
+      String(body)
+        .split("\n")
+        .map((l) => l.replace(/^\s*title\s*:\s*/i, "").replace(/^\s*-\s+/, "  • ").replace(/^\s*total\s*:\s*/i, "  • Total: "))
+        .join("\n")
+    )
+    .replace(/```[ \t]*(cards|upload|buttons|toggles|map|locate|pay|select)[ \t]*\n[\s\S]*?\n[ \t]*```/gi, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 /**
  * The record of what actually completed.
@@ -91,6 +117,20 @@ export function RequestsManager({ slug }: { slug: string }) {
     })();
     return () => { live = false; };
   }, [open, slug]);
+
+  // A modal traps the page: Escape closes it, and the list behind it does not
+  // scroll away under the pointer.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(null); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -213,9 +253,37 @@ export function RequestsManager({ slug }: { slug: string }) {
         </CardContent>
       </Card>
 
+      {/* THE CONVERSATION IS PART OF THE RECORD. Opening a request used to expand
+          a panel under the table and offer a link out to the transcript, which
+          is a second tab and a lost place in the list. It opens here instead,
+          beside the summary it produced. */}
       {open && (
-        <Card>
-          <CardContent className="grid gap-5 pt-5">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(9,12,24,0.45)] p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setOpen(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-[1120px] flex-col overflow-hidden rounded-2xl border border-[var(--color-line)] bg-surface shadow-[0_24px_64px_rgba(9,12,24,0.30)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] px-5 py-3">
+              <div className="min-w-0">
+                <span className="text-[14px] font-semibold text-ink">{detail?.reference ?? "Request"}</span>
+                {detail?.subject ? <span className="ml-2 truncate text-[13px] text-muted">{detail.subject}</span> : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(null)}
+                aria-label="Close"
+                className="rounded-lg p-1.5 text-muted transition-colors hover:bg-[var(--color-canvas)] hover:text-ink"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid min-h-0 flex-1 overflow-hidden md:grid-cols-2">
+              <div className="grid min-h-0 content-start gap-5 overflow-y-auto p-5">
             {detailLoading && !detail ? (
               <p className="py-6 text-center text-[13px] text-muted">Loading…</p>
             ) : !detail ? (
@@ -364,8 +432,50 @@ export function RequestsManager({ slug }: { slug: string }) {
                 )}
               </>
             )}
-          </CardContent>
-        </Card>
+              </div>
+
+              {/* The transcript, first on the eye and second in the markup so the
+                  summary keeps its place for a screen reader. */}
+              <div className="order-first min-h-0 overflow-y-auto border-b border-[var(--color-line)] p-5 md:order-first md:border-b-0 md:border-r">
+                <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  <MessagesSquare className="h-3.5 w-3.5" />
+                  Conversation
+                  {detail?.messages?.length ? <span className="font-normal normal-case">· {detail.messages.length} messages</span> : null}
+                </div>
+                {detailLoading && !detail ? (
+                  <p className="py-6 text-center text-[13px] text-muted">Loading…</p>
+                ) : !detail?.messages?.length ? (
+                  <p className="py-6 text-center text-[13px] text-muted">No transcript was kept for this request.</p>
+                ) : (
+                  <div className="grid gap-2.5">
+                    {detail.messages.map((m, i) => {
+                      const body = readable(m.content);
+                      if (!body) return null;
+                      return (
+                        <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                          <div
+                            dir="auto"
+                            className={cn(
+                              "max-w-[86%] whitespace-pre-wrap rounded-xl px-3 py-2 text-[12.5px] leading-relaxed",
+                              m.role === "user"
+                                ? "bg-[var(--color-brand)] text-white"
+                                : "border border-[var(--color-line)] bg-[var(--color-canvas)] text-ink"
+                            )}
+                          >
+                            {body}
+                            <span className={cn("mt-1 block text-[10.5px]", m.role === "user" ? "text-white/70" : "text-muted")}>
+                              {clock(m.at)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

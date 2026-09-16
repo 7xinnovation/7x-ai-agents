@@ -95,3 +95,33 @@ export function messageLocale(text: string | undefined | null): "en" | "ar" | nu
   const w = words(rest).map((x) => x.toLowerCase());
   return w.length >= 2 && w.some((x) => ENGLISH_GRAMMAR.has(x)) ? "en" : null;
 }
+
+/**
+ * The language the conversation has BEEN held in.
+ *
+ * Reported 16 September: a restarted chat, the interface switched to English,
+ * and the assistant still answering in Arabic. The session language was English
+ * and the prompt said so — but the transcript in front of the model was Arabic,
+ * and a model mirrors what it reads. Nothing told it that the earlier messages
+ * were the other language on purpose.
+ *
+ * Read from the ASSISTANT'S own last few messages, which are prose by
+ * definition: the ratio rule is reliable there in a way it is not on a customer
+ * message that might be a name and a phone number.
+ */
+export function historyLocale(
+  history: { role: string; content: string }[] | undefined | null,
+  take = 4
+): "en" | "ar" | null {
+  const said = (history ?? [])
+    .filter((m) => m.role === "assistant" && m.content?.trim())
+    .slice(-take)
+    .map((m) => m.content)
+    .join("\n");
+  const letters = said.match(LETTERS)?.length ?? 0;
+  if (letters < 20) return null;
+  const arabic = said.match(ARABIC)?.length ?? 0;
+  const ratio = arabic / letters;
+  if (ratio >= 0.5) return "ar";
+  return ratio === 0 ? "en" : null;
+}

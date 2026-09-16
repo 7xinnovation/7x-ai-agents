@@ -51,7 +51,7 @@ import { epglDocumentLabels } from "@/lib/epglDocumentLabel";
 import { NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
-import { messageLocale } from "@/lib/replyLocale";
+import { messageLocale, historyLocale } from "@/lib/replyLocale";
 import { narrationGuard } from "@/lib/narrationGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
@@ -1021,6 +1021,24 @@ export async function POST(req: NextRequest) {
       }
     }
     if (customerContext) pulseDirective += ` (${customerContext})`;
+  }
+  /**
+   * THE LANGUAGE CHANGED AND THE TRANSCRIPT DID NOT.
+   *
+   * A conversation held in Arabic, the interface switched to English, and the
+   * assistant carried on in Arabic — reported 16 September on a restarted chat.
+   * The session language was English and the prompt said so; what the model had
+   * in front of it was four Arabic messages, and a model mirrors what it reads.
+   *
+   * So the change is stated rather than left to be inferred. Only when the two
+   * actually disagree: on every ordinary turn this adds nothing.
+   */
+  const heldIn = historyLocale(session.history);
+  if (heldIn && heldIn !== body.locale) {
+    const from = heldIn === "ar" ? "Arabic" : "English";
+    const to = body.locale === "ar" ? "Arabic" : "English";
+    customerContext =
+      `${customerContext ?? ""}\nLANGUAGE CHANGED: the earlier messages in this conversation are in ${from}, and the customer has since switched to ${to}. Reply ONLY in ${to} from here — prose, buttons, cards, summaries, every part of it — and do not mirror the ${from} above. Everything already collected still stands; do not ask for any of it again.`.trim();
   }
   const effectiveMessage = isPulse
     ? pulseDirective
@@ -3198,6 +3216,18 @@ export async function POST(req: NextRequest) {
             },
             baseUrl,
             receiptPath,
+            // The receipt's own facts, where money actually settled. A link to a
+            // receipt is not a receipt: it asks the customer to go and look up a
+            // figure they have already paid.
+            receipt:
+              finalState.payment.status === "paid" && finalState.payment.reference
+                ? {
+                    reference: finalState.payment.reference,
+                    amount: finalState.payment.amount,
+                    currency: finalState.payment.currency,
+                    method: str(finalState.data.payment_method) ?? "card",
+                  }
+                : null,
           });
           // Stamped now, not on success: a retry loop that re-sends a confirmation
           // every turn is worse than one that failed once and said so in the audit.

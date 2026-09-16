@@ -157,6 +157,77 @@ Keep LR-37382 handy if you ever need to follow up with EPGL.`;
   check("no receipt link on a payment that has not happened", !mail.text.includes("/api/receipt/"));
 }
 
+console.log("\nThe receipt, when money actually moved");
+{
+  const mail = completionEmail({
+    agentName: "EPGL",
+    locale: "en",
+    reference: "LR-37385",
+    contactName: "Emre Karayalcin",
+    replyText: REPLY,
+    facts: { data: { payment_method: "card" }, documents: [], payment: { status: "paid", amount: 1000, currency: "AED" } },
+    baseUrl: "https://agent.7x.ae",
+    receiptPath: RECEIPT,
+    receipt: { reference: "cbcd55cd-0d8b-4525-8277-dff02b5e14c6", amount: 1000, currency: "AED", method: "card" },
+  });
+  check("the receipt has a block of its own", mail.text.includes("Your receipt:"), mail.text);
+  check("the receipt number is in it", mail.text.includes("Receipt no.: cbcd55cd-0d8b-4525-8277-dff02b5e14c6"));
+  check("the amount, to the fils", mail.text.includes("Amount paid: AED 1,000.00"), mail.text);
+  check("how it was paid", mail.text.includes("Payment method: Card payment"));
+  check("and the printable copy is still linked", mail.text.includes(`Download your receipt: https://agent.7x.ae${RECEIPT}`));
+  // The figure is not stated twice under two labels.
+  check("the summary does not repeat the amount", (mail.text.match(/1,000/g) ?? []).length === 1, mail.text);
+  check("...and the card's payment row is dropped", !/^Payment: /m.test(mail.text), mail.text);
+}
+{
+  // An application that has NOT been paid claims no receipt.
+  const mail = completionEmail({
+    agentName: "EPGL",
+    reference: "LR-37382",
+    replyText: "Submitted.",
+    facts: { data: { payment_method: "viban" }, documents: [], payment: { status: "none" } },
+    baseUrl: "https://agent.7x.ae",
+  });
+  check("no receipt block on an unpaid application", !mail.text.includes("Your receipt"), mail.text);
+  check("...and it still says how it will be paid", mail.text.includes("Payment: Bank transfer (Virtual IBAN)"), mail.text);
+}
+{
+  const ar = completionEmail({
+    agentName: "EPGL",
+    locale: "ar",
+    reference: "LR-37385",
+    replyText: "تم.",
+    facts: { data: { payment_method: "card" }, documents: [], payment: { status: "paid", amount: 1000, currency: "AED" } },
+    receipt: { reference: "cbcd55cd", amount: 1000, currency: "AED", method: "card" },
+    receiptPath: RECEIPT,
+    baseUrl: "https://agent.7x.ae",
+  });
+  check("Arabic receipt block", ar.text.includes("إيصال الدفع:") && ar.text.includes("رقم الإيصال: cbcd55cd"), ar.text);
+  check("...with the method in Arabic", ar.text.includes("طريقة الدفع: الدفع بالبطاقة"), ar.text);
+  check("...and the amount written the way Arabic writes one", ar.text.includes("المبلغ المدفوع: 1,000.00 درهم"), ar.text);
+}
+{
+  // LR-37385's own heading, which the first Arabic pattern missed: the model
+  // wrote the future tense, "ما الذي سيحدث بعد ذلك".
+  const steps = nextSteps("تم.\n\n**ما الذي سيحدث بعد ذلك:**\n- يراجع فريق EPGL مستنداتك.\n- تُصدر رخصتك.");
+  check("the Arabic next-steps heading is read, future tense and all", steps.length === 2, steps);
+}
+
+console.log("\nDates, in the format the journeys use");
+{
+  // A card that wrote the date as an ISO string: 2026-09-16 is not how these
+  // journeys show a date, and in an Arabic email the bidi algorithm lays the
+  // three numbers out right-to-left and it reads 2026-09-16 backwards.
+  const mail = completionEmail({
+    agentName: "EPGL",
+    reference: "LR-1",
+    replyText: "x\n\n```summary\ntitle: Done\n- Issued: 2026-09-16\n```",
+    facts: EMPTY_CASE,
+  });
+  check("an ISO date in a card row is rewritten", mail.text.includes("Issued: 16-09-2026"), mail.text);
+  check("...and the date is stated once", (mail.text.match(/16-09-2026/g) ?? []).length === 1, mail.text);
+}
+
 console.log("\nThe summary a case yields on its own");
 {
   const paid = summaryRows(
@@ -233,7 +304,7 @@ console.log("\nFired by the completion, not by the model");
   const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
   const at = route.indexOf("const emailTo = completionRecipient(finalState.data);");
   check("the completion email exists in the turn", at > 0);
-  const block = route.slice(at, at + 2600);
+  const block = route.slice(at, at + 3600);
   check("...gated on the same settled transaction the survey uses", /if \(purchase\?\.reference && !finalState\.confirmationEmailedAt && emailTo && emailConfigured\(\)\)/.test(block), block.slice(0, 200));
   check("...sent once per case", /confirmationEmailedAt: new Date\(\)\.toISOString\(\)/.test(block));
   check("...never on top of one the assistant already sent", /if \(emailToolSent\)/.test(block));
