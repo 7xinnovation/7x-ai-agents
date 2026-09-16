@@ -726,6 +726,67 @@ export function withEpglRequestFields(
     : [];
   if (!items.length) return input;
 
+  /**
+   * THE FIELD NAMES EPGL'S HANDLER ACTUALLY READS.
+   *
+   * Their Apex wrapper is not generic DML. The names in a composite item are its
+   * OWN contract: `EPG_Account__c` and `EPG_Emirates_Id__c` on the User item do
+   * not exist on the Salesforce User object at all, and a SOQL for either is a
+   * 400 — the handler reads them out of the JSON and does its own thing with
+   * them. So a near-miss on a name is not a field that gets ignored; it is a
+   * field the handler never sees.
+   *
+   * 16 September, YI FANG TAIWAN FRUIT TEA L.L.C, three attempts: the User item
+   * carried `EPG_Company__c` — right for a partner, wrong for the applicant —
+   * and every attempt came back "Value does not exist or does not match filter
+   * criteria." with all seven records rolled back. Nothing in that message names
+   * a field, so the model retried by guessing at picklists and got nowhere. With
+   * the one key renamed and nothing else changed, the same payload submits.
+   *
+   * Members__c is the quieter half of the same problem. `EPG_Role__c`,
+   * `EPG_Nationality__c` and `EPG_Name_Arabic__c` do not exist on that object
+   * either, but there the handler does NOT fail — it writes the row with a name
+   * and an account and silently drops the rest. Every licence member this agent
+   * has recorded landed with their role and nationality missing. The object's
+   * real fields are the DUL_ ones, and sending those was verified to land.
+   *
+   * Names are not the model's to get right by memory: it composes the payload
+   * from guidance, and guidance drifts. Corrected here, where it is one map.
+   */
+  let patched0 = false;
+  const RENAME: Record<string, Record<string, string>> = {
+    User: { EPG_Company__c: "EPG_Account__c" },
+    Members__c: {
+      EPG_Role__c: "DUL_License_Members_MemberRoleEn__c",
+      EPG_Nationality__c: "DULLicenseMembersNationalityEn__c",
+      EPG_Name_Arabic__c: "DUL_License_Members_Person_NameAr__c",
+      EPG_Member_Name_Arabic__c: "DUL_License_Members_Person_NameAr__c",
+      EPG_Member_Name_English__c: "DUL_License_Members_Person_NameEn__c",
+    },
+  };
+  for (const item of items) {
+    const object = /\/sobjects\/([A-Za-z0-9_]+)$/.exec(String(item?.url ?? ""))?.[1] ?? "";
+    const map = RENAME[object];
+    if (!map) continue;
+    for (const row of (Array.isArray(item.body) ? item.body : [item.body]) as Record<string, unknown>[]) {
+      if (!row || typeof row !== "object") continue;
+      for (const [from, to] of Object.entries(map)) {
+        if (row[from] === undefined) continue;
+        // A correct name already present wins; the wrong one is simply dropped.
+        if (row[to] === undefined || row[to] === null || row[to] === "") row[to] = row[from];
+        delete row[from];
+        patched0 = true;
+      }
+      // The member's English name lives on the record name AND on the portal's
+      // own field for it. One value, both places, rather than a row that reads
+      // as unnamed everywhere the portal looks.
+      if (object === "Members__c" && row.Name && !row.DUL_License_Members_Person_NameEn__c) {
+        row.DUL_License_Members_Person_NameEn__c = row.Name;
+        patched0 = true;
+      }
+    }
+  }
+
   const fill = (item: Record<string, unknown> | undefined, values: Record<string, unknown>) => {
     if (!item) return false;
     const b = { ...((item.body ?? {}) as Record<string, unknown>) };
@@ -757,7 +818,7 @@ export function withEpglRequestFields(
    * reference to it in the same composite is corrected with it.
    */
   const account = items.find((i) => /sobjects\/Account$/i.test(String(i?.url ?? "")));
-  let patched = false;
+  let patched = patched0;
   if (facts.accountId && /^[a-zA-Z0-9]{15,18}$/.test(facts.accountId)) {
     const wrong = new Set<string>();
     if (account) {
