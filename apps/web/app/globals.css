@@ -330,10 +330,10 @@ body {
   flex: 0 0 0;
   display: none;
   overflow-y: auto;
-  border-inline-start: 1px solid var(--c-border);
-  background:
-    radial-gradient(120% 60% at 100% 0%, color-mix(in srgb, var(--c-primary) 5%, transparent), transparent 60%),
-    var(--c-surface-muted);
+  /* A floating panel, not an attached column: a calm gutter of page surface
+     around a self-contained card that carries its own edge and soft shadow. */
+  background: transparent;
+  padding: 14px 18px 22px;
 }
 .dlg-root.is-full .dlg-case {
   width: 44%;
@@ -1831,22 +1831,60 @@ body {
 
 /* ---- Case builder ---- */
 .dlg-case-inner {
-  padding: 20px 20px 28px;
+  /* The floating card itself: page-surface fill, a single hairline edge and a
+     soft tinted shadow so it lifts off the gutter without a heavy border. */
+  background: var(--c-surface);
+  border: 1px solid color-mix(in srgb, var(--c-border) 82%, transparent);
+  border-radius: 20px;
+  box-shadow: var(--shadow-md);
+  padding: 16px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .dlg-case-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--c-border) 60%, transparent);
+}
+.dlg-case-head-main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+/* Soft tinted tile — the reference's "titled card" cue, in Aisha's accent. */
+.dlg-case-head-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--c-primary);
+  background: color-mix(in srgb, var(--c-primary) 10%, var(--c-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-primary) 14%, transparent);
+}
+.dlg-case-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 .dlg-case-head h2 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.01em;
   margin: 0;
+  line-height: 1.25;
+}
+.dlg-case-sub {
+  font-size: 12px;
+  color: var(--c-text-muted);
+  line-height: 1.2;
 }
 .dlg-status {
   font-size: 11px;
@@ -2037,23 +2075,26 @@ body {
   background: linear-gradient(90deg, color-mix(in srgb, var(--c-success) 80%, white), var(--c-success));
 }
 
+/* Sections WITHIN the floating card — flat, no nested box. Separated by the
+   card's own gap and a small label, so the panel reads as one clean surface
+   rather than a stack of boxes-in-a-box. */
 .dlg-card {
-  background: var(--c-surface);
-  border: 1px solid color-mix(in srgb, var(--c-border) 85%, transparent);
-  border-radius: var(--r-card);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in srgb, #fff 55%, transparent);
-  padding: 13px 16px 5px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
 }
 .dlg-card h3 {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: color-mix(in srgb, var(--c-primary) 45%, var(--c-text-muted));
-  margin: 0 0 4px;
+  letter-spacing: 0.08em;
+  color: var(--c-text-muted);
+  margin: 0 0 2px;
 }
 .dlg-card h3 svg {
   color: var(--c-primary);
@@ -2699,6 +2740,9 @@ body {
     border-inline-start: none;
     z-index: 40;
     animation: none;
+    /* Full-bleed overlay on a phone: the floating gutter is a desktop idea. */
+    background: var(--c-surface);
+    padding: 0;
   }
   .dlg-root.is-mobile-case .dlg-case {
     display: block;
@@ -2711,7 +2755,11 @@ body {
     padding: 16px 12px 24px;
   }
   .dlg-case-inner {
-    padding-bottom: 28px;
+    /* Full-bleed on a phone — drop the card edge and shadow the desktop float uses. */
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 16px 16px 28px;
   }
   /* Two cards per row keeps them tappable without going full width. */
   .dlg-cards {
@@ -2870,15 +2918,11 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 13px 15px;
-  border-radius: var(--r-card);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--c-success) 15%, var(--c-surface)),
-    color-mix(in srgb, var(--c-success) 7%, var(--c-surface))
-  );
-  border: 1px solid color-mix(in srgb, var(--c-success) 42%, var(--c-border));
-  box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent);
+  padding: 12px 14px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--c-success) 8%, var(--c-surface));
+  border: 1px solid color-mix(in srgb, var(--c-success) 26%, var(--c-border));
+  box-shadow: none;
   font-size: 13px;
   animation: dlg-rise 0.5s var(--ease-spring) both;
 }
