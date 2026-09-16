@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PaperPlaneRight,
   Stop,
+  ShieldSlash,
   GlobeSimple,
   SignIn,
   UserCircleCheck,
@@ -118,6 +119,9 @@ export const STR = {
     collapse: "Collapse",
     reset: "New chat",
     stop: "Stop",
+    withdraw: "Withdraw & erase",
+    withdrawHint: "Withdraw my permission — stop everything and erase what was collected",
+    withdrawing: "Withdrawing…",
     documents: "Documents",
     details: "Details",
     activity: "What has been done",
@@ -174,6 +178,9 @@ export const STR = {
     collapse: "تصغير",
     reset: "محادثة جديدة",
     stop: "إيقاف",
+    withdraw: "سحب الإذن ومسح البيانات",
+    withdrawHint: "اسحب إذني — أوقِف كل شيء وامسح ما تم جمعه",
+    withdrawing: "جارٍ السحب…",
     documents: "المستندات",
     details: "التفاصيل",
     activity: "ما تم تنفيذه نيابةً عنك",
@@ -519,6 +526,8 @@ export function Experience({
   >(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityBusy, setActivityBusy] = useState(false);
+  // One-tap permission withdrawal in flight (see withdrawPermission).
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
   /** Nothing has arrived for a couple of seconds and the turn is still open. */
   const [quiet, setQuiet] = useState(false);
   const lastDelta = useRef(0);
@@ -1402,6 +1411,57 @@ export function Experience({
   }, []);
 
   /**
+   * Withdraw permission in one step (pre-launch gate; FB-1737).
+   *
+   * Stops anything in flight, asks the server to revoke the session and consents
+   * and erase what was collected, then shows the customer a plain-language
+   * receipt — what had been done in their name, and what was just erased — and
+   * clears the panel back to a fresh start. Signing out follows the server: this
+   * is a withdrawal of consent, so it ends the session too.
+   */
+  const withdrawPermission = useCallback(async () => {
+    if (withdrawBusy) return;
+    const cid = convId.current;
+    try { abortRef.current?.abort(); } catch { /* ignore */ }
+    setWithdrawBusy(true);
+    let receipt: string | null = null;
+    try {
+      if (cid) {
+        const res = await fetch("/api/chat/withdraw", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentSlug: agent.slug, conversationId: cid, locale }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { message?: string };
+          receipt = data.message?.trim() || null;
+        }
+      }
+    } catch { /* the withdrawal still clears the client below */ }
+    finally {
+      // Clear the client like a new chat, but keep the receipt on screen so the
+      // customer can read what was erased. The withdrawn conversation is done;
+      // the next message starts a fresh one.
+      try { window.localStorage.removeItem(storageKey); } catch { /* private mode */ }
+      convId.current = null;
+      pulsed.current = false;
+      signedOut.current = true;
+      uaePass.current = undefined;
+      setCaseState(null);
+      setInput("");
+      setAuthReason(null);
+      setActivity(null);
+      setActivityOpen(false);
+      setAuthenticated(false);
+      setMessages(receipt ? [{ role: "assistant", content: receipt }] : []);
+      // Tell the host page too, so its header follows and it drops any token.
+      try { window.parent?.postMessage({ source: "dialog", action: "signed-out" }, "*"); } catch { /* not embedded */ }
+      postNative({ source: "dialog-native", action: "signed-out" });
+      setWithdrawBusy(false);
+    }
+  }, [withdrawBusy, agent.slug, locale, storageKey]);
+
+  /**
    * Watch for a silent stretch inside a turn that has already said something.
    *
    * Polled rather than timed off each delta: a timer per token is a timer reset
@@ -1640,6 +1700,20 @@ export function Experience({
           >
             {authenticated ? <UserCircleCheck size={17} weight="fill" /> : <SignIn size={16} weight={iconWeight} />}
           </button>
+          {/* Withdraw permission in one step (pre-launch gate; FB-1737). Shown
+              once there is a granted permission or collected data to pull back —
+              revokes consent, stops everything, and reports what was erased. */}
+          {authenticated || dataEntries.length > 0 || caseState?.documents?.some((d) => d.status === "uploaded" || d.status === "accepted") ? (
+            <button
+              className="dlg-chip icon-only is-withdraw"
+              onClick={() => void withdrawPermission()}
+              disabled={withdrawBusy}
+              aria-label={t.withdraw}
+              title={t.withdrawHint}
+            >
+              <ShieldSlash size={16} weight={withdrawBusy ? "fill" : iconWeight} />
+            </button>
+          ) : null}
           <button
             className="dlg-chip icon-only"
             onClick={resetChat}
