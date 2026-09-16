@@ -213,28 +213,60 @@ async function priceBook(
   const rents: RentBook = new Map(hit?.rents ?? []);
   const services: ServiceBook = new Map(hit?.services ?? []);
   try {
-    const rows = await getDb()
-      .select({ payload: auditLog.payload, createdAt: auditLog.createdAt })
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.agentId, agentId),
-          // `integration_write` is a Select the chat made. `registration_fee_observed`
-          // is one made deliberately by scripts/nxn-observe-registration-fees, for a
-          // bundle no customer has rented yet — same response, same backend, and
-          // labelled so the two are never confused afterwards.
-          inArray(auditLog.action, ["integration_write", "registration_fee_observed"]),
-          gt(auditLog.createdAt, new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)),
-          sql`${auditLog.payload}->>'tool' like ${key + "\\_\\_%"}`,
-          // Either the fee was extracted when the row was written, or it is still
-          // readable in the body. A long corporate response is truncated at 4000
-          // characters and its NEW-REG line falls off the end, which is exactly
-          // why the extracted copy exists.
-          sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload} ? 'rents' or ${auditLog.payload} ? 'services' or ${auditLog.payload}->>'response' like '%NEW-REG%' or ${auditLog.payload}->>'response' like '%"RENT"%')`
+    /**
+     * THE DELIBERATE OBSERVATIONS ARE NOT ALLOWED TO AGE OUT.
+     *
+     * Every price on the duration cards comes from `registration_fee_observed`
+     * — the rows scripts/nxn-observe-registration-fees writes by reserving a
+     * box on purpose and reading the price back. There are 42 of them on
+     * staging and they ARE the price book. `integration_write` rows are
+     * ordinary chat traffic and contribute almost nothing.
+     *
+     * Both were read by one query taking the 200 newest rows, so a day of
+     * testing pushed the observations off the end. Measured 16 September: 289
+     * rows in the window, 247 of them chat traffic, and MyBox's five terms sat
+     * at ranks 203-207 — just past the cut. The result was a MyBox rental
+     * offering "AED 370.00" for one year and "confirmed when the box is
+     * reserved" for two, three, five and ten, while MyHome — four ranks inside
+     * the window — still showed all of its. Nothing about the prices changed;
+     * the window slid over them. MyHome's one-year row was at 198 and would
+     * have gone next.
+     *
+     * So the two are read separately: every observation in the window, always,
+     * and a bounded slice of the chat traffic beside it.
+     */
+    const matchesAPrice = sql`(${auditLog.payload} ? 'fees' or ${auditLog.payload} ? 'rents' or ${auditLog.payload} ? 'services' or ${auditLog.payload}->>'response' like '%NEW-REG%' or ${auditLog.payload}->>'response' like '%"RENT"%')`;
+    const since = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+    const forAction = (actions: string[], limit: number) =>
+      getDb()
+        .select({ payload: auditLog.payload, createdAt: auditLog.createdAt })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.agentId, agentId),
+            inArray(auditLog.action, actions),
+            gt(auditLog.createdAt, since),
+            sql`${auditLog.payload}->>'tool' like ${key + "\\_\\_%"}`,
+            // Either the fee was extracted when the row was written, or it is
+            // still readable in the body. A long corporate response is truncated
+            // at 4000 characters and its NEW-REG line falls off the end, which
+            // is exactly why the extracted copy exists.
+            matchesAPrice
+          )
         )
-      )
-      .orderBy(desc(auditLog.createdAt))
-      .limit(200);
+        .orderBy(desc(auditLog.createdAt))
+        .limit(limit);
+
+    const [observed, written] = await Promise.all([
+      // Deliberate observations: bounded by how many bundles and terms exist,
+      // not by traffic. Taken whole.
+      forAction(["registration_fee_observed"], 1000),
+      // A Select the chat made. Incidental, and the newest of them is enough.
+      forAction(["integration_write"], 200),
+    ]);
+    const rows = [...observed, ...written].sort(
+      (a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)
+    );
     // Oldest first, so a newer row overwrites an older one for the same bundle.
     for (const r of rows.reverse()) {
       const p = r.payload as { response?: string; fees?: Record<string, unknown> } | null;

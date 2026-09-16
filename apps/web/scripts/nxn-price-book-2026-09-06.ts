@@ -47,5 +47,23 @@ async function main() {
     if (seen.length) console.log(`  services seen: ${seen.map(([k, v]) => `${k.split("|")[1]}y ${(v as string[]).join("/")}`).join("  ·  ")}`);
   }
   console.log(`\n${rents.size} priced term(s) across ${byBundle.size} bundle(s).`);
+
+  /**
+   * --check: a bundle that has lost its longer terms.
+   *
+   * The prices are learned, and on 16 September MyBox silently lost four of its
+   * five: the observations had been pushed out of the query's row window by a
+   * day of ordinary chat traffic, so the cards offered AED 370.00 for one year
+   * and "confirmed when the box is reserved" for the rest. Nothing errored and
+   * nothing in the logs said so — it looked exactly like a bundle nobody had
+   * ever priced. Worth one line in CI rather than a customer noticing.
+   */
+  if (process.argv.includes("--check")) {
+    const thin = [...byBundle].filter(([, terms]) => terms.length < 2).map(([b]) => b);
+    if (thin.length) {
+      console.log(`\nCHECK FAILED: ${thin.join(", ")} carr${thin.length === 1 ? "ies" : "y"} only one priced term — the longer durations will show no price.`);
+      process.exitCode = 1;
+    } else console.log("\ncheck ok: every bundle carries more than one priced term");
+  }
 }
 main().then(() => process.exit(0)).catch((e) => { console.error(String(e?.message ?? e)); process.exit(1); });
