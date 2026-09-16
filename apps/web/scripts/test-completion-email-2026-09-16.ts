@@ -14,7 +14,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-completion-email-2026-09-16.ts
  */
-import { completionEmail, completionRecipient, plainFromReply } from "../lib/completionEmail";
+import { completionEmail, completionRecipient, plainFromReply, summaryRows, nextSteps } from "../lib/completionEmail";
 import { textToHtml, emailLogoUrl } from "../lib/email";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -26,6 +26,7 @@ const check = (n: string, ok: boolean, got?: unknown) => {
 
 const B = "```";
 const RECEIPT = "/api/receipt/a1f03189?c=3b2f6e1c";
+const EMPTY_CASE = { data: {}, documents: [], payment: {} };
 
 /** LR-37380's closing message, as it was sent. */
 const REPLY = `Payment received — thank you.
@@ -70,43 +71,119 @@ console.log("\nThe reply, as plain text");
   check("a total line is kept as one", plainFromReply(`${B}summary\n- A: 1\ntotal: AED 70.00\n${B}`).includes("Total: AED 70.00"));
 }
 
-console.log("\nThe email itself");
+console.log("\nThe email is a summary, not a transcript");
 {
   const mail = completionEmail({
-    agentName: "Emirates Post Group Licensing",
+    agentName: "EPGL",
     locale: "en",
     reference: "LR-37380",
     contactName: "Emre Karayalcin",
     replyText: REPLY,
+    facts: EMPTY_CASE,
     baseUrl: "https://agent.7x.ae",
     receiptPath: RECEIPT,
   });
-  check("the subject names the agent and the reference", mail.subject === "Emirates Post Group Licensing — confirmation (LR-37380)", mail.subject);
+  check("the subject names the agent and the reference", mail.subject === "EPGL — confirmation (LR-37380)", mail.subject);
   check("it opens by name", mail.text.startsWith("Dear Emre Karayalcin,"), mail.text.slice(0, 40));
-  check("it carries the summary the customer read", mail.text.includes("Application reference: LR-37380"));
-  check("the receipt is in it once, not twice", (mail.text.match(/\/api\/receipt\//g) ?? []).length === 1, mail.text);
+  check("the card's title is the headline", mail.text.includes("APPLICATION CONFIRMED — YI FANG TAIWAN FRUIT TEA L.L.C"));
+  check("the card's rows are the summary", mail.text.includes("Payment: AED 1,000 — paid") && mail.text.includes("Documents: All submitted"), mail.text);
+  check("the reference is stated once, not under two names", (mail.text.match(/LR-37380/g) ?? []).length === 1, mail.text);
+  check("...and the card's own row for it is dropped", !mail.text.includes("Application reference:"), mail.text);
+  check("the next steps survive", mail.text.includes("- Once approved, your licence is issued and appears in the EPGL portal"), mail.text);
+
+  // THE TRANSCRIPT. Reported 16 September — the email read as a chat log.
+  for (const chatter of ["Payment received — thank you.", "already on file and all documents are attached", "Here's where things stand"]) {
+    check(`the conversation is left in the chat: "${chatter.slice(0, 34)}…"`, !mail.text.includes(chatter), mail.text);
+  }
+  check("no fences", !mail.text.includes(B));
+  check("the receipt is in it once", (mail.text.match(/\/api\/receipt\//g) ?? []).length === 1, mail.text);
   check("and it says not to reply", mail.text.includes("This is an automated message"));
   check("no blank-line pile-ups", !/\n{3,}/.test(mail.text), JSON.stringify(mail.text));
+  check("a dated confirmation", /\nDate: \d{2}-\d{2}-\d{4}/.test(mail.text), mail.text);
 }
+
+console.log("\nAnd where the journey never drew a card");
 {
-  // A reply whose card never named the reference, and a customer we have no name
-  // for: the email must still be usable on its own.
+  // LR-37382, the Virtual IBAN branch: submitted, unpaid for days, and its
+  // closing message sets the details out in prose. This is the branch with the
+  // longest wait and the most reason to re-read what was sent.
+  const VIBAN_REPLY = `On it — submitting your application now.
+
+Your application has been submitted successfully. Here are your details:
+
+Application reference: LR-37382
+
+EPGL Finance will issue your Virtual IBAN within one working day.
+
+What happens next:
+- The EPGL team reviews your documents — typically within one business day (8 working hours)
+- Once documents are approved, Finance issue your Virtual IBAN and you transfer the licensing fee to it
+- After the transfer is confirmed, your Postal Activity Licence is issued
+
+Keep LR-37382 handy if you ever need to follow up with EPGL.`;
   const mail = completionEmail({
-    agentName: "Emirates Post",
-    reference: "EP-0099",
-    replyText: "Your PO Box is confirmed.",
-    receiptPath: RECEIPT,
+    agentName: "EPGL",
+    reference: "LR-37382",
+    contactName: "Emre Karayalcin",
+    replyText: VIBAN_REPLY,
+    facts: {
+      data: {
+        company_name: "YI FANG TAIWAN FRUIT TEA L.L.C",
+        trade_license_number: "697670",
+        legal_form: "Limited Liability Company (LLC)",
+        po_box: "13422",
+        emirate: "Dubai",
+        region: "Al Mankhool",
+        activity_codes: "5320002,5320007,5320009",
+        payment_method: "viban",
+        contact_email: "emre.karayalcin@7x.ae",
+      },
+      documents: Array.from({ length: 7 }, () => ({ status: "uploaded" })),
+      payment: { status: "none", amount: null, currency: "AED" },
+    },
     baseUrl: "https://agent.7x.ae",
   });
-  check("the reference is added when the message left it out", mail.text.includes("Reference: EP-0099"), mail.text);
-  check("no name, no salutation of a stranger", mail.text.startsWith("Hello,"), mail.text.slice(0, 20));
-  check("the receipt is added when the message left it out", mail.text.includes(`https://agent.7x.ae${RECEIPT}`));
+  check("the reference leads", mail.text.includes("Reference: LR-37382"), mail.text);
+  check("the company is named", mail.text.includes("Company: YI FANG TAIWAN FRUIT TEA L.L.C"));
+  check("the trade licence is named", mail.text.includes("Trade licence: 697670"));
+  check("the activities are names, not codes", mail.text.includes("Postal activities: Letters & Post Items Delivery, Documents Delivery, Parcels Delivery"), mail.text);
+  check("...and never the raw codes", !mail.text.includes("5320002"));
+  check("the documents are counted", mail.text.includes("Documents: 7 submitted"));
+  // An unpaid application must not read as though money changed hands.
+  check("an unpaid Virtual IBAN says how it WILL be paid", mail.text.includes("Payment: Bank transfer (Virtual IBAN)"), mail.text);
+  check("...and does not say paid", !/—\s*paid/.test(mail.text), mail.text);
+  check("the next steps survive", mail.text.includes("- After the transfer is confirmed, your Postal Activity Licence is issued"));
+  check("the conversation does not", !mail.text.includes("On it — submitting") && !mail.text.includes("Keep LR-37382 handy"), mail.text);
+  check("no receipt link on a payment that has not happened", !mail.text.includes("/api/receipt/"));
 }
+
+console.log("\nThe summary a case yields on its own");
 {
-  const ar = completionEmail({ agentName: "بريد الإمارات", locale: "ar", reference: "EP-1", replyText: "تم.", receiptPath: RECEIPT });
-  check("Arabic subject", ar.subject === "بريد الإمارات — تأكيد (EP-1)", ar.subject);
-  check("Arabic receipt label", ar.text.includes("تحميل الإيصال:"), ar.text);
-  check("Arabic footer", ar.text.includes("هذه رسالة آلية"));
+  const paid = summaryRows(
+    {
+      data: { box_number: "5200", branch: "Ajman Central Post Office", package: "MyHome Instant", emirate: "Ajman" },
+      documents: [],
+      payment: { status: "paid", amount: 995, currency: "AED" },
+    },
+    "en"
+  );
+  const value = (l: string) => paid.find((r) => r.label === l)?.value;
+  check("a rental reads as a rental", value("PO Box") === "5200" && value("Branch") === "Ajman Central Post Office", paid);
+  check("a settled payment says so, with the figure", value("Payment") === "AED 995.00 — paid", paid);
+  check("documents are left out when there are none", !paid.some((r) => r.label === "Documents"), paid);
+  const arabic = summaryRows({ data: { company_name: "شركة", payment_method: "viban" }, documents: [{ status: "accepted" }], payment: {} }, "ar");
+  check("Arabic labels", arabic.some((r) => r.label === "الشركة") && arabic.some((r) => r.label === "المستندات"), arabic);
+  check("...including the payment route", arabic.find((r) => r.label === "الدفع")?.value === "تحويل بنكي (آيبان افتراضي)", arabic);
+  check("an empty case yields nothing rather than empty rows", summaryRows(EMPTY_CASE, "en").length === 0);
+}
+
+console.log("\nNext steps, kept rather than rewritten");
+{
+  check("a bulleted list is read", nextSteps("Blah.\n\nWhat happens next:\n- one\n- two\n\nThanks.").join("|") === "one|two");
+  check("a numbered one too", nextSteps("What happens next:\n1. one\n2. two").join("|") === "one|two");
+  check("a message without the heading has none", nextSteps("All done, thanks.").length === 0);
+  check("the list stops at the prose after it", nextSteps("What happens next:\n- one\n\nKeep LR-1 handy.").join("|") === "one");
+  check("Arabic headings are read", nextSteps("الخطوات التالية:\n- واحد\n- اثنان").length === 2);
 }
 
 console.log("\nThe logo at the top of it");

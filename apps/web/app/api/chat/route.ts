@@ -3188,6 +3188,14 @@ export async function POST(req: NextRequest) {
             reference: customerRef,
             contactName: str(finalState.data.contact_name) ?? null,
             replyText: finalText,
+            // The case, for a journey that confirms without drawing a card —
+            // EPGL's Virtual IBAN branch states the IBAN is coming and never
+            // draws one, and that is the branch with the longest wait.
+            facts: {
+              data: finalState.data,
+              documents: finalState.documents,
+              payment: finalState.payment,
+            },
             baseUrl,
             receiptPath,
           });

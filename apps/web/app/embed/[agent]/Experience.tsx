@@ -254,6 +254,22 @@ function QrModal({
  * assistant works through a (silent, multi-second) tool round. Matches on generic
  * keywords so it never leaks a raw internal tool name; falls back to a neutral line.
  */
+/**
+ * What to say while the turn is still running but nothing is arriving.
+ *
+ * Reported 16 September: "it took a while to load the buttons — after 10
+ * seconds did the buttons load". The reply had already printed its prose and
+ * the customer was looking at a finished-looking message with no sign that the
+ * assistant was still working. It was: the model writes the prose, records what
+ * the customer chose, and only then writes the buttons.
+ *
+ * The status line beside a tool round covered the INTEGRATION tools only —
+ * anything that calls out to Emirates Post or EPGL — and recording a field is
+ * not one of those, so the commonest silent stretch in any journey was the one
+ * with nothing on screen.
+ */
+const WORKING = (ar: boolean) => (ar ? "جارٍ العمل على طلبك…" : "Working on it…");
+
 function toolStatusLabel(ev: { type: string; tool?: string; kind?: string }, ar: boolean): string {
   const t = (ev.tool || "").toLowerCase();
   const L = (en: string, arb: string) => (ar ? arb : en);
@@ -451,6 +467,9 @@ export function Experience({
   const [authReason, setAuthReason] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
   const [toolStatus, setToolStatus] = useState<string | null>(null);
+  /** Nothing has arrived for a couple of seconds and the turn is still open. */
+  const [quiet, setQuiet] = useState(false);
+  const lastDelta = useRef(0);
   // Resume completion + a one-shot flag to fire the account pulse after sign-in.
   const [resumed, setResumed] = useState(false);
   const [signedInPulse, setSignedInPulse] = useState(false);
@@ -1136,6 +1155,8 @@ export function Experience({
     ]);
     setStreaming(true);
     setToolStatus(null);
+    lastDelta.current = Date.now();
+    setQuiet(false);
 
     try {
       const res = await fetch("/api/chat", {
@@ -1171,7 +1192,11 @@ export function Experience({
             /* ignore */
           }
         } else if (ev.type === "text") {
-          if (ev.delta) setToolStatus(null); // real text is arriving — drop the status
+          if (ev.delta) {
+            setToolStatus(null); // real text is arriving — drop the status
+            lastDelta.current = Date.now();
+            setQuiet(false);
+          }
           // Pure updater: never mutate the previous message object — StrictMode
           // double-invokes updaters, and a mutation would append the delta twice.
           setMessages((prev) => {
@@ -1299,8 +1324,24 @@ export function Experience({
     } finally {
       setStreaming(false);
       setToolStatus(null);
+      setQuiet(false);
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
+
+  /**
+   * Watch for a silent stretch inside a turn that has already said something.
+   *
+   * Polled rather than timed off each delta: a timer per token is a timer reset
+   * a thousand times a reply, and this needs to be right to about a second.
+   */
+  useEffect(() => {
+    if (!streaming) return;
+    // 2.5s: long enough that the tail of a turn — saving the case, minting a
+    // survey token — does not flash it after the last word, short enough that a
+    // ten-second wait for a button is never silent.
+    const id = setInterval(() => setQuiet(Date.now() - lastDelta.current > 2500), 500);
+    return () => clearInterval(id);
+  }, [streaming]);
 
   // Voice mode: speak the assistant's replies and turn the customer's speech into
   // chat messages (see useVoiceChat). Layered on the normal chat, not a separate
@@ -1583,12 +1624,15 @@ export function Experience({
                     )
                   ) : null}
                   {streaming && i === messages.length - 1
-                    ? toolStatus ? (
+                    ? toolStatus || (quiet && m.content) ? (
                         // Shows during a silent tool round — as a standalone line on an
                         // empty bubble, or a trailing line under an in-progress reply.
+                        // Also shows when a reply has simply stopped arriving: the model
+                        // recording a field is a silent stretch too, and a finished-
+                        // looking message that is not finished reads as a hang.
                         <span className={`dlg-tool-status${m.content ? " trailing" : ""}`}>
                           <span className="dlg-tool-spinner" />
-                          {toolStatus}
+                          {toolStatus ?? WORKING(locale === "ar")}
                         </span>
                       ) : !m.content ? (
                         <span className="dlg-typing">

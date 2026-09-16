@@ -42,6 +42,39 @@ console.log("\nSwitching back is as easy as switching");
 check("a clean English sentence after Arabic reads as English",
   messageLocale("Actually, can we continue in English please?") === "en");
 
+console.log("\nData is not a sentence (16 September)");
+/**
+ * An Arabic application, at the step where the assistant asks for the
+ * applicant's name and email. The customer answered with their own name, their
+ * own address and their own number — the only script any of them can be written
+ * in — and the interface switched to English for the rest of the session while
+ * they carried on typing Arabic.
+ */
+for (const t of [
+  "emre karayalcin, emre.karayalcin@7x.ae, 0553708434",
+  "emre.karayalcin@7x.ae",
+  "Emre Karayalcin",
+  "LR-37382",
+  "YI FANG TAIWAN FRUIT TEA L.L.C",
+  "697670",
+  "0553708434",
+  "784-1984-0847950-3",
+]) {
+  check(`"${t.slice(0, 38)}" is data, not English`, messageLocale(t) !== "en", messageLocale(t));
+}
+check("a sentence with contact details in it is still a sentence",
+  messageLocale("you can email me at emre.karayalcin@7x.ae if anything is missing") === "en",
+  messageLocale("you can email me at emre.karayalcin@7x.ae if anything is missing"));
+check("three words are enough to ask for English", messageLocale("I prefer English") === "en");
+check("...and Arabic still needs only its own script", messageLocale("اسمي عمرة") === "ar");
+// The other half of the same rule: a Latin ANSWER inside an Arabic journey is
+// the commonest thing there is, and none of it is a language change.
+for (const t of ["Dubai", "Al Mankhool", "Limited Liability Company (LLC)", "MyBox", "Ajman Central Post Office"]) {
+  check(`"${t}" is an answer, not English`, messageLocale(t) !== "en", messageLocale(t));
+}
+check("a real English question still switches", messageLocale("what documents do you need from me") === "en");
+check("...and so does asking for it outright", messageLocale("can we continue in english") === "en");
+
 console.log("\nDigits and punctuation are not letters");
 check("a box number with Arabic around it is Arabic", messageLocale("الصندوق 2290 من فضلك") === "ar");
 check("a bare number decides nothing", messageLocale("392028") === null);

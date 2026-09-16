@@ -1,4 +1,5 @@
 import { isValidEmail } from "./email";
+import { POSTAL_ACTIVITIES } from "./epglFields";
 
 /**
  * The confirmation email, sent because the journey finished — not because the
@@ -92,18 +93,148 @@ export function plainFromReply(text: string, baseUrl?: string | null): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/**
+ * WHAT THE EMAIL SAYS, AND WHAT IT DOES NOT.
+ *
+ * The first version sent the assistant's closing message as the body, on the
+ * reasoning that a second summary written here would drift from the journey's
+ * own wording. What arrived read as a transcript — "On it — submitting your
+ * application now.", "Here are your details:", "Keep LR-37382 handy" — three
+ * lines of conversation for every line of fact. Reported 16 September: "should
+ * not show a transcript on the email, it should show the summary".
+ *
+ * So the body is a SUMMARY, built in this order:
+ *
+ *   1. the confirmation card the customer was shown, when the reply carried one
+ *      — those rows are the summary, already agreed with the journey;
+ *   2. otherwise the case itself: what was applied for, for whom, with how many
+ *      documents, and what was paid.
+ *
+ * The only prose kept from the reply is the "what happens next" list, because
+ * it carries the review SLA and the payment route, both of which are the
+ * journey's to state and neither of which should be re-written here.
+ */
+
+/** Case fields worth putting in a confirmation, in the order they read best. */
+const SUMMARY_FIELDS: { key: string; en: string; ar: string }[] = [
+  { key: "company_name", en: "Company", ar: "الشركة" },
+  { key: "trade_license_number", en: "Trade licence", ar: "رقم الرخصة التجارية" },
+  { key: "legal_form", en: "Legal form", ar: "الشكل القانوني" },
+  { key: "box_number", en: "PO Box", ar: "صندوق البريد" },
+  { key: "po_box", en: "PO Box", ar: "صندوق البريد" },
+  { key: "branch", en: "Branch", ar: "الفرع" },
+  { key: "package", en: "Package", ar: "الباقة" },
+  { key: "rental_duration", en: "Duration", ar: "المدة" },
+  { key: "emirate", en: "Emirate", ar: "الإمارة" },
+  { key: "region", en: "Region", ar: "المنطقة" },
+];
+
+const PAY_METHOD: Record<string, { en: string; ar: string }> = {
+  viban: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي (آيبان افتراضي)" },
+  card: { en: "Card payment", ar: "الدفع بالبطاقة" },
+};
+
+const money = (amount: number | null | undefined, currency: string | null | undefined) =>
+  typeof amount === "number" && Number.isFinite(amount) && amount > 0
+    ? `${currency || "AED"} ${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : "";
+
+/** 16-09-2026 — the format the journeys show dates in, in both languages. */
+export function emailDate(d: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+export interface CaseFacts {
+  data: Record<string, unknown>;
+  documents: { status: string }[];
+  payment: { status?: string; amount?: number | null; currency?: string | null };
+}
+
+/**
+ * The summary rows for a case that confirmed without a card.
+ *
+ * EPGL's Virtual IBAN branch is the one that matters here: it submits, states
+ * the IBAN is coming, and never draws a summary card — so an email built only
+ * from cards would have nothing to show on the branch where the customer has
+ * the longest wait and the most reason to re-read what they sent.
+ */
+export function summaryRows(facts: CaseFacts, locale?: string): { label: string; value: string }[] {
+  const ar = locale === "ar";
+  const rows: { label: string; value: string }[] = [];
+  const seen = new Set<string>();
+  for (const f of SUMMARY_FIELDS) {
+    const label = ar ? f.ar : f.en;
+    if (seen.has(label)) continue;
+    const v = String(facts.data[f.key] ?? "").trim();
+    if (!v) continue;
+    seen.add(label);
+    rows.push({ label, value: v });
+  }
+  const activities = POSTAL_ACTIVITIES.filter((p) =>
+    String(facts.data.activity_codes ?? "").includes(p.code)
+  ).map((p) => p.en);
+  if (activities.length) rows.push({ label: ar ? "الأنشطة البريدية" : "Postal activities", value: activities.join(", ") });
+
+  const attached = facts.documents.filter((d) => d.status === "uploaded" || d.status === "accepted").length;
+  if (attached) rows.push({ label: ar ? "المستندات" : "Documents", value: ar ? `${attached} مرفقة` : `${attached} submitted` });
+
+  // What was paid, or how it is going to be. An unpaid Virtual IBAN application
+  // must not read as though money has changed hands.
+  const method = PAY_METHOD[String(facts.data.payment_method ?? "").toLowerCase()];
+  const amount = money(facts.payment.amount, facts.payment.currency);
+  const paid = facts.payment.status === "paid";
+  const payValue = paid
+    ? `${amount || (ar ? "مدفوع" : "paid")}${amount ? (ar ? " — مدفوع" : " — paid") : ""}`
+    : method
+      ? `${ar ? method.ar : method.en}${amount ? ` — ${amount}` : ""}`
+      : amount;
+  if (payValue) rows.push({ label: ar ? "الدفع" : "Payment", value: payValue });
+  return rows;
+}
+
+/**
+ * The "what happens next" list out of the reply, if it wrote one.
+ *
+ * Kept rather than rewritten: it states the review SLA and, on the Virtual IBAN
+ * branch, who issues the IBAN and when. Both belong to the journey, and a copy
+ * maintained here would be the copy that goes stale.
+ */
+export function nextSteps(reply: string): string[] {
+  const clean = plainFromReply(reply);
+  const at = clean.search(/^[^\n]*(what happens next|ما الذي يحدث|الخطوات التالية|ماذا يحدث)[^\n]*$/im);
+  if (at === -1) return [];
+  const after = clean.slice(at).split("\n").slice(1);
+  const out: string[] = [];
+  for (const line of after) {
+    const bullet = /^\s*(?:[-*•]|\d+[.)])\s+(.*\S)\s*$/.exec(line);
+    if (bullet) { out.push(bullet[1]!); continue; }
+    if (!line.trim()) { if (out.length) break; continue; }
+    break;
+  }
+  return out.slice(0, 6);
+}
+
 const STR = {
   en: {
     subject: (name: string, ref: string) => `${name} — confirmation (${ref})`,
     greeting: (who: string) => (who ? `Dear ${who},` : "Hello,"),
+    submitted: "Your application has been submitted.",
+    confirmed: "Your application is confirmed and your payment has been received.",
     reference: "Reference",
+    date: "Date",
+    next: "What happens next:",
     receipt: "Download your receipt",
     foot: "This is an automated message — please do not reply to it.",
   },
   ar: {
     subject: (name: string, ref: string) => `${name} — تأكيد (${ref})`,
     greeting: (who: string) => (who ? `عزيزنا ${who}،` : "مرحباً،"),
+    submitted: "تم إرسال طلبك.",
+    confirmed: "تم تأكيد طلبك واستلام الدفعة.",
     reference: "الرقم المرجعي",
+    date: "التاريخ",
+    next: "الخطوات التالية:",
     receipt: "تحميل الإيصال",
     foot: "هذه رسالة آلية — يُرجى عدم الرد عليها.",
   },
@@ -115,8 +246,10 @@ export interface CompletionEmailInput {
   /** What the CUSTOMER quotes: EPGL's LR-37380 rather than the record id. */
   reference: string;
   contactName?: string | null;
-  /** The assistant's confirmation message, as it was sent. */
+  /** The assistant's confirmation message — read for its card and next steps. */
   replyText: string;
+  /** The case, for a journey that confirmed without drawing a card. */
+  facts: CaseFacts;
   /** Where this deployment answers, so a chat-relative link works in an inbox. */
   baseUrl?: string | null;
   /** The receipt path for a settled payment, or null. */
@@ -126,19 +259,74 @@ export interface CompletionEmailInput {
 export function completionEmail(input: CompletionEmailInput): { subject: string; text: string } {
   const s = STR[input.locale === "ar" ? "ar" : "en"];
   const base = (input.baseUrl ?? "").replace(/\/$/, "");
-  const reply = plainFromReply(input.replyText, base || null);
+
+  // The card the customer was shown wins: those rows were written for this
+  // journey and already agreed with it. The case is the fallback, not the
+  // preference — see the note above summaryRows.
+  const card = parseSummaryCard(input.replyText);
+  const rows = card?.rows.length ? card.rows : summaryRows(input.facts, input.locale);
+  const headline = card?.title?.trim() || (input.facts.payment.status === "paid" ? s.confirmed : s.submitted);
+
   const receipt =
-    input.receiptPath && !reply.includes(input.receiptPath)
-      ? `${s.receipt}: ${base ? `${base}${input.receiptPath}` : input.receiptPath}`
-      : "";
-  // The reference is normally in the card already. Repeated only when it is not:
-  // an email about an application that never names it is unusable.
-  const ref = input.reference && !reply.includes(input.reference) ? `${s.reference}: ${input.reference}` : "";
-  const text = [s.greeting(String(input.contactName ?? "").trim()), "", reply, ref, receipt, "", s.foot]
-    .filter((l, i, all) => l !== "" || all[i - 1] !== "")
+    input.receiptPath && base
+      ? `${s.receipt}: ${base}${input.receiptPath}`
+      : input.receiptPath
+        ? `${s.receipt}: ${input.receiptPath}`
+        : "";
+
+  // A block of "Label: value" lines, which is what textToHtml renders as a
+  // detail table. The reference leads it: an email about an application that
+  // never names it is unusable.
+  const detail = [
+    `${s.reference}: ${input.reference}`,
+    ...rows
+      // The reference leads the block, so the card's own row for it — "Application
+      // reference: LR-37380" — would say it twice under two different names.
+      .filter((r) => !/reference|مرجع/i.test(r.label) && r.value.trim() !== input.reference.trim())
+      // The receipt is offered once, at the bottom, as an address that works
+      // from an inbox. The card's row carries the chat-relative path.
+      .filter((r) => !(receipt && /receipt|إيصال/i.test(r.label)))
+      .map((r) => `${r.label}: ${stripLinks(r.value)}`),
+    `${s.date}: ${emailDate()}`,
+  ].join("\n");
+
+  const steps = nextSteps(input.replyText);
+  const text = [
+    s.greeting(String(input.contactName ?? "").trim()),
+    "",
+    headline,
+    "",
+    detail,
+    ...(steps.length ? ["", s.next, ...steps.map((b) => `- ${b}`)] : []),
+    ...(receipt ? ["", receipt] : []),
+    "",
+    s.foot,
+  ]
     .join("\n")
     .replace(/\n{3,}/g, "\n\n");
   return { subject: s.subject(input.agentName, input.reference), text };
+}
+
+/** A card value written as a markdown link, reduced to the address itself. */
+function stripLinks(value: string): string {
+  return value.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, "$2").trim();
+}
+
+/** The summary card in an assistant message, if it drew one. */
+export function parseSummaryCard(text: string): { title: string | null; rows: { label: string; value: string }[]; total: string | null } | null {
+  const m = /```[ \t]*summary[ \t]*\n([\s\S]*?)\n[ \t]*```/i.exec(text);
+  if (!m) return null;
+  const rows: { label: string; value: string }[] = [];
+  let title: string | null = null;
+  let total: string | null = null;
+  for (const line of (m[1] ?? "").split("\n")) {
+    const meta = line.match(/^\s*(title|total)\s*:\s*(.+?)\s*$/i);
+    const row = line.match(/^\s*-\s+(.+?)\s*:\s*(.+?)\s*$/);
+    if (meta && /^title$/i.test(meta[1] ?? "")) title = (meta[2] ?? "").trim();
+    else if (meta) total = (meta[2] ?? "").trim();
+    else if (row) rows.push({ label: (row[1] ?? "").trim(), value: (row[2] ?? "").trim() });
+  }
+  return rows.length || total || title ? { title, rows, total } : null;
 }
 
 /** The address the confirmation goes to, or null when there is nothing usable. */
