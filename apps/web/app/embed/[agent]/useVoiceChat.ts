@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Locale } from "@dialog/config";
+import { nativeVoiceAllowed } from "./nativeBridge";
 
 /**
  * Voice mode as an I/O layer over the normal text chat (not a separate agent):
@@ -123,6 +124,10 @@ export function useVoiceChat(opts: {
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) &&
     "MediaRecorder" in window &&
     !!navigator.mediaDevices?.getUserMedia &&
+    // A WebView reports a microphone it may not be permitted to open; asking for
+    // one the app has no usage description for kills the app. See
+    // nativeVoiceAllowed.
+    nativeVoiceAllowed() &&
     ("AudioContext" in window || "webkitAudioContext" in window || "speechSynthesis" in window);
 
   const stopRecognition = useCallback(() => {

@@ -54,6 +54,7 @@ import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale, historyLocale } from "@/lib/replyLocale";
 import { narrationGuard } from "@/lib/narrationGuard";
+import { echoGuard } from "@/lib/echoGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -95,8 +96,25 @@ const Body = z.object({
 // user as a message; it instructs the agent to assemble the pulse from real data.
 const PULSE_DIRECTIVE =
   "(System: the customer just signed in via UAE PASS. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
-  "1) Greet them warmly (use their name once you have it from account data). " +
-  "2) Use your tools to pull everything you can about their account. " +
+  /**
+   * SAY SOMETHING BEFORE YOU GO AND LOOK.
+   *
+   * Reported from the mobile app, 11 September: "on clicking the chatbot icon
+   * from the home screen, the 'Working on it…' message keeps loading for almost
+   * a minute before responding." It does, and the directive below is most of
+   * the reason. It asks for a greeting that uses the customer's name, and the
+   * name comes from the account, so the first word of the reply waits on the
+   * account lookup — and on the pricing call for every box that turns out to be
+   * due, which for an account with sixteen boxes is a great many round trips
+   * before anything at all appears.
+   *
+   * The work still takes what it takes. What changes is that the customer is
+   * not staring at a spinner through it: one line lands in the first second,
+   * the status beside it says what is being fetched, and the pulse arrives
+   * underneath when it is ready.
+   */
+  "1) FIRST, before calling any tool, write ONE short line of greeting and say you are pulling their account up — this is the only thing the customer can see while the lookups run, so it must not wait on them. Use their name only if you have already been given it; do not call a tool to find it. " +
+  "2) Then use your tools to pull everything you can about their account. " +
   "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
   "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
   "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. If completed requests are on file (see the known customer record), add a short \"Recent activity\" list — but write each line as something a person would recognise: what was done, on which box, and when. \"NXN-B295AF15: Manage PO Box, 07-09-2026\" is our filing system talking to itself; \"You added an authorised agent to box 450866 on 7 September\" is the same fact addressed to the customer. Keep the reference if it is one they might need to quote, but put it at the end in brackets, never at the front. " +
@@ -2182,6 +2200,11 @@ export async function POST(req: NextRequest) {
         const idFilter = internalIdFilter();
         // The model talking to itself, kept out of the customer's chat.
         const narration = narrationGuard();
+        // The model saying the same thing twice in one reply — what a tool round
+        // does to a paragraph it started before the round and finished after it.
+        // Downstream of the narration guard on purpose: a preamble that guard
+        // drops must not be remembered as something the customer has read.
+        const echo = echoGuard();
         // An Arabic reply links to the Arabic pages, whatever the model reached for.
         // THE WIDGET'S OWN WORDS FOLLOW THE CONVERSATION.
         //
@@ -2426,13 +2449,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = keyGuard.push(mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))))))));
+            const out = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = keyGuard.push(mapOffer.push(links.push(branchNarration.push(narration.push(
+            const held = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -2441,7 +2464,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            )))));
+            ))))));
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -2564,7 +2587,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = keyGuard.push(mapOffer.push(links.push(branchNarration.push(narration.push(idFilter.push(
+          const rest = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -2572,7 +2595,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush();
+          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 

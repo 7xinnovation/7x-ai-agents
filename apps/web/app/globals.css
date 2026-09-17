@@ -1688,6 +1688,56 @@ body {
 .dlg-input textarea::placeholder {
   color: var(--c-text-muted);
 }
+/* =========================================================================
+   The composer on a touch device.
+   =========================================================================
+   Two things reported from the mobile app on 11 September come back to this
+   one control.
+
+   "The browser screen does not stay a fixed size — it keeps resizing/shifting
+   during the conversation" (issue 4), and "the message bubble text is cut off
+   at the right edge of the screen instead of wrapping" (issue 2), with the
+   composer itself cut off at the LEFT in three other screenshots.
+
+   That is not a wrapping bug. It is iOS: Safari and every WKWebView zoom the
+   page in when a text field smaller than 16px takes focus, and once zoomed the
+   visual viewport is narrower than the layout, so the fixed-position widget is
+   panned and clipped — at the right when the page sits at its origin, at the
+   left once the customer has scrolled. Nothing here is resizing. The page is
+   being magnified under them every time they tap the box to type, which is
+   exactly "keeps resizing/shifting during the conversation".
+
+   16px is the threshold, so the field is 16px where the pointer is coarse. The
+   desktop composer keeps its 14px; the two never meet.
+
+   `user-scalable=no` would also stop it and is not on the table — it takes
+   pinch-zoom away from everyone to fix a bug caused by our own font size.
+
+   The second is the "two white lines displayed near the Send (arrow) button"
+   (issue 6): the backdrop-filter behind the glass composer is rasterised to the
+   element's BORDER BOX, not to its 22px radius, on the WebViews in these
+   screenshots — so the blurred panel shows as a rectangle a few pixels proud of
+   the pill, top and bottom, which is the pair of lines. The glass is a desktop
+   refinement; on a phone the composer sits on an opaque surface anyway, and
+   dropping the filter costs nothing that can be seen. */
+@media (hover: none) and (pointer: coarse) {
+  /* Every field the customer can put a caret in, not just the composer: the
+     branch search, the map search, an inline correction in the application
+     panel, the picker. Each one of them was under 16px, so each one of them
+     magnified the page on focus. */
+  .dlg-input textarea,
+  .dlg-cardselect-search input,
+  .dlg-locate-input,
+  .dlg-field-edit input,
+  .dlg-select-input {
+    font-size: 16px;
+  }
+  .dlg-input {
+    background: var(--c-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
 .dlg-send {
   width: 38px;
   height: 38px;

@@ -21,9 +21,37 @@ export const runtime = "nodejs";
  * not as key=value, so the first valueless parameter is read as the reference.
  */
 const STR = {
-  en: { head: "Payment window", body: "Returning you to the chat…" },
-  ar: { head: "نافذة الدفع", body: "جارٍ إعادتك إلى المحادثة…" },
+  en: {
+    head: "Payment window",
+    body: "Returning you to the chat…",
+    stuck: "You can close this window — your chat is waiting behind it.",
+    close: "Back to the chat",
+  },
+  ar: {
+    head: "نافذة الدفع",
+    body: "جارٍ إعادتك إلى المحادثة…",
+    stuck: "يمكنك إغلاق هذه النافذة — محادثتك في انتظارك خلفها.",
+    close: "العودة إلى المحادثة",
+  },
 } as const;
+
+/**
+ * A deep link back into a native app, when there is one.
+ *
+ * Reported from the mobile app, 11 September: "after completing payment, the app
+ * does not automatically redirect back to the chat window; it stays on the
+ * 'Payment window — Returning you to the chat…' screen." It does, and the
+ * screenshot says why — the page is in an iOS in-app browser
+ * (SFSafariViewController), which is not the WebView the chat is in and not a
+ * window anything opened. There is no `opener` to tell and `close()` does
+ * nothing: a page cannot dismiss a browser the OS put in front of the app.
+ *
+ * What DOES dismiss it is navigating to a URL the app itself claims. So if the
+ * app's scheme is configured we go there, and iOS hands control back. Unset in
+ * every environment until Emirates Post give us theirs, which is why the page
+ * below no longer promises a return it may not be able to make.
+ */
+const APP_LINK = process.env.NATIVE_RETURN_URL ?? "";
 
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
@@ -42,17 +70,58 @@ body{margin:0;min-height:100dvh;display:flex;align-items:center;justify-content:
 font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f6f8fc;color:#0f172a}
 .card{background:#fff;border:1px solid #e1e8f0;border-radius:14px;padding:32px 36px;text-align:center;max-width:380px}
 h1{font-size:17px;margin:0 0 8px}p{margin:0;font-size:14px;color:#5B6478;line-height:1.6}
-</style></head><body><div class="card"><h1>${t.head}</h1><p>${t.body}</p></div>
+/* 16px: anything smaller is magnified by iOS the moment it is tapped. */
+a.done{display:none;margin-top:18px;padding:11px 20px;border-radius:10px;background:#0f172a;color:#fff;
+text-decoration:none;font-size:16px;font-weight:600}
+</style></head><body><div class="card"><h1>${t.head}</h1><p id="msg">${t.body}</p>
+<a class="done" id="done" href="#">${t.close}</a></div>
 <script>
 (function () {
   var ref = ${JSON.stringify(reference)};
-  try {
-    // Same origin as the embed that opened us, so this is addressed exactly.
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage({ source: "dialog-extpay", action: "returned", reference: ref }, window.location.origin);
-    }
-  } catch (e) { /* an opener we cannot reach just means the customer closes this themselves */ }
+  var appLink = ${JSON.stringify(APP_LINK)};
+
+  function tellTheChat() {
+    try {
+      // Same origin as the embed that opened us, so this is addressed exactly.
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ source: "dialog-extpay", action: "returned", reference: ref }, window.location.origin);
+      }
+    } catch (e) { /* an opener we cannot reach just means the customer closes this themselves */ }
+    try {
+      // A native host that put us in a WebView of its own rather than the
+      // system browser. It gets the same news through its own channel.
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ source: "dialog-native", action: "returned", url: ref }));
+      }
+    } catch (e) { /* the host is gone; the button below still works */ }
+  }
+
+  function goBack() {
+    tellTheChat();
+    if (appLink) { try { window.location.href = appLink; } catch (e) {} }
+    try { window.close(); } catch (e) {}
+  }
+
+  tellTheChat();
+  if (appLink) { try { window.location.href = appLink; } catch (e) {} }
   setTimeout(function () { try { window.close(); } catch (e) {} }, 900);
+
+  /**
+   * STILL HERE. Say so.
+   *
+   * If none of the above worked the customer is looking at a page that has been
+   * promising to return them for as long as they care to watch. Two seconds is
+   * long enough to know: the message becomes the truth — the chat is behind
+   * this window — and the button tries every route again for anyone who taps it.
+   */
+  setTimeout(function () {
+    var msg = document.getElementById("msg");
+    var done = document.getElementById("done");
+    if (!msg || !done) return;
+    msg.textContent = ${JSON.stringify(t.stuck)};
+    done.style.display = "inline-block";
+    done.addEventListener("click", function (e) { e.preventDefault(); goBack(); });
+  }, 2000);
 })();
 </script></body></html>`;
 

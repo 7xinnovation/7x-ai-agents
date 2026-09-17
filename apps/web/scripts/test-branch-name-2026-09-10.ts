@@ -152,7 +152,11 @@ console.log("\nThe branch names reach the model in the customer's language");
   check("...from an index that holds both languages", /Object\.entries\(hit\.byName\)\.map/.test(src.replace(/\s+/g, " ")));
 
   const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-  check("the guard is in the streaming chain", /branchNarration\.push\(narration\.push/.test(route));
+  // The echo guard was slipped in between the two on 17 September — a reply
+  // that repeats itself, from the mobile bug list. What this line is checking
+  // is that the branch guard still wraps the narration guard, not that nothing
+  // has ever been added in between.
+  check("the guard is in the streaming chain", /branchNarration\.push\(echo\.push\(narration\.push/.test(route));
   check("...and is flushed at the end of the turn", /branchNarration\.flush\(\)/.test(route));
   check("the selection is read from the customer's message first", /branchNamedIn\(body\.userMessage, idx\)/.test(route));
 }

@@ -31,22 +31,34 @@ check("it cancels the reader rather than waiting", /reader\.cancel\(\)/.test(exp
 check("and clears the timer when the stream ends properly", /if \(timer\) clearTimeout\(timer\);/.test(exp));
 
 console.log("\nAnd recovers what the server already finished");
-check("a stall re-reads the conversation", /if \(stalled && convId\.current\)[\s\S]{0,200}?\/api\/conversations\//.test(exp));
-check("it replaces the messages with the stored ones", /setMessages\(data\.messages\)/.test(exp));
+// 17 September: the same recovery now serves a SECOND door. A fetch that dies
+// on a phone changing cell threw "Load failed" into the conversation verbatim,
+// in English — WebKit's words, printed at a customer — when the turn it was
+// carrying had already finished on the server. Both paths go through
+// recoverTurn, and only a genuine nothing-to-show reaches noteDropped.
+check("there is one recovery, shared", /const recoverTurn = async \(\): Promise<boolean>/.test(exp));
+check("it re-reads the conversation", /recoverTurn[\s\S]{0,400}?\/api\/conversations\//.test(exp));
+check("it replaces the messages with the stored ones", /setMessages\(stored\)/.test(exp));
 check("...and the case with them", /if \(data\.case\) setCaseState\(data\.case\)/.test(exp));
-check("only on a stall — a normal turn is untouched", /if \(stalled && convId\.current\)/.test(exp));
-check("the spinner still clears either way", /finally \{\s*setStreaming\(false\);\s*setToolStatus\(null\);/.test(exp));
+check("a stall uses it", /if \(stalled && !\(await recoverTurn\(\)\)\) noteDropped\(\)/.test(exp));
+check("...and so does a dropped fetch", /if \(!\(await recoverTurn\(\)\)\) noteDropped\(\)/.test(exp));
+check("only then is the customer told, in their language", /noteDropped[\s\S]{0,600}?locale === "ar"/.test(exp));
+check("and WebKit's own wording never reaches them", !/err instanceof Error \? err\.message/.test(exp));
+check("the spinner still clears either way", /finally \{\s*abortRef\.current = null;\s*setStreaming\(false\);\s*setToolEvent\(null\);/.test(exp));
 
 console.log("\nThe server was never the one hanging");
 check("the stream closes BEFORE the deferred work drains", route.indexOf("controller.close()") < route.indexOf("for (const job of deferred)"));
 check("a deferred failure is logged, not surfaced", /deferred_job_failed/.test(route));
 
 console.log("\nAn escalation that cannot be arranged is a sentence, not a dead turn");
-check("createCallback is caught", /createCallback\(actx[\s\S]{0,320}?\} catch \(e\) \{/.test(tools));
+check("createCallback is caught", /createCallback\(actx[\s\S]{0,900}?\} catch \(e\) \{/.test(tools));
 check("createCase is caught too", /createCase\(actx[\s\S]{0,300}?\} catch \(e\) \{/.test(tools));
 check("no reference is invented for a request nobody got", /Do NOT give the customer a reference/.test(tools));
+// The number itself moved into supportRoute() so a tenant without one is not
+// handed Emirates Post's switchboard. What both paths must still do is give the
+// customer somewhere to go.
 check("the customer is given a number they can call", /600 599 999/.test(tools));
-check("...twice, once for each path", (tools.match(/600 599 999/g) ?? []).length >= 2);
+check("...on both paths", (tools.match(/\$\{supportRoute\(agent\)\}/g) ?? []).length >= 2);
 check("what already succeeded is not described as failed", /must not be described as failed|do not suggest it failed/.test(tools));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

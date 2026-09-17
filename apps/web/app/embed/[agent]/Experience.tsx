@@ -17,6 +17,7 @@ import {
   ArrowRight,
   UploadSimple,
   ArrowClockwise,
+  NotePencil,
   LockSimple,
   ArrowSquareOut,
   ArrowsOutSimple,
@@ -38,7 +39,7 @@ import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
 import { maskForDisplay } from "@/lib/maskIdentity";
-import { openExternal, isNative, postNative, nativeToken, nativeHandoff, type ExternalWindow } from "./nativeBridge";
+import { openExternal, isNative, postNative, nativeToken, nativeHandoff, onNativeEvent, type ExternalWindow } from "./nativeBridge";
 
 /** Aisha's brand azure (from the AISHA wordmark) — the single accent, applied
  *  across every tenant so the assistant reads as Aisha, not the host brand. */
@@ -120,6 +121,16 @@ export const STR = {
     collapse: "Collapse",
     reset: "New chat",
     stop: "Stop",
+    send: "Send",
+    /* The voice bar and the mic button. English-only until now, in a widget
+       whose whole point is that it follows the customer's language — reported
+       on 11 September alongside "Looking up your box". */
+    voiceStart: "Talk to the assistant",
+    voiceOn: "Voice on",
+    voiceStop: "Turn off",
+    voiceConnecting: "Connecting…",
+    voiceSpeaking: "Speaking…",
+    voiceListening: "Listening…",
     withdraw: "Withdraw & erase",
     withdrawHint: "Withdraw my permission — stop everything and erase what was collected",
     withdrawing: "Withdrawing…",
@@ -180,6 +191,13 @@ export const STR = {
     collapse: "تصغير",
     reset: "محادثة جديدة",
     stop: "إيقاف",
+    send: "إرسال",
+    voiceStart: "تحدّث إلى المساعد",
+    voiceOn: "الصوت مفعّل",
+    voiceStop: "إيقاف",
+    voiceConnecting: "جارٍ الاتصال…",
+    voiceSpeaking: "جارٍ التحدث…",
+    voiceListening: "جارٍ الاستماع…",
     withdraw: "سحب الإذن ومسح البيانات",
     withdrawHint: "اسحب إذني — أوقِف كل شيء وامسح ما تم جمعه",
     withdrawing: "جارٍ السحب…",
@@ -315,6 +333,18 @@ function toolStatusLabel(ev: { type: string; tool?: string; kind?: string }, ar:
   const t = (ev.tool || "").toLowerCase();
   const L = (en: string, arb: string) => (ar ? arb : en);
   if (ev.type === "lookup") return L("Tracking your shipment…", "جارٍ تتبّع شحنتك…");
+  /**
+   * The account lookup had no label, and it is the longest wait in the product.
+   *
+   * Reported from the mobile app, 11 September: "the 'Working on it…' message
+   * keeps loading for almost a minute". The account pulse walks every box on
+   * the account and prices the ones that are due, and the tool that starts it —
+   * nxn_boxes_for_customer — matched none of the patterns below, so the one
+   * minute with the most going on behind it was the one with the vaguest thing
+   * to say about it.
+   */
+  if (/boxes_for_customer|companies_for_customer|account/.test(t)) return L("Fetching your account…", "جارٍ جلب بيانات حسابك…");
+  if (/saved_cards|cards/.test(t)) return L("Checking your saved cards…", "جارٍ التحقق من بطاقاتك المحفوظة…");
   if (/details/.test(t)) return L("Looking up your box…", "جارٍ جلب بيانات صندوقك…");
   if (/pricing|charges/.test(t)) return L("Checking pricing…", "جارٍ حساب السعر…");
   if (/boxlocations|branch/.test(t)) return L("Finding branches…", "جارٍ إيجاد الفروع…");
@@ -512,7 +542,22 @@ export function Experience({
   const hostLoginWin = useRef<ExternalWindow | null>(null);
   const [authReason, setAuthReason] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
-  const [toolStatus, setToolStatus] = useState<string | null>(null);
+  /**
+   * WHAT the assistant is doing, not the SENTENCE that says so.
+   *
+   * Reported from the mobile app, 11 September: "after changing the language
+   * mid-conversation, a few texts (e.g. 'Looking up your box') continue to
+   * display in English instead of Arabic." They did. The label was rendered
+   * once, at the moment the tool event arrived, and stored as a finished string
+   * — so a language switch a second later repainted the composer, the readiness
+   * bar and the pickers around a status line frozen in the language the
+   * customer had just left.
+   *
+   * Keeping the event and translating at render time is the whole fix: the line
+   * is now in whatever language the conversation is in when it is read.
+   */
+  const [toolEvent, setToolEvent] = useState<{ type: string; tool?: string; kind?: string } | null>(null);
+  const toolStatus = toolEvent ? toolStatusLabel(toolEvent, locale === "ar") : null;
   /**
    * THE CUSTOMER'S OWN ACCOUNT OF WHAT WAS DONE FOR THEM.
    *
@@ -544,6 +589,24 @@ export function Experience({
    * out would last until the next tick. It is lifted only by an explicit sign-in.
    */
   const signedOut = useRef(false);
+  /**
+   * The customer was signed in by the NATIVE app, not by a token we hold.
+   *
+   * The distinction only matters when the conversation ends. A host page hands
+   * us its token and keeps re-offering it, so `uaePass.current` survives a new
+   * chat and so does the sign-in. A native handoff is the opposite by design:
+   * the code is single-use, worth two minutes, and the real credential never
+   * comes near this page — the session lives against the CONVERSATION on the
+   * server. Start a new conversation and the identity is simply not there any
+   * more.
+   *
+   * Which is what was reported on 11 September: "refreshing the chat window
+   * using the refresh button prompts the user to sign in again." It did, and no
+   * token was missing — a new chat had left the only thing that knew who they
+   * were behind. See resetChat, which now asks the app for another code instead
+   * of quietly dropping them to guest.
+   */
+  const nativeIdentity = useRef(false);
   /** Latches the post-sign-in pulse to one per conversation. */
   const pulsed = useRef(false);
   // One-shot flag: the in-chat payment card saw the webhook settle → have the
@@ -836,6 +899,27 @@ export function Experience({
    * forming.
    */
   const [expanded, setExpanded] = useState(false);
+  /**
+   * IS THERE ANYTHING TO EXPAND INTO?
+   *
+   * Reported from the mobile app, 11 September: "the minimize/maximize icon in
+   * the chat header is not functional — tapping it produces no visible effect".
+   * It was not: the button posts `expand` to the page that framed us, and
+   * inside a native WebView there is no such page. The message goes nowhere and
+   * the customer taps a control that does nothing.
+   *
+   * The CSS has hidden it on a phone since FB-5 — `.dlg-chip.icon-only.expand-
+   * toggle { display: none }` under the 599px breakpoint — but the button was
+   * never given that class, so the rule matched nothing. It has it now; this
+   * covers the other half, a WebView or a full-page load wide enough to miss
+   * the breakpoint but with no host frame listening.
+   */
+  // Settled after mount, not during render: whether there is a parent frame is
+  // a client-only fact, and deciding it while rendering on the server gives one
+  // answer there and another here — a hydration mismatch. Same reason as
+  // voiceReady above.
+  const [canExpand, setCanExpand] = useState(false);
+  useEffect(() => setCanExpand(!isNative() && window.parent !== window), []);
   const toggleExpanded = useCallback(() => {
     const next = !expanded;
     setExpanded(next);
@@ -947,32 +1031,48 @@ export function Experience({
    * verified SERVER-side here before the customer is treated as signed in, so a
    * bad one leaves them a guest rather than half signed in.
    */
+  /**
+   * Redeem a native sign-in code for the conversation it names.
+   *
+   * Pulled out of the effect below because it is needed twice: once when the
+   * app hands us one at load, and again when the customer starts a new chat and
+   * the app sends a fresh one — see resetChat.
+   */
+  const redeemHandoff = useCallback(
+    async (handoff: string): Promise<boolean> => {
+      try {
+        const res = await fetch("/api/embed/handoff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agent: agent.slug, handoff }),
+        });
+        if (!res.ok) return false;
+        const data = (await res.json()) as { conversationId?: string };
+        if (data.conversationId) {
+          convId.current = data.conversationId;
+          try { window.localStorage.setItem(storageKey, data.conversationId); } catch { /* private mode */ }
+        }
+        nativeIdentity.current = true;
+        signedOut.current = false;
+        setAuthenticated(true);
+        setAuthReason(null);
+        setSignedInPulse(true);
+        return true;
+      } catch {
+        /* leave signed out; the customer can still sign in from here */
+        return false;
+      }
+    },
+    [agent.slug, storageKey]
+  );
+
   useEffect(() => {
     // Preferred: a handoff code. The app has already exchanged the real token
     // with us from native code, so there is nothing here worth stealing -- this
     // only says which conversation is already signed in.
     const handoff = nativeHandoff();
     if (handoff) {
-      void (async () => {
-        try {
-          const res = await fetch("/api/embed/handoff", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ agent: agent.slug, handoff }),
-          });
-          if (!res.ok) return;
-          const data = (await res.json()) as { conversationId?: string };
-          if (data.conversationId) {
-            convId.current = data.conversationId;
-            try { window.localStorage.setItem(storageKey, data.conversationId); } catch { /* private mode */ }
-          }
-          setAuthenticated(true);
-          setAuthReason(null);
-          setSignedInPulse(true);
-        } catch {
-          /* leave signed out; the customer can still sign in from here */
-        }
-      })();
+      void redeemHandoff(handoff);
       return;
     }
     const token = nativeToken();
@@ -993,7 +1093,7 @@ export function Experience({
         /* leave signed out; the next chat turn re-verifies the same token */
       }
     })();
-  }, [agent.slug]);
+  }, [agent.slug, redeemHandoff]);
 
   // Resume a prior session for this agent (PRD: partial-application retention).
   useEffect(() => {
@@ -1069,8 +1169,44 @@ export function Experience({
     // was still authenticated — so the customer could not tell whether they were
     // logged in, which is the one thing that header exists to answer. Starting a
     // fresh conversation is not signing out; the sign-out is the token going.
-    if (!uaePass.current) setAuthenticated(false);
+    if (uaePass.current) return;
+    /**
+     * ...and it has to survive one inside the app too.
+     *
+     * A native session holds no token here to survive with — the server has it,
+     * attached to the conversation we have just left. So ask the app for
+     * another code for the new one. The app is the only party that can mint it:
+     * it still has the customer's real credential and we deliberately never do.
+     *
+     * The header keeps saying "signed in" while we wait, because that is what
+     * is true — the customer has not signed out of anything, and a header that
+     * flickers to guest and back is worse than one that is briefly ahead of the
+     * server. If nothing answers in five seconds the app cannot help, and then
+     * the honest thing IS to show them signed out with a way back in.
+     */
+    if (nativeIdentity.current && isNative()) {
+      postNative({ action: "signin-needed", reason: "new-chat" });
+      window.setTimeout(() => {
+        if (convId.current) return; // a fresh code landed and named a conversation
+        nativeIdentity.current = false;
+        setAuthenticated(false);
+      }, 5000);
+      return;
+    }
+    setAuthenticated(false);
   }, [streaming, storageKey]);
+
+  /**
+   * The app answering — with a sign-in code, or with the customer back from a
+   * payment page. A browser never fires either; nothing here is web.
+   */
+  useEffect(
+    () =>
+      onNativeEvent((e) => {
+        if (e.action === "handoff" && e.handoff) void redeemHandoff(e.handoff);
+      }),
+    [redeemHandoff]
+  );
 
   // Sign-in: real UAE PASS OIDC when configured, else the dev mock toggle.
   // UAE PASS forbids being framed, so from the embedded widget it opens in a
@@ -1109,6 +1245,23 @@ export function Experience({
   const signIn = useCallback(() => {
     // Asking to sign in is what lifts a sign-out.
     signedOut.current = false;
+    /**
+     * Inside the app, ask the app first.
+     *
+     * Reported on 11 September (issues 3 and 10): signing in from the chat
+     * takes the customer to the portal in an in-app browser, they sign in, and
+     * the app lands them on the account home screen — the conversation they
+     * were in the middle of is gone. It is the browser's own return that does
+     * that, and no amount of care on this page can change where a separate
+     * browser goes next.
+     *
+     * The app can: it already holds the customer's session, so it can mint a
+     * handoff from native code and hand it straight to this page, and nobody
+     * leaves the chat at all. So say what is wanted and let it answer. A host
+     * that has not implemented this ignores the message, and the portal below
+     * is still opened — nothing regresses for an app that is not listening.
+     */
+    if (isNative()) postNative({ action: "signin-needed", reason: "customer-asked" });
     // The host portal owns sign-in (its own UAE PASS client, its own registered
     // callback). Opening it in a POPUP rather than navigating keeps the
     // conversation alive; the token then arrives from the embed loader, which sees
@@ -1219,9 +1372,53 @@ export function Experience({
       { role: "assistant" as const, content: "", citations: [], at: said, ...(proactive ? { pulse: true } : {}) },
     ]);
     setStreaming(true);
-    setToolStatus(null);
+    setToolEvent(null);
     lastDelta.current = Date.now();
     setQuiet(false);
+
+    /**
+     * Go and read what actually happened.
+     *
+     * The turn runs to completion on the server whether or not this page is
+     * still listening, so a connection that dies mid-reply is a reason to fetch
+     * the result, not a reason to apologise. Returns false only when there is
+     * genuinely nothing to show — no conversation yet, the read failed too, or
+     * the server's last word is not a finished assistant reply — which is the
+     * one case where the customer needs telling.
+     */
+    const recoverTurn = async (): Promise<boolean> => {
+      const cid = convId.current;
+      if (!cid) return false;
+      try {
+        const res = await fetch(`/api/conversations/${cid}`);
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.case) setCaseState(data.case);
+        const stored = Array.isArray(data.messages) ? data.messages : [];
+        const last = stored[stored.length - 1];
+        if (!last || last.role !== "assistant" || !String(last.content ?? "").trim()) return false;
+        setMessages(stored);
+        return true;
+      } catch {
+        /* offline too — the caller says so in the customer's language */
+        return false;
+      }
+    };
+
+    /** The connection dropped and there was nothing on the server to show for it. */
+    const noteDropped = () => {
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (!last) return prev;
+        const next = prev.slice();
+        const note =
+          locale === "ar"
+            ? "انقطع الاتصال قبل وصول الرد. تحقّق من اتصالك وأعد إرسال رسالتك."
+            : "The connection dropped before the reply arrived. Check your connection and send that again.";
+        next[next.length - 1] = { ...last, content: `${last.content}\n\n⚠ ${note}`.trim() };
+        return next;
+      });
+    };
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -1261,7 +1458,7 @@ export function Experience({
           }
         } else if (ev.type === "text") {
           if (ev.delta) {
-            setToolStatus(null); // real text is arriving — drop the status
+            setToolEvent(null); // real text is arriving — drop the status
             lastDelta.current = Date.now();
             setQuiet(false);
           }
@@ -1275,7 +1472,7 @@ export function Experience({
             return next;
           });
         } else if (ev.type === "integration" || ev.type === "lookup") {
-          setToolStatus(toolStatusLabel(ev, locale === "ar"));
+          setToolEvent({ type: ev.type, tool: ev.tool, kind: ev.kind });
         } else if (ev.type === "payment_initiated") {
           // Attach the secure payment card to the assistant message being streamed.
           setMessages((prev) => {
@@ -1369,18 +1566,7 @@ export function Experience({
       // The connection died mid-turn. The reply is finished and stored on the
       // server, so fetch it rather than leaving the customer with half a
       // sentence and no payment link.
-      if (stalled && convId.current) {
-        try {
-          const res = await fetch(`/api/conversations/${convId.current}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (Array.isArray(data.messages) && data.messages.length) setMessages(data.messages);
-            if (data.case) setCaseState(data.case);
-          }
-        } catch {
-          /* offline too; the message below is the honest outcome */
-        }
-      }
+      if (stalled && !(await recoverTurn())) noteDropped();
     } catch (err) {
       // The customer stopped the turn: keep whatever was generated so far, and
       // drop a still-empty assistant bubble so nothing dangles. Not an error.
@@ -1391,18 +1577,36 @@ export function Experience({
           return prev;
         });
       } else {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (!last) return prev;
-          const next = prev.slice();
-          next[next.length - 1] = { ...last, content: `${last.content}\n\n⚠ ${err instanceof Error ? err.message : "error"}` };
-          return next;
-        });
+        /**
+         * "LOAD FAILED" IS NOT A SENTENCE WE WROTE.
+         *
+         * Reported from the mobile app, 11 September: "sometimes, after the
+         * 'Working on it…' message keeps loading continuously, the response ends
+         * in a 'Load failed' error instead of the expected reply." That string is
+         * WebKit's — it is what `TypeError.message` says when a fetch on iOS dies
+         * before it delivers anything — and it was being printed into the
+         * conversation verbatim, in English, whatever language the customer was
+         * reading.
+         *
+         * Two things were wrong with that and only one of them is the wording.
+         * A dropped connection does NOT mean the turn failed: the server runs it
+         * to completion whether or not anyone is listening, which is exactly why
+         * the stall path above goes and reads the result instead of apologising.
+         * A fetch that dies on a phone changing cell is the same event arriving
+         * through a different door, so it takes the same door out — and in the
+         * screenshot the reply that never arrived was a lookup that had already
+         * run.
+         *
+         * Only when that comes back with nothing does the customer get told, in
+         * their own language, that the connection dropped and the message is
+         * worth sending again.
+         */
+        if (!(await recoverTurn())) noteDropped();
       }
     } finally {
       abortRef.current = null;
       setStreaming(false);
-      setToolStatus(null);
+      setToolEvent(null);
       setQuiet(false);
     }
   }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
@@ -1723,11 +1927,19 @@ export function Experience({
             aria-label={t.reset}
             title={t.reset}
           >
-            <ArrowClockwise size={16} weight={iconWeight} />
+            {/* A PENCIL, NOT A RELOAD ARROW.
+                Reported from the mobile app, 11 September: "refreshing the chat
+                window using the refresh button prompts the user to sign in
+                again." There is no refresh button. This one starts a NEW chat —
+                it says so in its tooltip, and a phone has no tooltips, so the
+                circular arrow was the only thing telling the customer what it
+                did, and it was telling them the wrong thing. They pressed what
+                they read as reload and lost the conversation. */}
+            <NotePencil size={16} weight={iconWeight} />
           </button>
-          {embedded ? (
+          {embedded && canExpand ? (
             <button
-              className="dlg-chip icon-only"
+              className="dlg-chip icon-only expand-toggle"
               onClick={toggleExpanded}
               aria-label={expanded ? t.collapse : t.expand}
               title={expanded ? t.collapse : t.expand}
@@ -1896,8 +2108,8 @@ export function Experience({
             {voice.active ? (
               <div className={`dlg-voice-bar${voice.error ? " is-error" : voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
                 <span className="dlg-voice-bar-dot" />
-                <span>{voice.error ? voice.error : voice.connecting ? "Connecting…" : voice.speaking ? "Speaking…" : voice.listening ? "Listening…" : "Voice on"}</span>
-                <button type="button" className="dlg-voice-bar-stop" onClick={voice.toggle}>Turn off</button>
+                <span>{voice.error ? voice.error : voice.connecting ? t.voiceConnecting : voice.speaking ? t.voiceSpeaking : voice.listening ? t.voiceListening : t.voiceOn}</span>
+                <button type="button" className="dlg-voice-bar-stop" onClick={voice.toggle}>{t.voiceStop}</button>
               </div>
             ) : null}
             <div className="dlg-input">
@@ -1918,8 +2130,8 @@ export function Experience({
                   type="button"
                   className={`dlg-mic${voice.active ? " is-on" : ""}${voice.listening ? " is-listening" : ""}${voice.speaking ? " is-speaking" : ""}`}
                   onClick={voice.toggle}
-                  aria-label={voice.active ? "Turn off voice mode" : "Turn on voice mode"}
-                  title={voice.active ? "Voice mode on" : "Talk to the assistant"}
+                  aria-label={voice.active ? t.voiceStop : t.voiceStart}
+                  title={voice.active ? t.voiceOn : t.voiceStart}
                 >
                   <Microphone size={18} weight={voice.active ? "fill" : iconWeight} />
                 </button>
@@ -1931,7 +2143,7 @@ export function Experience({
                   <Stop size={17} weight="fill" />
                 </button>
               ) : (
-                <button className="dlg-send" onClick={() => void send()} disabled={!input.trim()} aria-label="Send">
+                <button className="dlg-send" onClick={() => void send()} disabled={!input.trim()} aria-label={t.send}>
                   <PaperPlaneRight size={18} weight="fill" />
                 </button>
               )}

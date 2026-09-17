@@ -19,9 +19,17 @@ export interface ExternalWindow {
 }
 
 export interface NativeEvent {
-  /** "returned" once the customer is back from a payment page. */
+  /**
+   * What the host is telling us.
+   *
+   * "returned" — the customer is back from a payment page.
+   * "handoff"  — a fresh sign-in code, carrying `handoff`. Sent unprompted when
+   *              the app has one, or in answer to our "signin-needed".
+   */
   action: string;
   url?: string;
+  /** A short-lived sign-in code, on a "handoff" event. */
+  handoff?: string;
 }
 
 interface RNWebView {
@@ -79,6 +87,32 @@ export function nativeHandoff(): string | undefined {
   if (typeof window === "undefined") return undefined;
   const h = (window as unknown as { __dialogNativeHandoff?: unknown }).__dialogNativeHandoff;
   return typeof h === "string" && h ? h : undefined;
+}
+
+/**
+ * May this WebView ask for the microphone?
+ *
+ * Reported from the mobile app, 11 September: "Major — the app crashed on
+ * clicking the speak (microphone) icon". Not a crash in the page: the iOS
+ * screenshot is the SYSTEM telling the customer that "(QA)Emirates Post"
+ * crashed, which is what happens when a process calls for the microphone
+ * without NSMicrophoneUsageDescription in its Info.plist — the OS kills it.
+ *
+ * `navigator.mediaDevices.getUserMedia` EXISTS in a WKWebView whether or not
+ * the app around it is allowed to record, so the feature test the mic button
+ * has always used cannot tell the difference. The page finds out by taking the
+ * app down with it.
+ *
+ * So inside a native host the mic is off unless the host says otherwise, the
+ * same way the token arrives: the wrapper sets this global before our scripts
+ * run, once it has both the usage description and a WebView delegate that
+ * grants the permission. A browser is unaffected — nothing here is native, and
+ * the ordinary feature test decides.
+ */
+export function nativeVoiceAllowed(): boolean {
+  if (typeof window === "undefined") return false;
+  if (!isNative()) return true;
+  return (window as unknown as { __dialogNativeVoice?: unknown }).__dialogNativeVoice === true;
 }
 
 /** Every window this widget has opened natively, so the host can close them. */

@@ -31,6 +31,7 @@ const RECEIPT_STR = {
     poBox: "PO Box", caseRef: "Case reference", status: "Status",
     customer: "Subscriber", bundle: "Bundle", expiry: "Valid until", branch: "Branch", orderNo: "Order no.",
     totalPaid: "Total paid", totalDue: "Total due", print: "Print / Save as PDF",
+    printHint: "To save this, use the share button in your browser and choose Print or Save as PDF. A screenshot works too.",
     foot: "This receipt was generated for the payment referenced above. Keep it for your records.",
     statuses: { paid: "Paid", failed: "Failed", initiated: "Initiated" } as Record<string, string>,
   },
@@ -39,6 +40,7 @@ const RECEIPT_STR = {
     poBox: "صندوق البريد", caseRef: "الرقم المرجعي للطلب", status: "الحالة",
     customer: "المشترك", bundle: "الباقة", expiry: "صالح حتى", branch: "الفرع", orderNo: "رقم الطلب",
     totalPaid: "الإجمالي المدفوع", totalDue: "الإجمالي المستحق", print: "طباعة / حفظ كملف PDF",
+    printHint: "لحفظ هذا الإيصال، استخدم زر المشاركة في المتصفح واختر الطباعة أو الحفظ كملف PDF. ولقطة الشاشة تفي بالغرض أيضًا.",
     foot: "تم إنشاء هذا الإيصال للدفعة المذكورة أعلاه. يُرجى الاحتفاظ به في سجلاتك.",
     statuses: { paid: "مدفوع", failed: "فشل", initiated: "قيد التنفيذ" } as Record<string, string>,
   },
@@ -161,7 +163,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   .row .v{font-weight:600;text-align:${rtl ? "left" : "right"}}
   .total{display:flex;justify-content:space-between;margin-top:14px;padding:14px 16px;background:#f4f5fb;border-radius:10px;font-size:15px;font-weight:700}
   .foot{padding:14px 24px 20px;font-size:11.5px;color:#5B6478}
-  .print{display:block;width:100%;margin:16px 0 0;padding:11px;border:0;border-radius:10px;background:${esc(primary)};color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+  .print{display:block;width:100%;margin:16px 0 0;padding:11px;border:0;border-radius:10px;background:${esc(primary)};color:#fff;font-size:16px;font-weight:600;cursor:pointer}
   /* PRINTED, the header keeps its logo.
      A browser does not print background colours unless the person ticks
      "Background graphics", so the blue band goes white — and the logo, which is
@@ -185,6 +187,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   /* And where backgrounds ARE printed, keep the colours we chose rather than
      the browser's approximation of them. */
   @media print{.total{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  /* Shown only when the print sheet did not open — see the script at the end. */
+  .printhint{display:none;margin:12px 2px 0;font-size:12.5px;line-height:1.6;color:#5B6478}
+  @media print{.printhint{display:none}}
 </style></head><body>
 <div class="card">
   <div class="head">${
@@ -195,10 +200,49 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   <div class="body">
     ${rows.map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("")}
     <div class="total"><span>${esc(pay.status === "paid" ? s.totalPaid : s.totalDue)}</span><span>${esc(money(charged, pay.currency))}</span></div>
-    <button class="print" onclick="window.print()">${esc(s.print)}</button>
+    <button class="print" id="print">${esc(s.print)}</button>
+    <p class="printhint" id="printhint">${esc(s.printHint)}</p>
   </div>
   <div class="foot">${esc(s.foot)}</div>
 </div>
+<script>
+/**
+ * "PRINT / SAVE AS PDF" IS NOT FUNCTIONAL ON THE PAYMENT RECEIPT SCREEN.
+ *
+ * Reported from the mobile app, 11 September, and true: the button called
+ * window.print(), and inside an iOS in-app browser — which is where the receipt
+ * link opens — that call is either absent or silently ignored. Nothing happened
+ * and nothing said why, on the one screen a customer actually wants to keep.
+ *
+ * There is no way for this page to open the OS print sheet itself. What it can
+ * do is ask, find out whether the ask worked, and if it did not, stop pretending
+ * and tell the customer where the control they need actually is. A native host
+ * gets told as well, so an app that wants to raise its own share sheet can.
+ */
+(function () {
+  var btn = document.getElementById("print");
+  var hint = document.getElementById("printhint");
+  if (!btn || !hint) return;
+  var printed = false;
+  window.addEventListener("beforeprint", function () { printed = true; });
+  // Safari fires no beforeprint; its print sheet is a media-query change.
+  try {
+    var mq = window.matchMedia("print");
+    if (mq && mq.addEventListener) mq.addEventListener("change", function (e) { if (e.matches) printed = true; });
+  } catch (e) { /* older engine; the timeout below still decides */ }
+  btn.addEventListener("click", function () {
+    try {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ source: "dialog-native", action: "print", url: window.location.href }));
+      }
+    } catch (e) { /* not in a native host */ }
+    try {
+      if (typeof window.print === "function") window.print();
+    } catch (e) { /* refused; the hint below is the answer */ }
+    setTimeout(function () { if (!printed) hint.style.display = "block"; }, 900);
+  });
+})();
+</script>
 </body></html>`;
 
   return new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });

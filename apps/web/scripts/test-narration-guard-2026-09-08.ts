@@ -26,7 +26,11 @@ const reported = "The customer chose MyHome. I need to price both options: upgra
   const out = stripInternalNarration("Let me fetch the exact pricing for the upgrade.\n\nThe upgrade-only price for MyHome (keeping your current expiry of 05-09-2031) is AED 1,973.00. Let me get the pricing confirmed and the renewed-by options.");
   check("the price the customer needs survives", /AED 1,973\.00/.test(out), out);
   check("the second tool-name sentence goes", !/renewed-by options/.test(out), out);
-  check("a plain progress note survives", /Let me fetch the exact pricing/.test(out), out);
+  // Was "a plain progress note survives" until 17 September. The widget now
+  // shows "Checking pricing…" beside the tool round itself, so the model saying
+  // it too is the same news twice — and, from the mobile report, the thing that
+  // splits a reply in half. See ANNOUNCED_WORK.
+  check("the announcement of the lookup goes", !/Let me fetch the exact pricing/.test(out), out);
 }
 
 console.log("\nWhat must never be touched");
@@ -38,11 +42,31 @@ check("list rows are left alone", stripInternalNarration("- The customer referen
 console.log("\nOrdinary replies are not rewritten");
 for (const t of [
   "Your box is reserved. Here is your total: AED 370.00.",
-  "Let me fetch the branches for you.",
-  "I'll bring up the payment now.",
   "Which plan would you like?",
   "That pin is in Dubai, but your box is in Abu Dhabi.",
 ]) check(`"${t.slice(0, 42)}…"`, stripInternalNarration(t) === t, stripInternalNarration(t));
+
+console.log("\nAnnouncing a lookup the widget is already showing (17 September)");
+for (const gone of [
+  "Let me fetch the branches for you.",
+  "I'll bring up the payment now.",
+  "Let me fetch the prices for each option.",
+  "Let me pull up the details for box 566300 in Dubai right away.",
+  "I'll check the renewal price for you.",
+  "Let me look up your box.",
+]) check(`gone: ${JSON.stringify(gone)}`, isInternalNarration(gone), gone);
+
+console.log("\n...and the sentences that only look like one");
+for (const kept of [
+  // A promise about later, not a lookup happening now.
+  "I'll get back to you once Emirates Post confirm it.",
+  // Carries the answer as well as the preamble — over the length cap, so it stays.
+  "Let me check the price, though it depends on which emirate the box is in and how long you renew for.",
+  // Not a lookup at all.
+  "I'll need their full name in English.",
+  "Let me know if that is the right one.",
+  "I'll send the receipt to the email on your account.",
+]) check(`kept: ${JSON.stringify(kept.slice(0, 44))}…`, !isInternalNarration(kept), kept);
 
 console.log("\nThe sentence test");
 check("third person about the reader", isInternalNarration("The customer chose MyHome."));
@@ -110,7 +134,6 @@ console.log("\nA reversal said out loud");
 
 console.log("\n...without taking honest sentences with it");
 for (const kept of [
-  "Let me fetch the branches for you.",
   "Let me know if that is the right one.",
   "Actually renting the box happens after payment.",
   "No MOA is needed for a sole establishment.",

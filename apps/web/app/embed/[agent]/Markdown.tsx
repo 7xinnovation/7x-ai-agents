@@ -3,7 +3,7 @@ import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileTe
 import { tr, type LocalizedString, type Locale } from "@dialog/config";
 import { ChatMap } from "./ChatMap";
 import { ChatLocate } from "./ChatLocate";
-import { openExternal, onNativeEvent, type ExternalWindow } from "./nativeBridge";
+import { openExternal, onNativeEvent, isNative, type ExternalWindow } from "./nativeBridge";
 
 /**
  * Context the chat needs to render an inline upload widget (feedback: keep the
@@ -267,6 +267,37 @@ const PAID_BACK: Record<string, string> = {
   ar: "لقد أتممت الدفع على صفحة بريد الإمارات. يُرجى التحقق منه وتأكيد الحجز.",
 };
 
+/**
+ * The payment card's own words.
+ *
+ * Every one of these was English no matter what language the conversation was
+ * in — reported on 11 September alongside "Looking up your box" and the
+ * branch picker's "16 to choose from". A customer paying AED 300 in Arabic
+ * should not have to read "Pay now" to do it.
+ */
+const PAY_STR = {
+  en: {
+    secure: "Secure payment",
+    pay: "Pay now",
+    reopen: "Reopen payment page",
+    again: "Open the payment page again",
+    checking: "Checking your payment…",
+    inWindow: "Finish in the payment window — I will pick it up from there.",
+    closed:
+      "The payment window closed. If your payment went through, I confirm it in the chat below — reopen this only if you did not finish.",
+  },
+  ar: {
+    secure: "دفع آمن",
+    pay: "ادفع الآن",
+    reopen: "إعادة فتح صفحة الدفع",
+    again: "افتح صفحة الدفع مرة أخرى",
+    checking: "جارٍ التحقق من الدفع…",
+    inWindow: "أكمل الدفع في نافذة الدفع — وسأتابع من هناك.",
+    closed:
+      "أُغلقت نافذة الدفع. إذا تم الدفع فسأؤكده في المحادثة أدناه — لا تعِد فتحها إلا إذا لم تكمل الدفع.",
+  },
+} as const;
+
 function ChatPay({
   url,
   amount,
@@ -332,6 +363,37 @@ function ChatPay({
     return () => window.removeEventListener("message", onMsg);
   }, [onSelect, returned, locale]);
 
+  /**
+   * THE APP CAME BACK TO THE FOREGROUND.
+   *
+   * On iOS the payment page opens in an in-app browser presented OVER the
+   * WebView the chat is in. That browser is not a window we opened, has no
+   * `opener` to post back to and cannot be closed by script — so on 11
+   * September the customer paid, dismissed it themselves, and found the chat
+   * exactly where they had left it, still offering to take their money.
+   *
+   * But the WebView underneath is not asleep: it is hidden while the browser is
+   * in front of it and visible again the moment that browser goes away. That is
+   * the return signal, it needs nothing from the app, and it is the one the
+   * customer's own gesture produces.
+   *
+   * Deliberately native-only and only while a payment window is open. On the
+   * desktop web the same event fires for switching tabs, which is not a
+   * customer coming back from anywhere.
+   */
+  React.useEffect(() => {
+    if (!opened || returned || !isNative()) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      setReturned(true);
+      win.current = null;
+      setOpened(false);
+      onSelect?.(PAID_BACK[locale === "ar" ? "ar" : "en"]!);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [opened, returned, onSelect, locale]);
+
   // The native host reports the customer back from the payment page; a browser
   // reports it by postMessage from the return page. Both end up here.
   React.useEffect(
@@ -360,34 +422,22 @@ function ChatPay({
       setEverOpened(true);
     }
   };
+  const p = PAY_STR[locale === "ar" ? "ar" : "en"];
   return (
     <div className="dlg-paycard ready">
       <div className="dlg-paycard-head">
         <span className="dlg-paycard-icon">
           <LockSimple size={15} weight="fill" />
         </span>
-        <span className="dlg-paycard-title">{label || "Secure payment"}</span>
+        <span className="dlg-paycard-title">{label || p.secure}</span>
         {amount ? <span className="dlg-paycard-amount">{amount}</span> : null}
       </div>
       <div className="dlg-paycard-body">
         <button className="dlg-paybtn" onClick={open} disabled={returned}>
-          {returned
-            ? "Checking your payment…"
-            : opened
-              ? "Reopen payment page"
-              : everOpened
-                ? "Open the payment page again"
-                : "Pay now"}
+          {returned ? p.checking : opened ? p.reopen : everOpened ? p.again : p.pay}
         </button>
-        {opened && !returned ? (
-          <div className="dlg-paycard-note">Finish in the payment window — I will pick it up from there.</div>
-        ) : null}
-        {!opened && !returned && everOpened ? (
-          <div className="dlg-paycard-note">
-            The payment window closed. If your payment went through, I confirm it in the chat below — reopen this only
-            if you did not finish.
-          </div>
-        ) : null}
+        {opened && !returned ? <div className="dlg-paycard-note">{p.inWindow}</div> : null}
+        {!opened && !returned && everOpened ? <div className="dlg-paycard-note">{p.closed}</div> : null}
       </div>
     </div>
   );

@@ -14,10 +14,11 @@
  * about "the renewed-by options", which is the name of one of our tools. This
  * is the model narrating its plan to itself and forgetting who is reading.
  *
- * NOT a ban on saying what it is doing. "Let me fetch the branches for you" is
- * a useful progress note and the journeys ask for it. What goes is the sentence
- * that could only have been addressed to itself: the third-person customer, and
- * the internal names for things.
+ * NOT a ban on saying what it is doing, at the time. "Let me fetch the branches
+ * for you" was a useful progress note and the journeys asked for it; what went
+ * was the sentence that could only have been addressed to itself — the
+ * third-person customer, and the internal names for things. See ANNOUNCED_WORK
+ * for why the progress note went too, once the widget started making it.
  */
 
 /** Sentences that are the model talking about the reader as a third party. */
@@ -52,11 +53,48 @@ const RETRACTION =
  *
  * "Let me ask about the region." followed by "Which area of Dubai is the office
  * in?" — the first sentence is the model telling itself what to do next, and
- * the customer reads a preamble to a question that is right there. Distinct
- * from "let me fetch the branches for you", which reports work being done on
- * their behalf and is deliberately allowed.
+ * the customer reads a preamble to a question that is right there.
  */
 const ANNOUNCED_QUESTION = /\blet me (ask|check with you|confirm with you|clarify)\b/i;
+
+/**
+ * Announcing the lookup, when the widget is already showing it.
+ *
+ * "Let me fetch the branches for you" used to be allowed here, on purpose, and
+ * the note above still says why: it reports work being done on the customer's
+ * behalf, and a silent multi-second tool round with nothing on screen is worse
+ * than a sentence about it.
+ *
+ * That stopped being true on 16 September, when the status line beside a tool
+ * round was extended past the integration calls to cover every silent stretch
+ * in a turn. The customer now watches "Checking pricing…" or "Looking up your
+ * box…" appear and disappear on its own. The model saying it too is the same
+ * information twice, in the slower of the two places.
+ *
+ * And it is not free. From the mobile app, 11 September, one bubble:
+ *
+ *   "…How long would you like to renew for? Let me fetch the prices for each
+ *    option."
+ *   "Your box expired on 21-08-2026, so the renewal runs from today forward…"
+ *
+ * The announcement is what splits the reply in half. The model says what it is
+ * about to do, does it, and comes back to a paragraph it no longer remembers
+ * finishing — so it starts again. Reported as a duplicate message, and
+ * [[echoGuard]] catches the repeat, but this is where the repeat comes from.
+ *
+ * Capped at 80 characters so it stays an ANNOUNCEMENT. The longest one in the
+ * reports is 62 — "Let me pull up the details for box 566300 in Dubai right
+ * away." — and a sentence appreciably longer than that is carrying something
+ * besides the preamble. "Let me check the price, though it depends on which
+ * emirate the box is in and how long you renew for" answers a question, and
+ * losing it would cost the customer more than the preamble does.
+ */
+/** Longer than this and the sentence is carrying something besides the preamble. */
+const ANNOUNCEMENT_MAX = 80;
+const ANNOUNCED_WORK =
+  /\b(let me|i'?ll|i will|i'?m going to|i am going to)\s+(go (?:and )?)?(fetch|pull up|pull|look up|retrieve|bring up|check|get|find|price|calculate|work out)\b/i;
+/** "I'll get back to you" is a promise about later, not a lookup happening now. */
+const NOT_A_LOOKUP = /\bget back to you\b|\bget in touch\b/i;
 
 /**
  * Split on sentence ends, keeping the delimiters so rejoining is lossless.
@@ -74,6 +112,7 @@ export function isInternalNarration(sentence: string): boolean {
   if (THIRD_PERSON.test(s) && !/\byou\b|\byour\b/i.test(s)) return true;
   if (RETRACTION.test(s)) return true;
   if (ANNOUNCED_QUESTION.test(s)) return true;
+  if (s.length <= ANNOUNCEMENT_MAX && ANNOUNCED_WORK.test(s) && !NOT_A_LOOKUP.test(s)) return true;
   return PLANNING.test(s);
 }
 
