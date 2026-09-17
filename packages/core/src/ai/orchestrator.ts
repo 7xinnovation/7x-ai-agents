@@ -412,12 +412,20 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
        * nothing here has ever recorded a token count or a time to first word.
        * That is a poor way to find out whether a turn is slow because the model
        * is thinking, because the prompt is large, or because the cache missed —
-       * and those want different fixes.
+       * and those want different fixes. It is also easy to get wrong: the first
+       * numbers taken this way were 9s to a first word with no tool call at
+       * all, and they were measured on an app that had just been redeployed.
+       * Warm, the same turn answers in 2.3 to 4.3 seconds.
+       *
+       * Which leaves the honest shape of it: a model round costs a few seconds,
+       * an Emirates Post call costs a few more, and a turn that needs several
+       * of each reaches fifteen to twenty-five. The account pulse needs more of
+       * both than anything else in the product — every box on the account, and
+       * a price for each one that is due — and it is always the first turn of a
+       * conversation, so it pays a cold prefill on top. That is the minute.
        *
        * One line per round, on stdout, which App Service keeps. `cacheRead`
-       * against `input` is the useful ratio: the first turn of every
-       * conversation pays a cold prefill, and the account pulse is always a
-       * first turn.
+       * against `input` is the useful ratio.
        */
       {
         const u = final.usage as unknown as Record<string, number | undefined>;
