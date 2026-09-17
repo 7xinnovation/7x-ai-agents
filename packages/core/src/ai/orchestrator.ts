@@ -307,6 +307,9 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // For the round's cost line below.
+      const roundStartedAt = Date.now();
+      let firstWordAt: number | null = null;
       // Re-read every round: the customer can add an agent or ask for key
       // delivery mid-turn, and the total they are quoted has to move with it.
       const sys = buildSystemPrompt(
@@ -361,6 +364,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
               if (pendingSeparator && !textStarted) yield { type: "text", delta: "\n\n" };
               pendingSeparator = false;
               textStarted = true;
+              firstWordAt ??= Date.now();
               yield { type: "text", delta: ev.delta.text };
             }
           }
@@ -398,6 +402,42 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         }
       }
       messages.push({ role: "assistant", content: final.content });
+
+      /**
+       * WHAT THE ROUND COST, AND HOW LONG IT TOOK TO SAY ANYTHING.
+       *
+       * "On clicking the chatbot icon the 'Working on it…' message keeps
+       * loading for almost a minute" was the 11 September mobile report, and
+       * answering it meant driving the deployed site with a stopwatch because
+       * nothing here has ever recorded a token count or a time to first word.
+       * That is a poor way to find out whether a turn is slow because the model
+       * is thinking, because the prompt is large, or because the cache missed —
+       * and those want different fixes.
+       *
+       * One line per round, on stdout, which App Service keeps. `cacheRead`
+       * against `input` is the useful ratio: the first turn of every
+       * conversation pays a cold prefill, and the account pulse is always a
+       * first turn.
+       */
+      {
+        const u = final.usage as unknown as Record<string, number | undefined>;
+        console.log(
+          JSON.stringify({
+            at: new Date().toISOString(),
+            event: "llm_round",
+            model,
+            round,
+            ms: Date.now() - roundStartedAt,
+            msToFirstWord: firstWordAt ? firstWordAt - roundStartedAt : null,
+            input: u.input_tokens ?? null,
+            output: u.output_tokens ?? null,
+            cacheRead: u.cache_read_input_tokens ?? null,
+            cacheWrite: u.cache_creation_input_tokens ?? null,
+            toolCalls: final.content.filter((c) => c.type === "tool_use").length,
+            stop: final.stop_reason,
+          })
+        );
+      }
 
       // The first round has streamed — resolve the concurrently-running intent
       // classification now so it gates set_journey this round and informs the
