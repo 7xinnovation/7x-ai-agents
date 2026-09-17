@@ -119,6 +119,23 @@ const PULSE_DIRECTIVE =
   "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
   "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. If completed requests are on file (see the known customer record), add a short \"Recent activity\" list — but write each line as something a person would recognise: what was done, on which box, and when. \"NXN-B295AF15: Manage PO Box, 07-09-2026\" is our filing system talking to itself; \"You added an authorised agent to box 450866 on 7 September\" is the same fact addressed to the customer. Keep the reference if it is one they might need to quote, but put it at the end in brackets, never at the front. " +
   "4) Only if NO PO Box is on file: welcome them, explain their account isn't linked to a PO Box yet, and offer — not require — to link one (\"if you have a box, tell me its number and emirate and I'll add it to your account\"). Never present the box number as a prerequisite for the pulse. " +
+  /**
+   * HAVING FORTY-ONE BOXES IS NOT A REASON YOU CANNOT RENT A FORTY-SECOND.
+   *
+   * 17 September: "I clicked on rent a new PO Box but for some reason it's not
+   * giving me the option to rent, only renew, after it's fetched the list of PO
+   * Boxes I have." The pulse closed on "Renew a box / Manage a box / Nothing
+   * right now" — renting was not among them — and everything above told the
+   * model that an account with boxes is an account that renews.
+   *
+   * Renting is a separate journey and the most valuable one Emirates Post has.
+   * It belongs in the closing offer for every customer, and an explicit ask for
+   * it must not be read as a renewal just because there is a list of boxes in
+   * front of the model. Those two sentences are the fix; the rest of the
+   * directive stays as it was.
+   */
+  "5) CLOSE with what they can do next, and ALWAYS include renting a NEW box among the options — a customer who already holds boxes can still rent another, and that offer must appear whether they hold one box or forty. Renewing, managing an existing box and renting a new one are three different things; never fold renting into renewing. " +
+  "If the customer then asks to RENT or asks for a NEW box, start the rental journey. Do NOT show them their existing boxes to choose from: that list is for renewing or managing one they already have, and it is not an answer to \"I want a new one\". " +
   "Use ONLY real data returned by tools — never invent boxes, dates, or fees.)";
 
 // Internal directive fired when the customer completes payment in the gateway

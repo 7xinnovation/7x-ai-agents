@@ -26,12 +26,16 @@ const STR = {
     body: "Returning you to the chat…",
     stuck: "You can close this window — your chat is waiting behind it.",
     close: "Back to the chat",
+    // When nothing on this page is able to close it, the customer needs the
+    // control that IS able to: the one their browser drew, not one of ours.
+    tapX: "Tap \u2715 at the top of this window to go back to your chat. Your payment is already recorded.",
   },
   ar: {
     head: "نافذة الدفع",
     body: "جارٍ إعادتك إلى المحادثة…",
     stuck: "يمكنك إغلاق هذه النافذة — محادثتك في انتظارك خلفها.",
     close: "العودة إلى المحادثة",
+    tapX: "اضغط \u2715 في أعلى هذه النافذة للعودة إلى محادثتك. تم تسجيل دفعتك بالفعل.",
   },
 } as const;
 
@@ -107,20 +111,35 @@ text-decoration:none;font-size:16px;font-weight:600}
   setTimeout(function () { try { window.close(); } catch (e) {} }, 900);
 
   /**
-   * STILL HERE. Say so.
+   * STILL HERE, WHICH MEANS NOTHING ABOVE CAN CLOSE THIS.
    *
-   * If none of the above worked the customer is looking at a page that has been
-   * promising to return them for as long as they care to watch. Two seconds is
-   * long enough to know: the message becomes the truth — the chat is behind
-   * this window — and the button tries every route again for anyone who taps it.
+   * A window a script may close is closed by the line above within a second. So
+   * reaching this timer is not a guess — it is proof that this page cannot
+   * dismiss itself, which is the case inside an iOS in-app browser: the OS put
+   * it there and no page can take it away.
+   *
+   * The first version of this offered a "Back to the chat" button anyway, and
+   * on 17 September it was reported doing exactly nothing: "when I click on back
+   * to chat nothing happens, only when I click on the X on the top left." Of
+   * course it did — it called the same close() that had already failed. A button
+   * that cannot work is worse than no button, because the customer trusts it and
+   * waits.
+   *
+   * So the button only appears when there is a real route out: an app deep link
+   * we were configured with. Otherwise the page stops offering and starts
+   * telling them about the control their own browser drew.
    */
   setTimeout(function () {
     var msg = document.getElementById("msg");
     var done = document.getElementById("done");
     if (!msg || !done) return;
-    msg.textContent = ${JSON.stringify(t.stuck)};
-    done.style.display = "inline-block";
-    done.addEventListener("click", function (e) { e.preventDefault(); goBack(); });
+    if (appLink) {
+      msg.textContent = ${JSON.stringify(t.stuck)};
+      done.style.display = "inline-block";
+      done.addEventListener("click", function (e) { e.preventDefault(); goBack(); });
+      return;
+    }
+    msg.textContent = ${JSON.stringify(t.tapX)};
   }, 2000);
 })();
 </script></body></html>`;

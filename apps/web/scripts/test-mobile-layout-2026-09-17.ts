@@ -107,6 +107,35 @@ check("the glass composer drops its backdrop filter on a phone", /\.dlg-input \{
 check("...and is given an opaque background in its place", /\.dlg-input \{[^}]*background:\s*var\(--c-surface\)/.test(coarseBlock));
 check("the desktop composer keeps its glass", /\.dlg-input \{[\s\S]{0,400}?backdrop-filter: blur\(10px\)/.test(desktop));
 
+console.log("\nWide content stays inside the phone (17 September, round two)");
+// The bubble must be ALLOWED to be narrower than what is in it — a flex item
+// keeps its content's width unless told otherwise, so `max-width: 86%` capped
+// the box and the table inside it overflowed anyway.
+for (const [what, sel] of [["the message row", ".dlg-msg"], ["the bubble", ".dlg-bubble"]] as const) {
+  const rule = rules(css).find((r) => r.selector === sel);
+  check(`${what} may shrink below its content`, /min-width:\s*0/.test(rule?.body ?? ""), rule?.body?.slice(0, 120));
+}
+{
+  const wrap = rules(css).find((r) => r.selector === ".dlg-md-tablewrap")?.body ?? "";
+  check("a wide table scrolls inside its card", /overflow-x:\s*auto/.test(wrap), wrap.slice(0, 200));
+  check("...and is not clipped by it", !/overflow:\s*hidden/.test(wrap), wrap.slice(0, 200));
+  check("...and cannot be wider than the bubble", /max-width:\s*100%/.test(wrap));
+}
+{
+  const cells = rules(css).find((r) => r.selector === ".dlg-md-table th,\n.dlg-md-table td")
+    ?? rules(css).find((r) => r.selector.includes(".dlg-md-table td"));
+  check('"450367" is not broken into "45 03 67"', /word-break:\s*normal/.test(cells?.body ?? ""), cells?.selector);
+}
+{
+  const list = rules(css).find((r) => r.selector === ".dlg-messages")?.body ?? "";
+  check("one wide message cannot make the conversation pannable", /overflow-x:\s*hidden/.test(list), list.slice(0, 200));
+}
+{
+  const btn = rules(css).find((r) => r.selector === ".dlg-chat-btn")?.body ?? "";
+  check("a long option label wraps instead of overflowing", !/white-space:\s*nowrap/.test(btn), btn.slice(0, 200));
+  check("...inside a pill no wider than the bubble", /max-width:\s*100%/.test(btn));
+}
+
 console.log("\nThe expand icon that does nothing on a phone (issue 12)");
 check("the CSS that hides it under 600px has existed since FB-5", /\.dlg-chip\.icon-only\.expand-toggle \{\s*display: none;/.test(css));
 check("the button now actually carries that class", /className="dlg-chip icon-only expand-toggle"/.test(exp));

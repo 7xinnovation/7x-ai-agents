@@ -455,6 +455,30 @@ function ChatPay({
 /** Above this many buttons the list stops being a set of choices and becomes a pile. */
 const BUTTON_LIST_MAX = 12;
 
+/**
+ * A PILE IS MADE OF LENGTH AS WELL AS COUNT.
+ *
+ * Twelve buttons reading "Yes" and "Dubai" are a row of chips. Twelve reading
+ * "450367 (MyHome Flex, Al Barsha)" are twelve full-width rows, and on the 17
+ * September screenshot they fill a phone screen and push the question that
+ * introduced them out of sight — at exactly twelve, one under the count above.
+ *
+ * It also got worse the moment a long label was allowed to wrap rather than
+ * overflow the conversation, which is the right fix for the cropping and turns
+ * each of those rows into two. So the threshold now reads the labels: a short
+ * list of long options collapses into the same searchable dropdown that a very
+ * long list already did.
+ */
+const LONG_LABEL = 24;
+const LONG_LABEL_LIST_MAX = 5;
+
+function isAPile(labels: string[]): boolean {
+  if (labels.length > BUTTON_LIST_MAX) return true;
+  if (labels.length <= LONG_LABEL_LIST_MAX) return false;
+  const avg = labels.reduce((n, l) => n + l.length, 0) / labels.length;
+  return avg > LONG_LABEL;
+}
+
 const SELECT_STR = {
   en: { count: (n: number) => `${n} to choose from`, search: "Search", empty: "Nothing matches that." },
   ar: { count: (n: number) => `${n} خيارات متاحة`, search: "بحث", empty: "لا توجد نتائج مطابقة." },
@@ -1072,7 +1096,7 @@ export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; 
         // filled the screen twice and pushed the question out of sight, so a
         // long run of buttons collapses into the searchable dropdown too — the
         // customer types two letters instead of hunting through the pile.
-        if (onSelect && labels.length > BUTTON_LIST_MAX) {
+        if (onSelect && isAPile(labels)) {
           nodes.push(
             <ChatCardSelect
               key={k++}

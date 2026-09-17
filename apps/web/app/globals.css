@@ -364,6 +364,12 @@ body {
   gap: 13px;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
+  /* overflow-y: auto computes the other axis to auto with it, so ONE message
+     wide enough to overflow used to make the entire conversation scrollable
+     sideways — and every message after it was then drawn at an offset nobody
+     asked for. Wide things scroll inside themselves; the conversation does not
+     move. */
+  overflow-x: hidden;
   /* Comfortable reading measure: on the wide full-page split the conversation
      centers into a column instead of stretching edge to edge. In the narrow
      widget (~404px) the cap is inert, so this only shapes the full-page. */
@@ -375,6 +381,14 @@ body {
   display: flex;
   gap: 10px;
   max-width: 86%;
+  /* A FLEX ITEM WILL NOT SHRINK BELOW ITS CONTENT UNLESS IT IS TOLD TO.
+     `max-width: 86%` caps the box; it does not make what is inside it fit. A
+     table of five columns has a min-content width of its own, and without this
+     the bubble keeps it and overflows the conversation — reported 17 September
+     as "the container gets cropped", with the prose above the table cut off
+     mid-word at the screen edge. See .dlg-md-tablewrap, which is where the
+     width then goes instead. */
+  min-width: 0;
   animation: dlg-rise 0.5s var(--ease) both;
 }
 .dlg-msg.user {
@@ -468,6 +482,8 @@ body {
   .dlg-orb-bloom, .dlg-orb-body, .dlg-orb-sheen, .dlg-orb-flow { animation: none !important; }
 }
 .dlg-bubble {
+  /* See .dlg-msg: the bubble is the flex item that actually holds the table. */
+  min-width: 0;
   padding: 12px 16px;
   border-radius: var(--r-card);
   line-height: 1.55;
@@ -904,7 +920,14 @@ body {
   margin: 9px 0 3px;
   border: 1px solid color-mix(in srgb, var(--c-text) 12%, var(--c-border));
   border-radius: 13px;
-  overflow: hidden;
+  /* A TABLE TOO WIDE FOR THE PHONE SCROLLS; IT DOES NOT GET CUT OFF.
+     `overflow: hidden` clipped it, so the EMIRATE column simply was not there
+     and nothing said so. overflow-y stays hidden, which is what keeps the
+     rounded corners. */
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   background: var(--c-surface);
   box-shadow:
     0 1px 2px rgba(16, 24, 40, 0.05),
@@ -916,6 +939,17 @@ body {
   border-collapse: collapse;
   font-size: 13px;
   line-height: 1.45;
+}
+/* "450367" WAS RENDERED AS "45 / 03 / 67".
+   The bubble breaks long words so a URL or a reference cannot overflow it, and
+   that rule reached into the table and broke six-digit box numbers across three
+   lines — in the one column the customer reads to find their box. Cells wrap at
+   spaces like ordinary text; anything with no space in it stays whole and the
+   card above scrolls instead. */
+.dlg-md-table th,
+.dlg-md-table td {
+  word-break: normal;
+  overflow-wrap: normal;
 }
 .dlg-md-table th {
   text-align: start;
@@ -2507,10 +2541,20 @@ body {
   font-size: 13.5px;
   font-weight: 600;
   padding: 8px 13px;
-  /* Never let a single label break across two lines inside its own pill. */
-  white-space: nowrap;
+  /* A LABEL THAT CANNOT FIT WRAPS; IT DOES NOT PUSH THE CONVERSATION SIDEWAYS.
+     This said `white-space: nowrap` — never break a label across two lines —
+     and that was right for "Renew a box" and wrong for the box picker, whose
+     labels carry a number, a bundle and a branch: "902020 (MyHome 3, Dubai
+     Sorting Centre)" is wider than a phone's bubble on its own. Reported 17
+     September, in the same screenshot as the cropped table. A two-line pill
+     costs a line; a pill that will not shrink costs the customer the right-hand
+     end of every message after it. */
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-align: start;
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   border-radius: var(--r-pill);
   color: var(--c-text);
   background: var(--c-surface);

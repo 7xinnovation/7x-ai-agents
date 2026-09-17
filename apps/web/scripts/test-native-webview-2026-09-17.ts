@@ -49,6 +49,15 @@ check(
 check("...only while a payment window is open", /if \(!opened \|\| returned \|\| !isNative\(\)\) return;/.test(md));
 check("...and only in the app, because a desktop tab switch is not a return", /!isNative\(\)/.test(md));
 
+console.log("\n...and the button that replaced it did nothing either (17 September)");
+// "When I click on back to chat nothing happens, only when I click on the X on
+// the top left." It called the same close() that had already failed a second
+// earlier. A button that cannot work is worse than no button.
+check("the button is only offered when a deep link can carry it", /if \(appLink\) \{[\s\S]{0,260}?done\.style\.display = "inline-block"/.test(extReturn));
+check("otherwise the page names the control the browser drew", /tapX/.test(extReturn));
+check("...in both languages", /اضغط/.test(extReturn));
+check("and reaching that point is proof, not a guess", /it is proof[\s\S]{0,80}cannot/.test(extReturn));
+
 console.log("\nIssue 9 — Print / Save as PDF did nothing");
 check("the button no longer calls print and hopes", !/onclick="window\.print\(\)"/.test(receipt));
 check("it finds out whether the sheet opened", /beforeprint/.test(receipt) && /matchMedia\("print"\)/.test(receipt));
@@ -88,6 +97,22 @@ check("every new English string has an Arabic twin", (() => {
   const missing = [...keys(en)].filter((k) => !keys(ar).has(k));
   return missing.length === 0 || (console.log(`         missing in ar: ${missing.join(", ")}`), false);
 })());
+
+console.log("\nRenting a new box, for a customer who already has forty (17 September)");
+{
+  const route = read("../app/api/chat/route.ts");
+  const prompt = read("../../../packages/core/src/ai/prompt.ts");
+  check("the pulse closes with renting among the options", /ALWAYS include renting a NEW box among the options/.test(route));
+  check("...and does not fold renting into renewing", /never fold renting into renewing/.test(route));
+  check(
+    "the rule also holds on every later turn, not just the pulse",
+    /A NEW one is not an EXISTING one/.test(prompt)
+  );
+  check(
+    "...and says plainly not to answer it with their existing boxes",
+    /Never answer it by listing the boxes they already have/.test(prompt)
+  );
+}
 
 console.log("\nThe account pulse, which is the longest wait in the product (issue 5)");
 check("the assistant speaks before it looks", /FIRST, before calling any tool, write ONE short line of greeting/.test(read("../app/api/chat/route.ts")));
