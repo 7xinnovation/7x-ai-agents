@@ -2384,7 +2384,27 @@ export async function POST(req: NextRequest) {
           () =>
             liveState.payment.status === "paid" && liveState.payment.reference
               ? receiptHref(liveState.payment.reference, session.conversationId)
-              : null
+              : null,
+          /**
+           * AN AGENT FEE ON A CARD FOR A RENTAL WITH NO AGENT.
+           *
+           * Seen in a demo on 17 September: the customer skipped the agent step
+           * and the summary still listed AED 50 for one, inside its total. The
+           * payment was right — rentalTotal knows the first agent is Inclusive —
+           * so the only wrong number was the one the customer read before paying.
+           *
+           * `extra` counts agents BEYOND the first, which are the only ones that
+           * cost anything. `named` asks the case whether there is an agent on
+           * this rental at all: add_agent is the question they were asked, and a
+           * name is the answer that actually put one on the box.
+           */
+          () => {
+            const data = liveState.data as Record<string, unknown>;
+            const named =
+              Boolean(str(data.agent_full_name)) ||
+              /^(yes|true|1|add|نعم)$/i.test(String(data.add_agent ?? "").trim());
+            return { extra: Math.max(0, agentCountFrom(data) - 1), named };
+          }
         );
         // And the total in the SENTENCE beside the card. The card's footer and
         // the pay button are stamped with the real charge; the paragraph under

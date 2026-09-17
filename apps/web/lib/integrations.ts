@@ -2860,7 +2860,23 @@ export async function buildApiTools(
                 "Their earlier summary could not name this amount because the box had not been reserved yet, so if it said the fee would be shown before payment, this is where that promise is kept. Never send them to the payment page without it."
               : " A one-time registration fee is inside that total. Its exact amount cannot be separated out for this rental, so say a one-time registration fee is included and do NOT state a figure for it.") +
             (lastHold.agentIncludedPrice
-              ? ` THE FIRST AUTHORISED AGENT COSTS THE CUSTOMER NOTHING. Emirates Post prices that line at AED ${lastHold.agentIncludedPrice.toFixed(2)} and marks it Inclusive, which means it is what a further agent would cost and NOT a charge on this rental — minimumAmount above is the rental plus the registration fee and nothing else. Write the row as \`- Authorised agent (their name): No charge — the first agent is included\`. Do NOT print ${lastHold.agentIncludedPrice.toFixed(2)} beside their name: a customer reads a figure next to a service as a fee, asks why it is there, and they are right to.`
+              ? ` THE FIRST AUTHORISED AGENT COSTS THE CUSTOMER NOTHING. Emirates Post prices that line Inclusive, which means it is what a further agent would cost and NOT a charge on this rental — minimumAmount above is the rental plus the registration fee and nothing else.` +
+                // THE ROW ONLY EXISTS IF THE AGENT DOES.
+                //
+                // This used to ask for `- Authorised agent (their name): No
+                // charge` on every card, and in a demo on 17 September the
+                // customer had SKIPPED the agent step — so the card carried a
+                // line for a service nobody had asked for, with a figure beside
+                // it, inside a total that included it.
+                //
+                // And the figure was here. The sentence forbidding the model to
+                // print the inclusive price was also the only place it could
+                // have read it; it has now been taken out of the instruction
+                // rather than mentioned in it again. The card is corrected on
+                // the way out either way — see settleAgentRow — but a prompt
+                // that hands over a number it does not want written is a prompt
+                // asking to be disobeyed.
+                ` If — and ONLY if — the customer added an authorised agent, write the row as \`- Authorised agent (their name): No charge — the first agent is included\`, with no figure beside it: a customer reads a figure next to a service as a fee, asks why it is there, and they are right to. If they were offered an agent and declined, or were never asked, the card has NO agent row at all. Do not list a service nobody took.`
               : "") +
             (agentExtra
               ? (() => {

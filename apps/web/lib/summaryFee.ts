@@ -84,6 +84,137 @@ export function dropCourier(block: string): string {
   return out.replace(COURIER_ROW, "").replace(/\n{3,}/g, "\n\n");
 }
 
+/**
+ * A CHARGE FOR AN AGENT NOBODY ADDED.
+ *
+ * Seen in a demo on 17 September: the customer skipped the authorised-agent
+ * step, and the summary card still carried an agent fee of AED 50 — and its
+ * total included it. The payment was right; the card the customer was reading
+ * before they paid was not, which is the wrong way round for the two to
+ * disagree.
+ *
+ * The 50 is real and it is not a charge. Emirates Post prices the AGENT line at
+ * 50 and marks it serviceCriteria "I" — Inclusive — meaning the FIRST agent is
+ * already inside minimumAmount. Only agents beyond the first cost anything. The
+ * model has now put that 50 on a card three separate times: once added on top
+ * of a 400 rental to make 450 (fixed in rentalTotal by doing the arithmetic
+ * ourselves), once beside an agent's name, and now beside no name at all.
+ *
+ * The instruction against it exists and is emphatic — "Do NOT print 50.00
+ * beside their name" — and it is also the sentence that tells the model the
+ * number. Three recurrences is enough: the card is corrected on the way out
+ * rather than asked for again.
+ *
+ * `named` is what separates the two remaining honest cards. An agent WAS added
+ * and is free: the row stays and loses its figure, because the customer should
+ * see that the person they named is on the box. No agent was added at all: the
+ * row is not a mispriced line, it is a line about nothing, and it goes.
+ */
+const AGENT_ROW =
+  // No \b before the alternation: \b is defined on ASCII word characters, so
+  // it never matches in front of "وكيل" and the Arabic labels were unreachable.
+  /^([ \t]*-[ \t]+[^\n:]*(?:authoris\w*|authoriz\w*|agent|وكيل|مفوّض|توكيل)[^\n:]*:[ \t]*)(.*)$/gim;
+
+/**
+ * An amount written the several ways a card writes one.
+ *
+ * THE CURRENCY IS REQUIRED. Without it "- PO Box: 450367" parses as four
+ * hundred and fifty thousand dirhams, which made a summary's rows add up to a
+ * number no footer could ever match — so the footer was quietly left wrong
+ * instead of being repaired. Every price on these cards names its currency;
+ * a bare number on a row is a box, a date or a count.
+ */
+const MONEY =
+  /(?:AED|د\.?إ\.?|درهم)\s*(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s*(?:AED|د\.?إ\.?|درهم)/i;
+
+/** What a row costs, or null when it names no figure. */
+function amountIn(value: string): number | null {
+  const m = MONEY.exec(value);
+  if (!m) return null;
+  const n = Number((m[1] ?? m[2] ?? "").replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Is this row's value a price rather than a name, a date or "included"? */
+function isPriced(value: string): boolean {
+  if (/no charge|included|free|inclusive|مجان|مشمول|بدون رسوم/i.test(value)) return false;
+  return amountIn(value) !== null;
+}
+
+export interface AgentRowFix {
+  block: string;
+  /** What was taken off the card, so a total written around it can be repaired. */
+  removed: number;
+}
+
+export function settleAgentRow(block: string, named: boolean, locale?: string): AgentRowFix {
+  const ar = locale === "ar";
+  let removed = 0;
+  const kept: string[] = [];
+  for (const line of block.split("\n")) {
+    AGENT_ROW.lastIndex = 0;
+    const m = AGENT_ROW.exec(line);
+    if (!m || !isPriced(m[2] ?? "")) {
+      kept.push(line);
+      continue;
+    }
+    removed += amountIn(m[2] ?? "") ?? 0;
+    /**
+     * An agent WAS added and costs nothing: keep the person, drop the figure.
+     * No agent at all: the row is about nothing, so the row goes.
+     *
+     * The card can also name them BEFORE the case does — the model is asked to
+     * record a field and write the card in the same response, and nothing
+     * guarantees which lands first. So a label that carries a name in brackets
+     * counts as named whatever the case says: a priced agent row is wrong
+     * either way, and between dropping a figure and dropping a person, the
+     * figure is the one that should go.
+     */
+    const carriesAName = /\([^)]*\p{L}[^)]*\)/u.test(m[1] ?? "");
+    if (named || carriesAName) {
+      kept.push(`${m[1]}${ar ? "بدون رسوم — الوكيل الأول مشمول" : "No charge — the first agent is included"}`);
+    }
+  }
+  return { block: kept.join("\n").replace(/\n{3,}/g, "\n\n"), removed };
+}
+
+/**
+ * Put the footer back in step with the rows above it, having changed one.
+ *
+ * Only where there is no authoritative charge to stamp instead — with a
+ * reservation in hand correctTotal writes the figure Emirates Post will take and
+ * this never runs. Before one exists there is no such figure, and the card the
+ * customer is reading is still the model's arithmetic; a total that was the sum
+ * of its rows should stay the sum of its rows after one of them is removed.
+ *
+ * Deliberately not a blind subtraction. The written total is only adjusted when
+ * it matches what the card added up to BEFORE the row went — if it never
+ * included the removed line, taking it off again would introduce the very error
+ * this is here to remove.
+ */
+export function retotalAfterRemoval(block: string, removed: number): string {
+  if (!(removed > 0)) return block;
+  const close = /\n[ \t]*```[ \t]*$/.exec(block);
+  if (!close) return block;
+  const body = block.slice(OPEN.length, close.index);
+  const written = TOTAL_ROW.exec(body);
+  if (!written) return block;
+  const stated = amountIn(written[0].split(":").slice(1).join(":"));
+  if (stated === null) return block;
+  // Everything priced that is NOT the footer.
+  let sum = 0;
+  for (const line of body.split("\n")) {
+    if (line === written[0] || /^[ \t]*(?:[-*][ \t]+)?total[ \t]*:/i.test(line)) continue;
+    const colon = line.indexOf(":");
+    if (colon === -1 || !/^[ \t]*[-*][ \t]+/.test(line)) continue;
+    const v = line.slice(colon + 1);
+    if (isPriced(v)) sum += amountIn(v) ?? 0;
+  }
+  const cents = (v: number) => Math.round(v * 100);
+  if (cents(stated) !== cents(sum + removed)) return block;
+  return correctTotal(block, sum);
+}
+
 export function insertRegistrationFee(block: string, fee: number): string {
   // Naming the fee is not stating it. "Registration fee and exact total:
   // confirmed when box is reserved" mentions the word and leaves the customer
@@ -199,7 +330,16 @@ export function summaryFeeGuard(
    * The receipt for a payment that has already settled, or null. Supplied only
    * for a settled payment — see insertReceiptRow.
    */
-  receipt: () => string | null = () => null
+  receipt: () => string | null = () => null,
+  /**
+   * The authorised agents actually being charged for, and whether one was named.
+   *
+   * `extra` is agents BEYOND the first — the only ones that cost anything. Zero
+   * means any figure on an agent row is the inclusive price being shown as a
+   * fee. `named` says whether there is an agent on this rental at all, which is
+   * what separates a free row worth keeping from a row about nobody.
+   */
+  agents: () => { extra: number; named: boolean } = () => ({ extra: 0, named: true })
 ) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
@@ -231,8 +371,16 @@ export function summaryFeeGuard(
       fixed = insertSelectionRows(fixed, facts(), locale);
       // Sold only if Emirates Post priced it on this reservation.
       if (extrasNamedIn(fixed).keyDelivery && !courierPriced()) fixed = dropCourier(fixed);
+      // The first agent is inclusive, so a figure beside one is not a charge.
+      const who = agents();
+      const agentFix = who.extra > 0 ? { block: fixed, removed: 0 } : settleAgentRow(fixed, who.named, locale);
+      fixed = agentFix.block;
       const charge = total(extrasNamedIn(fixed));
       if (charge !== null && Number.isFinite(charge) && charge > 0) fixed = correctTotal(fixed, charge);
+      // Only where there is no authoritative figure to stamp instead: before the
+      // box is reserved the footer is still the model's own addition, and it has
+      // to stay the sum of the rows it is under.
+      else fixed = retotalAfterRemoval(fixed, agentFix.removed);
       // Last, and only on a card that is reporting a finished transaction.
       const url = receipt();
       if (url) fixed = insertReceiptRow(fixed, url, locale);
