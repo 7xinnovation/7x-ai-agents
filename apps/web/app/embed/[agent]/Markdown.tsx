@@ -949,9 +949,53 @@ export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx, locale 
  * on a map". The language of the conversation is not part of the upload
  * context and should never have depended on it.
  */
+/**
+ * A FENCE THAT ENDED UP MID-LINE IS STILL A FENCE.
+ *
+ * 18 September, from the app: the customer read
+ *
+ *   How long would you like to rent the box? ```cards
+ *     • title: 1 Year
+ *       price: AED 370.00
+ *
+ * The parser below wants a fence alone on its line, and markdown agrees with
+ * it. The cause was ours and is fixed where it belongs — a streaming guard
+ * dropped the sentence in between and took the paragraph break with it — but
+ * the model can put a fence in the wrong place by itself just as easily, and
+ * when it does the customer gets the raw text of a card list.
+ *
+ * So a line that ends in an opener for one of OUR blocks is split in two. Only
+ * a named block, never a bare ```: a bare one could be an inline code span
+ * somebody meant, while "```cards" at the end of a sentence has never been
+ * anything but a card list that missed its newline.
+ */
+const TRAILING_OPENER =
+  /^(.*\S)[ \t]+(```[ \t]*(?:cards|upload|buttons|toggles|summary|map|locate|pay|select)[ \t]*)$/;
+
+export function openFencesOnTheirOwnLine(lines: string[]): string[] {
+  const out: string[] = [];
+  let inBlock = false;
+  for (const line of lines) {
+    // Inside a block the contents are data, not markdown; leave them exactly.
+    if (/^\s*```/.test(line)) {
+      inBlock = !inBlock;
+      out.push(line);
+      continue;
+    }
+    const m = !inBlock && TRAILING_OPENER.exec(line);
+    if (m) {
+      out.push(m[1]!, m[2]!.trim());
+      inBlock = true;
+      continue;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
 export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; onSelect?: (text: string) => void; uploadCtx?: UploadCtx; locale?: string }) {
   const lang: Locale = locale === "ar" ? "ar" : locale === "en" ? "en" : uploadCtx?.locale ?? "en";
-  const lines = text.split("\n");
+  const lines = openFencesOnTheirOwnLine(text.split("\n"));
   const nodes: React.ReactNode[] = [];
   let i = 0;
   let k = 0;

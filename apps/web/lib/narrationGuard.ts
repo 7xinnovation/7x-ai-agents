@@ -97,6 +97,42 @@ const ANNOUNCED_WORK =
 const NOT_A_LOOKUP = /\bget back to you\b|\bget in touch\b/i;
 
 /**
+ * WHAT SURVIVES WHEN THE SENTENCE IN FRONT OF IT DOES NOT.
+ *
+ * A dropped sentence used to take its trailing whitespace with it, and on 18
+ * September that whitespace was a paragraph break:
+ *
+ *   "How long would you like to rent the box? Let me fetch the prices for each
+ *    option.\n\n```cards\n- title: 1 Year …"
+ *
+ * The second sentence goes — it is an announcement of work the widget already
+ * shows — and the "\n\n" went with it, so the reply reached the customer as
+ * "…rent the box? ```cards" with the fence in the middle of a line. A fence
+ * only opens a block at the start of one, so the card renderer never saw a
+ * block: the customer got a literal "```cards" and the card body as bullets.
+ *
+ * The hazard has been here since this guard was written and nothing hit it,
+ * because the sentences it dropped sat in the middle of paragraphs. Announcing
+ * a lookup is different — that sentence's natural home is the line immediately
+ * before the cards the lookup produced, which is exactly the position where
+ * losing the break breaks the block.
+ *
+ * So the SEPARATION survives even when the words do not: a newline means the
+ * next thing starts on its own line, a blank line means its own paragraph, and
+ * a plain space between two sentences leaves nothing behind.
+ *
+ * The space after the sentence BEFORE the dropped one is left where it is. It
+ * has usually been sent to the customer already — this runs in a stream and
+ * bytes do not come back — so trimming it would only work when a whole reply
+ * arrives in one chunk, and a guard that behaves differently at different
+ * chunk sizes is worse than a trailing space that renders as nothing.
+ */
+export function keptSeparator(whitespace: string): string {
+  if (!whitespace.includes("\n")) return "";
+  return /\n[ \t]*\n/.test(whitespace) ? "\n\n" : "\n";
+}
+
+/**
  * Split on sentence ends, keeping the delimiters so rejoining is lossless.
  * Deliberately simple: this runs on chat prose, not on prose with citations.
  */
@@ -176,7 +212,9 @@ export function narrationGuard() {
       const m = /^([\s\S]*?[.!?])(\s+)/.exec(upto);
       if (m) {
         const sentence = m[1]!;
-        out += isInternalNarration(sentence) ? "" : sentence + m[2];
+        // The words may go; the line break they sat on does not. See keptSeparator.
+        // The words may go; the line break they sat on does not. See keptSeparator.
+        out += isInternalNarration(sentence) ? keptSeparator(m[2]!) : sentence + m[2];
         buf = buf.slice(m[0].length);
         continue;
       }

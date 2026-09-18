@@ -36,6 +36,8 @@
  *    ordinary writing and carry nothing when they do.
  */
 
+import { keptSeparator } from "./narrationGuard";
+
 /** Below this a repeat is a turn of phrase, not a duplicated paragraph. */
 const MIN_CHARS = 36;
 const MIN_WORDS = 6;
@@ -129,7 +131,9 @@ export function echoGuard(): EchoGuard {
       const m = /^([\s\S]*?[.!?؟])(\s+)/.exec(upto);
       if (m) {
         const sentence = m[1]!;
-        out += decide(sentence) ? sentence + m[2] : "";
+        // A repeat goes, but not the paragraph break after it — a fence that
+        // ends up mid-line stops being a fence. See narrationGuard.keptSeparator.
+        out += decide(sentence) ? sentence + m[2] : keptSeparator(m[2]!);
         buf = buf.slice(m[0].length);
         continue;
       }
