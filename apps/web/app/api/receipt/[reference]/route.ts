@@ -31,7 +31,9 @@ const RECEIPT_STR = {
     poBox: "PO Box", caseRef: "Case reference", status: "Status",
     customer: "Subscriber", bundle: "Bundle", expiry: "Valid until", branch: "Branch", orderNo: "Order no.",
     totalPaid: "Total paid", totalDue: "Total due", print: "Print / Save as PDF",
-    printHint: "To save this, use the share button in your browser and choose Print or Save as PDF. A screenshot works too.",
+    share: "Save or share receipt",
+    shareText: "Emirates Post receipt",
+    printHint: "Your browser will not open its print sheet here. The same receipt is in the confirmation email we sent you, and a screenshot of this page works too.",
     foot: "This receipt was generated for the payment referenced above. Keep it for your records.",
     statuses: { paid: "Paid", failed: "Failed", initiated: "Initiated" } as Record<string, string>,
   },
@@ -40,7 +42,9 @@ const RECEIPT_STR = {
     poBox: "صندوق البريد", caseRef: "الرقم المرجعي للطلب", status: "الحالة",
     customer: "المشترك", bundle: "الباقة", expiry: "صالح حتى", branch: "الفرع", orderNo: "رقم الطلب",
     totalPaid: "الإجمالي المدفوع", totalDue: "الإجمالي المستحق", print: "طباعة / حفظ كملف PDF",
-    printHint: "لحفظ هذا الإيصال، استخدم زر المشاركة في المتصفح واختر الطباعة أو الحفظ كملف PDF. ولقطة الشاشة تفي بالغرض أيضًا.",
+    share: "حفظ الإيصال أو مشاركته",
+    shareText: "إيصال بريد الإمارات",
+    printHint: "لن يفتح متصفحك نافذة الطباعة هنا. الإيصال نفسه موجود في رسالة التأكيد التي أرسلناها إليك، ولقطة الشاشة لهذه الصفحة تفي بالغرض أيضًا.",
     foot: "تم إنشاء هذا الإيصال للدفعة المذكورة أعلاه. يُرجى الاحتفاظ به في سجلاتك.",
     statuses: { paid: "مدفوع", failed: "فشل", initiated: "قيد التنفيذ" } as Record<string, string>,
   },
@@ -209,15 +213,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
 /**
  * "PRINT / SAVE AS PDF" IS NOT FUNCTIONAL ON THE PAYMENT RECEIPT SCREEN.
  *
- * Reported from the mobile app, 11 September, and true: the button called
- * window.print(), and inside an iOS in-app browser — which is where the receipt
- * link opens — that call is either absent or silently ignored. Nothing happened
- * and nothing said why, on the one screen a customer actually wants to keep.
+ * Reported from the mobile app on 11 September and again on 18 September, the
+ * second time against the fix: the button called window.print(), and inside an
+ * iOS in-app browser — which is where the receipt link opens — that call is
+ * either absent or silently ignored. Nothing happened.
  *
- * There is no way for this page to open the OS print sheet itself. What it can
- * do is ask, find out whether the ask worked, and if it did not, stop pretending
- * and tell the customer where the control they need actually is. A native host
- * gets told as well, so an app that wants to raise its own share sheet can.
+ * The first attempt at this detected that nothing had happened and explained
+ * where the browser's own share button was. That is an explanation, not a
+ * receipt, and telling a customer to go and find a control we could press for
+ * them is not an answer. So the button now presses it: on a touch device it
+ * opens the system share sheet through the Web Share API, which is where Save
+ * to Files, Print and Mail actually live. The customer taps one thing.
+ *
+ * Order matters. On a desktop, print() is what "Print / Save as PDF" means and
+ * it works, so share is only reached where the pointer is coarse. A cancelled
+ * share is not a failure — it is the customer changing their mind — so it is
+ * not followed by a print attempt or an apology.
+ *
+ * And the hint that is left for the case where neither works now names
+ * something that certainly does: the same receipt is in the confirmation email,
+ * which was sent when the payment settled and does not depend on this page.
  */
 (function () {
   var btn = document.getElementById("print");
@@ -230,16 +245,40 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
     var mq = window.matchMedia("print");
     if (mq && mq.addEventListener) mq.addEventListener("change", function (e) { if (e.matches) printed = true; });
   } catch (e) { /* older engine; the timeout below still decides */ }
+
+  var touch = false;
+  try { touch = window.matchMedia("(hover: none) and (pointer: coarse)").matches; } catch (e) {}
+  // Say what the button will actually do here. On a phone it opens the system
+  // share sheet, and "Print" is only one of the things in it.
+  if (touch && navigator.share) btn.textContent = ${JSON.stringify(s.share)};
+
+  function printIt() {
+    try {
+      if (typeof window.print === "function") window.print();
+    } catch (e) { /* refused; the hint below is the answer */ }
+    setTimeout(function () { if (!printed) hint.style.display = "block"; }, 900);
+  }
+
   btn.addEventListener("click", function () {
+    // A native host may prefer to raise its own sheet; it is told either way.
     try {
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ source: "dialog-native", action: "print", url: window.location.href }));
       }
     } catch (e) { /* not in a native host */ }
-    try {
-      if (typeof window.print === "function") window.print();
-    } catch (e) { /* refused; the hint below is the answer */ }
-    setTimeout(function () { if (!printed) hint.style.display = "block"; }, 900);
+
+    if (touch && navigator.share) {
+      // Must be called inside the gesture, so no awaiting anything first.
+      navigator
+        .share({ title: document.title, text: ${JSON.stringify(s.shareText)}, url: window.location.href })
+        .catch(function (err) {
+          // They closed the sheet. Nothing failed and nothing needs saying.
+          if (err && (err.name === "AbortError" || err.name === "NotAllowedError")) return;
+          printIt();
+        });
+      return;
+    }
+    printIt();
   });
 })();
 </script>
