@@ -1157,6 +1157,8 @@ export function Experience({
   // Reset: start a brand-new conversation (clears the view + the persisted session).
   const resetChat = useCallback(() => {
     if (streaming) return;
+    const leaving = convId.current;
+    const wasSignedIn = authenticated;
     try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
     convId.current = null;
     pulsed.current = false;
@@ -1169,32 +1171,62 @@ export function Experience({
     // was still authenticated — so the customer could not tell whether they were
     // logged in, which is the one thing that header exists to answer. Starting a
     // fresh conversation is not signing out; the sign-out is the token going.
+    //
+    // A host page re-offers its token on a timer, so that case needs nothing.
     if (uaePass.current) return;
+    if (!wasSignedIn || !leaving) { setAuthenticated(false); return; }
     /**
-     * ...and it has to survive one inside the app too.
+     * AND IT HAS TO SURVIVE ONE AFTER UAE PASS, WHICH IS THE CASE THAT WAS
+     * ACTUALLY REPORTED.
      *
-     * A native session holds no token here to survive with — the server has it,
-     * attached to the conversation we have just left. So ask the app for
-     * another code for the new one. The app is the only party that can mint it:
-     * it still has the customer's real credential and we deliberately never do.
+     * "Logged-in user — refreshing the chat window using the refresh button
+     * prompts the user to sign in again." The first pass at this changed the
+     * icon, which was right — the control starts a new chat and a circular
+     * arrow said reload — and then handled the NATIVE HANDOFF, where the app
+     * can mint another code. The app is not on that path. It signs in with UAE
+     * PASS, and a UAE PASS session leaves nothing in the widget at all: the
+     * token is stored server-side against the CONVERSATION, deliberately out of
+     * this page's reach. So `uaePass.current` was empty, `nativeIdentity` was
+     * false, and the customer was dropped to guest exactly as before.
      *
-     * The header keeps saying "signed in" while we wait, because that is what
-     * is true — the customer has not signed out of anything, and a header that
-     * flickers to guest and back is worse than one that is briefly ahead of the
-     * server. If nothing answers in five seconds the app cannot help, and then
-     * the honest thing IS to show them signed out with a way back in.
+     * There is nothing here to re-present, so the SERVER moves the session into
+     * the new conversation instead. The header holds "signed in" across the
+     * round trip because that is what is true — they have not signed out of
+     * anything — and follows the server if it cannot.
      */
-    if (nativeIdentity.current && isNative()) {
-      postNative({ action: "signin-needed", reason: "new-chat" });
-      window.setTimeout(() => {
-        if (convId.current) return; // a fresh code landed and named a conversation
-        nativeIdentity.current = false;
-        setAuthenticated(false);
-      }, 5000);
-      return;
-    }
-    setAuthenticated(false);
-  }, [streaming, storageKey]);
+    void (async () => {
+      try {
+        const res = await fetch("/api/embed/continue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agent: agent.slug, from: leaving }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { conversationId?: string };
+          if (data.conversationId) {
+            convId.current = data.conversationId;
+            try { window.localStorage.setItem(storageKey, data.conversationId); } catch { /* private mode */ }
+            return;
+          }
+        }
+      } catch {
+        /* fall through to the app, and then to the honest answer */
+      }
+      // The server could not carry it. An app that implements the handoff can
+      // still mint a fresh code; one that does not leaves them signed out, which
+      // is then the truth rather than a guess.
+      if (nativeIdentity.current && isNative()) {
+        postNative({ action: "signin-needed", reason: "new-chat" });
+        window.setTimeout(() => {
+          if (convId.current) return;
+          nativeIdentity.current = false;
+          setAuthenticated(false);
+        }, 5000);
+        return;
+      }
+      setAuthenticated(false);
+    })();
+  }, [streaming, storageKey, authenticated, agent.slug]);
 
   /**
    * The app answering — with a sign-in code, or with the customer back from a

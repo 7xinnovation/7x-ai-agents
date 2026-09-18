@@ -87,6 +87,73 @@ export async function rememberVerifiedEmiratesId(caseId: string, emiratesId: str
 }
 
 /**
+ * A NEW CONVERSATION FOR A CUSTOMER WHO IS ALREADY SIGNED IN.
+ *
+ * "Logged-in user — refreshing the chat window using the refresh button prompts
+ * the user to sign in again" (mobile bug list, item 10). The control starts a
+ * new chat rather than refreshing, and it has been given an icon that says so —
+ * but starting one still threw the sign-in away, and that half was never fixed
+ * for the path the app is actually on.
+ *
+ * A UAE PASS sign-in leaves nothing in the widget. The token is stored here,
+ * against the CONVERSATION, which is the whole design: it is never handed to the
+ * page. So a new conversation is a conversation with no session, and the next
+ * turn is a guest — whatever the header said a moment ago. The earlier fix
+ * covered only the native handoff, where the app can mint another code. There is
+ * nothing to mint here.
+ *
+ * So the session moves. The new conversation inherits the encrypted token, the
+ * verified subject and the Emirates ID that was resolved for it — everything
+ * that says WHO, and nothing that says what they were doing, which is what
+ * "new chat" means.
+ *
+ * ON WHY THIS IS NOT A NEW CAPABILITY. The conversation id is already a session
+ * bearer: getOrCreateSession above takes one, reads `authenticated` and the
+ * stored token off the row, and every /api/chat turn quoting that id continues
+ * as that customer. Anyone holding an id can already act with it. This grants
+ * exactly what it already grants — to the same holder, in a fresh conversation —
+ * and it refuses an id that is not authenticated, so it can never manufacture a
+ * session that did not exist.
+ */
+export async function carrySessionForward(
+  agentId: string,
+  fromConversationId: string
+): Promise<{ conversationId: string } | null> {
+  const db = getDb();
+  const from = await db.query.conversations.findFirst({
+    where: and(eq(conversations.id, fromConversationId), eq(conversations.agentId, agentId)),
+  });
+  // Not ours, or never signed in: there is no session to carry and nothing to do.
+  if (!from || !(from.authenticated && from.sessionToken)) return null;
+
+  const [conv] = await db
+    .insert(conversations)
+    .values({
+      agentId,
+      locale: from.locale,
+      authenticated: true,
+      userRef: from.userRef,
+      // Copied as stored — still encrypted, never decrypted on this path. The
+      // token does not need to be read to be carried.
+      sessionToken: from.sessionToken,
+    })
+    .returning();
+
+  // The identity the old case had resolved travels with it; the application does
+  // not. An Emirates ID is a fact about the customer, and asking Emirates Post
+  // for it again on the next turn would be a round trip for something we know.
+  const oldCase = await db.query.cases.findFirst({ where: eq(cases.conversationId, from.id) });
+  const eid = (oldCase?.state?.data as Record<string, unknown> | undefined)?.[VERIFIED_EID_KEY];
+  const fresh = emptyCase();
+  const state = typeof eid === "string" && eid
+    ? { ...fresh, data: { ...fresh.data, [VERIFIED_EID_KEY]: eid } }
+    : fresh;
+
+  await db.insert(cases).values({ conversationId: conv!.id, agentId, state });
+  return { conversationId: conv!.id };
+}
+
+/**
  * Sign a conversation out.
  *
  * The token goes, the authenticated flag goes, and the identity goes — all

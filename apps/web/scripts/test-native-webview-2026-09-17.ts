@@ -63,7 +63,15 @@ check("the button no longer calls print and hopes", !/onclick="window\.print\(\)
 check("it finds out whether the sheet opened", /beforeprint/.test(receipt) && /matchMedia\("print"\)/.test(receipt));
 check("a native host is offered the job", /action: "print"/.test(receipt));
 check("and the customer is told where the control is when nothing opened", /printHint/.test(receipt));
-check("...in both languages", /لحفظ هذا الإيصال/.test(receipt));
+// 18 September: the hint was an explanation, not a receipt. The button now
+// opens the system share sheet on a touch device — where Save to Files and
+// Print actually live — and the hint left behind names the confirmation email,
+// which works whatever the browser does. See test-receipt-share.
+check("on a phone the button opens the share sheet", /navigator\s*\n?\s*\.share\(\{ title: document\.title/.test(receipt));
+check("...and says so on its own label", /btn\.textContent = /.test(receipt));
+check("...and a cancelled share is not treated as a failure", /err\.name === "AbortError"/.test(receipt));
+check("the fallback names something that certainly works", /confirmation email/.test(receipt));
+check("...in both languages", /رسالة التأكيد/.test(receipt) && /حفظ الإيصال أو مشاركته/.test(receipt));
 
 console.log("\nIssue 10 — a new chat signed the customer out");
 check("a native sign-in is remembered as one", /const nativeIdentity = useRef\(false\)/.test(exp));
