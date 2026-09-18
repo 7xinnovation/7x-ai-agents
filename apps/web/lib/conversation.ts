@@ -123,8 +123,24 @@ export async function carrySessionForward(
   const from = await db.query.conversations.findFirst({
     where: and(eq(conversations.id, fromConversationId), eq(conversations.agentId, agentId)),
   });
-  // Not ours, or never signed in: there is no session to carry and nothing to do.
-  if (!from || !(from.authenticated && from.sessionToken)) return null;
+  /**
+   * Not ours, or never signed in.
+   *
+   * `authenticated` is the whole test, and a stored token is NOT required. It
+   * is set by markAuthenticated, which every sign-in path calls only after a
+   * verified subject — so the flag already means "an identity was established
+   * here", whether or not a credential came with it. A client cannot set it:
+   * getOrCreateSession only honours a claimed one when clientAuthClaimTrusted()
+   * says so, and that is UAEPASS_MOCK=1, a dev deployment.
+   *
+   * Requiring the token as well looked stricter and was simply wrong. The UAE
+   * PASS mock deliberately stores none — "a synthetic placeholder no backend
+   * would accept" — so the first version of this refused every tester using
+   * ?mock=1, which is the whole of QA, while behaving correctly in production
+   * where a real sign-in does store one. A guard that only fires for the people
+   * testing it is worse than no guard.
+   */
+  if (!from || !from.authenticated) return null;
 
   const [conv] = await db
     .insert(conversations)
@@ -134,7 +150,8 @@ export async function carrySessionForward(
       authenticated: true,
       userRef: from.userRef,
       // Copied as stored — still encrypted, never decrypted on this path. The
-      // token does not need to be read to be carried.
+      // token does not need to be read to be carried, and a session that never
+      // had one (the mock) carries null, which is what it had.
       sessionToken: from.sessionToken,
     })
     .returning();

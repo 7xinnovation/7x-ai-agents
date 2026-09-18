@@ -33,7 +33,11 @@ console.log("\nThe session moves; the application does not");
 check("there is a carry", /export async function carrySessionForward/.test(conversation));
 check("it takes the agent as well as the id", /carrySessionForward\(\s*agentId: string,\s*fromConversationId: string/.test(conversation));
 check("...and will not cross agents", /eq\(conversations\.agentId, agentId\)/.test(carry));
-check("it refuses a conversation that was never signed in", /if \(!from \|\| !\(from\.authenticated && from\.sessionToken\)\) return null;/.test(carry));
+check("it refuses a conversation that was never signed in", /if \(!from \|\| !from\.authenticated\) return null;/.test(carry));
+// A stored token is NOT part of the test: the UAE PASS mock stores none on
+// purpose, and the first version of this refused every tester using ?mock=1.
+check("...on the flag, not on holding a credential", !/from\.authenticated && from\.sessionToken/.test(carry));
+check("...and says why that looked stricter and was wrong", /refused every tester using/.test(carry.replace(/\n \* /g, " ")));
 check("the token is copied as stored, never decrypted", /sessionToken: from\.sessionToken/.test(carry) && !/decryptSecret/.test(carry));
 check("the verified subject travels", /userRef: from\.userRef/.test(carry));
 check("so does the Emirates ID", /VERIFIED_EID_KEY\]: eid/.test(carry));
