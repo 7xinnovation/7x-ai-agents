@@ -1135,6 +1135,15 @@ export async function buildApiTools(
      */
     savedCard?: () => Promise<{ cardToken?: string; maskedPan?: string; expiry?: string; scheme?: string; cardholderName?: string } | null>;
     /**
+     * The signed-in customer's Emirates ID, as Emirates Post themselves gave it.
+     *
+     * A rental save carries it as userProfile.idNumber and their backend answers
+     * 115 USER_PROFILE_INVALID without one — see the save patch, where it is
+     * stamped rather than left to the model to remember. Resolved lazily: only
+     * the save needs it, and getting it can cost an introspection.
+     */
+    verifiedEmiratesId?: () => Promise<string | null>;
+    /**
      * The PO Boxes this customer actually holds, for the ownership gate.
      *
      * Resolved lazily and only when a management call is about to run. Returning
@@ -2055,6 +2064,79 @@ export async function buildApiTools(
         pay.billingDetail = filled;
         body.paymentProperties = pay;
         patched = true;
+      }
+
+      /**
+       * WHO THE SUBSCRIPTION IS FOR. STAMPED, NOT REMEMBERED.
+       *
+       * 18 September, from the app: a rental reached the payment step and came
+       * back `115 USER_PROFILE_INVALID` with the box already reserved. The save
+       * that had worked the day before differed by one field —
+       * `userProfile.idNumber` — and their check is presence, not validity: the
+       * save that succeeded carried the literal string "784-XXXX-XXXXXXX-X",
+       * which is a placeholder the model typed, and Emirates Post wrote it into
+       * a real subscription record without complaint.
+       *
+       * So the field was deciding whether a rental completed on whether the
+       * model happened to have an identity in front of it, and when it did not
+       * have one it made a plausible-looking one up. Both are ours to stop. The
+       * Emirates ID is a verified fact about the customer, held by us, and it is
+       * stamped here the way the billing detail above is.
+       *
+       * A value the model wrote is kept only if it is a real Emirates ID —
+       * fifteen digits beginning 784. Anything else is replaced where we know
+       * better, and where we do not, the call is refused: a save that fails is
+       * recoverable and a national id invented for someone else's records is not.
+       */
+      if (opts.verifiedEmiratesId) {
+        const written = String(u.idNumber ?? "").trim();
+        const plausible = (v: string) => /^784\d{12}$/.test(v.replace(/\D/g, ""));
+        if (!plausible(written)) {
+          const verified = await opts.verifiedEmiratesId().catch(() => null);
+          if (verified && plausible(verified)) {
+            u.idNumber = verified.replace(/\D/g, "");
+            body.userProfile = u;
+            patched = true;
+            if (written) {
+              void audit({
+                agentId,
+                conversationId: opts.conversationId,
+                actor: "system",
+                action: "rental_save_identity_corrected",
+                payload: {
+                  tool: toolName,
+                  method: entry.op.method,
+                  path: entry.op.path,
+                  input: { wrote: written.length, shape: written.replace(/\d/g, "#") },
+                  response: "The save carried an Emirates ID that is not one; the verified id was substituted.",
+                },
+              }).catch(() => {});
+            }
+          } else {
+            void audit({
+              agentId,
+              conversationId: opts.conversationId,
+              actor: "system",
+              action: "rental_save_identity_missing",
+              payload: {
+                tool: toolName,
+                method: entry.op.method,
+                path: entry.op.path,
+                input: { wrote: written.replace(/\d/g, "#") },
+                response: "No verified Emirates ID for this session; the save was refused rather than sent without one.",
+              },
+            }).catch(() => {});
+            return {
+              result:
+                "REFUSED LOCALLY: this rental cannot be saved because we do not hold a verified Emirates ID for this customer, " +
+                "and Emirates Post answers 115 USER_PROFILE_INVALID without one. Do NOT invent an id, do not put a placeholder " +
+                "in idNumber, and do not retry this call with one. Nothing has been charged and their box reservation still " +
+                "stands. Ask the customer to sign in again — that is what supplies it — and if they already are, offer them a " +
+                "callback and give them ONLY the reservation reference.",
+              isError: true,
+            };
+          }
+        }
       }
 
       // Did these company details come from Emirates Post, or from the customer?

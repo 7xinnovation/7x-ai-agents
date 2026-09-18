@@ -8,7 +8,7 @@ import { getDb, payments, documents as documentsTable, documentBlobs } from "@di
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug, getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, VERIFIED_EID_KEY } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, rememberVerifiedEmiratesId, VERIFIED_EID_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
@@ -553,6 +553,14 @@ export async function POST(req: NextRequest) {
         if (v.ok) {
           sub = v.identity.sub;
           verifiedEmiratesId = v.identity.emiratesId;
+          // KEPT, like the token above. This introspection is the only place a
+          // host-page sign-in ever learns the customer's Emirates ID, and until
+          // now it was used for the turn and thrown away — so a later turn on
+          // the same conversation had to ask Emirates Post all over again, or
+          // go without.
+          if (verifiedEmiratesId && session.caseId) {
+            void rememberVerifiedEmiratesId(session.caseId, verifiedEmiratesId).catch(() => {});
+          }
           verifiedIdentity = { name: v.identity.name, mobile: v.identity.mobileNumber, email: v.identity.email };
         } else reason = v.reason;
       }
@@ -669,6 +677,52 @@ export async function POST(req: NextRequest) {
    * turn: a management call is rare, and asking twice would double a round trip
    * for no gain. null means "could not establish", which REFUSES the call.
    */
+  /**
+   * THE CUSTOMER'S EMIRATES ID, WHEREVER IT IS BY NOW.
+   *
+   * 18 September, from the app: a rental reached the payment step and Emirates
+   * Post answered `115 USER_PROFILE_INVALID`. The difference between that save
+   * and the one that had worked the day before was a single field —
+   * `userProfile.idNumber`, present in one and absent in the other. The model
+   * writes that field, from whatever identity it can see in its prompt, and
+   * when it cannot see one it leaves the field out and the rental dies at the
+   * last step with the box already reserved.
+   *
+   * It could not see one. `verifiedEmiratesId` above is only ever filled when
+   * the widget sends the token in the request BODY, which is the hosting-page
+   * handover. A customer signed in through the app hands their token over once,
+   * from native code, and it is kept encrypted against the conversation —
+   * exactly so it never reaches the WebView — so on every turn after that the
+   * body carries no token and nothing ever asked the stored one who it belongs
+   * to. Signing in through the app resolved an identity and then discarded the
+   * only part of it the rental needs.
+   *
+   * So it is asked for here instead of assumed: the turn's own verification
+   * first, then what a previous turn wrote onto the case, and only then the
+   * stored token — one introspection, cached by lib/hostToken for the token's
+   * life, and written back onto the case so the next turn does not repeat it.
+   */
+  let eidResolved: string | null | undefined;
+  const resolveEmiratesId = async (): Promise<string | null> => {
+    if (eidResolved !== undefined) return eidResolved;
+    const known = verifiedEmiratesId ?? str(session.state.data[VERIFIED_EID_KEY]);
+    if (known) return (eidResolved = known);
+    const stored = backendSessionToken ?? uaePassIdentityToken;
+    if (!stored || !session.authenticated) return (eidResolved = null);
+    try {
+      const usersBase = await epUsersBaseUrl(agent.id, agent.definition.activeEnvironment ?? "production");
+      if (!usersBase) return (eidResolved = null);
+      const v = await introspectEmiratesPostToken(stored, usersBase);
+      const found = v.ok ? v.identity.emiratesId ?? null : null;
+      if (found && session.caseId) void rememberVerifiedEmiratesId(session.caseId, found).catch(() => {});
+      return (eidResolved = found);
+    } catch {
+      // Not knowing is an answer; inventing one is not. The save refuses rather
+      // than writing a made-up national id into a subscription record.
+      return (eidResolved = null);
+    }
+  };
+
   let ownedBoxesCache: { at: number; boxes: string[] | null } | null = null;
   const ownedBoxes = async (): Promise<string[] | null> => {
     if (ownedBoxesCache) return ownedBoxesCache.boxes;
@@ -841,6 +895,10 @@ export async function POST(req: NextRequest) {
             return usable.find((c) => c.isDefault) ?? usable[0] ?? null;
           }
         : undefined,
+    // Stamped onto the rental save as userProfile.idNumber — Emirates Post
+    // answers 115 USER_PROFILE_INVALID without it, and the model was the only
+    // thing supplying it. See resolveEmiratesId, and the save patch that uses it.
+    verifiedEmiratesId: agent.definition.tenantSlug === "nxn" ? resolveEmiratesId : undefined,
     // Set on the save payload rather than handed to the model, which pasted it
     // into a pay block and sent the customer to our own return page.
     paymentReturnUrl: (agent.definition.journeys ?? [])

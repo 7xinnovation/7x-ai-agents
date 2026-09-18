@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAgentBySlug } from "@/lib/agents";
-import { getOrCreateSession, markAuthenticated, saveSessionToken } from "@/lib/conversation";
+import { getOrCreateSession, markAuthenticated, rememberVerifiedEmiratesId, saveSessionToken } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { mintHandoff, readHandoff, HANDOFF_TTL_MS } from "@/lib/handoff";
 import { log } from "@/lib/logger";
@@ -56,6 +56,18 @@ export async function POST(req: NextRequest) {
 
   const looksSigned = token.split(".").length === 3;
   let sub: string | undefined;
+  /**
+   * The Emirates ID this introspection already knows.
+   *
+   * Kept, not merely used. A rental save carries userProfile.idNumber and
+   * Emirates Post answers 115 USER_PROFILE_INVALID without it — and an app
+   * sign-in is the one route where nothing else will ever ask: the token is
+   * held encrypted against the conversation precisely so it never reaches the
+   * WebView, so no later turn has one in hand to introspect. 18 September: a
+   * rental from the app reached the payment step and died there, with the box
+   * already reserved, because this value was discarded here.
+   */
+  let emiratesId: string | undefined;
   let reason = "";
   if (looksSigned && hostTokenConfigured()) {
     const v = verifyHostToken(token);
@@ -66,8 +78,10 @@ export async function POST(req: NextRequest) {
     if (!usersBase) reason = "no host users service configured for this environment";
     else {
       const v = await introspectEmiratesPostToken(token, usersBase);
-      if (v.ok) sub = v.identity.sub;
-      else reason = v.reason;
+      if (v.ok) {
+        sub = v.identity.sub;
+        emiratesId = v.identity.emiratesId;
+      } else reason = v.reason;
     }
   }
   if (!sub) {
@@ -87,6 +101,7 @@ export async function POST(req: NextRequest) {
   // WebView, and the code handed back cannot be replayed against Emirates Post.
   await saveSessionToken(session.conversationId, token, "backend");
   await markAuthenticated(session.conversationId, sub);
+  if (emiratesId && session.caseId) await rememberVerifiedEmiratesId(session.caseId, emiratesId);
 
   const handoff = mintHandoff(session.conversationId, slug);
   if (!handoff) {
