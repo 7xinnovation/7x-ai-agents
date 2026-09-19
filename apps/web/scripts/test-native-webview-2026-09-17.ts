@@ -82,6 +82,25 @@ check("and gives up honestly if the app cannot help", /nativeIdentity\.current =
 check("a code arriving from the app is redeemed", /e\.action === "handoff" && e\.handoff/.test(exp));
 check("the event shape carries it", /handoff\?: string;/.test(bridge));
 check("signing in asks the app first", /postNative\(\{ action: "signin-needed", reason: "customer-asked" \}\)/.test(exp));
+
+console.log("\n...and the sign-in button that could not work in the app (19 September)");
+// "This button for the sign in, if clicked on I think it takes to web so you
+// basically can't sign in through that button." The host portal route needs a
+// hosting PAGE: the token lands in box.emiratespost.ae's localStorage and
+// reaches the widget because the embed LOADER runs first-party there and posts
+// it in. In the app the widget is the whole window — no host page, no loader,
+// nobody to hand the token over. UAE PASS returns to this embed's own URL and
+// works there today.
+check("the portal route is skipped inside a native host", /const hostLoginUsable = Boolean\(agent\.hostLoginUrl\) && !isNative\(\)/.test(exp));
+check("...so UAE PASS is what a native sign-in uses", /if \(hostLoginUsable && typeof window !== "undefined"\)/.test(exp));
+check("...and the web is unchanged", /agent\.uaePassEnabled && typeof window !== "undefined"/.test(exp));
+
+console.log("\nThe green chip the customer read as 'sign in'");
+check("on a phone it asks before signing out", /if \(!coarsePointer \|\| signOutArmed\)/.test(exp));
+check("...in words, not a tooltip", /t\.signOutConfirm/.test(exp));
+check("...in both languages", /signOutConfirm: "Sign out\?"/.test(exp) && /signOutConfirm: "تسجيل الخروج؟"/.test(exp));
+check("...and it disarms itself", /setTimeout\(\(\) => setSignOutArmed\(false\), 4000\)/.test(exp));
+check("a desktop keeps its tooltip and its single click", /!coarsePointer/.test(exp));
 check("the control that caused it no longer looks like reload", /<NotePencil size=\{16\}/.test(exp));
 
 console.log("\nIssue 14 — English left behind after a language switch");

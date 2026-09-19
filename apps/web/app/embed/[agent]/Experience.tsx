@@ -117,6 +117,7 @@ export const STR = {
     signedIn: "Signed in",
     signOut: "Sign out",
     signedOut: "You are signed out.",
+    signOutConfirm: "Sign out?",
     expand: "Expand",
     collapse: "Collapse",
     reset: "New chat",
@@ -187,6 +188,7 @@ export const STR = {
     signedIn: "تم الدخول",
     signOut: "تسجيل الخروج",
     signedOut: "تم تسجيل خروجك.",
+    signOutConfirm: "تسجيل الخروج؟",
     expand: "توسيع",
     collapse: "تصغير",
     reset: "محادثة جديدة",
@@ -920,6 +922,12 @@ export function Experience({
   // voiceReady above.
   const [canExpand, setCanExpand] = useState(false);
   useEffect(() => setCanExpand(!isNative() && window.parent !== window), []);
+  // A phone has no tooltip, so a control whose meaning lives in one has to say
+  // it another way. Settled after mount for the same hydration reason.
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  useEffect(() => setCoarsePointer(window.matchMedia?.("(hover: none) and (pointer: coarse)").matches ?? false), []);
+  /** The signed-in chip, tapped once on a phone: it asks before it acts. */
+  const [signOutArmed, setSignOutArmed] = useState(false);
   const toggleExpanded = useCallback(() => {
     const next = !expanded;
     setExpanded(next);
@@ -1294,12 +1302,32 @@ export function Experience({
      * is still opened — nothing regresses for an app that is not listening.
      */
     if (isNative()) postNative({ action: "signin-needed", reason: "customer-asked" });
-    // The host portal owns sign-in (its own UAE PASS client, its own registered
-    // callback). Opening it in a POPUP rather than navigating keeps the
-    // conversation alive; the token then arrives from the embed loader, which sees
-    // the host's localStorage write because it runs first-party on that page.
-    if (agent.hostLoginUrl && typeof window !== "undefined") {
-      const win = openExternal(agent.hostLoginUrl, { name: "dlg-host-login", kind: "signin" });
+    /**
+     * THE HOST PORTAL ROUTE CANNOT WORK INSIDE THE APP.
+     *
+     * Reported 19 September: "this button for the sign in, if clicked on I think
+     * it takes to web so you basically can't sign in through that button."
+     * Exactly right, and it is not the browser being awkward — it is that this
+     * route needs a hosting PAGE and the app has not got one.
+     *
+     * The portal owns its own UAE PASS client and its own registered callback,
+     * so signing in there leaves the token in box.emiratespost.ae's
+     * localStorage. It reaches the widget because the embed LOADER runs
+     * first-party on that page, reads it, and posts it into the iframe. In the
+     * app the widget is the whole window: no host page, no loader, nobody to
+     * read that token or hand it over. The customer signs in perfectly well and
+     * the chat never hears about it.
+     *
+     * UAE PASS, by contrast, works there today — its callback returns to this
+     * embed's own URL with ?uaepass=ok, which this page reads itself, and the
+     * screenshots of the app show customers signed in exactly that way. So
+     * inside a native host the portal is skipped and UAE PASS is used. The
+     * ordering stays as it was on the web, where the portal is the right door
+     * and the loader is standing behind it.
+     */
+    const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative();
+    if (hostLoginUsable && typeof window !== "undefined") {
+      const win = openExternal(agent.hostLoginUrl!, { name: "dlg-host-login", kind: "signin" });
       if (!win) {
         setAuthReason(
           locale === "ar"
@@ -1930,13 +1958,28 @@ export function Experience({
               to have none: on a shared or public screen, an account with its
               addresses and its agents stayed one tap away for whoever sat down
               next. The server session is cleared first; the header follows it. */}
+          {/* ONE TAP AND THEIR SESSION IS GONE, WITH NOTHING SAYING SO.
+              Reported 19 September, and the way it was reported is the evidence:
+              the customer took this green chip for a SIGN-IN button. Signed in,
+              it signs them out — and the only thing that ever said so was a
+              `title`, which is a tooltip, which a phone does not have. A stray
+              tap mid-application ended the session in silence.
+              So on a touch device it asks first: the tap arms it and says "Sign
+              out?" in words, and a second tap within four seconds does it. On a
+              desktop the tooltip is there and it behaves as it always has. */}
           <button
-            className={`dlg-chip icon-only ${authenticated ? "is-on" : ""}`}
-            onClick={() => { if (authenticated) void signOut(); else signIn(); }}
+            className={`dlg-chip ${signOutArmed ? "" : "icon-only "}${authenticated ? "is-on" : ""}`}
+            onClick={() => {
+              if (!authenticated) { signIn(); return; }
+              if (!coarsePointer || signOutArmed) { setSignOutArmed(false); void signOut(); return; }
+              setSignOutArmed(true);
+              window.setTimeout(() => setSignOutArmed(false), 4000);
+            }}
             aria-label={authenticated ? t.signOut : t.signIn}
             title={authenticated ? `${t.signedIn} — ${t.signOut}` : t.signIn}
           >
             {authenticated ? <UserCircleCheck size={17} weight="fill" /> : <SignIn size={16} weight={iconWeight} />}
+            {signOutArmed ? <span className="dlg-chip-tag">{t.signOutConfirm}</span> : null}
           </button>
           {/* Withdraw permission in one step (pre-launch gate; FB-1737). Shown
               once there is a granted permission or collected data to pull back —
