@@ -60,6 +60,12 @@ check("...by name", /=== CALLBACK_RECORD_TYPE\.toLowerCase\(\)/.test(cb));
 // returns it available. Access to the RecordType OBJECT is a different grant.
 check("and not from a RecordType query, which does not see it", !/FROM RecordType/i.test(code));
 check("a missing record type names the fix, which is in Salesforce", /Callback_Case_API permission set has not been assigned/.test(cb));
+// The live org answers a describe with 404 for a user without Case access —
+// which the collection itself documents — and that is the failure production
+// will actually hit, so it gets the message that names the fix rather than one
+// that reads as an outage. Confirmed against epro.my.salesforce.com on the day.
+check("...and so does a 404, which is what production answers", /res\.status === 404 \|\| res\.status === 403/.test(code));
+check("...through the same sentence", (code.match(/permissionSetMissing\(\)/g) ?? []).length === 2, (code.match(/permissionSetMissing\(\)/g) ?? []).length);
 check("the lookup is cached", /rtCache/.test(cb) && /RT_TTL_MS/.test(cb));
 
 console.log("\nNothing new is provisioned");

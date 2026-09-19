@@ -54,11 +54,24 @@ nobody asks for it twice.
 
 ## Two things for you
 
-**1. The permission set is PreProd2 only.** `Callback_Case_API` was assigned to
-`ai.agent@epg.ae.preprod`. The production org will need the equivalent assigned
-to the production integration user before this works there. Until it is, the
-assistant refuses cleanly and says nothing has been arranged — it will not
-invent a reference.
+**1. The permission set is PreProd2 only — and we have confirmed production is
+missing it.** `Callback_Case_API` was assigned to `ai.agent@epg.ae.preprod`.
+Production's integration user is a different one:
+
+```
+instance          https://epro.my.salesforce.com
+integration user  sf.integration@7x.ae.agentai
+GET /sobjects/Case/describe
+  -> 404 [{"errorCode":"NOT_FOUND","message":"The requested resource does not exist"}]
+```
+
+which is the answer your own collection documents: *"A `NOT_FOUND` answer means
+the token user has no access to the Case object."*
+
+**Please assign `Callback_Case_API` to `sf.integration@7x.ae.agentai` in the
+production org.** Until it is assigned, the assistant refuses cleanly and says
+nothing has been arranged — it will not invent a reference, and the applicant is
+never shown a case number that does not exist.
 
 We do **not** hardcode the record type id. It is read from the Case describe at
 run time, so whatever id the Callback record type has in production is the one

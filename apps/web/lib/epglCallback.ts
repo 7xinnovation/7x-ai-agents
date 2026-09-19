@@ -41,6 +41,17 @@ import type { EnvKey } from "./integrations";
  * object is not the same permission as access to the record type.
  */
 const CALLBACK_RECORD_TYPE = "Callback";
+
+/**
+ * The one thing worth saying when this fails, because the fix is not here.
+ *
+ * Whether Case is invisible altogether (404) or visible without the Callback
+ * record type, the cause is the same and it is an assignment in Salesforce.
+ * Naming it saves whoever reads this log from looking in the product first.
+ */
+const permissionSetMissing = () =>
+  `The "${CALLBACK_RECORD_TYPE}" Case record type is not available to the EPGL integration user in this org — ` +
+  `the Callback_Case_API permission set has not been assigned to it there`;
 const rtCache = new Map<string, { id: string; at: number }>();
 const RT_TTL_MS = 60 * 60_000;
 
@@ -54,6 +65,19 @@ async function callbackRecordTypeId(agentId: string, env: EnvKey): Promise<strin
   const call = (bearer: string) => fetch(url, { headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" } });
   let res = await call(auth.bearer);
   if (res.status === 401) res = await call(await auth.retry());
+  /**
+   * 404 ON A DESCRIBE IS A PERMISSION, NOT A MISSING OBJECT.
+   *
+   * Checked against the LIVE org on 19 September, and this is the answer it
+   * gives: `[{"errorCode":"NOT_FOUND","message":"The requested resource does not
+   * exist"}]`. The collection says so itself — "a NOT_FOUND answer means the
+   * token user has no access to the Case object" — and production's integration
+   * user is `sf.integration@7x.ae.agentai`, a different user from PreProd2's
+   * `ai.agent@epg.ae.preprod`, which is the one Callback_Case_API was assigned
+   * to. So this is the failure production will actually hit, and it deserves the
+   * message that names the fix rather than the one that reads as an outage.
+   */
+  if (res.status === 404 || res.status === 403) throw new Error(permissionSetMissing());
   if (!res.ok) throw new Error(`Could not read the Case object (HTTP ${res.status})`);
 
   const described = (await res.json()) as {
@@ -62,14 +86,7 @@ async function callbackRecordTypeId(agentId: string, env: EnvKey): Promise<strin
   const found = (described.recordTypeInfos ?? []).find(
     (r) => r.available && String(r.name ?? "").trim().toLowerCase() === CALLBACK_RECORD_TYPE.toLowerCase()
   );
-  if (!found?.recordTypeId) {
-    // Named precisely, because the fix is an assignment in Salesforce and not
-    // anything here: the permission set is what makes this record type visible.
-    throw new Error(
-      `The "${CALLBACK_RECORD_TYPE}" Case record type is not available to the EPGL integration user in this org — ` +
-        `the Callback_Case_API permission set has not been assigned there`
-    );
-  }
+  if (!found?.recordTypeId) throw new Error(permissionSetMissing());
   rtCache.set(key, { id: found.recordTypeId, at: Date.now() });
   return found.recordTypeId;
 }
