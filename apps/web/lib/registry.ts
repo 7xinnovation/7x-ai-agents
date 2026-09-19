@@ -5,6 +5,9 @@ import { and, desc, eq, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { sendEmail } from "./email";
 import { raiseEpCase } from "./epCase";
+import { createEpglCallback } from "./epglCallback";
+import { getAgentBySlug } from "./agents";
+import type { EnvKey } from "./integrations";
 import { log } from "./logger";
 
 let initialised = false;
@@ -203,15 +206,44 @@ export function ensureAdapters() {
     },
 
     async createCallback(_ctx, input) {
-      // A callback belongs in the queue Emirates Post's team already works, not
-      // in a mailbox of ours: their contact form raises a case on /nextApi/case
-      // and hands the customer a case number they can quote. Try that first.
       const [firstName, ...rest] = String(input.name ?? "").trim().split(/\s+/);
       // The journey travels with the request. Their case form takes one message
       // field, so the context goes under the customer's own words rather than
       // instead of them — the officer reads why they called, then what has
       // already happened and what not to ask for again.
       const context = input.context ? `\n\n--- Context from the assistant ---\n${renderHandover(input.context)}` : "";
+
+      /**
+       * A LICENSING CALLBACK IS NOT A PO BOX CALLBACK.
+       *
+       * Everything below this is the postal side of the business: Emirates
+       * Post's own contact form at /nextApi/case, and a PO Box ops mailbox
+       * behind it. Whoever answers either cannot help with a postal ACTIVITY
+       * LICENCE, and the mailbox is unset in every environment, so an EPGL
+       * applicant asking to speak to someone got a failed tool call and a
+       * sentence telling them to use a channel we could not name.
+       *
+       * Emirates Post Group Licensing supplied the route on 19 September. It is
+       * a Case on their own Salesforce, through the connected app the licence
+       * submission already uses, landing in the queue their licensing team
+       * works. See lib/epglCallback.
+       */
+      const agent = await getAgentBySlug(_ctx.agentSlug).catch(() => null);
+      if (agent?.definition.tenantSlug === "epgl") {
+        const env = (agent.definition.activeEnvironment ?? "production") as EnvKey;
+        const { reference } = await createEpglCallback(agent.id, env, {
+          name: String(input.name ?? "Unknown"),
+          phone: String(input.phone ?? ""),
+          email: input.email,
+          description: `${String(input.reason ?? "")}${context}`,
+          journeyKey: input.journeyKey ?? null,
+        });
+        return { reference };
+      }
+
+      // A callback belongs in the queue Emirates Post's team already works, not
+      // in a mailbox of ours: their contact form raises a case on /nextApi/case
+      // and hands the customer a case number they can quote. Try that first.
       const epCase = await raiseEpCase({
         firstName: firstName || "Customer",
         lastName: rest.join(" ") || "-",

@@ -1,0 +1,257 @@
+{
+  "info": {
+    "name": "EPG Licensing - Callback Case (PreProd2) - simple",
+    "description": "Two steps to create a Callback Case in PreProd2 through the standard Salesforce REST API.\n\n1. **Get access token** - OAuth 2.0 client credentials. Fill `client_id` / `client_secret` in the collection variables. The token is stored in `access_token` automatically.\n2. **Create Callback Case** - `POST /services/data/v59.0/sobjects/Case` with `RecordTypeId` = Callback (`012FW001nRU85B6YQJ` in PreProd2). Returns 201 with the new Case Id.\n\nThe token user must hold the `Callback_Case_API` permission set (assigned to ai.agent@epg.ae.preprod on 2026-09-18). A `NOT_FOUND` answer means the token user has no access to the Case object.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://epro--preprod2.sandbox.my.salesforce.com",
+      "type": "string"
+    },
+    {
+      "key": "apiVersion",
+      "value": "v59.0",
+      "type": "string"
+    },
+    {
+      "key": "client_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "client_secret",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "callbackRecordTypeId",
+      "value": "012FW001nRU85B6YQJ",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Get access token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// --- guard: surface the real server error instead of crashing the script ---",
+              "let json = null; try { json = pm.response.json(); } catch (e) { json = null; }",
+              "if (pm.response.code >= 400) {",
+              "    const msg = Array.isArray(json) ? json.map(e => e.errorCode + \": \" + e.message).join(\" | \") : (json && (json.error_description || json.error || json.message)) || pm.response.text();",
+              "    console.log(\"HTTP \" + pm.response.code + \" from \" + pm.request.url.toString() + \" -> \" + msg);",
+              "    pm.test(\"Server returned HTTP \" + pm.response.code + \": \" + msg, () => { throw new Error(msg); });",
+              "    return;",
+              "}",
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"access_token returned\", () => pm.expect(json.access_token).to.be.a(\"string\"));",
+              "pm.collectionVariables.set(\"access_token\", json.access_token);",
+              "if (pm.environment.name) { pm.environment.set(\"access_token\", json.access_token); }",
+              "if (json.instance_url) { pm.collectionVariables.set(\"baseUrl\", json.instance_url); if (pm.environment.name) { pm.environment.set(\"baseUrl\", json.instance_url); } }",
+              "console.log(\"Token OK for \" + json.instance_url + \" - now run Auth / Who am I to see the user\");"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "client_credentials",
+              "type": "text"
+            },
+            {
+              "key": "client_id",
+              "value": "{{client_id}}",
+              "type": "text"
+            },
+            {
+              "key": "client_secret",
+              "value": "{{client_secret}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/services/oauth2/token",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "services",
+            "oauth2",
+            "token"
+          ]
+        },
+        "description": "OAuth 2.0 Client Credentials flow. Consumer key/secret come from the org's External Client App (PreProd2: `EPG_Form9API`, or a dedicated app whose run-as user holds a Case-capable licence + the `Callback_Case_API` permission set)."
+      }
+    },
+    {
+      "name": "2. Create Callback Case",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// --- guard: surface the real server error instead of crashing the script ---",
+              "let json = null; try { json = pm.response.json(); } catch (e) { json = null; }",
+              "if (pm.response.code >= 400) {",
+              "    const msg = Array.isArray(json) ? json.map(e => e.errorCode + \": \" + e.message).join(\" | \") : (json && (json.error_description || json.error || json.message)) || pm.response.text();",
+              "    console.log(\"HTTP \" + pm.response.code + \" from \" + pm.request.url.toString() + \" -> \" + msg);",
+              "    pm.test(\"Server returned HTTP \" + pm.response.code + \": \" + msg, () => { throw new Error(msg); });",
+              "    return;",
+              "}",
+              "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+              "pm.test(\"success = true\", () => pm.expect(json.success).to.eql(true));",
+              "pm.test(\"Case Id returned\", () => pm.expect(json.id).to.match(/^500/));",
+              "pm.collectionVariables.set(\"caseId\", json.id);",
+              "if (pm.environment.name) { pm.environment.set(\"caseId\", json.id); }"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"RecordTypeId\": \"{{callbackRecordTypeId}}\",\n  \"Subject\": \"Callback request - licence renewal\",\n  \"Description\": \"Customer asked to be called back regarding the renewal of their postal activity licence.\",\n  \"Origin\": \"Phone\",\n  \"Priority\": \"Medium\",\n  \"Type\": \"Question\",\n  \"SuppliedName\": \"Ahmed Al Mansoori\",\n  \"SuppliedPhone\": \"+971501234567\",\n  \"SuppliedEmail\": \"ahmed@example.com\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/services/data/{{apiVersion}}/sobjects/Case",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{apiVersion}}",
+            "sobjects",
+            "Case"
+          ]
+        },
+        "description": "Standard sObject create. `RecordTypeId` must be the Callback record type of the target org.\n\nOptional extra fields: `AccountId` (001...), `ContactId` (003...), `Reason`, `EPG_Postal_Licence_No__c` (lookup to EPG_License__c).\n\nPicklist values available on the Callback record type:\n- Origin: Phone (default), Email, Web, Portal, Live Chat, Manual\n- Priority: Medium (default), High, Low\n- Type: Question, General, Licensing, Customer Complaint, Other, Renew Postal Activity License, No Objection Certificate\n- Status is set by the support process (New on create)."
+      },
+      "response": [
+        {
+          "name": "201 Created",
+          "originalRequest": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/services/data/{{apiVersion}}/sobjects/Case"
+            }
+          },
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json;charset=UTF-8"
+            },
+            {
+              "key": "Location",
+              "value": "/services/data/v59.0/sobjects/Case/500FW00AKpVUfVQYM1"
+            }
+          ],
+          "body": "{\n  \"id\": \"500FW00AKpVUfVQYM1\",\n  \"success\": true,\n  \"errors\": []\n}"
+        },
+        {
+          "name": "400 Bad picklist value",
+          "originalRequest": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/services/data/{{apiVersion}}/sobjects/Case"
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json;charset=UTF-8"
+            }
+          ],
+          "body": "[\n  {\n    \"message\": \"Origin: bad value for restricted picklist field: Fax\",\n    \"errorCode\": \"INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST\",\n    \"fields\": [ \"Origin\" ]\n  }\n]"
+        },
+        {
+          "name": "400 Record type not visible to user",
+          "originalRequest": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/services/data/{{apiVersion}}/sobjects/Case"
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json;charset=UTF-8"
+            }
+          ],
+          "body": "[\n  {\n    \"message\": \"Record Type ID: this ID value isn't valid for the user: 012FW001nRU85B6YQJ\",\n    \"errorCode\": \"INVALID_CROSS_REFERENCE_KEY\",\n    \"fields\": [ \"RecordTypeId\" ]\n  }\n]"
+        },
+        {
+          "name": "401 Session expired",
+          "originalRequest": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/services/data/{{apiVersion}}/sobjects/Case"
+            }
+          },
+          "status": "Unauthorized",
+          "code": 401,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json;charset=UTF-8"
+            }
+          ],
+          "body": "[\n  {\n    \"message\": \"Session expired or invalid\",\n    \"errorCode\": \"INVALID_SESSION_ID\"\n  }\n]"
+        }
+      ]
+    }
+  ]
+}

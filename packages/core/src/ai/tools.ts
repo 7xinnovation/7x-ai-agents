@@ -800,6 +800,7 @@ export async function dispatchTool(
           email: input.email as string | undefined,
           reason: String(input.reason ?? ""),
           userRef: ctx.userRef,
+          journeyKey: state.journeyKey,
           // THE CONTEXT GOES WITH IT. The artefact asks that the request, its
           // context and the actions already taken transfer to the officer; what
           // transferred was a name, a number and the customer's own sentence,

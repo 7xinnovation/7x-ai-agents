@@ -36,6 +36,15 @@ export interface CRMAdapter {
       reason: string;
       userRef?: string;
       /**
+       * Which journey they were in, for a system of record that routes on it.
+       *
+       * EPGL's Case has a Type picklist their licensing queue reports on, and a
+       * callback about a renewal arriving as a generic question is a callback
+       * that goes to the wrong list. The handover context deliberately carries
+       * PROSE for a person to read; this is the machine-readable half.
+       */
+      journeyKey?: string | null;
+      /**
        * The journey context that travels WITH the callback — summary, last
        * completed step, consents, payment and the do-not-re-ask list. Without it
        * the officer picks up a name and a sentence and the customer explains

@@ -246,6 +246,30 @@ async function token(c: Creds): Promise<string> {
   return json.access_token;
 }
 
+/**
+ * A bearer for the EPGL org, and the instance to spend it against.
+ *
+ * Exported because the CALLBACK case is a write and does not belong in a module
+ * whose whole point is that the model never composes SOQL — but it is the same
+ * org, the same connected app and the same run-as user, so it must be the same
+ * token and the same cache. Nothing new is provisioned for it; see
+ * lib/epglCallback.
+ *
+ * `retry` is given to the caller rather than done here, because a write cannot
+ * be replayed blindly on a 401 the way a read can.
+ */
+export async function epglAuth(agentId: string, env: EnvKey): Promise<{ baseUrl: string; bearer: string; retry: () => Promise<string> }> {
+  const c = await creds(agentId, env);
+  return {
+    baseUrl: c.baseUrl,
+    bearer: await token(c),
+    retry: async () => {
+      cached = null;
+      return token(c);
+    },
+  };
+}
+
 async function query<T>(agentId: string, env: EnvKey, soql: string): Promise<T[]> {
   const c = await creds(agentId, env);
   const run = async (bearer: string) =>
