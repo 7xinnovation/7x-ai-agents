@@ -73,7 +73,22 @@ check("...because a closure variable is empty on the next turn — which is the 
 console.log("\nAnd the status read knows which request it is asking about");
 check("getRequestStatus is given the id", /getrequeststatus\$\/i\.test\(toolName\)/.test(integrations));
 check("...from the request this conversation created", /inp\.id = thisCasesRequest/.test(integrations));
-check("...and never over one the model supplied", /if \(!asStr\(inp\.id\)\)/.test(integrations));
+/**
+ * Reversed on 21 September, deliberately.
+ *
+ * "Never over one the model supplied" rested on the idea that a supplied id was
+ * a considered choice — perhaps an older application the customer had asked
+ * about. What it produced was a reference that changed while the customer
+ * watched: the panel said LR-37425, the first status check said LR-37425 and
+ * the second said LR-37427, because two duplicate requests exist for that
+ * company and the model reached for whichever a lookup returned.
+ *
+ * "Check status again" means this application. The case's own request now wins,
+ * and the override is audited so a genuine question about an older one is not
+ * silently redirected. See test-status-reference-2026-09-21.
+ */
+check("...over ANY other, because the reference must not move", /if \(asked !== thisCasesRequest\)/.test(integrations));
+check("...and the redirect is recorded", /status_request_redirected/.test(integrations));
 
 
 console.log("\nThe number a customer can quote, beside the key we are keyed by");

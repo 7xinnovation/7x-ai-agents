@@ -1578,62 +1578,6 @@ export async function POST(req: NextRequest) {
     // without one, and without the 30 the summary had just charged for.
     if (turnState) liveState = turnState;
 
-    /**
-     * ONE APPLICATION, ONE SUBMISSION.
-     *
-     * 21 September, PreProd2, from Salesforce's own field history on LR-37533:
-     *
-     *   08:51:17  created                         Under document review
-     *   08:51:57  our payment notification        Payment Verified
-     *   08:51:59  their automation                Closed
-     *   08:52:23  WE SUBMITTED IT AGAIN           Under document review
-     *   08:52:25  our payment notification again  Payment Verified
-     *   08:52:27  their automation again          Closed
-     *
-     * The last three lines are ours. A minute after a successful submission the
-     * model called the save tool a second time, which re-opened a request their
-     * workflow had already finished with, and then re-closed it. The same
-     * pattern on 9 September created SEVEN licence requests for one application
-     * — the reference is written into the case now, which stopped the loop, but
-     * nothing actually REFUSED a second call.
-     *
-     * The guidance did: "NEVER call the submit twice for the same renewal". A
-     * sentence in a prompt is not a guard, and this is the third time this
-     * particular sentence has failed to hold.
-     *
-     * An UPDATE is a real and supported use of the same tool — the contract
-     * matches on the licence request's Name and rewrites the application — so
-     * the block is narrow: a repeat call is refused only when it carries no
-     * Name, which is what makes it a fresh submission rather than an amendment.
-     */
-    const activeSaveTool = findJourney(agent.definition, liveState.journeyKey)?.submission?.apiFlow?.saveTool;
-    if (activeSaveTool && name === activeSaveTool && str(liveState.reference)) {
-      const body = (input?.body ?? {}) as Record<string, unknown>;
-      const items = Array.isArray(body.compositeRequest) ? (body.compositeRequest as Record<string, unknown>[]) : [];
-      const namesTheRequest = items.some((it) => {
-        const b = (it?.body ?? {}) as Record<string, unknown>;
-        return /License_Request__c$/.test(String(it?.url ?? "")) && Boolean(str(b.Name));
-      });
-      if (!namesTheRequest) {
-        await audit({
-          agentId: agent.id,
-          conversationId: session.conversationId,
-          actor: "system",
-          action: "duplicate_submission_refused",
-          payload: { tool: name, reference: liveState.reference, items: items.length },
-        }).catch(() => {});
-        return {
-          result:
-            `REFUSED LOCALLY: this application has already been submitted and its reference is ${liveState.reference}. ` +
-            `Submitting again would re-open a request the licensing team may have already worked, and it is what created ` +
-            `duplicate licence requests before. Do NOT retry. Give the customer that reference. If they genuinely want to ` +
-            `AMEND the application, call this tool with the update shape — the EPG_License_Request__c item must carry its ` +
-            `Name (the licence request number, e.g. LR-37214) — and not otherwise.`,
-          isError: true,
-        };
-      }
-    }
-
     if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL || name === MYBOXES_TOOL || name === MYCOMPANIES_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       // The customer's own session is what the MOE endpoints mean by "requires

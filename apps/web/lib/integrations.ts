@@ -2766,14 +2766,49 @@ export async function buildApiTools(
       }
     }
 
-    // The status of WHICH request. See lastLicenceRequestId: without the id their
-    // endpoint is a 404, and the model has no way to know that from a parameter
-    // marked optional. Never overwritten -- an id the model supplied is a
-    // deliberate one, and may well be an older application the customer asked
-    // about.
+    /**
+     * The status of WHICH request.
+     *
+     * Without the id their endpoint is a 404, and the model has no way to know
+     * that from a parameter their swagger marks optional — so an absent id has
+     * always been filled in from the case.
+     *
+     * An id the model DID supply used to stand, on the reasoning that it was a
+     * deliberate choice and might be an older application the customer had asked
+     * about. On 21 September that reasoning cost the customer this:
+     *
+     *   panel:                 Reference LR-37425
+     *   first "check status":  Reference LR-37425
+     *   second "check status": Reference LR-37427
+     *
+     * Two real requests exist for that company — duplicates of each other — and
+     * the model reached for whichever one a lookup handed back. "Check status
+     * again" means this application, and an application whose number changes
+     * while you watch it is not one anybody can quote or trust.
+     *
+     * So the case's own request wins whenever there is one, and the override is
+     * audited rather than silent: if a customer ever does ask about an older
+     * application, the trail says we redirected them and to what.
+     */
     if (/getrequeststatus$/i.test(toolName) && thisCasesRequest) {
       const inp = { ...((input ?? {}) as Record<string, unknown>) };
-      if (!asStr(inp.id)) {
+      const asked = asStr(inp.id);
+      if (asked && asked !== thisCasesRequest) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "status_request_redirected",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: { asked },
+            response: `The status was asked for a different licence request; this conversation's own (${thisCasesRequest}) was used instead.`,
+          },
+        }).catch(() => {});
+      }
+      if (asked !== thisCasesRequest) {
         inp.id = thisCasesRequest;
         input = inp;
       }
