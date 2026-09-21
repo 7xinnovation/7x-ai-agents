@@ -54,29 +54,22 @@ nobody asks for it twice.
 
 ## Two things for you
 
-**1. The permission set is PreProd2 only — and we have confirmed production is
-missing it.** `Callback_Case_API` was assigned to `ai.agent@epg.ae.preprod`.
-Production's integration user is a different one:
+**1. The permission set — done, and confirmed working.** `Callback_Case_API` has
+been assigned to the production integration user, and we have verified it end to
+end against the live org:
 
 ```
 instance          https://epro.my.salesforce.com
 integration user  sf.integration@7x.ae.agentai
-GET /sobjects/Case/describe
-  -> 404 [{"errorCode":"NOT_FOUND","message":"The requested resource does not exist"}]
+Case              createable = true
+Callback type     012NM00SU5NdE0yYMF   available = true
 ```
 
-which is the answer your own collection documents: *"A `NOT_FOUND` answer means
-the token user has no access to the Case object."*
-
-**Please assign `Callback_Case_API` to `sf.integration@7x.ae.agentai` in the
-production org.** Until it is assigned, the assistant refuses cleanly and says
-nothing has been arranged — it will not invent a reference, and the applicant is
-never shown a case number that does not exist.
-
-We do **not** hardcode the record type id. It is read from the Case describe at
-run time, so whatever id the Callback record type has in production is the one
-we use. A sandbox id compiled into the product would have been a production
-outage waiting to happen.
+That is the id your production collection names, and we do not hold it anywhere:
+it is read from the Case describe at run time, so PreProd2's
+`012FW001nRU85B6YQJ` and production's are each discovered in the org they belong
+to. Every field we send is createable in production and the Origin and Type
+picklists match PreProd2 exactly, so nothing needed changing for the live org.
 
 **2. Two documented fields are not actually available.** The collection offers
 `AccountId` and `EPG_Postal_Licence_No__c` as optional extras. Checked against

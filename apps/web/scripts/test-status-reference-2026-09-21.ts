@@ -47,5 +47,14 @@ check("the existing guard is the only one", /ALREADY SUBMITTED — NOTHING WAS S
 check("...and the chat route does not repeat it", !/ONE APPLICATION, ONE SUBMISSION/.test(route));
 check("it lets a genuine amendment through", /const isUpdate = Boolean\(asStr\(lb\?\.Id\) \|\| asStr\(lb\?\.Name\)\)/.test(intg));
 
+console.log("\nAnd an unchanged status is not offered as a new answer");
+{
+  const prompt = readFileSync(new URL("../../../packages/core/src/ai/prompt.ts", import.meta.url), "utf8");
+  check("the rule exists", /AN UNCHANGED STATUS IS NOT A NEW ANSWER/.test(prompt));
+  check("...it asks for a real interval", /not "in a little while"/.test(prompt));
+  check("...and forbids the lone repeated button", /do not offer "check again" as the only thing they can do/.test(prompt));
+  check("...naming what else to offer", /the reference to quote, a callback, or simply finishing here/.test(prompt));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -1,0 +1,178 @@
+{
+  "info": {
+    "_postman_id": "ef5b860d-46b9-420e-872a-af8ac7185f4c",
+    "name": "EPG Licensing - Callback Case (Prod) - simple",
+    "description": "Two steps to create a Callback Case in Production through the standard Salesforce REST API.\n\n1. **Get access token** - OAuth 2.0 client credentials using `client_id` / `client_secret` from the collection variables. The token is stored in `access_token` automatically, and `baseUrl` is refreshed from the returned `instance_url`.\n2. **Create Callback Case** - `POST /services/data/v59.0/sobjects/Case` with `RecordTypeId` = Callback (`012NM00SU5NdE0yYMF` in Prod). Returns 201 with the new Case Id.\n\nThe token (run-as) user must hold the `Callback_Case_API` permission set in Prod. A `NOT_FOUND` answer means the token user has no access to the Case object.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "22876447",
+    "_collection_link": "https://go.postman.co/collection/22876447-ef5b860d-46b9-420e-872a-af8ac7185f4c?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "1. Get access token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// --- guard: surface the real server error instead of crashing the script ---",
+              "let json = null; try { json = pm.response.json(); } catch (e) { json = null; }",
+              "if (pm.response.code >= 400) {",
+              "    const msg = Array.isArray(json) ? json.map(e => e.errorCode + \": \" + e.message).join(\" | \") : (json && (json.error_description || json.error || json.message)) || pm.response.text();",
+              "    console.log(\"HTTP \" + pm.response.code + \" from \" + pm.request.url.toString() + \" -> \" + msg);",
+              "    pm.test(\"Server returned HTTP \" + pm.response.code + \": \" + msg, () => { throw new Error(msg); });",
+              "    return;",
+              "}",
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"access_token returned\", () => pm.expect(json.access_token).to.be.a(\"string\"));",
+              "pm.collectionVariables.set(\"access_token\", json.access_token);",
+              "if (pm.environment.name) { pm.environment.set(\"access_token\", json.access_token); }",
+              "if (json.instance_url) {",
+              "    pm.collectionVariables.set(\"baseUrl\", json.instance_url);",
+              "    if (pm.environment.name) { pm.environment.set(\"baseUrl\", json.instance_url); }",
+              "}",
+              "console.log(\"Token OK for \" + json.instance_url + \" - now run 2. Create Callback Case\");"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "key": "client_id",
+              "value": "{{client_id}}"
+            },
+            {
+              "key": "client_secret",
+              "value": "{{client_secret}}"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/services/oauth2/token",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "services",
+            "oauth2",
+            "token"
+          ]
+        },
+        "description": "OAuth 2.0 Client Credentials flow. Consumer key/secret come from the org's External Client App, whose run-as user holds a Case-capable licence + the `Callback_Case_API` permission set."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Create Callback Case",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// --- guard: surface the real server error instead of crashing the script ---",
+              "let json = null; try { json = pm.response.json(); } catch (e) { json = null; }",
+              "if (pm.response.code >= 400) {",
+              "    const msg = Array.isArray(json) ? json.map(e => e.errorCode + \": \" + e.message).join(\" | \") : (json && (json.error_description || json.error || json.message)) || pm.response.text();",
+              "    console.log(\"HTTP \" + pm.response.code + \" from \" + pm.request.url.toString() + \" -> \" + msg);",
+              "    pm.test(\"Server returned HTTP \" + pm.response.code + \": \" + msg, () => { throw new Error(msg); });",
+              "    return;",
+              "}",
+              "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+              "pm.test(\"success = true\", () => pm.expect(json.success).to.eql(true));",
+              "pm.test(\"Case Id returned\", () => pm.expect(json.id).to.match(/^500/));",
+              "pm.collectionVariables.set(\"caseId\", json.id);",
+              "if (pm.environment.name) { pm.environment.set(\"caseId\", json.id); }"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"RecordTypeId\": \"{{callbackRecordTypeId}}\",\n  \"Subject\": \"Callback request - licence renewal\",\n  \"Description\": \"Customer asked to be called back regarding the renewal of their postal activity licence.\",\n  \"Origin\": \"Phone\",\n  \"Priority\": \"Medium\",\n  \"Type\": \"Question\",\n  \"SuppliedName\": \"Ahmed Al Mansoori\",\n  \"SuppliedPhone\": \"+971501234567\",\n  \"SuppliedEmail\": \"ahmed@example.com\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/services/data/{{apiVersion}}/sobjects/Case",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "services",
+            "data",
+            "{{apiVersion}}",
+            "sobjects",
+            "Case"
+          ]
+        },
+        "description": "Standard sObject create. `RecordTypeId` must be the Callback record type of the target org.\n\nOptional extra fields: `AccountId` (001...), `ContactId` (003...), `Reason`, `EPG_Postal_Licence_No__c` (lookup to EPG_License__c).\n\nPicklist values available on the Callback record type:\n- Origin: Phone (default), Email, Web, Portal, Live Chat, Manual\n- Priority: Medium (default), High, Low\n- Type: Question, General, Licensing, Customer Complaint, Other, Renew Postal Activity License, No Objection Certificate\n- Status is set by the support process (New on create)."
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://epro.my.salesforce.com"
+    },
+    {
+      "key": "apiVersion",
+      "value": "v59.0"
+    },
+    {
+      "key": "client_id",
+      "value": ""
+    },
+    {
+      "key": "client_secret",
+      "value": ""
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "callbackRecordTypeId",
+      "value": "012NM00SU5NdE0yYMF"
+    },
+    {
+      "key": "caseId",
+      "value": ""
+    }
+  ]
+}
