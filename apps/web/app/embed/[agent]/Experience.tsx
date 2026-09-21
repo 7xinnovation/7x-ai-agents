@@ -331,6 +331,20 @@ function QrModal({
  */
 const WORKING = (ar: boolean) => (ar ? "جارٍ العمل على طلبك…" : "Working on it…");
 
+/**
+ * THE ARABIC VERB FOR WORK IN PROGRESS IS NOT THE ONE FOR SHOWING.
+ *
+ * Emirates Post's Arabic reviewer, 21 September, having read the live
+ * transcripts: «سأجلب» is correct and reads as physically bringing something,
+ * which is not what happens on a screen. «سأعرض» ("I will show you") is the
+ * customer-facing verb, and «سأتحقق» ("I will check") is right when the thing
+ * being described really is a check rather than a presentation.
+ *
+ * These lines are the second case. They appear WHILE the lookup runs, so
+ * nothing is being shown yet — "checking" is what is happening. The other verb
+ * belongs in the assistant's own sentence, which is a prompt rule; see
+ * prompt.ts.
+ */
 function toolStatusLabel(ev: { type: string; tool?: string; kind?: string }, ar: boolean): string {
   const t = (ev.tool || "").toLowerCase();
   const L = (en: string, arb: string) => (ar ? arb : en);
@@ -345,13 +359,13 @@ function toolStatusLabel(ev: { type: string; tool?: string; kind?: string }, ar:
    * minute with the most going on behind it was the one with the vaguest thing
    * to say about it.
    */
-  if (/boxes_for_customer|companies_for_customer|account/.test(t)) return L("Fetching your account…", "جارٍ جلب بيانات حسابك…");
+  if (/boxes_for_customer|companies_for_customer|account/.test(t)) return L("Fetching your account…", "جارٍ التحقق من بيانات حسابك…");
   if (/saved_cards|cards/.test(t)) return L("Checking your saved cards…", "جارٍ التحقق من بطاقاتك المحفوظة…");
-  if (/details/.test(t)) return L("Looking up your box…", "جارٍ جلب بيانات صندوقك…");
+  if (/details/.test(t)) return L("Looking up your box…", "جارٍ التحقق من بيانات صندوقك…");
   if (/pricing|charges/.test(t)) return L("Checking pricing…", "جارٍ حساب السعر…");
   if (/boxlocations|branch/.test(t)) return L("Finding branches…", "جارٍ إيجاد الفروع…");
-  if (/bundle/.test(t)) return L("Fetching packages…", "جارٍ جلب الباقات…");
-  if (/options|entities|expiry/.test(t)) return L("Getting the details…", "جارٍ جلب التفاصيل…");
+  if (/bundle/.test(t)) return L("Fetching packages…", "جارٍ التحقق من الباقات المتاحة…");
+  if (/options|entities|expiry/.test(t)) return L("Getting the details…", "جارٍ التحقق من التفاصيل…");
   return L("Working on it…", "جارٍ العمل على طلبك…");
 }
 
