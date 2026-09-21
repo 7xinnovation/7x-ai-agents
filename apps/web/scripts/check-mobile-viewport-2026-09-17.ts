@@ -54,6 +54,11 @@ async function main() {
    * `--css ../app/globals.css` appends the local file over the live one, so a
    * layout fix can be measured on a real page before it is pushed. Deployed
    * runs leave it off and measure what is actually live.
+   *
+   * IT CAN ONLY ADD. A fix that REMOVES a rule cannot be previewed this way —
+   * the deployed sheet still carries it and a later sheet that simply lacks it
+   * overrides nothing. Those have to be verified after deploying, and the
+   * failing check on the live build is the evidence in the meantime.
    */
   const cssFile = arg("--css");
   if (cssFile) {
@@ -256,6 +261,49 @@ async function main() {
   check("the page has not scrolled sideways", after.scrollX === 0, after);
   check("the document is still the width of the screen", after.docWidth <= after.vw, after);
   check("the composer is fully on screen", after.input.left >= -1 && after.input.right <= after.vw + 1, after);
+
+  /**
+   * THE DESKTOP EMBED, WHICH IS THE CASE THIS FILE MISSED.
+   *
+   * Every check above loads the widget as the whole page at phone size, so the
+   * expand control is correctly absent — and a rule that hid it on every
+   * DESKTOP embed as well passed here without a murmur.
+   *
+   * The widget's own viewport is the one its CSS sees, and in a host page the
+   * floating launcher is about 520px wide however big the monitor is. The rule
+   * that went wrong keyed on `max-width: 599px`, which is true of the launcher
+   * on a 1512px desktop — so it fired exactly where the control matters, since
+   * expanding is how the application panel gets shown beside the chat.
+   *
+   * Framed for real would be better and is not available: `frame-ancestors`
+   * lists the agent's own host pages, and a page this script writes is not one
+   * of them. So the CONDITIONS are reproduced instead — launcher width, a fine
+   * pointer, a desktop — which is precisely what the broken rule read.
+   */
+  console.log("\nThe widget at launcher size on a desktop, where expanding is the point");
+  {
+    const p2 = await browser.newPage();
+    await p2.setViewport({ width: 520, height: 760, isMobile: false, hasTouch: false });
+    // canExpand asks whether there is a host frame to expand into. There is one
+    // in a real embed; there cannot be one here, so it is answered directly.
+    await p2.evaluateOnNewDocument("Object.defineProperty(window, 'parent', { get: function () { return { postMessage: function () {} }; } });");
+    await p2.goto(url, { waitUntil: "networkidle2", timeout: 60_000 });
+    if (cssFile) await p2.addStyleTag({ content: readFileSync(cssFile, "utf8") });
+    await p2.waitForSelector(".dlg-input textarea", { timeout: 30_000 });
+    const seen = await p2.evaluate(`(function(){
+      var el = document.querySelector('[aria-label="Expand"], [aria-label="توسيع"]');
+      return {
+        present: !!el,
+        visible: !!(el && el.offsetParent),
+        width: window.innerWidth,
+        coarse: matchMedia("(hover: none) and (pointer: coarse)").matches
+      };
+    })()`) as any;
+    check("the launcher really is narrower than the old breakpoint", seen.width < 600, seen);
+    check("...and the pointer is fine, because this is a desktop", seen.coarse === false, seen);
+    check("the expand control is offered", seen.present && seen.visible, seen);
+    await p2.close();
+  }
 
   await browser.close();
   console.log(`\n${pass} passed, ${fail} failed\n`);

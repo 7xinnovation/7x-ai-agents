@@ -81,8 +81,32 @@ const isField = (sel: string) => {
 
 // The coarse-pointer block is where the phone rules live. Everything else is the
 // desktop stylesheet, and that is what a field's declared size is read from.
-const COARSE_AT = css.indexOf('@media (hover: none) and (pointer: coarse) {\n  /* Every field');
-const coarseBlock = css.slice(COARSE_AT, css.indexOf("\n}\n", COARSE_AT) + 2);
+/**
+ * The coarse-pointer block, found by what it CONTAINS.
+ *
+ * There is more than one `(hover: none) and (pointer: coarse)` block in the
+ * stylesheet, and this used to anchor on the first line of a comment inside the
+ * one it wanted — so editing that comment silently emptied the block and half
+ * this file started failing for a reason that had nothing to do with the CSS.
+ * The composer is what identifies it.
+ */
+function coarseBlockContaining(needle: string): { at: number; text: string } {
+  const OPEN = "@media (hover: none) and (pointer: coarse) {";
+  for (let at = css.indexOf(OPEN); at !== -1; at = css.indexOf(OPEN, at + 1)) {
+    let depth = 0;
+    let i = css.indexOf("{", at);
+    const start = i;
+    for (; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}" && --depth === 0) break;
+    }
+    const text = css.slice(at, i + 1);
+    if (text.includes(needle)) return { at, text };
+    void start;
+  }
+  throw new Error(`no coarse-pointer block contains ${needle}`);
+}
+const { at: COARSE_AT, text: coarseBlock } = coarseBlockContaining(".dlg-input textarea");
 const desktop = css.slice(0, COARSE_AT) + css.slice(COARSE_AT + coarseBlock.length);
 
 console.log("\nEvery field the customer types into (issues 2 and 4)");
@@ -137,7 +161,19 @@ for (const [what, sel] of [["the message row", ".dlg-msg"], ["the bubble", ".dlg
 }
 
 console.log("\nThe expand icon that does nothing on a phone (issue 12)");
-check("the CSS that hides it under 600px has existed since FB-5", /\.dlg-chip\.icon-only\.expand-toggle \{\s*display: none;/.test(css));
+check("there is a rule that hides it", /\.dlg-chip\.icon-only\.expand-toggle \{\s*display: none;/.test(css));
+/**
+ * AND IT KEYS ON THE POINTER, NOT THE WIDTH.
+ *
+ * The rule has existed since FB-5 under `max-width: 599px` and matched nothing,
+ * because the button never carried the class. Giving it the class on 17
+ * September woke it in the wrong place: the widget's viewport is the IFRAME's,
+ * and a floating launcher is about 520px wide on any desktop — so it hid the
+ * control on every desktop embed, which is the one place expanding does
+ * something. Reported on both epgl.ae and emiratespost.ae.
+ */
+check("...on a touch device", coarseBlock.includes(".dlg-chip.icon-only.expand-toggle"), coarseBlock.slice(0, 60));
+check("...and NOT on a narrow viewport", !/expand-toggle/.test(css.slice(css.indexOf("@media (max-width: 599px)"), css.indexOf("@media (max-width: 599px)") + 2000)));
 check("the button now actually carries that class", /className="dlg-chip icon-only expand-toggle"/.test(exp));
 check("...and is not rendered at all with no host frame to expand into", /embedded && canExpand \?/.test(exp));
 check("which is what canExpand means", /!isNative\(\) && window\.parent !== window/.test(exp));

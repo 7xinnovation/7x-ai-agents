@@ -1755,6 +1755,23 @@ body {
    refinement; on a phone the composer sits on an opaque surface anyway, and
    dropping the filter costs nothing that can be seen. */
 @media (hover: none) and (pointer: coarse) {
+  /* THE EXPAND TOGGLE GOES ON A TOUCH DEVICE, NOT IN A NARROW BOX.
+     This rule has existed since FB-5 under `max-width: 599px`, matching
+     nothing because the button never carried the class. On 17 September I gave
+     it the class — and woke it up in the wrong place. The widget's own viewport
+     is the IFRAME's, and the floating launcher is about 520px wide on a
+     1900px desktop, so the rule fired on every desktop embed and took away the
+     control that opens the split view with the application panel beside the
+     chat. Reported the same day on both epgl.ae and emiratespost.ae, and the
+     screenshots are of a desktop browser.
+     A phone is a touch device, not a narrow element. The reason to drop this
+     control there is that the widget already fills the screen and the host page
+     has nowhere to expand into; neither is true of a desktop iframe. The native
+     app is handled separately and earlier — see canExpand, which does not
+     render the button at all when there is no host frame to ask. */
+  .dlg-chip.icon-only.expand-toggle {
+    display: none;
+  }
   /* Every field the customer can put a caret in, not just the composer: the
      branch search, the map search, an inline correction in the application
      panel, the picker. Each one of them was under 16px, so each one of them
@@ -2817,10 +2834,6 @@ body {
   }
   .dlg-mobile-toggle {
     display: inline-flex;
-  }
-  /* The desktop expand/collapse toggle is redundant on a phone. */
-  .dlg-chip.icon-only.expand-toggle {
-    display: none;
   }
   /* Case panel: an in-split overlay, shown only when toggled open. */
   .dlg-case,
