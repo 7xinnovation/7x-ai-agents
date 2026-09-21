@@ -31,7 +31,7 @@ import {
   type PenaltySplit,
 } from "@/lib/epglRead";
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
-import { notifyEpglPayment } from "@/lib/epglPayment";
+import { notifyEpglPayment, paymentAdviceExists } from "@/lib/epglPayment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
@@ -289,6 +289,35 @@ async function notifyEpglPaidOnSubmit(agentId: string, conversationId: string, r
     if (!paid || paid.status !== "paid") return;
 
     const env = agent.definition.activeEnvironment ?? "production";
+
+    /**
+     * NOT THE MOMENT WE SUBMIT — the moment there is something to mark paid.
+     *
+     * A new licence carries no payment advice when it is created (a renewal
+     * does), and notifying against one that does not exist takes the request to
+     * Payment Verified and then, two seconds later, to Closed — past the review
+     * it was submitted for. See paymentAdviceExists.
+     *
+     * Deferring is safe because the reconcile sweep retries: this path does not
+     * write the "notified" audit, and that audit is what makes the notifier
+     * idempotent.
+     */
+    const advice = await paymentAdviceExists(agent.id, env, reference);
+    if (advice !== true) {
+      await audit({
+        agentId,
+        conversationId,
+        actor: "system",
+        action: "epgl_payment_notify_deferred",
+        payload: {
+          at: "submit",
+          reference,
+          reason: advice === null ? "could not read the payment advice" : "no payment advice raised yet",
+        },
+      });
+      return;
+    }
+
     const res = await notifyEpglPayment(agent.id, env, {
       licenseRequestId: reference,
       paymentId: paid.reference,

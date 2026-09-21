@@ -111,6 +111,55 @@ async function token(c: Creds): Promise<string> {
  * "this licence request does not exist", because only one of those is worth
  * sending again.
  */
+/**
+ * IS THERE ANYTHING TO NOTIFY AGAINST YET?
+ *
+ * The contract says this call "marks its payment advice (EPG_Transaction__c,
+ * record type Invoice) as Paid with the summed transaction amounts". It says
+ * nothing about what happens when there is no advice, and PreProd2 answered
+ * that on 21 September: the request goes to Payment Verified and, two seconds
+ * later, their workflow takes it to Closed — before anyone has reviewed it.
+ *
+ * Checked across six days of submissions, and the split is total rather than
+ * incidental:
+ *
+ *   S-EPG-000003 (renewal)      5 of 5 carry an advice, raised one second
+ *                               after the request, for AED 100,000
+ *   S-EPG-000002 (new licence) 13 of 13 carry NONE
+ *
+ * So a renewal is payable the moment it exists and a new licence is not —
+ * which matches their own sequencing note, that the advice is marked Paid
+ * "after the request has been approved by the Business Team". We were
+ * notifying about forty seconds after submission, long before any of that.
+ *
+ * Returns null when the question could not be answered, which the caller treats
+ * as "not yet" rather than "go ahead": the sweep will ask again, and a
+ * notification that arrives late is recoverable where one that closes an
+ * unreviewed application is not.
+ */
+export async function paymentAdviceExists(
+  agentId: string,
+  env: EnvKey,
+  licenseRequestId: string
+): Promise<boolean | null> {
+  const id = String(licenseRequestId ?? "").trim();
+  if (!SF_ID.test(id)) return null;
+  try {
+    const c = await creds(agentId, env);
+    const bearer = await token(c);
+    // Fixed statement, one substituted value, already shape-checked above.
+    const soql = `SELECT Id FROM EPG_Transaction__c WHERE EPG_License_Request__c = '${id}' LIMIT 1`;
+    const res = await fetch(`${c.baseUrl}/services/data/v62.0/query?q=${encodeURIComponent(soql)}`, {
+      headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { records?: unknown[] };
+    return (j.records ?? []).length > 0;
+  } catch {
+    return null;
+  }
+}
+
 export async function notifyEpglPayment(
   agentId: string,
   env: EnvKey,
@@ -246,6 +295,21 @@ export async function notifyEpglIfLicenceFee(
     if (!licenseRequestId) return;
 
     const env = agent.definition.activeEnvironment ?? "production";
+
+    // Nothing to mark paid yet — see paymentAdviceExists. NOT audited as
+    // notified, so the sweep in /api/payments/reconcile asks again.
+    const advice = await paymentAdviceExists(agent.id, env, licenseRequestId);
+    if (advice !== true) {
+      await audit({
+        agentId,
+        conversationId,
+        actor: "system",
+        action: "epgl_payment_notify_deferred",
+        payload: { reference, licenseRequestId, reason: advice === null ? "could not read the payment advice" : "no payment advice raised yet" },
+      });
+      return;
+    }
+
     const res = await notifyEpglPayment(agent.id, env, {
       licenseRequestId,
       paymentId: reference,

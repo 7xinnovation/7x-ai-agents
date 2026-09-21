@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
 import { resolveAdapters, setPayment, adapterContext } from "@dialog/core";
-import { getDb, payments, agents, conversations, cases, escalations, analyticsEvents } from "@dialog/db";
+import { getDb, payments, agents, conversations, cases, escalations, analyticsEvents, auditLog } from "@dialog/db";
 import { getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, saveCase, audit } from "@/lib/conversation";
@@ -69,6 +69,38 @@ export async function POST(req: NextRequest) {
         out.paymentsBreached++;
       }
     }
+  }
+
+  /**
+   * 1b) EPGL licence fees that have been paid and still not reported.
+   *
+   * A new licence carries no payment advice when it is created, so the
+   * notification is deferred rather than sent against nothing — see
+   * paymentAdviceExists. Deferring is only safe if something asks again, and
+   * the sweep above cannot: it looks at payments still "initiated", and these
+   * are paid. So they are picked up here, by the absence of the audit row that
+   * makes the notifier idempotent.
+   *
+   * Bounded to a week. A fee still unreported after that is not going to be
+   * fixed by another attempt, and it should be found by someone reading the
+   * deferral audits rather than retried forever.
+   */
+  const unreportedCut = new Date(now - 7 * 24 * 60 * 60_000);
+  const paidUnreported = await db
+    .select({ agentId: payments.agentId, conversationId: payments.conversationId, reference: payments.reference, amount: payments.amount })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.status, "paid"),
+        gt(payments.createdAt, unreportedCut),
+        sql`not exists (select 1 from ${auditLog} a where a.conversation_id = ${payments.conversationId}
+              and a.action = 'epgl_payment_notified' and a.payload ->> 'reference' = ${payments.reference})`
+      )
+    );
+  for (const p of paidUnreported) {
+    if (!p.agentId || !p.conversationId) continue;
+    // Not EPGL, or no licence request yet: the notifier decides and returns.
+    await notifyEpglIfLicenceFee(p.agentId, p.conversationId, p.reference, Number(p.amount ?? 0));
   }
 
   // 2) Abandoned journeys: a draft case with a journey set, idle past the window,
