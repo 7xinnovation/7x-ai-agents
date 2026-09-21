@@ -857,6 +857,29 @@ export function Experience({
 
   // Context for in-chat upload widgets (feedback: keep the upload in the chat).
   // A ```upload block in an assistant message renders a control for that doc key.
+  /**
+   * The LAST message that asked for each document.
+   *
+   * An upload block renders from one shared status map, so the rejection that
+   * came back at 13:24 appeared on the card in the message written at 13:23 as
+   * well as the one reporting it — "the same rejection error message displayed
+   * twice in a row", 21 September. The verdict belongs to whichever card asked
+   * most recently; the earlier ones keep the control and lose the banner.
+   */
+  const uploadOwner = useMemo<Record<string, number>>(() => {
+    const at: Record<string, number> = {};
+    messages.forEach((m, i) => {
+      if (m.role !== "assistant") return;
+      for (const block of m.content.match(/```[ \t]*upload[\s\S]*?```/gi) ?? []) {
+        for (const line of block.split("\n")) {
+          const k = /^\s*(?:-\s*)?key\s*:\s*([\w.-]+)\s*$/i.exec(line);
+          if (k?.[1]) at[k[1]] = i;
+        }
+      }
+    });
+    return at;
+  }, [messages]);
+
   const uploadCtx = useMemo<UploadCtx>(() => {
     const docs: UploadCtx["docs"] = {};
     for (const j of agent.journeys)
@@ -2129,7 +2152,7 @@ export function Experience({
                   ) : null}
                   {m.content ? (
                     m.role === "assistant" ? (
-                      <TypewriterMarkdown text={displayContent(i, m)} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={uploadCtx} locale={locale} />
+                      <TypewriterMarkdown text={displayContent(i, m)} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={{ ...uploadCtx, ownerIndex: uploadOwner, messageIndex: i }} locale={locale} />
                     ) : (
                       displayContent(i, m)
                     )

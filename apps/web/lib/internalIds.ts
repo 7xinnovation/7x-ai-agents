@@ -53,7 +53,63 @@ const ERROR_PROSE = /\berrors?\s+(?:code\s+)?\d{2,4}\s*(?:means|indicates|is)?\s
 /** A bare SCREAMING_SNAKE code, outside brackets. */
 const BARE_CODE = /\s*\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}\b/g;
 
+/**
+ * OUR OWN FILING SYSTEM, CITED AT THE CUSTOMER.
+ *
+ * EPGL widget, 21 September: "Internal source references (e.g. 'EPGL Agentic AI
+ * KB §4', 'EPGL Licensing Guide §7/§1') are displayed to the end user in the
+ * chat." Raised on the PO Box agent too.
+ *
+ * These are the names WE gave the knowledge documents, and a section number
+ * inside them. An applicant cannot open either, so the citation is at best
+ * noise and at worst an invitation to ask for a document that is not theirs to
+ * read. The answer is the answer; where it came from is ours to know, and the
+ * widget already has a Sources control for the cases where a source genuinely
+ * belongs on screen.
+ *
+ * The section mark is what makes this safe to match on. It is not a character
+ * that turns up in a company name, an address or an applicant's own words —
+ * every instance in the transcripts is one of ours — so the rule is anchored to
+ * it rather than to the document names, which change.
+ */
+const SECTION = String.raw`§\s*\d+(?:\s*[/,&]\s*§?\s*\d+)*`;
+/**
+ * What makes a run of words a DOCUMENT rather than a sentence.
+ *
+ * The first version of this took "a capitalised word plus up to seven more,
+ * then a section mark" and turned "Renewals run annually §3." into ".". Eating
+ * the customer's answer to remove a citation from it is much worse than leaving
+ * the citation, so a name is only removed when it ends in a word that names a
+ * document. Anything else loses its section mark and keeps its prose.
+ */
+const DOC_WORD = String.raw`(?:KB|Knowledge\s*Base|Guide|Manual|Handbook|Policy|Procedure|SOP|Playbook|Document)`;
+/**
+ * Every word of the name STARTS WITH A LETTER.
+ *
+ * Without that, "AED 100,700 EPGL Agentic AI KB §4" matched from the 700
+ * onwards and the reply came out as "AED 100,and covers one year." A number is
+ * never part of a document's name, and corrupting a fee to remove a citation
+ * from beside it is not a trade worth making.
+ */
+const DOC_NAME = String.raw`[A-Za-z][\w'’&.\-]*(?:[ \t][A-Za-z][\w'’&.\-]*){0,6}[ \t]${DOC_WORD}`;
 
+/** A bracket holding nothing but a citation: "(EPGL Licensing Guide §7/§1)". */
+const ONLY_SOURCE = new RegExp(
+  String.raw`^[([]\s*(?:see|per|source|ref(?:erence)?)?[\s:]*(?:${DOC_NAME}|[\w'’&.\- ]{0,60}?)[\s,]*${SECTION}\s*[)\]]$`,
+  "i"
+);
+
+/** "Per EPGL Licensing Guide §7/§1," — a citation announced as one. */
+const CITED = new RegExp(
+  String.raw`(^|[.!?]\s+)(?:see|per|source|ref(?:erence)?)[\s:]+(?:${DOC_NAME}|[A-Za-z][\w'’&.\- ]{0,60}?)[\s,]*${SECTION}[\s,]*(\w)`,
+  "gi"
+);
+
+/** "…the EPGL Agentic AI KB §4 says…" — named document, mid-sentence. */
+const NAMED_SOURCE = new RegExp(String.raw`[ \t]*([,;(\[]?)[ \t]*(?:the[ \t])?${DOC_NAME}[\s,]*${SECTION}[ \t]*([,;)\]]?)`, "gi");
+
+/** A bare section mark with nothing identifying it. Only the mark goes. */
+const BARE_SECTION = new RegExp(String.raw`[ \t]*[(\[]?\s*${SECTION}\s*[)\]]?`, "g");
 
 /**
  * The same pairs written inline, e.g. "Naif Post Office, officeId 214, is…".
@@ -71,7 +127,19 @@ const MAX_HOLD = 160;
 /** Clean a complete string (used by the tests and by the non-streaming paths). */
 export function stripInternalIds(text: string): string {
   return text
-    .replace(new RegExp(`\\s*\\((?:[^()\\n]{0,${MAX_HOLD}})\\)`, "g"), (m) => (ONLY_IDS.test(m.trim()) ? "" : m))
+    .replace(new RegExp(`\\s*\\((?:[^()\\n]{0,${MAX_HOLD}})\\)`, "g"), (m) =>
+      ONLY_IDS.test(m.trim()) || ONLY_SOURCE.test(m.trim()) ? "" : m
+    )
+    // Announced as a citation: it and its lead-in go, and the sentence it was
+    // in front of keeps its capital letter.
+    // The citation opened the sentence, so the word behind it inherits the
+    // capital letter the citation was using.
+    .replace(CITED, (_m, before: string, next: string) => `${before}${next.toUpperCase()}`)
+    // A named document mid-sentence. Punctuation on both sides means it was an
+    // aside and both go; otherwise one space stands in for it.
+    .replace(NAMED_SOURCE, (_m, lead: string, trail: string) => (lead && trail ? "" : lead || trail || " "))
+    // And a section mark on its own, which takes nothing else with it.
+    .replace(BARE_SECTION, "")
     .replace(INLINE, (_m, lead: string, trail: string) => (lead && trail ? "" : lead || trail || " "))
     // Removing the pair can leave the punctuation that framed it: "(open until
     // 8pm,)" and "has . Let me". Tidy the seams rather than the sentence.

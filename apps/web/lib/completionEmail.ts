@@ -251,6 +251,8 @@ const STR = {
     receiptNo: "Receipt no.",
     amountPaid: "Amount paid",
     method: "Payment method",
+    vibanHead: "Paying by bank transfer",
+    viban: "Emirates Post Group Licensing will send you the Virtual IBAN for this application. Please wait for it — do not transfer to any other account, and do not use a Virtual IBAN from an earlier application. Your application stays with them while you pay.",
     foot: "This is an automated message — please do not reply to it.",
   },
   ar: {
@@ -266,6 +268,8 @@ const STR = {
     receiptNo: "رقم الإيصال",
     amountPaid: "المبلغ المدفوع",
     method: "طريقة الدفع",
+    vibanHead: "الدفع عبر التحويل البنكي",
+    viban: "سترسل لك مجموعة بريد الإمارات للتراخيص رقم الآيبان الافتراضي الخاص بهذا الطلب. يُرجى انتظاره — ولا تقم بالتحويل إلى أي حساب آخر، ولا تستخدم آيبان افتراضي من طلب سابق. يبقى طلبك لديهم أثناء إتمام الدفع.",
     foot: "هذه رسالة آلية — يُرجى عدم الرد عليها.",
   },
 } as const;
@@ -359,6 +363,30 @@ export function completionEmail(input: CompletionEmailInput): { subject: string;
     ...(rows.some((row) => normaliseDate(row.value) === emailDate()) ? [] : [`${s.date}: ${emailDate()}`]),
   ].join("\n");
 
+  /**
+   * THE VIRTUAL IBAN IS SENT TO THEM. SAY SO.
+   *
+   * Reported on the EPGL widget, 21 September. Choosing bank transfer leaves the
+   * application submitted and unpaid, and the email says only "Payment: Bank
+   * transfer (Virtual IBAN)" — which reads as an instruction to go and transfer
+   * something, to an account nobody has given them. The IBAN is issued by
+   * Emirates Post Group Licensing afterwards, through a process that does not
+   * run on this platform, so the one thing the customer needs to know is that
+   * it is coming and that they should wait for it.
+   *
+   * Only on an application that has NOT settled: once money has arrived the
+   * receipt block speaks for itself, and telling someone to await an IBAN they
+   * have already used would be worse than saying nothing.
+   *
+   * Written here rather than left to the model's "what happens next" list. That
+   * list is whatever the reply happened to say, and this is the sentence that
+   * has to be in every one of these mails.
+   */
+  const payingByViban =
+    String(input.facts.data.payment_method ?? "").toLowerCase() === "viban" &&
+    input.facts.payment.status !== "paid";
+  const vibanBlock = payingByViban ? [`${s.vibanHead}:`, "", s.viban].join("\n") : "";
+
   const steps = nextSteps(input.replyText);
   const text = [
     s.greeting(String(input.contactName ?? "").trim()),
@@ -367,6 +395,7 @@ export function completionEmail(input: CompletionEmailInput): { subject: string;
     "",
     detail,
     ...(receiptBlock ? ["", receiptBlock] : receipt ? ["", receipt] : []),
+    ...(vibanBlock ? ["", vibanBlock] : []),
     ...(steps.length ? ["", s.next, ...steps.map((b) => `- ${b}`)] : []),
     "",
     s.foot,

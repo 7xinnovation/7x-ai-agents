@@ -31,6 +31,14 @@ export interface UploadCtx {
   // Cap on upload controls rendered per assistant message (FB-1565). Undefined
   // = no cap, for agents that pair blocks deliberately (EID front + back).
   maxUploads?: number;
+  /**
+   * Which message currently owns each document's outcome, and which message is
+   * being rendered. An upload block in an older message shows the control
+   * without the verdict — see ChatUpload. Both absent means one message, which
+   * is how the non-streaming callers use this.
+   */
+  ownerIndex?: Record<string, number>;
+  messageIndex?: number;
   onUpload: (key: string, file: File) => void;
   onQr: () => void;
   strings: {
@@ -127,7 +135,23 @@ function resetFileInput(e: React.MouseEvent<HTMLInputElement>) {
 function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
   const doc = ctx.docs[dkey];
   if (!doc) return null;
-  const st = ctx.statuses[dkey];
+  /**
+   * THE OUTCOME BELONGS TO THE CARD THAT ASKED FOR IT.
+   *
+   * EPGL widget, 21 September: "the same rejection error message is displayed
+   * twice in a row". It was not said twice — it was RENDERED twice. Every
+   * upload block for a document key reads one shared status map, so a card in
+   * a message written before the file arrived showed the rejection that
+   * happened after it, directly above the message that reports the same thing.
+   *
+   * A control in a superseded turn is history. It keeps its name and its
+   * upload button — the customer can still use it, and it is the same slot —
+   * but the verdict is shown once, on the card that is current.
+   */
+  const owns = ctx.ownerIndex === undefined || ctx.messageIndex === undefined
+    ? true
+    : (ctx.ownerIndex[dkey] ?? ctx.messageIndex) === ctx.messageIndex;
+  const st = owns ? ctx.statuses[dkey] : undefined;
   const uploaded = st?.status === "uploaded" || st?.status === "accepted";
   const busy = ctx.uploadingKeys.has(dkey);
   const accept = doc.acceptedFormats.map((f) => "." + f).join(",");
