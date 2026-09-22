@@ -40,7 +40,15 @@ check("...on the flag, not on holding a credential", !/from\.authenticated && fr
 check("...and says why that looked stricter and was wrong", /refused every tester using/.test(carry.replace(/\n \* /g, " ")));
 check("the token is copied as stored, never decrypted", /sessionToken: from\.sessionToken/.test(carry) && !/decryptSecret/.test(carry));
 check("the verified subject travels", /userRef: from\.userRef/.test(carry));
-check("so does the Emirates ID", /VERIFIED_EID_KEY\]: eid/.test(carry));
+/**
+ * Widened on 22 September. EPGL's signed token turned out to carry an accountId
+ * where it does not yet carry an Emirates ID, and both are facts about the
+ * CUSTOMER rather than about the application — so both travel, through one loop
+ * rather than one hand-written line each.
+ */
+check("so does the Emirates ID", /VERIFIED_EID_KEY, VERIFIED_ACCOUNT_KEY\]/.test(carry));
+check("...and the account their login is", /VERIFIED_ACCOUNT_KEY/.test(carry));
+check("...copied only when there is something to copy", /typeof old\[k\] === "string" && old\[k\]/.test(carry));
 check("but the case starts empty", /const fresh = emptyCase\(\)/.test(carry));
 check("...which is what 'new chat' means", /everything\s+\*?\s*that says WHO, and nothing that says what they were doing/.test(carry.replace(/\n \* /g, " ")), carry.slice(0, 40));
 

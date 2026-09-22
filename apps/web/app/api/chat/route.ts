@@ -8,7 +8,7 @@ import { getDb, payments, documents as documentsTable, documentBlobs } from "@di
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug, getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
-import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, rememberVerifiedEmiratesId, VERIFIED_EID_KEY } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, rememberVerifiedEmiratesId, rememberVerifiedAccountId, VERIFIED_EID_KEY, VERIFIED_ACCOUNT_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
@@ -20,6 +20,7 @@ import { emitEvent } from "@/lib/analytics";
 import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
 import {
   companyByEmiratesId,
+  companyByAccountId,
   companyByTradeLicense,
   form9ByAccountId,
   outstandingSummary,
@@ -160,6 +161,9 @@ function isTrue(v: unknown): boolean {
 const SF_DOCS_SENT_KEY = "__sf_documents_sent";
 
 const MOE_TOOL_NAME = "epgl_licences_for_customer";
+/** Named up here for the same reason as the one above: the signed-in customer
+ *  context is built long before the tool list is. */
+const MY_COMPANY_TOOL_NAME = "epgl_my_company";
 
 /**
  * Is this licensed activity one EPGL would call postal?
@@ -592,13 +596,43 @@ export async function POST(req: NextRequest) {
          * their own companies to pick from.
          *
          * Punctuation does not matter: UAE PASS gives `idn` as 784-XXXX-XXXXXXX-X
-         * and normaliseEmiratesId reduces it to digits at the point of use.
+         * and rememberVerifiedEmiratesId stores the fifteen digits.
          */
-        verifiedEmiratesId = typeof v.claims.emiratesId === "string" && v.claims.emiratesId.trim()
-          ? v.claims.emiratesId.trim()
-          : undefined;
+        const claim = (k: string): string | undefined => {
+          const raw = (v.claims as Record<string, unknown>)[k];
+          return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+        };
+        verifiedEmiratesId = claim("emiratesId");
         if (verifiedEmiratesId && session.caseId) {
           void rememberVerifiedEmiratesId(session.caseId, verifiedEmiratesId).catch(() => {});
+        }
+        /**
+         * AND THE REST OF WHAT THEY ALREADY TOLD US.
+         *
+         * Read out of a real EPGL token on 22 September, it also carries `name`,
+         * `email`, `accountId`, `contactId` and `userId`. All of it was dropped,
+         * so a signed-in applicant was asked for their name and email address by
+         * an assistant that had both, and for a trade licence number when their
+         * company was named in the token.
+         *
+         * `verifiedIdentity` is the same shape the Emirates Post introspection
+         * fills, so contactSeed below puts the name and email on the case exactly
+         * as it does for a PO Box customer — seeded for confirmation, never
+         * imposed, and never over an answer the customer has already given.
+         *
+         * No mobile: UAE PASS gives EPGL one through their own profile, and the
+         * token does not carry it. Absent is better than invented.
+         */
+        verifiedIdentity = { name: claim("name"), email: claim("email") };
+        /**
+         * The account is the STAND-IN for the Emirates ID, for as long as that
+         * claim is missing. `epgl_licences_for_customer` needs an Emirates ID and
+         * has none; the account id names the company directly instead, which is
+         * the same question answered from the other end.
+         */
+        const accountId = claim("accountId");
+        if (accountId && session.caseId) {
+          void rememberVerifiedAccountId(session.caseId, accountId).catch(() => {});
         }
       } else reason = v.reason;
     } else {
@@ -1116,6 +1150,20 @@ export async function POST(req: NextRequest) {
       // can be fetched rather than asked for. Named here so the model reaches
       // for the tool instead of asking a signed-in customer to type a licence
       // number we could have looked up.
+      /**
+       * THE COMPANY THEIR LOGIN IS, while the Emirates ID claim is still missing.
+       *
+       * EPGL's token carries `accountId` today and `emiratesId` not yet, so the
+       * registry route below has nothing to key on. This is the same question
+       * answered from the other end — their account names the company outright —
+       * and it is what keeps a signed-in applicant from being asked to type a
+       * licence number until the Emirates ID lands.
+       */
+      const accountId = str(session.state.data[VERIFIED_ACCOUNT_KEY]);
+      if (accountId) {
+        customerContext =
+          `${customerContext ?? ""}\nThis customer is signed in and their portal account is known to us. Call ${MY_COMPANY_TOOL_NAME} FIRST — it takes no argument — to read the company that account belongs to, and ask them to confirm it is the one this application is for. Do NOT ask a signed-in customer for a trade licence number before you have looked, and never state or repeat an account id to them.`.trim();
+      }
       const eid = str(session.state.data[VERIFIED_EID_KEY]);
       if (eid) {
         customerContext =
@@ -1251,6 +1299,7 @@ export async function POST(req: NextRequest) {
   // model supplies only a value, so it can never compose a query. See lib/epglRead.
   const COMPANY_TOOL = "epgl_company_lookup";
   const COMPANY_BY_EID_TOOL = "epgl_company_by_emirates_id";
+  const MY_COMPANY_TOOL = MY_COMPANY_TOOL_NAME;
   const FORM9_TOOL = "epgl_form9_history";
   const MOE_TOOL = MOE_TOOL_NAME;
   /**
@@ -1429,6 +1478,21 @@ export async function POST(req: NextRequest) {
             properties: { emiratesId: { type: "string", description: "The customer's Emirates ID, 15 digits, dashed or bare" } },
             required: ["emiratesId"],
           },
+        },
+        {
+          name: MY_COMPANY_TOOL,
+          /**
+           * No argument, deliberately. The account comes from the customer's own
+           * signed token, and a lookup the model can aim is a lookup that returns
+           * whoever it was aimed at — these are company records.
+           */
+          description:
+            "THE COMPANY THE SIGNED-IN CUSTOMER'S PORTAL ACCOUNT BELONGS TO. Call this FIRST for a signed-in customer, before asking for a trade licence number and before " +
+            COMPANY_TOOL +
+            ": their sign-in tells us which company they are, so asking them to type a licence number is asking for something we already have. It takes NO argument — the account comes from their sign-in, not from you. Returns the same registered details as the other company lookups: names in English and Arabic, licence number and expiry, emirate, regulator, postal licence and status. Show what comes back and ask the customer to CONFIRM it is the company this application is for; if they say it is a different company, ask for that trade licence number and use " +
+            COMPANY_TOOL +
+            " instead. An empty answer means their login is not linked to a company record — normal, and not an error: ask for the trade licence number as usual.",
+          input_schema: { type: "object", properties: {}, required: [] },
         },
         {
           name: MOE_TOOL,
@@ -2244,6 +2308,44 @@ export async function POST(req: NextRequest) {
         };
       }
     }
+    if (name === MY_COMPANY_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const accountId = str(session.state.data[VERIFIED_ACCOUNT_KEY]);
+      if (!accountId) {
+        return {
+          result:
+            "NOT SIGNED IN, or their sign-in carried no company. There is nothing to look up here, so ask for the trade licence number and use " +
+            COMPANY_TOOL +
+            " as usual. Do NOT say you are checking their account.",
+        };
+      }
+      try {
+        const found = await companyByAccountId(agent.id, env, accountId);
+        if (!found) {
+          return {
+            result:
+              "THEIR LOGIN IS NOT LINKED TO A COMPANY RECORD. Normal, and not an error — ask for the trade licence number and continue as usual.",
+          };
+        }
+        rememberLicenceRecordId(found);
+        const stop = await blockedNotice(found);
+        if (stop) return { result: stop };
+        return {
+          result:
+            "THE COMPANY THIS CUSTOMER IS SIGNED IN AS. Ask them to confirm it is the one this application is for before you use it.\n" +
+            (await withOutstanding(found)),
+        };
+      } catch (err) {
+        log.error("epgl_my_company_failed", err as Error, { ...a, tool: name });
+        return {
+          result:
+            "COULD NOT READ THEIR COMPANY just now. Do not say what the problem was — ask for the trade licence number and carry on with " +
+            COMPANY_TOOL +
+            ".",
+        };
+      }
+    }
+
     if (name === COMPANY_TOOL || name === FORM9_TOOL || name === COMPANY_BY_EID_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       try {

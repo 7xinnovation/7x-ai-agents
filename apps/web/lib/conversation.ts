@@ -87,6 +87,33 @@ export async function rememberVerifiedEmiratesId(caseId: string, emiratesId: str
 }
 
 /**
+ * The Salesforce account a signed-in EPGL customer's portal login belongs to.
+ *
+ * Same reasoning as the Emirates ID beside it, and for now the same JOB. EPGL's
+ * token does not yet carry `idn`, so the registry lookup that turns an Emirates
+ * ID into somebody's trade licences has nothing to work with — but the token
+ * does carry `accountId`, and that names their company outright rather than
+ * finding it. Until the Emirates ID arrives this is what stops a signed-in
+ * applicant being asked to type a licence number we could have read.
+ *
+ * Bookkeeping, so the "__" prefix: out of the case panel, out of submissions.
+ */
+export const VERIFIED_ACCOUNT_KEY = "__verified_account_id";
+
+/** Salesforce ids are 15 or 18 characters of [A-Za-z0-9], and nothing else. */
+const SF_ID = /^[A-Za-z0-9]{15,18}$/;
+
+export async function rememberVerifiedAccountId(caseId: string, accountId: string): Promise<void> {
+  const id = String(accountId ?? "").trim();
+  if (!SF_ID.test(id)) return;
+  try {
+    await mutateCase(caseId, (st) => ({ ...st, data: { ...st.data, [VERIFIED_ACCOUNT_KEY]: id } }));
+  } catch {
+    /* the sign-in itself has already succeeded; do not fail it for this */
+  }
+}
+
+/**
  * A NEW CONVERSATION FOR A CUSTOMER WHO IS ALREADY SIGNED IN.
  *
  * "Logged-in user — refreshing the chat window using the refresh button prompts
@@ -160,11 +187,16 @@ export async function carrySessionForward(
   // not. An Emirates ID is a fact about the customer, and asking Emirates Post
   // for it again on the next turn would be a round trip for something we know.
   const oldCase = await db.query.cases.findFirst({ where: eq(cases.conversationId, from.id) });
-  const eid = (oldCase?.state?.data as Record<string, unknown> | undefined)?.[VERIFIED_EID_KEY];
+  const old = (oldCase?.state?.data ?? {}) as Record<string, unknown>;
   const fresh = emptyCase();
-  const state = typeof eid === "string" && eid
-    ? { ...fresh, data: { ...fresh.data, [VERIFIED_EID_KEY]: eid } }
-    : fresh;
+  const carried: Record<string, unknown> = {};
+  // Both are facts about the CUSTOMER rather than about the application, so both
+  // travel; asking for either again on the next turn is a round trip for
+  // something the sign-in already settled.
+  for (const k of [VERIFIED_EID_KEY, VERIFIED_ACCOUNT_KEY]) {
+    if (typeof old[k] === "string" && old[k]) carried[k] = old[k];
+  }
+  const state = Object.keys(carried).length ? { ...fresh, data: { ...fresh.data, ...carried } } : fresh;
 
   await db.insert(cases).values({ conversationId: conv!.id, agentId, state });
   return { conversationId: conv!.id };
@@ -179,7 +211,8 @@ export async function carrySessionForward(
  * verified session and the next turn was still authenticated, so the customer
  * could not tell which they were.
  *
- * The VERIFIED Emirates ID is dropped from the case too. It is the strongest
+ * The VERIFIED Emirates ID and account id are dropped from the case too. The
+ * first is the strongest
  * identifier in this system, it is what the ownership and licence checks are
  * keyed on, and leaving it behind after a sign-out would let the next person at
  * the same screen act as the last one.
@@ -195,6 +228,9 @@ export async function signOutConversation(conversationId: string): Promise<void>
   await mutateCase(c.id, (st) => {
     const data = { ...st.data };
     delete data[VERIFIED_EID_KEY];
+    // And the account it resolved to, for the same reason: it is the other way
+    // to reach the same company records.
+    delete data[VERIFIED_ACCOUNT_KEY];
     return { ...st, data };
   }).catch(() => undefined);
 }
