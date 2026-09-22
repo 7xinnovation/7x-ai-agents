@@ -4,6 +4,7 @@ import type { AdapterBundle } from "../adapters/types";
 import { handoverContext } from "./handover";
 import { adapterContext } from "../adapters/registry";
 import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition } from "../case/engine";
+import { RECORD_IDENTITY } from "./extract";
 
 /** Tool schemas exposed to Claude. Generic across every agent/journey. */
 export const TOOL_DEFS: Anthropic.Tool[] = [
@@ -622,6 +623,57 @@ export async function dispatchTool(
             result:
               "NOT RECORDED. Only the customer can say a partner lives outside the UAE — a foreign passport does not make somebody a non-resident, and most UAE residents hold one. " +
               "Ask them, once, with three choices: upload the Emirates ID, type the number, or \"this partner lives outside the UAE\". Record this only after they have chosen the third.",
+            state,
+            events,
+            isError: true,
+          };
+        }
+      }
+      /**
+       * WHO THE COMPANY'S PEOPLE ARE IS NOT THE ASSISTANT'S TO DECIDE.
+       *
+       * 22 September. A tester uploaded somebody else's Emirates ID against a
+       * sole establishment, and the assistant — having noticed the mismatch and
+       * said so, which was the right instinct — offered two buttons:
+       *
+       *   [ Valentina Mintah is the correct partner ]  [ I'll upload the correct Emirates ID ]
+       *
+       * The first of those is not a choice anybody in this conversation is
+       * entitled to make. The partners of a company are printed on its trade
+       * licence and held in the licensing register; changing them is a filing
+       * with the licensing authority, not a button in a chat. Pressing it would
+       * have written the stranger into partner 1 and submitted her to Salesforce
+       * as an owner of the business.
+       *
+       * So the model cannot record these at all, and the refusal says why:
+       *
+       *  - partner / member / shareholder names and nationalities are optional
+       *    fields copied off the licence and the MOA by the document extraction,
+       *    which is unaffected by this. Refusing every write to them cannot stall
+       *    an application, because nothing requires them of the customer.
+       *  - the OWNER's name is required, so a first write stays possible for the
+       *    application whose licence would not read. Only a CHANGE is refused —
+       *    which is the move that rewrites the register.
+       */
+      if (RECORD_IDENTITY.test(fieldKey)) {
+        const held = state.data[fieldKey];
+        const onFile = held !== undefined && held !== null && String(held).trim() !== "";
+        const ownerSlot = /^owner_/i.test(fieldKey);
+        const wouldChange = onFile && String(held).trim() !== String(input.value ?? "").trim();
+        if (wouldChange || (!ownerSlot && !onFile)) {
+          return {
+            result:
+              `NOT RECORDED, and do not try again. "${fieldKey}" is part of the company's registered details — who its ` +
+              `owner, partners and licence members are. Those come from the trade licence, the Memorandum of ` +
+              `Association and the licensing register, and this application copies them; it does not set them. ` +
+              (wouldChange
+                ? `The record says "${String(held)}". `
+                : ``) +
+              `NEVER offer the customer an option that changes who a partner is — not as a button, not as a ` +
+              `sentence. If an uploaded identity document names somebody the licence does not, the document is the ` +
+              `wrong one for this application: ask for the right person's, and if the customer says the register ` +
+              `itself is out of date, tell them that change has to be made with the licensing authority first and ` +
+              `the updated trade licence uploaded here.`,
             state,
             events,
             isError: true,

@@ -44,7 +44,14 @@ const card = (name: string) => ({ owner_name: name });
   check("the owner's card is accepted", ownerDocumentCheck(LICENCE, card("Faisal Eissa Lutfi Ali Hussain")).reject === null);
   check("a transliteration variant is accepted",
     ownerDocumentCheck(LICENCE, card("Faisal Eissa Lutfi Ali-Hussain")).reject === null);
-  check("...and is reported as the owner", ownerDocumentCheck(LICENCE, card("Faisal Eissa Lutfi")).matched === "the owner");
+  /**
+   * "the owner" until 16 September, when namedPeople started giving one person
+   * one entry. Faisal is the owner AND partner 1 -- he was listed twice, and a
+   * refusal read like the application could not count. The partner label is the
+   * more useful of the two, so it wins where they are the same person.
+   */
+  check("...and is reported as partner 1, the entry he is listed under",
+    ownerDocumentCheck(LICENCE, card("Faisal Eissa Lutfi")).matched === "partner 1");
 }
 
 // 3. Any PARTNER's card is accepted too. On a multi-partner licence the person
@@ -74,9 +81,10 @@ const card = (name: string) => ({ owner_name: name });
 // 6. namedPeople underpins the message: everyone, labelled.
 {
   const people = namedPeople(LICENCE);
-  check("owner and three partners", people.length === 4, people);
-  check("owner first", people[0]?.label === "the owner", people[0]);
-  check("partners numbered", people[2]?.label === "partner 2", people[2]);
+  // Three people, not four: the owner is also partner 1. See above.
+  check("three people, each once", people.length === 3, people);
+  check("partners first, numbered", people[0]?.label === "partner 1", people[0]);
+  check("...and in order", people[1]?.label === "partner 2", people[1]);
   check("an empty case names nobody", namedPeople({}).length === 0);
 }
 

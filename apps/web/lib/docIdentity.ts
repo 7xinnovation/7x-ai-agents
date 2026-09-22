@@ -682,7 +682,47 @@ export function partnerDocumentCheck(
     }
   }
 
-  if (!expected) return { conflict: null, observedName: found };
+  /**
+   * AN EMPTY SLOT IS NOT PERMISSION TO FILL IT WITH ANYBODY.
+   *
+   * This returned "clear" whenever the slot had no name on file, on the
+   * reasoning that a check with nothing to compare against should stay silent.
+   * That is right for a company document and wrong for an identity card, and on
+   * 22 September it let a stranger's Emirates ID into a sole establishment.
+   *
+   * The licence named OBAID SAEED OBAID KHALFAN BIN JARSH as its only partner —
+   * as the OWNER, which is where a sole establishment's single partner is
+   * printed. `partner_1_name` was therefore empty, `expected` was null, and
+   * Valentina Mintah's card went in with a green tick against it.
+   *
+   * The owner's own slot has refused this since 8 September, through exactly the
+   * test below: a card has to belong to SOMEBODY this licence names. There was
+   * never a reason for the partner slots to be more permissive — they are the
+   * same question about the same people — and the difference was an accident of
+   * which slot the model happened to ask for the card in.
+   *
+   * Still silent when the application names nobody at all: the first document of
+   * an application has nothing to contradict, and refusing it would stall every
+   * journey at step one.
+   */
+  if (!expected) {
+    if (!IDENTITY_SLOT.test(documentKey)) return { conflict: null, observedName: found };
+    const people = namedPeople(data);
+    if (!people.length) return { conflict: null, observedName: found };
+    if (people.some((p) => personMatches(p.name, found))) return { conflict: null, observedName: found };
+    const kind = slot.kind.includes("passport") ? "passport" : "Emirates ID";
+    return {
+      observedName: found,
+      conflict: {
+        severity: "block",
+        reason:
+          `This ${kind} is in the name of ${found}, who is not named on this licence. ` +
+          `The licence names: ${people.map((p) => `${p.name} (${p.label})`).join(", ")}. ` +
+          `Please upload the ${kind} for one of them. Who the partners are is printed on the trade licence — ` +
+          `it is not something this application can change, so do NOT offer to record ${found} as a partner.`,
+      },
+    };
+  }
 
   // A STRANGER, not a spelling.
   //

@@ -100,7 +100,13 @@ const doc = (name: string) => ({ owner_name: name });
   const r = partnerDocumentCheck("partner_2_passport", {}, doc("ANYONE AT ALL"));
   check("the first document of an unnamed partner passes", r.conflict === null, r.conflict);
   check("...but its name is recorded for the next one", r.observedName === "ANYONE AT ALL", r.observedName);
-  check("a document with no readable name passes", partnerDocumentCheck("partner_2_passport", LICENCE, {}).conflict === null);
+  /**
+   * Changed 15 September. A card we could not read a name off is a card we did
+   * not check: it is still kept, but the customer is told so rather than shown a
+   * verification that did not happen.
+   */
+  check("a document with no readable name is kept, and said to be unchecked",
+    partnerDocumentCheck("partner_2_passport", LICENCE, {}).conflict?.severity === "confirm");
   check("a non-partner slot is not checked", partnerDocumentCheck("trade_license", LICENCE, doc("ANYONE")).conflict === null);
 }
 

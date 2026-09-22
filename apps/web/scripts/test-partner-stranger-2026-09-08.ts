@@ -59,9 +59,49 @@ console.log("\nMisfiling still names the right slot");
 }
 
 console.log("\nNothing to judge on is never a refusal");
-check("no name on the document", on("partner_3_emirates_id", "").conflict === null);
-check("no name on file for that partner", partnerDocumentCheck("partner_4_emirates_id", CASE, { full_name: "Someone New" }).conflict === null);
+/**
+ * Changed 15 September: a card we could not read a name off is a card we did not
+ * check, and accepting it in silence claims a verification that never happened.
+ * It is still KEPT -- a poor photograph of an Emirates ID is ordinary -- but the
+ * customer is told, and the model is forbidden from calling it verified.
+ */
+{
+  const r = on("partner_3_emirates_id", "");
+  check("no name on the document — kept, but not called verified", r.conflict?.severity === "confirm", r.conflict);
+  check("...and it says plainly that it could not be checked", /could NOT be checked/.test(r.conflict?.reason ?? ""));
+}
 check("not a partner slot at all", partnerDocumentCheck("trade_license", CASE, { full_name: "Nida" }).conflict === null);
+check("an application that names nobody at all",
+  partnerDocumentCheck("partner_1_emirates_id", { company_name: "SOME CO" }, { full_name: "Someone New" }).conflict === null);
+
+/**
+ * REVERSED ON 22 SEPTEMBER, deliberately.
+ *
+ * This asserted that an EMPTY partner slot accepts anybody -- "nothing to judge
+ * on", on the reasoning that a check with no name to compare against should stay
+ * silent. That is right for a company document and wrong for an identity card,
+ * and it is the hole a tester walked through: a sole establishment prints its
+ * single partner as the OWNER, so partner_1_name was empty and a stranger's
+ * Emirates ID went in with a green tick.
+ *
+ * There IS something to judge on. The application names people -- as the owner,
+ * as licence members, as other partners -- and the card has to belong to one of
+ * them. Which is the test the owner's own slot has applied since 8 September.
+ * See test-partner-register-2026-09-22.
+ */
+check("but an empty slot on an application that DOES name people refuses a stranger",
+  partnerDocumentCheck("partner_4_emirates_id", CASE, { full_name: "Someone New" }).conflict?.severity === "block");
+check("...naming who it does hold", /Valentina Mintah/.test(
+  partnerDocumentCheck("partner_4_emirates_id", CASE, { full_name: "Someone New" }).conflict?.reason ?? ""));
+// Somebody the application names, into a slot with no name of its own: the owner
+// of a sole establishment is its only partner, and the card is theirs.
+check("...while somebody the application DOES name goes in",
+  partnerDocumentCheck("partner_1_emirates_id", { owner_name: "Obaid Saeed Obaid Khalfan Bin Jarsh" },
+    { full_name: "Obaid Saeed Obaid Khalfan Bin Jarsh" }).conflict === null);
+// And a card that belongs to a DIFFERENT partner is still the misfile it always
+// was -- named as such, rather than as a stranger.
+check("...and a misfile is still reported as a misfile",
+  /they are partner 3/.test(partnerDocumentCheck("partner_4_emirates_id", CASE, { full_name: "Valentina Mintah" }).conflict?.reason ?? ""));
 
 console.log("\ncouldBeSamePerson");
 check("shares a family name", couldBeSamePerson("Valentina Mintah", "V Mintah"));

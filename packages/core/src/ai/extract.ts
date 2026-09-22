@@ -158,6 +158,25 @@ const OWNER_ENTITY_KEY = "__owner_entity_type";
  */
 const HOLDER_NAME_KEY = "__document_holder_name";
 
+/**
+ * WHO THE COMPANY'S PEOPLE ARE — the register's answer, not the assistant's.
+ *
+ * The owner, the partners and the licence members are printed on the trade
+ * licence and the Memorandum of Association. These fields are a COPY of that
+ * record, and nothing in a conversation may rewrite them: not an uploaded
+ * identity card, and not the model on a customer's say-so. See the identity
+ * filter below and the collect_field guard in tools.ts, which share this.
+ *
+ * Deliberately NOT matching `agent_*`: an Emirates Post authorised agent is a
+ * person being ADDED by this application rather than one the register already
+ * names, and their card is the only place their name comes from.
+ */
+export const RECORD_IDENTITY =
+  /^(owner|partner_\d+|shareholder_\d+|member_\d+)_(name|name_ar|name_en|full_name|nationality)$/i;
+
+/** Document slots whose whole purpose is to identify one named person. */
+export const IDENTITY_SLOT_KEY = /(^|_)(emirates_id|passport|eid|eid_front|eid_back|id_card)$/i;
+
 const ARABIC_RE = /[؀-ۿ]/;
 const LATIN_RE = /[A-Za-z]/;
 
@@ -228,7 +247,7 @@ export async function extractFieldsFromDocument(input: {
     "- Memoranda of Association and partner lists usually give each partner's EMIRATES ID number, NATIONALITY and PASSPORT number: read the primary owner's into the matching owner fields.\n" +
     "- A single phone number on the document can fill BOTH an owner-contact and a general contact-phone field if the document shows only one number for that person.\n" +
     "- If the document is an identity card (e.g. Emirates ID) and the fields describe an agent/representative, map the card's name, ID number and expiry to those agent fields only.\n" +
-    "- If the document is an Emirates ID card and the fields include an owner/signatory Emirates ID field, map the card's ID number (format 784-YYYY-NNNNNNN-N) into it, and the holder's name/nationality into the matching owner fields when present.\n" +
+    "- If the document is an Emirates ID card and the fields include an owner/signatory Emirates ID field, map the card's ID number (format 784-YYYY-NNNNNNN-N) into it. Map NOTHING ELSE about the person: not their name, not their Arabic name, not their nationality. Who the owner, partners and licence members ARE is printed on the trade licence and the MOA, and an identity card is evidence that a named person is who they say they are — never evidence that the company's register says something different. The holder's name goes in \"" + HOLDER_NAME_KEY + "\" and nowhere else.\n" +
     "- WHOSE CARD IS IT: for ANY identity document, always return the holder's printed name in \"" + HOLDER_NAME_KEY + "\", even when the person is nobody you were told about and even when no owner or partner name field seems to fit. That key is how the application checks the document was issued to the right person; omitting it is how somebody else's Emirates ID gets accepted. It is never the company's name and never a name you inferred from the file name.\n" +
     "- If the document is NOT a type that carries application data (business_card, other), return ONLY the " + DOC_TYPE_KEY + " classification and nothing else.\n" +
     "- Respond with the JSON object only, no prose, no markdown fences.";
@@ -282,6 +301,45 @@ export async function extractFieldsFromDocument(input: {
     for (const [k, v] of Object.entries(values)) {
       if (/_ar$/.test(k) && !ARABIC_RE.test(v)) delete values[k];
       else if ((/_en$/.test(k) || k === "company_name") && !LATIN_RE.test(v) && ARABIC_RE.test(v)) delete values[k];
+    }
+    /**
+     * AN IDENTITY DOCUMENT PROVES WHO SOMEBODY IS. IT DOES NOT SAY WHO THEY ARE
+     * TO THIS COMPANY.
+     *
+     * 22 September, and it is the worst of these to have shipped. A tester
+     * uploaded Valentina Mintah's Emirates ID against a sole establishment whose
+     * licence names OBAID SAEED OBAID KHALFAN BIN JARSH as its only partner. The
+     * card was accepted, and the case panel then read:
+     *
+     *   Partner 1 — full name            Valentina Mintah
+     *   Partner 1 — full name in Arabic  فالنتينا مينتاه
+     *   Partner 1 — nationality          United Kingdom (Uk)
+     *
+     * The application had quietly changed who owned the company, on the strength
+     * of a file the customer chose. The instruction above asked for exactly that
+     * — "the holder's name/nationality into the matching owner fields" — written
+     * for the ordinary case where the cardholder IS the owner, and blind to the
+     * case where they are not.
+     *
+     * Who the owner, the partners and the licence members are is a matter of
+     * record: it is printed on the trade licence and the MOA, and held in the
+     * licensing register. Those documents still fill these fields, as they
+     * always did. An Emirates ID and a passport now fill exactly one thing about
+     * a person, the number on the card, and the name they carry travels in
+     * `__document_holder_name` — where the identity checks use it to decide
+     * whether the card belongs here at all.
+     *
+     * The prompt rule above says so. This enforces it, because a prompt rule is
+     * a request and the register is not ours to edit.
+     */
+    const isIdentityDocument =
+      docType === "emirates_id" ||
+      docType === "passport" ||
+      (!docType && !!holderName && IDENTITY_SLOT_KEY.test(input.expected?.key ?? ""));
+    if (isIdentityDocument) {
+      for (const k of Object.keys(values)) {
+        if (RECORD_IDENTITY.test(k)) delete values[k];
+      }
     }
     // Corporate owner (FB-1422): person-only attributes never apply.
     if (ownerEntity === "corporate") {
