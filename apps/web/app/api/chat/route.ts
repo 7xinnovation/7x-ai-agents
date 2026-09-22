@@ -573,8 +573,34 @@ export async function POST(req: NextRequest) {
 
     if (looksSigned && hostTokenConfigured()) {
       const v = verifyHostToken(body.uaePassToken);
-      if (v.ok) sub = v.claims.sub;
-      else reason = v.reason;
+      if (v.ok) {
+        sub = v.claims.sub;
+        /**
+         * THE EMIRATES ID THE SIGN-IN ALREADY PROVED.
+         *
+         * This branch took the subject and nothing else, so an EPGL customer
+         * signed in, was recognised, and was then asked to type the Emirates ID
+         * their sign-in had just established. The Emirates Post branch below has
+         * kept it since 18 September; the signed-token branch never did, because
+         * when it was written no host sent one.
+         *
+         * It is not a convenience. `epgl_licences_for_customer` prefers this
+         * value over anything the model supplies, precisely because a registry
+         * lookup keyed on a typed number returns whoever was typed rather than
+         * whoever is signed in — and those are somebody's company records. A
+         * verified one turns "what is your trade licence number?" into a list of
+         * their own companies to pick from.
+         *
+         * Punctuation does not matter: UAE PASS gives `idn` as 784-XXXX-XXXXXXX-X
+         * and normaliseEmiratesId reduces it to digits at the point of use.
+         */
+        verifiedEmiratesId = typeof v.claims.emiratesId === "string" && v.claims.emiratesId.trim()
+          ? v.claims.emiratesId.trim()
+          : undefined;
+        if (verifiedEmiratesId && session.caseId) {
+          void rememberVerifiedEmiratesId(session.caseId, verifiedEmiratesId).catch(() => {});
+        }
+      } else reason = v.reason;
     } else {
       const usersBase = await epUsersBaseUrl(agent.id, agent.definition.activeEnvironment ?? "production");
       if (!usersBase) reason = "no Emirates Post users service configured for this environment";
