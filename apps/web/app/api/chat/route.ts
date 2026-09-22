@@ -31,6 +31,7 @@ import {
   type PenaltySplit,
 } from "@/lib/epglRead";
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
+import { trackShipment, TrackingNotConfiguredError } from "@/lib/emxTracking";
 import { notifyEpglPayment, paymentAdviceExists } from "@/lib/epglPayment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode } from "@/lib/gsbLookup";
@@ -1555,7 +1556,45 @@ export async function POST(req: NextRequest) {
       ]
     : [];
 
-  const extraTools = [...baseExtraTools, emailTool, ...epglReadTools, ...gsbTools];
+  /**
+   * SHIPMENT TRACKING, WHICH THIS ASSISTANT COULD NEVER DO.
+   *
+   * The most-asked thing it had no answer for: `lib/metrics.ts` counted the
+   * demand rather than the lookups, because "shipment.lookup is emitted by a
+   * tool that does not exist" — 42 of thirty days' intents on production, every
+   * one of them handed a link to a web page. Emirates Post gave us their EMX
+   * tracking gateway on 22 September, with a real production key.
+   *
+   * The guidance in every journey still said tracking was not one of our
+   * services and told the model to refuse before asking for a number. That text
+   * is replaced by nxn-tracking-2026-09-22.ts in the same change; a tool the
+   * prompt forbids is a tool that is never called.
+   */
+  const TRACK_TOOL = "nxn_track_shipment";
+  const trackingTools: Anthropic.Tool[] = isNxn
+    ? [
+        {
+          name: TRACK_TOOL,
+          description:
+            "THE ONLY source for where a shipment has got to. Call it whenever the customer gives a tracking or AWB number, or asks about a parcel, letter, delivery or consignment — and ask for the number if they have not given one. It returns the current status, the full history newest-first with dates and locations in both languages, and the weight. " +
+            "NEVER answer a tracking question from your own knowledge, never guess a status or a delivery date, and never show a step this tool did not return. " +
+            "An empty result means Emirates Post do not recognise that number: say so plainly, suggest they check the digits, and note that a very recently posted item may not have been scanned yet — do NOT treat it as an error or apologise for a fault. " +
+            "PRIVACY: names are deliberately not returned. Do not ask for, infer, or offer the sender's or recipient's name, and do not say who signed for an item.",
+          input_schema: {
+            type: "object",
+            properties: {
+              trackingNumber: {
+                type: "string",
+                description: "The tracking / AWB number exactly as the customer gave it, e.g. CP175823258AE. Spaces and dashes are fine.",
+              },
+            },
+            required: ["trackingNumber"],
+          },
+        },
+      ]
+    : [];
+
+  const extraTools = [...baseExtraTools, emailTool, ...epglReadTools, ...gsbTools, ...trackingTools];
   /**
    * Companies GSB has named this turn. Emirates Post is told whether a corporate
    * rental's details came from its own registry or from the customer, and by the
@@ -1577,6 +1616,56 @@ export async function POST(req: NextRequest) {
     // not yet know the customer chose a courier — and the save was going out
     // without one, and without the 30 the summary had just charged for.
     if (turnState) liveState = turnState;
+
+    if (name === TRACK_TOOL) {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const asked = String(input.trackingNumber ?? "");
+      try {
+        const found = await trackShipment(agent.id, env, asked);
+        await emitEvent({
+          type: "shipment.lookup",
+          ...a,
+          customerType: authenticated ? "authenticated" : "guest",
+          language: body.locale,
+          outcome: found ? "found" : "not_found",
+          attributes: { kind: "tracking" },
+        }).catch(() => {});
+        if (!found) {
+          // NOT AN ERROR, AND IT MUST NOT SOUND LIKE ONE. A mistyped digit and a
+          // parcel posted an hour ago are the same answer from their gateway, and
+          // both customers are better served by that sentence than by "something
+          // went wrong" -- which sends someone to a call centre over a typo.
+          return {
+            result:
+              `NOT FOUND. Emirates Post do not recognise "${asked}". Tell the customer plainly, in one line: nothing is showing for that number. ` +
+              `Ask them to check the digits, and say that an item posted very recently may not have been scanned in yet — trying again later is worth it. ` +
+              `Do NOT apologise for a system problem, do not offer to check again yourself, and do not invent a status.`,
+          };
+        }
+        return {
+          result:
+            `SHIPMENT ${found.trackingNumber}. Current status and full history, newest first. Show the CURRENT STATUS prominently, then the history as a short list — date, status, and location where there is one. ` +
+            `Write every date as DD-MM-YYYY exactly as given here. Use the Arabic wording when the conversation is in Arabic. Never add a step, a location or an estimated delivery date that is not below.\n` +
+            JSON.stringify(found),
+        };
+      } catch (err) {
+        if (err instanceof TrackingNotConfiguredError) {
+          // The same shape as the GSB no-credential branch: a tool that says what
+          // is missing beats a model that fills the gap from its own knowledge.
+          return {
+            result:
+              "TRACKING IS NOT CONNECTED in this environment, so there is nothing to look up and you must not pretend otherwise. " +
+              "Say that tracking is not available here yet and point them to Emirates Post's own page: " +
+              "English https://www.emiratespost.ae/all-services/track-a-package, Arabic https://www.emiratespost.ae/ar/all-services/track-a-package, or 600 599 999.",
+          };
+        }
+        log.error("tracking_read_failed", err as Error, { ...a, tool: name });
+        return {
+          result:
+            "THE TRACKING SERVICE DID NOT ANSWER. Say that you could not reach the tracking system just now — plainly, without a code or a reason they cannot act on — and offer to try again in a moment or point them to https://www.emiratespost.ae/all-services/track-a-package.",
+        };
+      }
+    }
 
     if (name === AUTHORITIES_TOOL || name === COMPANIES_TOOL || name === LICENCE_TOOL || name === MYBOXES_TOOL || name === MYCOMPANIES_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
