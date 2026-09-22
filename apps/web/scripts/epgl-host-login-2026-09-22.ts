@@ -63,9 +63,26 @@ import { eq } from "drizzle-orm";
 
 const SLUG = "epgl-dialog";
 
-/** EPGL's own sign-in pages, as they gave them to us on 22 September. */
+/**
+ * EPGL's own sign-in pages, as they gave them to us on 22 September.
+ *
+ * Staging moved the same afternoon, and the second address is the right one.
+ * `app.epgl.ae/s/login-epgl` is a page of the PRODUCTION org, so a token minted
+ * there is signed by the production certificate — which our staging does not
+ * hold and must not, since it can hold exactly one. The PreProd2 community is a
+ * different org, signing with the PreProd2 certificate that IS on staging, and
+ * their developer has already put the staging relay on it:
+ *
+ *   <script src="https://7xagents.7x-lab.com/dialog-relay.js"
+ *           data-domain=".epgl.ae" data-token-key="epglDialogToken"></script>
+ *
+ * (`data-domain` does nothing on a my.site.com host — the browser drops a cookie
+ * for a domain the page is not under, and the relay says so in the console. It
+ * costs nothing here: the popup hands the token to its opener directly, which is
+ * the path a sign-in actually uses.)
+ */
 const LOGIN_PAGE: Record<string, string> = {
-  staging: "https://app.epgl.ae/s/login-epgl?language=en_US",
+  staging: "https://epro--preprod2.sandbox.my.site.com/s/login/?language=en_US",
   production: "https://app.epgl.ae/s/login/?language=en_US",
 };
 
@@ -82,7 +99,8 @@ async function main() {
   const db = getDb();
   const [row] = await db.select().from(agents).where(eq(agents.slug, SLUG)).limit(1);
   if (!row) throw new Error(`No agent ${SLUG} in this database`);
-  const def = row.definition as any;
+  const def = row.definition as typeof row.definition & { hostLoginUrl?: string; allowedOrigins?: string[] };
+  let defChanged = false;
 
   /**
    * The popup returns by postMessage to its opener, and the widget only accepts
@@ -91,27 +109,43 @@ async function main() {
    * throw the token away, which is worse than not offering it.
    */
   if (HOST_LOGIN_URL) {
+    /**
+     * The popup hands the token back by postMessage, and the widget checks the
+     * SENDER'S ORIGIN against allowedOrigins before taking it — "source:
+     * dialog-host" is a convention, not a credential. A login URL whose origin
+     * is not on that list would sign the customer in and then have the token
+     * thrown away, which is worse than not offering sign-in at all.
+     *
+     * This used to refuse and tell the operator to add it. That is the wrong way
+     * round: choosing the login URL IS the decision, and leaving the two out of
+     * step is the only outcome nobody wants. It is added, and said out loud.
+     */
     const origin = new URL(HOST_LOGIN_URL).origin;
     const allowed: string[] = def.allowedOrigins ?? [];
-    if (!allowed.some((o) => { try { return new URL(o).origin === origin; } catch { return false; } })) {
-      throw new Error(
-        `${origin} is not in this agent's allowedOrigins (${allowed.join(", ") || "none"}) — ` +
-        `add it there first, or the token the sign-in returns will be refused`
-      );
+    const known = allowed.some((o) => { try { return new URL(o).origin === origin; } catch { return false; } });
+    if (!known) {
+      console.log(`  + allowedOrigins: ${origin}  (the sign-in popup posts from here; without it the token is refused)`);
+      def.allowedOrigins = [...allowed, origin];
+      defChanged = true;
     }
   }
 
   const current = def.hostLoginUrl ?? null;
   if (current === HOST_LOGIN_URL) {
-    console.log(`Already applied — hostLoginUrl is ${JSON.stringify(current)}`);
-    return;
+    console.log(`  (already) hostLoginUrl is ${JSON.stringify(current)}`);
+  } else {
+    console.log(`  hostLoginUrl: ${JSON.stringify(current)} -> ${JSON.stringify(HOST_LOGIN_URL)}`);
+    // Removed rather than set to null: the schema has it optional, and an
+    // explicit null is a value the parser has to tolerate for no reason.
+    if (HOST_LOGIN_URL) def.hostLoginUrl = HOST_LOGIN_URL;
+    else delete def.hostLoginUrl;
+    defChanged = true;
   }
-  console.log(`  hostLoginUrl: ${JSON.stringify(current)} -> ${JSON.stringify(HOST_LOGIN_URL)}`);
-  // Removed rather than set to null: the schema has it optional, and an explicit
-  // null is a value the parser has to tolerate for no reason.
-  if (HOST_LOGIN_URL) def.hostLoginUrl = HOST_LOGIN_URL;
-  else delete def.hostLoginUrl;
 
+  // Checked AFTER the origin, so a run that only has an origin to add still
+  // writes. An early return there left the login URL right and the origin
+  // missing, which is the one combination that silently discards the token.
+  if (!defChanged) { console.log("\nAlready applied — nothing to change."); return; }
   if (dryRun) {
     console.log("\n--dry-run: not written.");
     return;
