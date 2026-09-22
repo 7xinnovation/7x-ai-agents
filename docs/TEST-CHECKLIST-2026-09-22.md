@@ -18,6 +18,7 @@ Everything below is on **staging** and not yet on production.
 | 5 | Choose **bank transfer (VIBAN)** and finish | The confirmation email says EPGL will send you the Virtual IBAN | Email said only "Payment: Bank transfer" |
 | 6 | Check the status when nothing has changed | Says it hasn't moved, gives a realistic timeframe, offers something besides checking again | Same lone button every time |
 | 7 | Switch to Arabic and start a flow | Progress lines read «جارٍ التحقق من …», not «جارٍ جلب …» | — |
+| 8 | Upload **someone else's** Emirates ID for a partner or owner | Refused, naming who the licence says it should be. No option to make them a partner, and the panel's partner details do not change | Accepted; the panel showed the stranger as Partner 1, and a button offered to confirm it |
 
 ---
 
@@ -25,7 +26,7 @@ Everything below is on **staging** and not yet on production.
 
 | # | Do this | Should happen | Was |
 |---|---|---|---|
-| 8 | Switch to Arabic and ask for available PO Box numbers | The reply says «سأعرض لك», not «سأجلب» | Reviewer asked for this wording |
+| 9 | Switch to Arabic and ask for available PO Box numbers | The reply says «سأعرض لك», not «سأجلب» | Reviewer asked for this wording |
 
 ---
 
@@ -33,7 +34,7 @@ Everything below is on **staging** and not yet on production.
 
 | # | Do this | Should happen | Was |
 |---|---|---|---|
-| 9 | Submit a **new licence** and pay | Request stays in review — it does **not** jump to "Closed" | Went to Closed within seconds, unreviewed |
+| 10 | Submit a **new licence** and pay | Request stays in review — it does **not** jump to "Closed" | Went to Closed within seconds, unreviewed |
 
 This one is half ours. We no longer tell Salesforce a payment arrived when there
 is no payment advice to record it against, which is what tripped the close. The
