@@ -39,7 +39,13 @@
  * verification path exists. Setting this is a prerequisite, not the whole job.
  *
  * Idempotent. Run from apps/web:
- *   npx tsx scripts/epgl-host-login-2026-09-22.ts --target staging|production [--env <file>] [--dry-run]
+ *   npx tsx scripts/epgl-host-login-2026-09-22.ts --target staging|production [--clear] [--env <file>] [--dry-run]
+ *
+ * `--clear` puts it back to unset, which sends sign-in through our own UAE PASS
+ * popup again. Staging was reverted that way on 22 September: testers were
+ * mid-round there, staging's UAE PASS client is the sandbox (and
+ * UAEPASS_MOCK_ALLOWED is on), so our own popup is the thing that actually works
+ * for them today. Production keeps the host login.
  */
 import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
@@ -64,11 +70,12 @@ const LOGIN_PAGE: Record<string, string> = {
 };
 
 const target = process.argv[process.argv.indexOf("--target") + 1] ?? "";
-const HOST_LOGIN_URL = LOGIN_PAGE[target];
-if (!HOST_LOGIN_URL) {
+const clear = process.argv.includes("--clear");
+if (!LOGIN_PAGE[target]) {
   console.error(`Pass --target staging|production (got ${JSON.stringify(target)}).`);
   process.exit(1);
 }
+const HOST_LOGIN_URL = clear ? null : LOGIN_PAGE[target]!;
 const dryRun = process.argv.includes("--dry-run");
 
 async function main() {
@@ -83,21 +90,27 @@ async function main() {
    * whose origin is not in allowedOrigins would sign the customer in and then
    * throw the token away, which is worse than not offering it.
    */
-  const origin = new URL(HOST_LOGIN_URL).origin;
-  const allowed: string[] = def.allowedOrigins ?? [];
-  if (!allowed.some((o) => { try { return new URL(o).origin === origin; } catch { return false; } })) {
-    throw new Error(
-      `${origin} is not in this agent's allowedOrigins (${allowed.join(", ") || "none"}) — ` +
-      `add it there first, or the token the sign-in returns will be refused`
-    );
+  if (HOST_LOGIN_URL) {
+    const origin = new URL(HOST_LOGIN_URL).origin;
+    const allowed: string[] = def.allowedOrigins ?? [];
+    if (!allowed.some((o) => { try { return new URL(o).origin === origin; } catch { return false; } })) {
+      throw new Error(
+        `${origin} is not in this agent's allowedOrigins (${allowed.join(", ") || "none"}) — ` +
+        `add it there first, or the token the sign-in returns will be refused`
+      );
+    }
   }
 
-  if (def.hostLoginUrl === HOST_LOGIN_URL) {
-    console.log(`Already applied — hostLoginUrl is ${HOST_LOGIN_URL}`);
+  const current = def.hostLoginUrl ?? null;
+  if (current === HOST_LOGIN_URL) {
+    console.log(`Already applied — hostLoginUrl is ${JSON.stringify(current)}`);
     return;
   }
-  console.log(`  hostLoginUrl: ${JSON.stringify(def.hostLoginUrl ?? null)} -> ${HOST_LOGIN_URL}`);
-  def.hostLoginUrl = HOST_LOGIN_URL;
+  console.log(`  hostLoginUrl: ${JSON.stringify(current)} -> ${JSON.stringify(HOST_LOGIN_URL)}`);
+  // Removed rather than set to null: the schema has it optional, and an explicit
+  // null is a value the parser has to tolerate for no reason.
+  if (HOST_LOGIN_URL) def.hostLoginUrl = HOST_LOGIN_URL;
+  else delete def.hostLoginUrl;
 
   if (dryRun) {
     console.log("\n--dry-run: not written.");
