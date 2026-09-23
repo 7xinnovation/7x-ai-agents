@@ -125,6 +125,20 @@ console.log("\nThe production shipment, end to end");
   check("THE RECIPIENT'S NAME IS NOWHERE IN IT", !/CHELLIA|SAMIRA/i.test(json), json.slice(0, 200));
 }
 
+console.log("\nThe Arabic half, worded differently by each gateway");
+// Production says it with a dash where staging says it with a colon. Both
+// carry the name after the break; neither should leave a preposition dangling.
+{
+  const prod = normalise([{ trackingNumber: "RR1", lastStatus: { descriptionEn: "Delivered - Received  by :  CHELLIA SAMIRA", descriptionAr: "تم التسليم - تم الاستلام من جانب CHELLIA SAMIRA" }, events: [] }], "RR1")!;
+  check("the name goes from the Arabic too", !/CHELLIA|SAMIRA/i.test(prod.statusAr), prod.statusAr);
+  check("...and it is not left ending on a preposition", prod.statusAr === "تم التسليم", prod.statusAr);
+}
+{
+  // Staging's wording, which has no dash and no name after it: untouched.
+  const stg = normalise([{ trackingNumber: "CP1", lastStatus: { descriptionEn: "Delivered ", descriptionAr: "سُلِّمت إلى" }, events: [] }], "CP1")!;
+  check("an Arabic status with nothing appended is left alone", stg.statusAr === "سُلِّمت إلى", stg.statusAr);
+}
+
 console.log("\nAnd the answers that are not shipments");
 check("an empty array is 'not found', not a crash", normalise([], "CP175823258AE") === null);
 check("null is too", normalise(null, "CP175823258AE") === null);

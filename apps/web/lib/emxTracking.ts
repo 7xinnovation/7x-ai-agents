@@ -171,7 +171,23 @@ export function withoutNames(status: string): string {
 function arabicWithoutNames(ar: string, englishWasCut: boolean): string {
   const clean = String(ar ?? "").replace(/\s+/g, " ").trim();
   if (!englishWasCut) return clean;
-  const cut = clean.split(/[:：]/)[0]!.replace(/[\s,\-–—]+$/, "").trim();
+  /**
+   * A COLON, OR THE DASH THAT STANDS IN FOR ONE.
+   *
+   * Production's gateway words this event differently from staging's:
+   * "تم التسليم - تم الاستلام من جانب CHELLIA SAMIRA" — delivered, dash,
+   * "received by", then the name. Cutting at the colon alone removed the name
+   * (there is none to find) and left "تم التسليم - تم الاستلام من جانب": a
+   * sentence ending on a preposition with nothing after it, which reads as
+   * though the wording were broken.
+   *
+   * The part before the dash is the status; everything after it was about the
+   * person. This runs ONLY on an event whose English half we already know named
+   * someone, so an ordinary Arabic status that happens to be punctuated is
+   * never touched.
+   */
+  const head = clean.split(/[:：]/)[0]!.split(/\s+[-–—]\s+/)[0]!;
+  const cut = head.replace(/[\s,\-–—]+$/, "").trim();
   return cut || clean;
 }
 
