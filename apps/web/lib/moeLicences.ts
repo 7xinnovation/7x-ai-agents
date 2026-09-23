@@ -31,8 +31,16 @@
 import { createHmac } from "node:crypto";
 import { log } from "./logger";
 
-const TOKEN_PATH = "gateway/getAccessToken_MOEc/1.0/getAccessToken";
-const OWNER_PATH = "gateway/fetchLicenseDetailsByOwnerID_MOEc/1.0/getLicenseDetailsByOwnerID";
+/**
+ * The two constants that used to sit here named the government gateway's own
+ * services — `gateway/getAccessToken_MOEc/1.0/…` and
+ * `gateway/fetchLicenseDetailsByOwnerID_MOEc/1.0/…`. Nothing referenced them:
+ * the live paths are AUTH_PATH, BY_OWNER_PATH and BY_ERN_PATH further down, and
+ * they address EPGL's wrapper, which is the whole arrangement described above.
+ *
+ * Removed on 23 September rather than left as documentation, because dead code
+ * naming the one endpoint we are not allowed to call reads like permission.
+ */
 
 /** Their client allows 15s. We sit inside a chat turn, so we allow less. */
 const REQUEST_TIMEOUT_MS = 12_000;

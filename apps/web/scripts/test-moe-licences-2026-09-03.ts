@@ -256,10 +256,14 @@ const wrap = (entries: unknown[], statusCode = "100") => ({
 // 14. The government bus is not an acceptable base URL, whatever is pasted in.
 {
   __resetMoeCaches();
-  process.env.MOE_API_TOKEN = "test-token";
+  // Client credentials, since the bearer stopped being a pasted token: config()
+  // wants an id and a secret, and this asserted the old shape. The base URL is
+  // the thing under test either way.
+  process.env.MOE_API_CLIENT_ID = "test-client";
+  process.env.MOE_API_CLIENT_SECRET = "test-secret";
   process.env.MOE_API_BASE_URL = "https://integrate.gsb.government.ae/";
   check("a direct GSB base URL is refused", !moeConfigured());
-  process.env.MOE_API_BASE_URL = "https://stg.wayn.ae/services/digitalbox-portalapi";
+  process.env.MOE_API_BASE_URL = "https://api-stg.epgl.ae";
   check("the wrapper base URL is accepted", moeConfigured());
   delete process.env.MOE_API_BASE_URL;
   delete process.env.MOE_API_TOKEN;
