@@ -1,4 +1,4 @@
-import { sendEmail, isValidEmail, textToHtml, type EmailResult } from "./email";
+import { sendEmail, isValidEmail, textToHtml, type EmailResult, type EmailBrand } from "./email";
 
 /**
  * Internal ops notifications fired when a PO Box submission completes — mirrors
@@ -29,6 +29,17 @@ export async function notifyOpsForSubmission(input: {
   journeyKey: string;
   data: Record<string, unknown>;
   agentName: string;
+  /**
+   * The mark and colour for the one message here a CUSTOMER reads.
+   *
+   * Everything else on this page goes to an internal mailbox as plain text,
+   * where a logo would be decoration. The authorised-agent confirmation does
+   * not: it goes to the person being added to somebody's PO Box, it is the
+   * first and often only thing we ever send them, and it arrived unbranded
+   * beside confirmations that are not. Optional, so a caller that has no theme
+   * to hand still sends the email.
+   */
+  brand?: EmailBrand;
 }): Promise<OpsNotifyOutcome[]> {
   const { reference, data } = input;
   const out: OpsNotifyOutcome[] = [];
@@ -106,7 +117,7 @@ export async function notifyOpsForSubmission(input: {
         to: agentEmail,
         subject: `You have been added as an authorised agent on PO Box ${box || reference}`,
         text: body,
-        html: textToHtml(body, "Authorised agent confirmation"),
+        html: textToHtml(body, "Authorised agent confirmation", input.brand),
       }),
     });
   }

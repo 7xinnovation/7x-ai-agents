@@ -3327,6 +3327,9 @@ export async function POST(req: NextRequest) {
                 journeyKey: finalState.journeyKey ?? "",
                 data: finalState.data,
                 agentName: agent.definition.name,
+                // For the authorised-agent confirmation, which is the one message
+                // in there a customer reads. See the note on the parameter.
+                brand: emailBrand,
               });
               for (const o of outcomes) {
                 await audit({
