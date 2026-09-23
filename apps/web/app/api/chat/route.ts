@@ -140,6 +140,42 @@ const PULSE_DIRECTIVE =
   "If the customer then asks to RENT or asks for a NEW box, start the rental journey. Do NOT show them their existing boxes to choose from: that list is for renewing or managing one they already have, and it is not an answer to \"I want a new one\". " +
   "Use ONLY real data returned by tools — never invent boxes, dates, or fees.)";
 
+/**
+ * THE SAME MOMENT, FOR A COMPANY WITH A LICENCE RATHER THAN A PERSON WITH A BOX.
+ *
+ * The directive above is Emirates Post's, and it was the only one there was —
+ * so an EPGL applicant who signed in was shown, under their postal licence:
+ *
+ *   PO Boxes
+ *   No PO Boxes are currently showing on your Emirates Post account. If you hold
+ *   a box and it's not appearing here, let me know its number and emirate…
+ *
+ * followed by "Rent a new PO Box" as the first thing offered. The model was
+ * doing exactly as it was told: cover EVERY PO Box, say so when there are none,
+ * and always include renting one among the options. None of that is this
+ * service. EPGL licenses postal ACTIVITY — who may carry mail commercially —
+ * and a PO Box is a different Emirates Post product the applicant did not ask
+ * about and cannot buy here.
+ *
+ * Same shape as its neighbour, because the reasoning behind the shape holds:
+ * one line before any tool runs, so the customer is not watching a spinner
+ * through the lookups; then what is on the account; then what they can do.
+ */
+const EPGL_PULSE_DIRECTIVE =
+  "(System: the customer just signed in. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
+  "1) FIRST, before calling any tool, write ONE short line of greeting and say you are pulling their account up. It is the only thing they can see while the lookups run, so it must not wait on one. Use their name only if you have already been given it; never call a tool to find it. " +
+  "2) Then use your tools to read their company and its postal activity licence — the company lookup for a signed-in customer takes no argument and is the one to call first. " +
+  "3) Show a concise, scannable section titled \"Account Pulse\": the company name, its postal licence number, its trade licence number and expiry date, and the licence status. Then anything NEEDING ATTENTION — a licence expiring or expired, a renewal due, outstanding fees or approved penalties on file — stated plainly with the amount where there is one, and flagged first. A postal activity licence runs for a year, so an expiry inside the next two months is worth raising whether or not they asked. " +
+  "4) If completed or in-progress applications are on file, add a short \"Recent activity\" list written as something a person would recognise: what was applied for, and when. Keep a reference number only if it is one they might quote, in brackets at the end, never at the front. " +
+  "5) If their sign-in is not linked to a company, say so plainly and ask for the trade licence number so you can find them — do not present that as a prerequisite for helping. " +
+  "6) CLOSE with what they can do next: renew their postal activity licence, apply for a new one, check the status of an application, or ask a question. " +
+  /**
+   * The line that would have prevented the screenshot, said in the imperative
+   * rather than left to be inferred from the absence of a PO Box tool.
+   */
+  "NEVER MENTION PO BOXES. This assistant licenses postal ACTIVITY. Renting, renewing or managing a PO Box is a different Emirates Post service, it is not something you can do here, and a customer who came about their licence has not asked about one — do not list PO Boxes, do not report that they have none, and never offer to rent one. " +
+  "Use ONLY real data returned by tools — never invent a licence, a date, a status or a fee.)";
+
 // Internal directive fired when the customer completes payment in the gateway
 // window. The webhook (authoritative) has already advanced the case payment
 // state; this just has the agent acknowledge and finish the journey. Note the
@@ -1120,7 +1156,9 @@ export async function POST(req: NextRequest) {
   // Injected into the system prompt on EVERY authenticated turn, so both the
   // auto-pulse and a typed "show my account" never re-ask for a box number.
   let customerContext: string | undefined;
-  let pulseDirective = PULSE_DIRECTIVE;
+  // Emirates Post's pulse talks about PO Boxes, which is right for Emirates Post
+  // and wrong for a postal-activity licence. See EPGL_PULSE_DIRECTIVE.
+  let pulseDirective = agent.definition.slug === "epgl-dialog" ? EPGL_PULSE_DIRECTIVE : PULSE_DIRECTIVE;
   if (authenticated && userRef) {
     // EPGL: prefill the signed-in customer's company profile + EID + quarterly
     // figures from their Salesforce/IDEP company data (feedback FB-2/FB-3).
