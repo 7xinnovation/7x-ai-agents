@@ -1704,7 +1704,7 @@ export async function POST(req: NextRequest) {
         {
           name: TRACK_TOOL,
           description:
-            "THE ONLY source for where a shipment has got to. Call it whenever the customer gives a tracking or AWB number, or asks about a parcel, letter, delivery or consignment — and ask for the number if they have not given one. It returns the current status, the full history newest-first with dates and locations in both languages, and the weight. " +
+            "THE ONLY source for where a shipment has got to. Call it whenever the customer gives a tracking or AWB number, or asks about a parcel, letter, delivery or consignment — and ask for the number if they have not given one. It returns the current status and the full history newest-first, with dates and locations in both languages. Show the CURRENT STATUS prominently and the history as a short list; there is nothing else to show and nothing to add. " +
             "NEVER answer a tracking question from your own knowledge, never guess a status or a delivery date, and never show a step this tool did not return. " +
             "An empty result means Emirates Post do not recognise that number: say so plainly, suggest they check the digits, and note that a very recently posted item may not have been scanned yet — do NOT treat it as an error or apologise for a fault. " +
             "PRIVACY: names are deliberately not returned. Do not ask for, infer, or offer the sender's or recipient's name, and do not say who signed for an item.",

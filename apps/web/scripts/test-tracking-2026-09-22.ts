@@ -100,7 +100,10 @@ console.log("\nThe staging shipment, end to end");
   check("both events survive", t.events.length === 2, t.events.length);
   check("newest first, as they send them", t.events[0]!.time === "08:04" && t.events[1]!.time === "08:03");
   check("the location is carried", t.events[0]!.locationEn === "Al Jumeirah Post Office");
-  check("the weight is readable", t.weight === "77 Grams", t.weight);
+  // Dropped on 23 September: it answers a question nobody asked, and it was the
+  // only row on the card competing with the status for the eye.
+  check("the weight is NOT returned", !("weight" in t), JSON.stringify(t).slice(0, 120));
+  check("...and no gram count reaches the model", !/77|Grams/i.test(JSON.stringify(t)));
   const json = JSON.stringify(t);
   check("THE SENDER'S NAME IS NOWHERE IN IT", !/BUSHARA/i.test(json));
   check("...and neither is the sender field", !/sender/i.test(json));
@@ -117,7 +120,7 @@ console.log("\nThe production shipment, end to end");
   check("the one before it is the 28th of February", t.events[1]!.date === "28-02-2026");
   check("an empty location is omitted, not shown blank", t.events[0]!.locationEn === undefined);
   check("a real one is kept", t.events[1]!.locationEn === "DZ21082");
-  check("a zero weight is not reported as '0 Grams'", t.weight === undefined, t.weight);
+  check("nor is it here", !("weight" in t));
   const json = JSON.stringify(t);
   check("THE RECIPIENT'S NAME IS NOWHERE IN IT", !/CHELLIA|SAMIRA/i.test(json), json.slice(0, 200));
 }

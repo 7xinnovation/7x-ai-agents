@@ -67,7 +67,6 @@ export interface Tracking {
   statusAr: string;
   /** Newest first, as their gateway returns them. */
   events: TrackingEvent[];
-  weight?: string;
 }
 
 export class TrackingNotConfiguredError extends Error {
@@ -217,15 +216,21 @@ export function normalise(body: unknown, awb: string): Tracking | null {
   const statusAr = arabicWithoutNames(str(last.descriptionAr), statusEn !== lastRawEn) || events[0]?.statusAr || "";
   if (!statusEn && !statusAr && !events.length) return null;
 
-  const w = (row.weight ?? {}) as { value?: unknown; unit?: unknown };
-  const weight = typeof w.value === "number" && w.value > 0 ? `${w.value} ${str(w.unit) || "Grams"}` : undefined;
-
+  /**
+   * THE WEIGHT IS NOT WHY ANYONE IS ASKING.
+   *
+   * Their gateway returns it and the first version passed it through, so a
+   * customer asking where their parcel was got a card reading "Status:
+   * Delivered / Weight: 77 Grams". Dropped on 23 September: it answers a
+   * question nobody asked, and it is the only row competing with the status for
+   * the eye. Removed HERE rather than asked not to be shown — a field the model
+   * never sees is a field it cannot decide to render.
+   */
   return {
     trackingNumber: real(row.trackingNumber) ?? real(row.trackingReferenceNo) ?? awb,
     statusEn,
     statusAr,
     events,
-    weight,
   };
 }
 
