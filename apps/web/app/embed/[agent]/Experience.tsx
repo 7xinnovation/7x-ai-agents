@@ -1548,6 +1548,23 @@ export function Experience({
       const apply = (ev: any) => {
         if (ev.type === "session") {
           convId.current = ev.conversationId;
+          /**
+           * The session ended while they were away, and the header says so.
+           *
+           * Left unhandled, the widget would go on showing them as signed in
+           * while the server treated them as a stranger — the same "which am I?"
+           * the sign-out fix was about, pointing the other way.
+           */
+          if (ev.expired) {
+            uaePass.current = undefined;
+            nativeIdentity.current = false;
+            setAuthenticated(false);
+            setAuthReason(
+              locale === "ar"
+                ? "انتهت جلستك لعدم النشاط. يرجى تسجيل الدخول مرة أخرى للمتابعة."
+                : "Your session ended after a period of inactivity. Please sign in again to continue."
+            );
+          }
           try {
             window.localStorage.setItem(storageKey, ev.conversationId);
           } catch {

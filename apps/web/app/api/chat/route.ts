@@ -1280,6 +1280,20 @@ export async function POST(req: NextRequest) {
     customerContext =
       `${customerContext ?? ""}\nLANGUAGE CHANGED: the earlier messages in this conversation are in ${from}, and the customer has since switched to ${to}. Reply ONLY in ${to} from here — prose, buttons, cards, summaries, every part of it — and do not mirror the ${from} above. Everything already collected still stands; do not ask for any of it again.`.trim();
   }
+  /**
+   * AND THE REPLY SAYS SO, rather than quietly becoming a stranger.
+   *
+   * The session ended between their last message and this one. Everything they
+   * filled in is still on the case — only the identity went — so the worst
+   * possible answer is to start again as though nobody had been here.
+   */
+  if (session.expired) {
+    customerContext =
+      `${customerContext ?? ""}\nTHE CUSTOMER WAS SIGNED OUT BEFORE THIS MESSAGE, automatically, because the session had been ` +
+      `${session.expired === "idle" ? "idle too long" : "open too long"}. Say so in ONE short line before anything else — plainly, as a security measure and not as a fault of theirs or an error — ` +
+      `and ask them to sign in again to carry on. Everything they had already given is still here and must NOT be asked for again once they are back. ` +
+      `Until they sign in you cannot read their account, their boxes, their licences or anything else that needs identity: do not call those tools and do not guess at what they would return.`.trim();
+  }
   const effectiveMessage = isPulse
     ? pulseDirective
     : isPaymentSettled
@@ -2508,7 +2522,20 @@ export async function POST(req: NextRequest) {
         try { controller.enqueue(encoder.encode(": ping\n\n")); } catch { closed = true; }
       }, 15000);
       try {
-        send({ type: "session", conversationId: session.conversationId });
+        /**
+         * AND THE HEADER IS TOLD, on the same event it already listens to.
+         *
+         * A session that ends server-side while the widget still shows the
+         * customer as signed in is the inverse of FB-1485, where the header said
+         * signed out and the server had not agreed. Either way the customer
+         * cannot tell which they are, so the one request that ends a session
+         * carries the fact back with it.
+         */
+        send({
+          type: "session",
+          conversationId: session.conversationId,
+          ...(session.expired ? { expired: session.expired } : {}),
+        });
         if (isNewSession) {
           await emitEvent({ type: "conversation.started", ...a, attributes: { locale: body.locale } });
         }

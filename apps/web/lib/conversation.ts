@@ -26,6 +26,12 @@ export interface Session {
   authenticated: boolean;
   // External identity (e.g. UAE PASS sub) attached at sign-in, if any.
   userRef?: string;
+  /**
+   * Set when THIS request is the one that ended the session, so the turn can say
+   * so rather than silently behaving like a stranger. Absent on every ordinary
+   * request, including every one after it.
+   */
+  expired?: SessionExpiry;
 }
 
 /**
@@ -67,6 +73,65 @@ function readSessionToken(stored: string | null | undefined): {
  * migration to hold one string that only EPGL reads is not worth the schema.
  */
 export const VERIFIED_EID_KEY = "__verified_emirates_id";
+
+/**
+ * WHEN THIS CONVERSATION WAS SIGNED IN.
+ *
+ * "When I signed in using my UAE PASS from another machine, there is no way to
+ * log out of that machine — the active session token remains, with the ability
+ * for anyone using it to sign in to the agent using my credentials."
+ *
+ * Reported against Emirates Post and true of both agents. Signing out worked;
+ * what did not exist was an end to a session nobody signed out of. `authenticated`
+ * was set once and never cleared, the conversation id sits in that browser's
+ * localStorage, and so the next person at that screen resumed as the customer —
+ * with their verified Emirates ID, their boxes, and their company.
+ *
+ * Bookkeeping on the case, like the verified values above, so this needs no
+ * migration: a nullable column on `conversations` would say the same thing and
+ * cost a schema change on two live databases.
+ */
+export const AUTH_AT_KEY = "__authenticated_at";
+
+/**
+ * How long a signed-in session lasts, and why there are two answers.
+ *
+ * IDLE is the one that closes the hole reported: a customer walks away and the
+ * session goes with them. Thirty minutes is the ordinary figure for a government
+ * service and is long enough to read a document, find a licence number, or take
+ * a phone call mid-application.
+ *
+ * ABSOLUTE covers the case idle cannot: a machine somebody keeps using. Twelve
+ * hours is a working day — nobody's session survives to the next one.
+ *
+ * Both tunable, because a tester on a shared laptop and a customer on their own
+ * phone do not want the same number, and neither wants to wait for a deploy to
+ * change it.
+ */
+const minutes = (name: string, fallback: number): number => {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? raw * 60_000 : fallback * 60_000;
+};
+const IDLE_MS = minutes("SESSION_IDLE_MINUTES", 30);
+const MAX_MS = minutes("SESSION_MAX_MINUTES", 12 * 60);
+
+/** Why a session ended, for the audit trail and for what the customer is told. */
+export type SessionExpiry = "idle" | "max_age";
+
+export function sessionExpired(input: {
+  signedInAt?: Date | null;
+  lastActivityAt?: Date | null;
+  now?: number;
+}): SessionExpiry | null {
+  const now = input.now ?? Date.now();
+  // A session with no recorded sign-in time predates this and is judged on
+  // activity alone — better than treating every older conversation as expired
+  // the moment this ships.
+  if (input.signedInAt && now - input.signedInAt.getTime() > MAX_MS) return "max_age";
+  const last = input.lastActivityAt ?? input.signedInAt;
+  if (last && now - last.getTime() > IDLE_MS) return "idle";
+  return null;
+}
 
 /**
  * Remember the Emirates ID UAE PASS just verified.
@@ -217,6 +282,22 @@ export async function carrySessionForward(
  * keyed on, and leaving it behind after a sign-out would let the next person at
  * the same screen act as the last one.
  */
+/**
+ * The case as it stands, minus who was holding it.
+ *
+ * signOutConversation clears these in the database; this is the same removal on
+ * the object handed back to the turn that triggered it, which was read a moment
+ * BEFORE that clear and would otherwise carry the Emirates ID into the very
+ * request that expired the session.
+ */
+function withoutIdentity(state: CaseState): CaseState {
+  const data = { ...state.data };
+  delete data[VERIFIED_EID_KEY];
+  delete data[VERIFIED_ACCOUNT_KEY];
+  delete data[AUTH_AT_KEY];
+  return { ...state, data };
+}
+
 export async function signOutConversation(conversationId: string): Promise<void> {
   const db = getDb();
   await db
@@ -231,13 +312,24 @@ export async function signOutConversation(conversationId: string): Promise<void>
     // And the account it resolved to, for the same reason: it is the other way
     // to reach the same company records.
     delete data[VERIFIED_ACCOUNT_KEY];
+    delete data[AUTH_AT_KEY];
     return { ...st, data };
   }).catch(() => undefined);
 }
 
 /** Mark a conversation as authenticated and record the external identity (e.g. UAE PASS sub). */
 export async function markAuthenticated(conversationId: string, userRef: string) {
-  await getDb().update(conversations).set({ authenticated: true, userRef }).where(eq(conversations.id, conversationId));
+  const db = getDb();
+  await db.update(conversations).set({ authenticated: true, userRef }).where(eq(conversations.id, conversationId));
+  // The clock the absolute limit runs on. Best-effort: a sign-in that succeeded
+  // must not fail because a timestamp could not be written, and a session with
+  // no stamp still expires on idle.
+  try {
+    const c = await db.query.cases.findFirst({ where: eq(cases.conversationId, conversationId) });
+    if (c) await mutateCase(c.id, (st) => ({ ...st, data: { ...st.data, [AUTH_AT_KEY]: new Date().toISOString() } }));
+  } catch {
+    /* see above */
+  }
 }
 
 /**
@@ -441,22 +533,58 @@ export async function getOrCreateSession(input: {
       }
       const caseRow = await db.query.cases.findFirst({ where: eq(cases.conversationId, conv.id) });
       const history = await db
-        .select({ role: messages.role, content: messages.content })
+        .select({ role: messages.role, content: messages.content, at: messages.createdAt })
         .from(messages)
         .where(eq(messages.conversationId, conv.id))
         .orderBy(asc(messages.createdAt));
-      const stored = readSessionToken(conv.sessionToken);
+
+      /**
+       * AND A SESSION NOBODY SIGNED OUT OF STILL ENDS.
+       *
+       * The whole of the reported problem is above this line: `effectiveAuth`
+       * only ever goes up. Once signed in, a conversation stayed signed in for
+       * good, and its id sits in that browser's localStorage — so the next
+       * person at that machine picked up the customer's verified identity.
+       *
+       * The APPLICATION is not touched. Only who is holding it: the token, the
+       * flag, the identity and the verified values go, exactly as a deliberate
+       * sign-out clears them, and everything they had filled in is still there
+       * when they sign in again.
+       */
+      let expiredAs: SessionExpiry | null = null;
+      if (effectiveAuth) {
+        const stampedAt = (caseRow?.state as CaseState | undefined)?.data?.[AUTH_AT_KEY];
+        expiredAs = sessionExpired({
+          signedInAt: typeof stampedAt === "string" ? new Date(stampedAt) : conv.createdAt,
+          lastActivityAt: history.at(-1)?.at ?? conv.createdAt,
+        });
+        if (expiredAs) {
+          await signOutConversation(conv.id).catch(() => undefined);
+          await audit({
+            agentId: input.agentId,
+            conversationId: conv.id,
+            actor: "system",
+            action: "session_expired",
+            payload: { reason: expiredAs },
+          }).catch(() => undefined);
+        }
+      }
+      const stored = expiredAs ? {} : readSessionToken(conv.sessionToken);
       return {
         conversationId: conv.id,
         caseId: caseRow!.id,
-        state: caseRow!.state,
+        state: expiredAs ? withoutIdentity(caseRow!.state) : caseRow!.state,
         history: history
           .filter((m) => m.role === "user" || m.role === "assistant")
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         sessionToken: stored.token,
         sessionTokenKind: stored.kind,
-        authenticated: effectiveAuth,
-        userRef: input.userRef ?? conv.userRef ?? undefined,
+        authenticated: effectiveAuth && !expiredAs,
+        // The identity goes with the session. Honouring the client's userRef here
+        // would hand the next person the customer's subject back on the very
+        // request that expired it.
+        userRef: expiredAs ? undefined : input.userRef ?? conv.userRef ?? undefined,
+        expired: expiredAs ?? undefined,
       };
     }
   }
