@@ -156,10 +156,38 @@ export function textToHtml(text: string, heading?: string, brand?: EmailBrand): 
    * here can reintroduce markup: `&` is already `&amp;`, so a query string
    * survives, and `<` can no longer appear at all.
    */
-  const link = (escaped: string) =>
-    escaped.replace(/https?:\/\/[^\s<>"]+/g, (u) =>
-      `<a href="${u}" style="color:#1330F0;word-break:break-all">${u}</a>`
-    );
+  /**
+   * AND A LINK THAT WAS GIVEN A NAME KEEPS IT.
+   *
+   * "In the chat, Download receipt shows as a clean, shortened link label. In
+   * the confirmation email, the same link instead shows the full raw 7xagents
+   * URL" — EPGL, 22 September. Both were true: the email is built from plain
+   * text and the only rule here was "make a URL clickable", which can do nothing
+   * but show the URL.
+   *
+   * A markdown link is matched FIRST and rendered with its label, so
+   * `[Download receipt](https://…)` reads as it does in the chat. Everything
+   * else still falls to the bare-URL rule below — a link nobody named has
+   * nothing to show but itself.
+   */
+  const MD_LINK = /\[([^\]\n]{1,80})\]\((https?:\/\/[^)\s]+)\)/g;
+  const anchor = (href: string, label: string) =>
+    `<a href="${href}" style="color:#1330F0;word-break:break-all">${label}</a>`;
+  const link = (escaped: string) => {
+    // Escaping has already run, so `<` cannot appear and `&` is `&amp;` — the
+    // patterns below match only what escaping leaves behind and can therefore
+    // not reintroduce markup. The href is the same escaped text as the label.
+    const named: string[] = [];
+    const held = escaped.replace(MD_LINK, (_m, label: string, href: string) => {
+      named.push(anchor(href, label));
+      // A placeholder the bare-URL rule cannot match, and escaping cannot have
+      // produced: the URL is out of the string while that rule runs.
+      return `\u0000LINK${named.length - 1}\u0000`;
+    });
+    return held
+      .replace(/https?:\/\/[^\s<>"]+/g, (u) => anchor(u, u))
+      .replace(/\u0000LINK(\d+)\u0000/g, (_m, i: string) => named[Number(i)] ?? "");
+  };
   /**
    * A "Label: value" line, in ANY script.
    *

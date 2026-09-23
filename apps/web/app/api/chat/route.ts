@@ -12,7 +12,7 @@ import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSes
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
 import { notifyOpsForSubmission } from "@/lib/opsNotify";
-import { completionEmail, completionRecipient } from "@/lib/completionEmail";
+import { completionEmail, completionRecipient, plainLinks } from "@/lib/completionEmail";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
@@ -3700,7 +3700,10 @@ export async function POST(req: NextRequest) {
               const res = await sendEmail({
                 to: emailTo,
                 subject: mail.subject,
-                text: mail.text,
+                // The HTML half renders a named link with its name; the plain
+                // half has to spell the address out, or a text-only client is
+                // handed a link it cannot follow.
+                text: plainLinks(mail.text),
                 html: textToHtml(mail.text, mail.subject, emailBrand),
               });
               await audit({

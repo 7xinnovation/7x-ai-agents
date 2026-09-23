@@ -29,7 +29,15 @@ const CONTROL_FENCE = /^[ \t]*```[ \t]*(cards|upload|buttons|toggles|map|locate|
 const SUMMARY_FENCE = /^[ \t]*```[ \t]*summary[ \t]*$/i;
 const ANY_FENCE = /^[ \t]*```/;
 
-/** `[label](href)` → label plus a usable address; relative hrefs are absolutised. */
+/**
+ * `[label](href)` → label plus a usable address; relative hrefs are absolutised.
+ *
+ * Exported since 22 September as `plainLinks`: the email body now carries
+ * markdown links so the HTML half can show a label instead of ninety characters
+ * of URL, and the PLAIN half has to put the address back. A text-only client
+ * that was shown `[Download receipt](…)` and nothing else would have been given
+ * a link it cannot follow.
+ */
 function links(line: string, baseUrl?: string | null): string {
   return line.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label: string, href: string) => {
     const abs = href.startsWith("/") && baseUrl ? `${baseUrl.replace(/\/$/, "")}${href}` : href;
@@ -51,6 +59,8 @@ function inlineText(line: string, baseUrl?: string | null): string {
  * fenced block is a control (a button, an upload slot, a payment widget) and is
  * dropped: an email cannot honour a tap.
  */
+export const plainLinks = links;
+
 export function plainFromReply(text: string, baseUrl?: string | null): string {
   const lines = text.split("\n");
   const out: string[] = [];
@@ -311,7 +321,21 @@ export function completionEmail(input: CompletionEmailInput): { subject: string;
   const rows = card?.rows.length ? card.rows : summaryRows(input.facts, input.locale);
   const headline = card?.title?.trim() || (input.facts.payment.status === "paid" ? s.confirmed : s.submitted);
 
-  const link = input.receiptPath ? `${s.receipt}: ${base ? `${base}${input.receiptPath}` : input.receiptPath}` : "";
+  /**
+   * NAMED, so the email reads as the chat did.
+   *
+   * It was `"Download your receipt: https://…"`, and textToHtml could only turn
+   * the address into an anchor showing itself — ninety characters of URL in a
+   * table cell, wrapped mid-token. EPGL raised it on 22 September beside the
+   * chat, where the same link is a two-word label.
+   *
+   * Markdown here, because that is what the email renderer now understands and
+   * what the plain-text half already knew how to flatten: `links()` turns it
+   * back into "label: address" for a client that shows no HTML, so the address
+   * is never actually lost.
+   */
+  const receiptHref = input.receiptPath ? (base ? `${base}${input.receiptPath}` : input.receiptPath) : "";
+  const link = receiptHref ? `[${s.receipt}](${receiptHref})` : "";
   /**
    * The receipt, as facts rather than as an errand.
    *
