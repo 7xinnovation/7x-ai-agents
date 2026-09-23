@@ -139,17 +139,38 @@ const SUMMARY_FIELDS: { key: string; en: string; ar: string }[] = [
   { key: "region", en: "Region", ar: "المنطقة" },
 ];
 
+/**
+ * The words a customer reads, against every value the case might hold.
+ *
+ * `gateway` is the one that mattered: it is what the EPGL journey records when
+ * somebody pays by card — "record it with collect_field(payment_method,
+ * gateway)" — and the receipt block is handed `payment_method` directly. So a
+ * paid renewal confirmation read "Payment method: gateway", which is our
+ * plumbing talking to itself in an email to a customer who paid AED 100,700.
+ */
 const PAY_METHOD: Record<string, { en: string; ar: string }> = {
   viban: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي (آيبان افتراضي)" },
   card: { en: "Card payment", ar: "الدفع بالبطاقة" },
+  gateway: { en: "Card payment", ar: "الدفع بالبطاقة" },
+  ngenius: { en: "Card payment", ar: "الدفع بالبطاقة" },
+  "bank transfer": { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي (آيبان افتراضي)" },
+  bank_transfer: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي (آيبان افتراضي)" },
 };
 
-/** "card" as the customer would read it, in their language. */
+/**
+ * "card" as the customer would read it, in their language.
+ *
+ * An unknown value yields NOTHING rather than itself. Echoing it is how
+ * "gateway" reached a customer, and the line it fills is optional — a receipt
+ * that does not name the method is complete, while one naming an internal token
+ * is not. A new payment route added later is silent here until somebody gives
+ * it words, which is the safe way round.
+ */
 export function payMethodLabel(method: string | null | undefined, locale?: string): string {
   const key = String(method ?? "").trim().toLowerCase();
   if (!key) return "";
   const known = PAY_METHOD[key];
-  return known ? (locale === "ar" ? known.ar : known.en) : String(method).trim();
+  return known ? (locale === "ar" ? known.ar : known.en) : "";
 }
 
 /** An amount the way each language writes one: "AED 1,000.00" / "1,000.00 درهم". */
