@@ -3,6 +3,7 @@ import { getDb, payments, cases, agents, conversations } from "@dialog/db";
 import { and, eq } from "drizzle-orm";
 import type { CaseState } from "@dialog/config";
 import { receiptFacts } from "@/lib/receiptFacts";
+import { emiratesPostInvoice } from "@/lib/epInvoice";
 
 export const runtime = "nodejs";
 
@@ -84,6 +85,47 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ refe
   if (!pay) return NextResponse.json({ error: "receipt_not_found" }, { status: 404 });
 
   const agent = pay.agentId ? await db.query.agents.findFirst({ where: eq(agents.id, pay.agentId) }) : null;
+
+  /**
+   * EMIRATES POST ISSUE THE INVOICE. WE WERE PRINTING A SECOND DOCUMENT.
+   *
+   * Asked for on 24 September: show their invoice rather than the receipt we
+   * render. They have one — `GET {usersBase}/api/v1/Invoice` — and the reference
+   * it wants is the one this route is already keyed on: `payments.reference`
+   * holds their payment GUID for a PO Box journey, the same value their
+   * Rental/UpdatePayment takes.
+   *
+   * Checked against staging rather than read off the spec, because the spec
+   * declares the 200 body as an empty object:
+   *
+   *   IsFile=true   -> application/pdf, the invoice itself
+   *   IsFile=false  -> {"message":"...","payload":"<base64 of the same PDF>"}
+   *   Type          -> ignored; the same PDF comes back for RENT and RENEWAL,
+   *                    and for no Type at all, so none is sent
+   *   unknown ref   -> HTTP 500, not 404
+   *
+   * That last one is why any non-200 falls through to our own receipt instead of
+   * being reported: a customer who has paid must always be handed something.
+   *
+   * AND THE AUTHORISATION STAYS OURS. Their endpoint takes no credential — a
+   * payment reference is the whole of it — so the conversation check above is
+   * the only thing standing between a GUID and somebody's invoice. It runs
+   * first, deliberately.
+   */
+  if (agent?.definition.tenantSlug === "nxn") {
+    const invoice = await emiratesPostInvoice(agent.id, agent.definition.activeEnvironment ?? "production", reference);
+    if (invoice) {
+      return new NextResponse(invoice as BodyInit, {
+        headers: {
+          "Content-Type": "application/pdf",
+          // Shown in the browser rather than dropped in Downloads; the filename
+          // is what a save gives it either way.
+          "Content-Disposition": `inline; filename="emirates-post-invoice-${reference}.pdf"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+  }
   const caseRow = pay.caseId ? await db.query.cases.findFirst({ where: eq(cases.id, pay.caseId) }) : null;
   const conv = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) });
   const state = (caseRow?.state ?? null) as CaseState | null;
