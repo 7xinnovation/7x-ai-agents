@@ -16,6 +16,18 @@ export interface EmailInput {
   subject: string;
   text: string;
   html?: string;
+  /**
+   * WHOSE EMAIL THIS IS, so it can be sent from their address.
+   *
+   * EMAIL_FROM is one setting and both agents send through it, so switching
+   * EPGL to licensing.department@epg.ae would have put Emirates Post's mail on
+   * it too. That is the same shape of mistake as the host-token key checking
+   * the wrong host's token, and it is cheaper to prevent than to explain.
+   *
+   * Resolves EMAIL_FROM_<TENANT> and falls back to the shared EMAIL_FROM, so a
+   * deployment that has not split its senders behaves exactly as before.
+   */
+  tenant?: string;
 }
 
 export interface EmailResult {
@@ -34,9 +46,28 @@ export function emailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY || process.env.EMAIL_WEBHOOK_URL);
 }
 
+/**
+ * Where email is sent from, for one tenant.
+ *
+ * `EMAIL_FROM_<TENANT>` wins; the unsuffixed name is the shared default. Both
+ * spellings of the default are accepted because the deployment has used either.
+ * The last resort is Resend's sandbox sender, which can ONLY deliver to the
+ * Resend account owner — so a real verified sending domain has to be configured
+ * before any of this reaches a customer.
+ */
+export function senderFor(tenant?: string): string {
+  const scoped = tenant ? process.env[`EMAIL_FROM_${tenant.toUpperCase()}`] : undefined;
+  return (
+    scoped?.trim() ||
+    process.env.EMAIL_FROM ||
+    process.env.NOTIFICATION_FROM_EMAIL ||
+    "Dialog <onboarding@resend.dev>"
+  );
+}
+
 /** Where email would be sent from, for diagnostics. */
-export function emailSender(): string {
-  return process.env.EMAIL_FROM || process.env.NOTIFICATION_FROM_EMAIL || "Dialog <onboarding@resend.dev>";
+export function emailSender(tenant?: string): string {
+  return senderFor(tenant);
 }
 
 export async function sendEmail(input: EmailInput): Promise<EmailResult> {
@@ -47,8 +78,7 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
   // alias so either spelling works in the deployment environment. The fallback is
   // Resend's sandbox sender, which can ONLY deliver to the Resend account owner —
   // so a real verified sending domain must be configured for customer email.
-  const from =
-    process.env.EMAIL_FROM || process.env.NOTIFICATION_FROM_EMAIL || "Dialog <onboarding@resend.dev>";
+  const from = senderFor(input.tenant);
 
   try {
     if (process.env.RESEND_API_KEY) {

@@ -2458,7 +2458,13 @@ export async function POST(req: NextRequest) {
     const bodyText = String(input.body ?? "");
     // Sent as both: the text part unchanged, plus an HTML rendering so the details
     // read as details rather than as one undifferentiated block.
-    const res = await sendEmail({ to, subject, text: bodyText, html: textToHtml(bodyText, subject, emailBrand) });
+    const res = await sendEmail({
+      to,
+      subject,
+      text: bodyText,
+      html: textToHtml(bodyText, subject, emailBrand),
+      tenant: agent.definition.tenantSlug,
+    });
     // So the completion email below does not arrive on top of this one.
     if (res.ok) emailToolSent = true;
     await audit({ ...a, actor: "agent", action: res.ok ? "email_sent" : "email_send_failed", payload: { to, subject, reason: res.reason } });
@@ -3350,6 +3356,7 @@ export async function POST(req: NextRequest) {
                 // For the authorised-agent confirmation, which is the one message
                 // in there a customer reads. See the note on the parameter.
                 brand: emailBrand,
+                tenant: agent.definition.tenantSlug,
               });
               for (const o of outcomes) {
                 await audit({
@@ -3763,6 +3770,7 @@ export async function POST(req: NextRequest) {
               const res = await sendEmail({
                 to: emailTo,
                 subject: mail.subject,
+                tenant: agent.definition.tenantSlug,
                 // The HTML half renders a named link with its name; the plain
                 // half has to spell the address out, or a text-only client is
                 // handed a link it cannot follow.

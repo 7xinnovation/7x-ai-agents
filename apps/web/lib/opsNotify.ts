@@ -40,6 +40,8 @@ export async function notifyOpsForSubmission(input: {
    * to hand still sends the email.
    */
   brand?: EmailBrand;
+  /** Whose address these go out from. See EmailInput.tenant. */
+  tenant?: string;
 }): Promise<OpsNotifyOutcome[]> {
   const { reference, data } = input;
   const out: OpsNotifyOutcome[] = [];
@@ -73,7 +75,7 @@ export async function notifyOpsForSubmission(input: {
       to: to || undefined,
       trackingRef,
       result: to
-        ? await sendEmail({ to, subject: `[${input.agentName}] Key delivery request ${trackingRef} (case ${reference})`, text: body })
+        ? await sendEmail({ tenant: input.tenant, to, subject: `[${input.agentName}] Key delivery request ${trackingRef} (case ${reference})`, text: body })
         : { ok: false, reason: "recipient_not_configured" },
     });
   }
@@ -114,6 +116,7 @@ export async function notifyOpsForSubmission(input: {
       kind: "authorised_agent",
       to: agentEmail,
       result: await sendEmail({
+        tenant: input.tenant,
         to: agentEmail,
         subject: `You have been added as an authorised agent on PO Box ${box || reference}`,
         text: body,
@@ -164,7 +167,7 @@ export async function notifyOpsForSubmission(input: {
       kind: "viban_request",
       to: to || undefined,
       result: to
-        ? await sendEmail({ to, subject: `[${input.agentName}] Virtual IBAN request — licence request ${reference}`, text: body })
+        ? await sendEmail({ tenant: input.tenant, to, subject: `[${input.agentName}] Virtual IBAN request — licence request ${reference}`, text: body })
         : { ok: false, reason: "recipient_not_configured" },
     });
   }
@@ -185,7 +188,7 @@ export async function notifyOpsForSubmission(input: {
       kind: "home_delivery",
       to: to || undefined,
       result: to
-        ? await sendEmail({ to, subject: `[${input.agentName}] MyHome delivery request ${reference}`, text: body })
+        ? await sendEmail({ tenant: input.tenant, to, subject: `[${input.agentName}] MyHome delivery request ${reference}`, text: body })
         : { ok: false, reason: "recipient_not_configured" },
     });
   }
