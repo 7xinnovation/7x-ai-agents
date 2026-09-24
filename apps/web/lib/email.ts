@@ -3,6 +3,7 @@ import { log } from "./logger";
 /**
  * Transactional email sender (customer confirmations/receipts + internal ops
  * notifications). Providers, in order of precedence:
+ *   - SENDGRID_API_KEY (+ EMAIL_FROM): sends via SendGrid's v3 API (no SDK).
  *   - RESEND_API_KEY (+ EMAIL_FROM): sends via the Resend HTTPS API (no SDK).
  *   - EMAIL_WEBHOOK_URL: POSTs {to, subject, text, html} as JSON to a relay the
  *     ops team controls (e.g. a Power Automate / internal SMTP bridge).
@@ -55,8 +56,8 @@ export function isValidEmail(addr: string): boolean {
 }
 
 export function emailConfigured(tenant?: string): boolean {
-  const { resendKey, webhookUrl } = providerFor(tenant);
-  return Boolean(resendKey || webhookUrl);
+  const { resendKey, sendgridKey, webhookUrl } = providerFor(tenant);
+  return Boolean(resendKey || sendgridKey || webhookUrl);
 }
 
 /**
@@ -84,21 +85,42 @@ export function emailSender(tenant?: string): string {
 }
 
 /** The provider credentials for one tenant, taken as a set. See the note above. */
-export function providerFor(tenant?: string): { resendKey?: string; webhookUrl?: string; from: string; own: boolean } {
+export function providerFor(tenant?: string): {
+  resendKey?: string;
+  sendgridKey?: string;
+  webhookUrl?: string;
+  from: string;
+  own: boolean;
+} {
   const suffix = tenant ? `_${tenant.toUpperCase()}` : "";
   if (suffix) {
-    const key = process.env[`RESEND_API_KEY${suffix}`]?.trim();
+    const resend = process.env[`RESEND_API_KEY${suffix}`]?.trim();
+    const sendgrid = process.env[`SENDGRID_API_KEY${suffix}`]?.trim();
     const hook = process.env[`EMAIL_WEBHOOK_URL${suffix}`]?.trim();
-    if (key || hook) {
-      return { resendKey: key, webhookUrl: hook, from: senderFor(tenant), own: true };
+    if (resend || sendgrid || hook) {
+      return { resendKey: resend, sendgridKey: sendgrid, webhookUrl: hook, from: senderFor(tenant), own: true };
     }
   }
   return {
     resendKey: process.env.RESEND_API_KEY,
+    sendgridKey: process.env.SENDGRID_API_KEY,
     webhookUrl: process.env.EMAIL_WEBHOOK_URL,
     from: senderFor(tenant),
     own: false,
   };
+}
+
+/**
+ * `Name <addr@host>` split into the two fields SendGrid wants.
+ *
+ * Resend takes the whole string; SendGrid takes an object and rejects a
+ * display name smuggled into the address. A bare address is a bare address.
+ */
+export function splitSender(from: string): { email: string; name?: string } {
+  const m = /^\s*(.*?)\s*<\s*([^<>\s]+)\s*>\s*$/.exec(from);
+  if (!m) return { email: from.trim() };
+  const name = m[1]!.replace(/^"|"$/g, "").trim();
+  return name ? { email: m[2]!, name } : { email: m[2]! };
 }
 
 export async function sendEmail(input: EmailInput): Promise<EmailResult> {
@@ -109,7 +131,7 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
   // alias so either spelling works in the deployment environment. The fallback is
   // Resend's sandbox sender, which can ONLY deliver to the Resend account owner —
   // so a real verified sending domain must be configured for customer email.
-  const { resendKey, webhookUrl, from, own } = providerFor(input.tenant);
+  const { resendKey, sendgridKey, webhookUrl, from, own } = providerFor(input.tenant);
   /**
    * A tenant sending from its own address through the SHARED account would be
    * signing our mail with their name. Refused rather than sent: their recipients
@@ -122,6 +144,37 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
   }
 
   try {
+    /**
+     * SendGrid first where a tenant has one, because a tenant that brought its
+     * own account brought it to be used. EPGL send from noreply@epg.ae through
+     * their SendGrid; a 202 with an X-Message-Id is the success, and the body
+     * is empty.
+     */
+    if (sendgridKey) {
+      const sender = splitSender(from);
+      const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sendgridKey}` },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: to }] }],
+          from: sender,
+          subject: input.subject,
+          content: [
+            { type: "text/plain", value: input.text },
+            // Order matters to SendGrid: text/plain must precede text/html, and
+            // it rejects the pair the other way round.
+            ...(input.html ? [{ type: "text/html", value: input.html }] : []),
+          ],
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 300);
+        log.error("email_send_failed", new Error(`sendgrid ${res.status}`), { to, body });
+        return { ok: false, reason: `provider_error_${res.status}` };
+      }
+      return { ok: true, id: res.headers.get("x-message-id") ?? undefined };
+    }
+
     if (resendKey) {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",

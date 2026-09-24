@@ -11,7 +11,7 @@
  * Run from apps/web:  npx tsx scripts/test-sender-per-tenant-2026-09-24.ts
  */
 import { readFileSync } from "node:fs";
-import { emailConfigured, providerFor, senderFor } from "../lib/email";
+import { emailConfigured, providerFor, senderFor, splitSender } from "../lib/email";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -22,6 +22,7 @@ const reset = () => {
   for (const k of [
     "EMAIL_FROM", "NOTIFICATION_FROM_EMAIL", "EMAIL_FROM_EPGL", "EMAIL_FROM_NXN",
     "RESEND_API_KEY", "RESEND_API_KEY_EPGL", "EMAIL_WEBHOOK_URL", "EMAIL_WEBHOOK_URL_EPGL",
+    "SENDGRID_API_KEY", "SENDGRID_API_KEY_EPGL",
   ]) delete process.env[k];
 };
 
@@ -83,6 +84,27 @@ console.log("\nAn entity that sends from its own address sends through its own s
   check("their address on our account is refused, not sent", providerFor("epgl").own === false);
   check("...and email is still 'configured' for everyone else", emailConfigured("nxn"));
 }
+
+console.log("\nEPGL's own SendGrid account");
+{
+  reset();
+  process.env.RESEND_API_KEY = "ours";
+  process.env.EMAIL_FROM = "Agents <no-reply@7x-lab.com>";
+  process.env.SENDGRID_API_KEY_EPGL = "SG.theirs";
+  process.env.EMAIL_FROM_EPGL = "EPGL Licensing <noreply@epg.ae>";
+  check("EPGL goes out through their SendGrid", providerFor("epgl").sendgridKey === "SG.theirs");
+  check("...and not through our Resend", providerFor("epgl").resendKey === undefined);
+  check("Emirates Post is untouched", providerFor("nxn").resendKey === "ours" && providerFor("nxn").sendgridKey === undefined);
+  check("email counts as configured for both", emailConfigured("epgl") && emailConfigured("nxn"));
+}
+
+console.log("\nThe sender, split the way SendGrid wants it");
+// Resend takes the whole string; SendGrid takes an object and rejects a display
+// name smuggled into the address.
+check("name and address", JSON.stringify(splitSender("EPGL Licensing <noreply@epg.ae>")) === JSON.stringify({ email: "noreply@epg.ae", name: "EPGL Licensing" }));
+check("a bare address stays bare", JSON.stringify(splitSender("noreply@epg.ae")) === JSON.stringify({ email: "noreply@epg.ae" }));
+check("quotes around the name are dropped", splitSender('"EPGL, Licensing" <noreply@epg.ae>').name === "EPGL, Licensing");
+check("an empty name is not sent as one", splitSender("<noreply@epg.ae>").name === undefined);
 
 console.log("\nEvery send says whose it is");
 const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
