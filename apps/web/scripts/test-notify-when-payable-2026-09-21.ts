@@ -34,14 +34,31 @@ console.log("\nAsking whether there is anything to mark paid");
 check("there is a check", /export async function paymentAdviceExists/.test(pay));
 check("it reads the payment advice object", /FROM EPG_Transaction__c WHERE EPG_License_Request__c/.test(pay));
 check("the id is shape-checked before it is substituted", /if \(!SF_ID\.test\(id\)\) return null;/.test(pay));
-check("an unanswerable question is not a yes", /return null;\s*\n\s*\}\s*\n\}/.test(pay) && /advice !== true/.test(pay));
+check("an unanswerable question answers null, not false", /return null;/.test(pay));
 
-console.log("\nBoth paths that notify are gated");
-check("the webhook / sweep path", /const advice = await paymentAdviceExists\(agent\.id, env, licenseRequestId\)/.test(pay));
-check("the at-submit path", /const advice = await paymentAdviceExists\(agent\.id, env, reference\)/.test(route));
+/**
+ * REVERSED ON 24 SEPTEMBER, deliberately.
+ *
+ * Holding the notification back stopped their workflow closing an unreviewed
+ * application, and it bought the wrong thing: a request that had been PAID sat
+ * at "Under document review" for ever, because Salesforce was never told the
+ * money arrived. The status the applicant needs is Payment Verified, and the
+ * notification is what produces it.
+ *
+ * The premature close is EPGL's own Payment Verified -> Closed automation. That
+ * is theirs to gate on a review; withholding a true fact from their system of
+ * record was never our way to gate it. A payment nobody can reconcile is worse
+ * than a status that moves too fast.
+ *
+ * The advice is still READ — it is the difference between marking an invoice
+ * paid and reporting a payment against nothing — and recorded on the audit.
+ */
+console.log("\nBoth paths notify, and record what they found");
+check("the webhook / sweep path still asks", /const advice = await paymentAdviceExists\(agent\.id, env, licenseRequestId\)/.test(pay));
+check("the at-submit path still asks", /const advice = await paymentAdviceExists\(agent\.id, env, reference\)/.test(route));
 for (const [what, src] of [["the first", pay], ["the second", route]] as const) {
-  check(`${what} records why it held off`, /epgl_payment_notify_deferred/.test(src));
-  check(`${what} distinguishes "none yet" from "could not tell"`, /could not read the payment advice/.test(src) && /no payment advice raised yet/.test(src));
+  check(`${what} no longer holds off`, !/epgl_payment_notify_deferred/.test(src));
+  check(`${what} records whether there was an advice`, /adviceExisted: advice/.test(src));
 }
 
 console.log("\nDeferring is only safe if something asks again");

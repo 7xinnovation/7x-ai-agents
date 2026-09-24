@@ -332,32 +332,18 @@ async function notifyEpglPaidOnSubmit(agentId: string, conversationId: string, r
     const env = agent.definition.activeEnvironment ?? "production";
 
     /**
-     * NOT THE MOMENT WE SUBMIT — the moment there is something to mark paid.
+     * TELL THEM THE MONEY ARRIVED. See the note in lib/epglPayment.
      *
-     * A new licence carries no payment advice when it is created (a renewal
-     * does), and notifying against one that does not exist takes the request to
-     * Payment Verified and then, two seconds later, to Closed — past the review
-     * it was submitted for. See paymentAdviceExists.
+     * This deferred when no payment advice existed, to keep their Payment
+     * Verified -> Closed automation from closing an unreviewed application. The
+     * cost was the status the applicant actually needs: a paid request sat at
+     * "Under document review" indefinitely, because Salesforce was never told.
      *
-     * Deferring is safe because the reconcile sweep retries: this path does not
-     * write the "notified" audit, and that audit is what makes the notifier
-     * idempotent.
+     * Whether an advice existed is still read and recorded — it is the
+     * difference between marking an invoice paid and reporting a payment against
+     * nothing — but it no longer decides.
      */
     const advice = await paymentAdviceExists(agent.id, env, reference);
-    if (advice !== true) {
-      await audit({
-        agentId,
-        conversationId,
-        actor: "system",
-        action: "epgl_payment_notify_deferred",
-        payload: {
-          at: "submit",
-          reference,
-          reason: advice === null ? "could not read the payment advice" : "no payment advice raised yet",
-        },
-      });
-      return;
-    }
 
     const res = await notifyEpglPayment(agent.id, env, {
       licenseRequestId: reference,
@@ -372,8 +358,8 @@ async function notifyEpglPaidOnSubmit(agentId: string, conversationId: string, r
       actor: "system",
       action: res.ok ? "epgl_payment_notified" : "epgl_payment_notify_failed",
       payload: res.ok
-        ? { at: "submit", reference, paymentId: paid.reference, amount: paid.amount }
-        : { at: "submit", reference, paymentId: paid.reference, status: res.status, reason: res.reason },
+        ? { at: "submit", reference, paymentId: paid.reference, amount: paid.amount, adviceExisted: advice }
+        : { at: "submit", reference, paymentId: paid.reference, status: res.status, reason: res.reason, adviceExisted: advice },
     });
   } catch (e) {
     log.error("epgl_notify_on_submit_failed", e, { agentId, conversationId });

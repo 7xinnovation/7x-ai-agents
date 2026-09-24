@@ -296,19 +296,29 @@ export async function notifyEpglIfLicenceFee(
 
     const env = agent.definition.activeEnvironment ?? "production";
 
-    // Nothing to mark paid yet — see paymentAdviceExists. NOT audited as
-    // notified, so the sweep in /api/payments/reconcile asks again.
+    /**
+     * NOTIFY, AND RECORD WHETHER THERE WAS AN ADVICE TO MARK.
+     *
+     * This used to hold the notification back when no payment advice existed,
+     * to stop their workflow closing an unreviewed application two seconds
+     * later. It worked, and it bought the wrong thing: a licence request that
+     * has been PAID now sits at "Under document review" for ever, because
+     * Salesforce is never told the money arrived. Raised on 24 September — the
+     * status should be Payment Verified.
+     *
+     * Which the notification is what produces. The premature close is EPGL's
+     * own Payment Verified -> Closed automation, added to their org between 16
+     * and 21 September; it is theirs to gate on a review, and withholding a true
+     * fact from their system of record is not our way to gate it. A payment that
+     * is never reported is worse than a status that moves too fast: one is a
+     * reconciliation nobody can do, the other is a workflow they can change.
+     *
+     * The advice is still READ, because whether one existed is the difference
+     * between "marked an invoice paid" and "reported a payment against nothing",
+     * and that distinction is what told us renewals differ from new licences.
+     * It is recorded, not obeyed.
+     */
     const advice = await paymentAdviceExists(agent.id, env, licenseRequestId);
-    if (advice !== true) {
-      await audit({
-        agentId,
-        conversationId,
-        actor: "system",
-        action: "epgl_payment_notify_deferred",
-        payload: { reference, licenseRequestId, reason: advice === null ? "could not read the payment advice" : "no payment advice raised yet" },
-      });
-      return;
-    }
 
     const res = await notifyEpglPayment(agent.id, env, {
       licenseRequestId,
@@ -323,8 +333,8 @@ export async function notifyEpglIfLicenceFee(
       actor: "system",
       action: res.ok ? "epgl_payment_notified" : "epgl_payment_notify_failed",
       payload: res.ok
-        ? { reference, licenseRequestId, correlationId: res.correlationId }
-        : { reference, licenseRequestId, status: res.status, reason: res.reason, retryable: res.retryable },
+        ? { reference, licenseRequestId, correlationId: res.correlationId, adviceExisted: advice }
+        : { reference, licenseRequestId, status: res.status, reason: res.reason, retryable: res.retryable, adviceExisted: advice },
     });
   } catch (e) {
     const { audit } = await import("./conversation");
