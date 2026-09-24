@@ -32,7 +32,9 @@ const prompt = readFileSync(new URL("../../../packages/core/src/ai/prompt.ts", i
 console.log("\nOne confirmation per purchase");
 check("the send is skipped for the host that sends its own", /const hostSendsItsOwn = agent\.definition\.tenantSlug === "nxn"/.test(route));
 check("...by having no recipient, so every other guard still applies", /const emailTo = hostSendsItsOwn \? null : completionRecipient/.test(route));
-check("...and the gate itself is unchanged", /if \(purchase\?\.reference && !finalState\.confirmationEmailedAt && emailTo && emailConfigured\(\)\)/.test(route));
+// emailConfigured gained a tenant when the providers were split; the gate's
+// SHAPE is what this asserts, not its arguments.
+check("...and the gate itself is unchanged", /if \(purchase\?\.reference && !finalState\.confirmationEmailedAt && emailTo && emailConfigured\(/.test(route));
 check("it is decided by tenant, not by a flag someone must remember", /whose backend is doing the emailing/.test(route));
 // EPGL's confirmation is the only one a customer gets, so it must not be caught
 // by this: the test that matters is that the condition names nxn and nothing else.
