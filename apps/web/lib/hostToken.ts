@@ -20,10 +20,13 @@ import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
  * trusting it "until the key arrives" — is how a temporary gap becomes permanent.
  *
  * Configuration (all optional except the key material):
- *   HOST_TOKEN_HS256_SECRET   shared secret, if NXN signs with HMAC
- *   HOST_TOKEN_PUBLIC_KEY     PEM public key, if NXN signs with RSA/ECDSA
+ *   HOST_TOKEN_HS256_SECRET   shared secret, if the host signs with HMAC
+ *   HOST_TOKEN_PUBLIC_KEY     PEM public key, if the host signs with RSA/ECDSA
  *   HOST_TOKEN_ISSUER         expected `iss`, when the issuer is pinned
  *   HOST_TOKEN_AUDIENCE       expected `aud`, when the audience is pinned
+ *
+ * The first two take a `_<TENANT>` suffix and MUST where more than one host
+ * signs its own tokens — see keyMaterial below, and the day it was not.
  *   HOST_TOKEN_MAX_AGE_S      reject tokens older than this even if `exp` is generous
  */
 
@@ -44,9 +47,45 @@ export type HostTokenResult =
   | { ok: true; claims: HostTokenClaims }
   | { ok: false; reason: string };
 
+/**
+ * KEY MATERIAL, PER TENANT — and this is not a nicety.
+ *
+ * These were plain globals, and on 24 September that broke Emirates Post
+ * sign-in on the web. Their identity service issues a SIGNED JWT
+ * (iss https://accounts-stg.emiratespost.ae), the route chooses its
+ * verification path by the token's SHAPE, and installing EPGL's certificate for
+ * EPGL therefore sent Emirates Post's tokens to be checked against EPGL's key.
+ * Every one failed, and a customer signed in on box-stg came back to a widget
+ * that did not know them.
+ *
+ * The risk was written down on 22 September and dismissed on a false premise —
+ * "NXN's token is opaque so it never reaches this path". It is not opaque.
+ *
+ * So the lookup is scoped the way UAE PASS's already is: `<VAR>_<TENANT>` wins,
+ * and the unsuffixed name is the single-tenant fallback. With EPGL's key held as
+ * HOST_TOKEN_PUBLIC_KEY_EPGL, an Emirates Post token finds no key,
+ * hostTokenConfigured("nxn") is false, and it goes to the introspection that
+ * actually validates it.
+ */
+function keyMaterial(tenant?: string): { secret?: string; pubKey?: string } {
+  const suffix = tenant ? `_${tenant.toUpperCase()}` : "";
+  const scoped = {
+    secret: process.env[`HOST_TOKEN_HS256_SECRET${suffix}`],
+    pubKey: process.env[`HOST_TOKEN_PUBLIC_KEY${suffix}`],
+  };
+  if (suffix && (scoped.secret || scoped.pubKey)) return scoped;
+  return { secret: process.env.HOST_TOKEN_HS256_SECRET, pubKey: process.env.HOST_TOKEN_PUBLIC_KEY };
+}
+
+/** A tenant-scoped setting name, for diagnostics that name what is missing. */
+export function hostTokenVar(tenant?: string): string {
+  return `HOST_TOKEN_PUBLIC_KEY${tenant ? `_${tenant.toUpperCase()}` : ""}`;
+}
+
 /** Is any verification material configured? When false, every token is rejected. */
-export function hostTokenConfigured(): boolean {
-  return Boolean(process.env.HOST_TOKEN_HS256_SECRET || process.env.HOST_TOKEN_PUBLIC_KEY);
+export function hostTokenConfigured(tenant?: string): boolean {
+  const { secret, pubKey } = keyMaterial(tenant);
+  return Boolean(secret || pubKey);
 }
 
 /**
@@ -172,9 +211,14 @@ const NODE_HASH: Record<string, string> = {
  * HMAC token where we hold a public key, is rejected rather than being allowed to
  * choose its own verification. That confusion is the classic JWT bypass.
  */
-export function verifyHostToken(token: unknown, now = Date.now()): HostTokenResult {
+export function verifyHostToken(
+  token: unknown,
+  opts: { tenant?: string; now?: number } = {}
+): HostTokenResult {
+  const now = opts.now ?? Date.now();
+  const tenant = opts.tenant;
   if (typeof token !== "string" || !token) return { ok: false, reason: "no token" };
-  if (!hostTokenConfigured()) return { ok: false, reason: "no verification key configured" };
+  if (!hostTokenConfigured(tenant)) return { ok: false, reason: "no verification key configured" };
 
   const parts = token.split(".");
   if (parts.length !== 3) return { ok: false, reason: "not a compact JWS" };
@@ -193,8 +237,7 @@ export function verifyHostToken(token: unknown, now = Date.now()): HostTokenResu
   const kind = ALGS[alg];
   if (!kind) return { ok: false, reason: `unsupported alg ${alg || "(none)"}` };
 
-  const secret = process.env.HOST_TOKEN_HS256_SECRET;
-  const pubKey = process.env.HOST_TOKEN_PUBLIC_KEY;
+  const { secret, pubKey } = keyMaterial(tenant);
   // The key we hold decides the algorithm family, never the token's own header.
   if (kind === "hmac" && !secret) return { ok: false, reason: "token is HMAC-signed but no shared secret is configured" };
   if (kind !== "hmac" && !pubKey) return { ok: false, reason: "token is asymmetrically signed but no public key is configured" };

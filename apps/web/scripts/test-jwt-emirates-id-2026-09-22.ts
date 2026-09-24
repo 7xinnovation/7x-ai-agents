@@ -39,7 +39,13 @@ const moe = readFileSync(new URL("../lib/moeLicences.ts", import.meta.url), "utf
 const conv = readFileSync(new URL("../lib/conversation.ts", import.meta.url), "utf8");
 
 /** The signed-token branch, which is the only part this change touches. */
-const signed = route.slice(route.indexOf("if (looksSigned && hostTokenConfigured())"), route.indexOf("const usersBase = await epUsersBaseUrl"));
+// Anchored on the condition rather than its exact arguments: the call gained a
+// tenant on 24 September (see test-host-token-tenant), and an indexOf that
+// missed silently sliced from the END of the file, turning eleven assertions
+// green-to-red at once for a reason that had nothing to do with them.
+const signedFrom = route.indexOf("if (looksSigned && hostTokenConfigured(");
+if (signedFrom === -1) throw new Error("cannot find the signed-token branch in route.ts — the anchor has moved again");
+const signed = route.slice(signedFrom, route.indexOf("const usersBase = await epUsersBaseUrl"));
 
 console.log("\nA verified token yields more than a subject");
 check("the subject is still taken", /sub = v\.claims\.sub/.test(signed));

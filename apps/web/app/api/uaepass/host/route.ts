@@ -34,14 +34,20 @@ export async function POST(req: NextRequest) {
   if (!agent) return NextResponse.json({ ok: false, error: "unknown_agent" }, { status: 404 });
 
   // Same two shapes the chat route handles, decided by what the token IS: a signed
-  // JWS is verified against our key; an opaque Emirates Post token is validated by
-  // using it, which also returns the customer's Emirates ID.
+  // JWS is verified against our key; an Emirates Post token is validated by using
+  // it, which also returns the customer's Emirates ID.
+  //
+  // THE KEY IS THE TENANT'S. Emirates Post's identity service issues a signed JWT
+  // too, so "looks signed and we hold a key" is not enough to decide — with the
+  // key held unscoped, EPGL's certificate was used to check Emirates Post's
+  // tokens and every sign-in through this endpoint failed.
+  const tenant = agent.definition.tenantSlug;
   const looksSigned = token.split(".").length === 3;
   let sub: string | undefined;
   let reason = "";
 
-  if (looksSigned && hostTokenConfigured()) {
-    const v = verifyHostToken(token);
+  if (looksSigned && hostTokenConfigured(tenant)) {
+    const v = verifyHostToken(token, { tenant });
     if (v.ok) sub = v.claims.sub;
     else reason = v.reason;
   } else {

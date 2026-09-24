@@ -611,8 +611,14 @@ export async function POST(req: NextRequest) {
     let sub: string | undefined;
     let reason = "";
 
-    if (looksSigned && hostTokenConfigured()) {
-      const v = verifyHostToken(body.uaePassToken);
+    /**
+     * WHOSE KEY, not just "is a key configured". EPGL's certificate being
+     * installed is not a reason to check an Emirates Post token against it —
+     * which is precisely what happened while this read the unscoped setting.
+     */
+    const tenant = agent.definition.tenantSlug;
+    if (looksSigned && hostTokenConfigured(tenant)) {
+      const v = verifyHostToken(body.uaePassToken, { tenant });
       if (v.ok) {
         sub = v.claims.sub;
         /**
@@ -762,7 +768,7 @@ export async function POST(req: NextRequest) {
         // Distinguishes "NXN sent us something bad" from "we are not set up yet",
         // which look identical from the customer's side and need opposite fixes.
         signed: looksSigned,
-        configured: hostTokenConfigured(),
+        configured: hostTokenConfigured(agent.definition.tenantSlug),
       });
     }
   }

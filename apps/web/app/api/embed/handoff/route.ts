@@ -69,8 +69,11 @@ export async function POST(req: NextRequest) {
    */
   let emiratesId: string | undefined;
   let reason = "";
-  if (looksSigned && hostTokenConfigured()) {
-    const v = verifyHostToken(token);
+  // Scoped to the tenant: see the note in lib/hostToken. A key installed for one
+  // host must never be used to check another's token.
+  const tenant = agent.definition.tenantSlug;
+  if (looksSigned && hostTokenConfigured(tenant)) {
+    const v = verifyHostToken(token, { tenant });
     if (v.ok) sub = v.claims.sub;
     else reason = v.reason;
   } else {
