@@ -60,6 +60,16 @@ console.log("\nWhat happens to sessions that predate this");
 check("no stamp and recent activity is left alone", sessionExpired({ lastActivityAt: ago(MIN), now: NOW }) === null);
 check("no stamp and no activity for an hour still expires", sessionExpired({ lastActivityAt: ago(60 * MIN), now: NOW }) === "idle");
 check("nothing known at all is not an expiry", sessionExpired({ now: NOW }) === null);
+/**
+ * And the fallback that made this dangerous. The resume path used to pass the
+ * CONVERSATION's creation time as the sign-in time, so a tab left open since
+ * yesterday put the customer past the absolute limit the instant they signed in
+ * — expired on the turn after signing in, with no way to tell why.
+ */
+check("a day-old conversation signed into a minute ago is NOT expired",
+  sessionExpired({ signedInAt: null, lastActivityAt: ago(MIN), now: NOW }) === null);
+check("...and the route passes null rather than the conversation's age",
+  /signedInAt: typeof stampedAt === "string" \? new Date\(stampedAt\) : null/.test(conv));
 
 console.log("\nWhat ending one actually does");
 check("the limits are read from the environment", /SESSION_IDLE_MINUTES/.test(conv) && /SESSION_MAX_MINUTES/.test(conv));

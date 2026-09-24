@@ -555,7 +555,20 @@ export async function getOrCreateSession(input: {
       if (effectiveAuth) {
         const stampedAt = (caseRow?.state as CaseState | undefined)?.data?.[AUTH_AT_KEY];
         expiredAs = sessionExpired({
-          signedInAt: typeof stampedAt === "string" ? new Date(stampedAt) : conv.createdAt,
+          /**
+           * NO STAMP MEANS NO ABSOLUTE CLOCK, not "use the conversation's".
+           *
+           * This read `conv.createdAt` as the fallback, which is when the CHAT
+           * was opened and not when anybody signed in. A customer who had a tab
+           * open since yesterday, then signed in, was past the twelve-hour limit
+           * the instant they arrived — signed out on the very next turn, having
+           * just signed in, with no way to tell why.
+           *
+           * Absent, the limit simply does not apply and the session is judged on
+           * idleness alone, which is what every conversation predating the stamp
+           * gets and is already the documented behaviour.
+           */
+          signedInAt: typeof stampedAt === "string" ? new Date(stampedAt) : null,
           lastActivityAt: history.at(-1)?.at ?? conv.createdAt,
         });
         if (expiredAs) {
