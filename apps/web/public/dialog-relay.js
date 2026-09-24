@@ -209,6 +209,36 @@
     }
   }
 
+  /**
+   * AND THE CASE THAT WAS SILENT IN THE OTHER DIRECTION: no token at all.
+   *
+   * Installed correctly, reading the right key, and simply finding nothing —
+   * which looks identical from the outside to not being installed at all. It
+   * cost EPGL a round trip to work out (their component wrote into Lightning
+   * Locker's sandboxed storage, so the real key stayed empty) and it has now
+   * cost Emirates Post one, where the question was whether the script was on
+   * the page at all.
+   *
+   * So the relay says so. Once, after the page has settled, naming the key it
+   * looked under and what IS in storage — because "epglDialogToken is not
+   * there, but these five things are" answers the question in one line, and
+   * every alternative to saying it is somebody reading a script tag in the
+   * elements panel and guessing.
+   */
+  setTimeout(function () {
+    if (readToken()) return;
+    var keys = [];
+    try { for (var i = 0; i < window.localStorage.length; i++) keys.push(window.localStorage.key(i)); } catch (e) { keys = null; }
+    note(
+      "no token found in localStorage under \"" + TOKEN_KEY + "\". " +
+        (keys === null
+          ? "localStorage is not readable on this page."
+          : keys.length
+            ? "Keys present: " + keys.join(", ") + ". If the token is under one of those, set data-token-key to it."
+            : "localStorage is empty here. Nothing has been written yet, or it was written on a different page or into a sandboxed storage.")
+    );
+  }, 5000);
+
   // The one case that is otherwise completely silent: a token is here, but the
   // opener was severed (rel=noopener, or a Cross-Origin-Opener-Policy header on this
   // page) AND the cookie is unavailable, so there is nowhere to put it.
