@@ -3690,7 +3690,20 @@ export async function POST(req: NextRequest) {
         // The body is the assistant's own confirmation message. A second summary
         // written here would be a parallel copy of every journey's completion
         // wording — including its review SLA — and the two would drift.
-        const emailTo = completionRecipient(finalState.data);
+        /**
+         * EMIRATES POST SEND THEIR OWN, so ours is a second one.
+         *
+         * Asked for on 24 September: their PO Box APIs already email the
+         * customer when a rental or renewal completes, and this arrived beside
+         * it saying the same thing in different words. Two confirmations for one
+         * purchase is worse than one — the customer cannot tell which is
+         * authoritative, and the references are formatted differently.
+         *
+         * EPGL send nothing, so theirs stays. Read from the tenant rather than a
+         * flag, because the reason is whose backend is doing the emailing.
+         */
+        const hostSendsItsOwn = agent.definition.tenantSlug === "nxn";
+        const emailTo = hostSendsItsOwn ? null : completionRecipient(finalState.data);
         if (purchase?.reference && !finalState.confirmationEmailedAt && emailTo && emailConfigured()) {
           const customerRef = String(finalState.referenceLabel ?? finalState.reference ?? purchase.reference);
           const receiptPath =

@@ -334,7 +334,24 @@ ${journey?.submission?.apiFlow
     (done.length
       ? `\nALREADY UPLOADED — do NOT ask for these again and do NOT show an upload card for them: ${done
           .map((d) => `${d.key}${d.fileName ? ` (${d.fileName})` : ""}`)
-          .join(", ")}. If one needs replacing, say WHY and point at its Replace button rather than asking as though nothing was uploaded.`
+          .join(", ")}. If one needs replacing, say WHY and point at its Replace button rather than asking as though nothing was uploaded.` +
+        /**
+         * AND THAT INCLUDES OFFERING ONE AS OPTIONAL.
+         *
+         * 24 September: every document was in, and the reply was "Next, the
+         * Memorandum of Association is optional but can help EPGL verify the
+         * company structure if you have it handy:" followed by the guard's
+         * "Already uploaded… Nothing to do here." The MOA was already on file.
+         * The turn therefore ended with no question, no control and nothing to
+         * press, and the customer had to type "already uploaded" to get the
+         * application moving again.
+         *
+         * The rule above said not to ask for it. What it did not say is that an
+         * OPTIONAL document is still a document, and that a reply which turns
+         * out to have nothing to ask for must carry the next step instead of
+         * stopping on a status line.
+         */
+        `\nThis holds for OPTIONAL documents too: one already on file is not something to offer, mention as available, or invite "if you have it handy" — it is done. And never end a reply on a statement about a document. If nothing is outstanding, MOVE ON in the same message: take the next step of the journey, or show the summary, or ask the next question. A reply the customer cannot act on makes them type something just to restart you.`
       : "") +
     (rejected.length
       ? `\nREJECTED, so these DO still need uploading: ${rejected.map((d) => d.key).join(", ")}.`
