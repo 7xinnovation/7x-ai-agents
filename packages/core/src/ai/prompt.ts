@@ -351,7 +351,9 @@ ${journey?.submission?.apiFlow
          * out to have nothing to ask for must carry the next step instead of
          * stopping on a status line.
          */
-        `\nThis holds for OPTIONAL documents too: one already on file is not something to offer, mention as available, or invite "if you have it handy" — it is done. And never end a reply on a statement about a document. If nothing is outstanding, MOVE ON in the same message: take the next step of the journey, or show the summary, or ask the next question. A reply the customer cannot act on makes them type something just to restart you.`
+        `\nThis holds for OPTIONAL documents too: one already on file is not something to offer, mention as available, or invite "if you have it handy" — it is done, including when YOU asked for it earlier in this same conversation and they gave it to you. ` +
+        `If you are part-way through writing an ask and realise the document is already listed above, do not deliver that realisation as the message: the customer does not need to be told that something they handed over is in. CONTINUE to the next step in the same reply — the next document, the declaration, the summary, the next question. ` +
+        `Never end a reply on a statement about a document. A reply with nothing in it to act on makes the customer type something just to restart you, which is what happened on 24 September.`
       : "") +
     (rejected.length
       ? `\nREJECTED, so these DO still need uploading: ${rejected.map((d) => d.key).join(", ")}.`

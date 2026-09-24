@@ -41,9 +41,22 @@ check("EPGL is not swept up in it", !/tenantSlug === "epgl"[\s\S]{0,80}emailTo/.
 console.log("\nAnd a reply the customer can act on");
 check("an already-uploaded document is not offered as optional either", /This holds for OPTIONAL documents too/.test(prompt));
 check("...not even as \"if you have it handy\"", /if you have it handy/.test(prompt));
-check("a reply never ends on a statement about a document", /never end a reply on a statement about a document/.test(prompt));
-check("...it moves on in the same message", /MOVE ON in the same message/.test(prompt));
-check("...and the reason is stated, not just the rule", /makes them type something just to restart you/.test(prompt));
+// The actual case: it had ASKED for the MOA earlier in the same conversation and
+// been given it. That is the sentence that was missing.
+check("...including one this conversation asked for and received", /when YOU asked for it earlier in this same conversation/.test(prompt));
+check("realising it mid-ask is not a message of its own", /do not deliver that realisation as the message/.test(prompt));
+check("...the reply continues to the next step instead", /CONTINUE to the next step in the same reply/.test(prompt));
+check("a reply never ends on a statement about a document", /Never end a reply on a statement about a document/.test(prompt));
+check("...and the reason is stated, not just the rule", /makes the customer type something just to restart you/.test(prompt));
+
+console.log("\nAnd when it happens anyway, it is visible");
+check("a suppressed ask is audited", /action: "upload_ask_suppressed"/.test(route));
+check("...recording whether the customer was left anything to do", /endedWithNoAction/.test(route));
+check("...and what the application was still waiting on", /missing: finalState\.readiness\.missing/.test(route));
+// Appending the next pending document is NOT the repair: it is what caused the
+// stray upload boxes of 15 September, prose naming one document and the control
+// offering another.
+check("the appender is still held off when the guard suppressed", /!uploadGuard\.suppressed\(\)/.test(route));
 // The rule it extends has to survive: this is an addition, not a replacement.
 check("the original 'do not ask again' rule is still there", /ALREADY UPLOADED — do NOT ask for these again/.test(prompt));
 

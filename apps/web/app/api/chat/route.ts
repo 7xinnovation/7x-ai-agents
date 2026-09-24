@@ -3100,6 +3100,34 @@ export async function POST(req: NextRequest) {
           finalText += withAck;
         }
 
+        /**
+         * AND WHEN IT HAPPENS ANYWAY, WE FIND OUT FROM THE LOG.
+         *
+         * The guard suppressing a block means the model asked for a document
+         * that is already in. The rule against that predates this and was
+         * followed for weeks; on 24 September it was not, and the reply ended on
+         * "Already uploaded… Nothing to do here" with nothing to press — the
+         * customer had to type to restart the application.
+         *
+         * There is no safe deterministic repair: appending the next pending
+         * document is what caused the stray-box reports of 15 September, because
+         * the prose says one document and the control offers another. What can
+         * be done is to stop finding out about it from a screenshot.
+         */
+        if (uploadGuard.suppressed()) {
+          await audit({
+            ...a,
+            actor: "system",
+            action: "upload_ask_suppressed",
+            payload: {
+              journeyKey: finalState.journeyKey ?? null,
+              // Whether the customer was left with anything to do at all.
+              endedWithNoAction: !/```/.test(finalText) && !/\?\s*$/.test(finalText.trim()),
+              missing: finalState.readiness.missing.map((m) => m.key).slice(0, 6),
+            },
+          }).catch(() => {});
+        }
+
         // Deterministic upload widget (feedback FB-1425: "AI says upload slots
         // appeared but no upload fields display"): when the reply talks about
         // uploading but contains no ```upload block, append the block(s) for the
