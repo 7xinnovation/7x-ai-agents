@@ -11,7 +11,7 @@
  * Run from apps/web:  npx tsx scripts/test-sender-per-tenant-2026-09-24.ts
  */
 import { readFileSync } from "node:fs";
-import { senderFor } from "../lib/email";
+import { emailConfigured, providerFor, senderFor } from "../lib/email";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -19,8 +19,10 @@ const check = (n: string, ok: boolean, got?: unknown) => {
   else { fail++; console.log(`  FAIL ${n}${got === undefined ? "" : ` — got ${JSON.stringify(got)}`}`); }
 };
 const reset = () => {
-  delete process.env.EMAIL_FROM; delete process.env.NOTIFICATION_FROM_EMAIL;
-  delete process.env.EMAIL_FROM_EPGL; delete process.env.EMAIL_FROM_NXN;
+  for (const k of [
+    "EMAIL_FROM", "NOTIFICATION_FROM_EMAIL", "EMAIL_FROM_EPGL", "EMAIL_FROM_NXN",
+    "RESEND_API_KEY", "RESEND_API_KEY_EPGL", "EMAIL_WEBHOOK_URL", "EMAIL_WEBHOOK_URL_EPGL",
+  ]) delete process.env[k];
 };
 
 console.log("\nOne sender each");
@@ -48,6 +50,38 @@ console.log("\nAnd nothing changes where senders are not split");
   check("nothing configured falls back to the sandbox sender", senderFor("epgl").includes("resend.dev"));
   process.env.EMAIL_FROM_EPGL = "   ";
   check("...and a blank override does not win", senderFor("epgl").includes("resend.dev"));
+}
+
+console.log("\nAn entity that sends from its own address sends through its own service");
+{
+  reset();
+  process.env.RESEND_API_KEY = "ours";
+  process.env.EMAIL_FROM = "Agents <no-reply@7x-lab.com>";
+  process.env.RESEND_API_KEY_EPGL = "theirs";
+  process.env.EMAIL_FROM_EPGL = "EPGL Licensing <licensing.department@epg.ae>";
+  check("EPGL goes out through EPGL's key", providerFor("epgl").resendKey === "theirs");
+  check("...and Emirates Post through ours", providerFor("nxn").resendKey === "ours");
+  check("EPGL is marked as using its own", providerFor("epgl").own && !providerFor("nxn").own);
+}
+{
+  // Taken WHOLE: a tenant with its own relay must not borrow the shared key.
+  reset();
+  process.env.RESEND_API_KEY = "ours";
+  process.env.EMAIL_WEBHOOK_URL_EPGL = "https://epg.example/relay";
+  check("their relay does not fall back to our key", providerFor("epgl").resendKey === undefined);
+  check("...and is the provider that will be used", providerFor("epgl").webhookUrl === "https://epg.example/relay");
+}
+{
+  /**
+   * The refusal that matters. Their address configured and their provider not
+   * means their mail would leave OUR account under a domain we cannot prove we
+   * own — rejected or spam-foldered, with nobody knowing why. Refused instead.
+   */
+  reset();
+  process.env.RESEND_API_KEY = "ours";
+  process.env.EMAIL_FROM_EPGL = "EPGL Licensing <licensing.department@epg.ae>";
+  check("their address on our account is refused, not sent", providerFor("epgl").own === false);
+  check("...and email is still 'configured' for everyone else", emailConfigured("nxn"));
 }
 
 console.log("\nEvery send says whose it is");

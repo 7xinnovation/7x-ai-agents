@@ -8,6 +8,18 @@ import { log } from "./logger";
  *     ops team controls (e.g. a Power Automate / internal SMTP bridge).
  *   - Neither configured: returns {ok:false, reason:"email_not_configured"}.
  *
+ * EVERY ONE OF THOSE TAKES A `_<TENANT>` SUFFIX, and the suffixed set is taken
+ * whole. An entity that sends from its OWN address sends through its OWN
+ * service: EPGL's licensing mail leaves EPGL's account, under a domain they
+ * verified, with a key they issued and can revoke — not ours with their name on
+ * it. Mixing those is how a government entity's mail ends up depending on a
+ * third party's account nobody there has ever seen.
+ *
+ * Whole, not field by field: a tenant with its own credential must not silently
+ * fall back to the shared sender or the shared relay, because half-configured
+ * would mean their address going out through our account, which is the one
+ * outcome this exists to prevent.
+ *
  * Callers MUST honour the result: never tell a customer an email was sent when
  * ok=false (feedback FB-1426 — the assistant claimed emails that never went out).
  */
@@ -42,8 +54,9 @@ export function isValidEmail(addr: string): boolean {
   return EMAIL_RE.test(addr.trim());
 }
 
-export function emailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY || process.env.EMAIL_WEBHOOK_URL);
+export function emailConfigured(tenant?: string): boolean {
+  const { resendKey, webhookUrl } = providerFor(tenant);
+  return Boolean(resendKey || webhookUrl);
 }
 
 /**
@@ -70,6 +83,24 @@ export function emailSender(tenant?: string): string {
   return senderFor(tenant);
 }
 
+/** The provider credentials for one tenant, taken as a set. See the note above. */
+export function providerFor(tenant?: string): { resendKey?: string; webhookUrl?: string; from: string; own: boolean } {
+  const suffix = tenant ? `_${tenant.toUpperCase()}` : "";
+  if (suffix) {
+    const key = process.env[`RESEND_API_KEY${suffix}`]?.trim();
+    const hook = process.env[`EMAIL_WEBHOOK_URL${suffix}`]?.trim();
+    if (key || hook) {
+      return { resendKey: key, webhookUrl: hook, from: senderFor(tenant), own: true };
+    }
+  }
+  return {
+    resendKey: process.env.RESEND_API_KEY,
+    webhookUrl: process.env.EMAIL_WEBHOOK_URL,
+    from: senderFor(tenant),
+    own: false,
+  };
+}
+
 export async function sendEmail(input: EmailInput): Promise<EmailResult> {
   const to = input.to.trim();
   if (!isValidEmail(to)) return { ok: false, reason: `invalid_recipient:${to}` };
@@ -78,15 +109,25 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
   // alias so either spelling works in the deployment environment. The fallback is
   // Resend's sandbox sender, which can ONLY deliver to the Resend account owner —
   // so a real verified sending domain must be configured for customer email.
-  const from = senderFor(input.tenant);
+  const { resendKey, webhookUrl, from, own } = providerFor(input.tenant);
+  /**
+   * A tenant sending from its own address through the SHARED account would be
+   * signing our mail with their name. Refused rather than sent: their recipients
+   * would see a domain we cannot prove we own, and the mail would be rejected or
+   * land in spam anyway — with nobody knowing why.
+   */
+  if (!own && input.tenant && process.env[`EMAIL_FROM_${input.tenant.toUpperCase()}`]) {
+    log.error("email_send_failed", new Error("tenant sender without tenant provider"), { to, tenant: input.tenant });
+    return { ok: false, reason: "tenant_sender_without_provider" };
+  }
 
   try {
-    if (process.env.RESEND_API_KEY) {
+    if (resendKey) {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          Authorization: `Bearer ${resendKey}`,
         },
         body: JSON.stringify({
           from,
@@ -105,8 +146,8 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
       return { ok: true, id: json.id };
     }
 
-    if (process.env.EMAIL_WEBHOOK_URL) {
-      const res = await fetch(process.env.EMAIL_WEBHOOK_URL, {
+    if (webhookUrl) {
+      const res = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from, to, subject: input.subject, text: input.text, html: input.html }),

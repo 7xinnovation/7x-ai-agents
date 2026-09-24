@@ -3725,7 +3725,7 @@ export async function POST(req: NextRequest) {
          */
         const hostSendsItsOwn = agent.definition.tenantSlug === "nxn";
         const emailTo = hostSendsItsOwn ? null : completionRecipient(finalState.data);
-        if (purchase?.reference && !finalState.confirmationEmailedAt && emailTo && emailConfigured()) {
+        if (purchase?.reference && !finalState.confirmationEmailedAt && emailTo && emailConfigured(agent.definition.tenantSlug)) {
           const customerRef = String(finalState.referenceLabel ?? finalState.reference ?? purchase.reference);
           const receiptPath =
             finalState.payment.status === "paid" && finalState.payment.reference
