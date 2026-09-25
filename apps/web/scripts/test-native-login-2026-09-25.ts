@@ -40,6 +40,18 @@ check("nothing navigates the window itself", !/window\.location\.href\s*=\s*url/
 check("a host that throws is not an error the customer sees", /catch \{/.test(bridge));
 check("the reason for the iframe is written down", /replaces the conversation with an error page/.test(bridge));
 
+console.log("\nAnd a button that does nothing says so");
+// "When I click the login button nothing happens on the mobile version." All
+// three requests had fired correctly and the app acted on none of them.
+check("a timer starts when the app is asked", /nativeAskTimer\.current = window\.setTimeout/.test(exp));
+check("...and says the app did not answer", /Sign-in could not be started inside the app/.test(exp));
+check("...in both languages", /تعذّر بدء تسجيل الدخول داخل التطبيق/.test(exp));
+check("...telling them the one thing they can do", /sign in from the app, then come back/.test(exp));
+// An app that answers slowly must never be told it did not.
+check("a late answer cancels it", /if \(authenticated && nativeAskTimer\.current\)/.test(exp));
+check("...and clears the message with it", /setAuthReason\(null\)/.test(exp));
+check("the timer reads auth as it stands, not as it was rendered", /authenticatedRef\.current/.test(exp));
+
 console.log("\nThe setting");
 check("it is declared", /nativeLoginUrl: z/.test(schema));
 // A custom scheme is not a URL by zod's definition, which is why it cannot

@@ -556,6 +556,19 @@ export function Experience({
   const [authenticated, setAuthenticated] = useState(false);
   /** Host sign-in popup, so a window closed without a token can be reported. */
   const hostLoginWin = useRef<ExternalWindow | null>(null);
+  /** The "the app never answered" timer, so a later answer can cancel it. */
+  const nativeAskTimer = useRef<number | null>(null);
+  /** Auth as it stands NOW, for callbacks that outlive the render they were made in. */
+  const authenticatedRef = useRef(false);
+  useEffect(() => {
+    authenticatedRef.current = authenticated;
+    // An app that answered — however slowly — must not then be told it did not.
+    if (authenticated && nativeAskTimer.current) {
+      window.clearTimeout(nativeAskTimer.current);
+      nativeAskTimer.current = null;
+      setAuthReason(null);
+    }
+  }, [authenticated]);
   const [authReason, setAuthReason] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
   /**
@@ -1350,6 +1363,32 @@ export function Experience({
        * app that implements neither is exactly where it was.
        */
       if (agent.nativeLoginUrl) askNativeToSignIn(agent.nativeLoginUrl);
+      /**
+       * AND SILENCE IS NOT AN ACCEPTABLE ANSWER TO A BUTTON.
+       *
+       * "When I click the login button nothing happens on the mobile version."
+       * Everything above had fired correctly and the app acted on none of it —
+       * not the message, not the URL, not the open-url that follows — so the
+       * customer tapped a control and the world did not change. A tester can
+       * report that; a customer just leaves.
+       *
+       * So if nobody has signed them in shortly afterwards, say so. It is the
+       * honest reading: we asked the app three ways and it did not answer, and
+       * the one thing the person holding the phone can do is use the app's own
+       * sign-in and come back.
+       *
+       * Cleared the moment a handoff arrives, so an app that answers slowly
+       * never shows it.
+       */
+      if (nativeAskTimer.current) window.clearTimeout(nativeAskTimer.current);
+      nativeAskTimer.current = window.setTimeout(() => {
+        if (authenticatedRef.current) return;
+        setAuthReason(
+          locale === "ar"
+            ? "تعذّر بدء تسجيل الدخول داخل التطبيق. يرجى تسجيل الدخول من التطبيق ثم العودة إلى المحادثة."
+            : "Sign-in could not be started inside the app. Please sign in from the app, then come back to this chat."
+        );
+      }, 6000);
     }
     /**
      * THE HOST PORTAL ROUTE CANNOT WORK INSIDE THE APP.
