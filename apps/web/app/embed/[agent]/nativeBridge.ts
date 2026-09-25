@@ -62,6 +62,42 @@ export function postNative(detail: Record<string, unknown>): void {
 }
 
 /**
+ * ASK THE APP TO SIGN THE CUSTOMER IN, THROUGH A URL IT RECOGNISES.
+ *
+ * `postNative({ action: "signin-needed" })` is the documented way and the one
+ * to prefer — it carries a reason and needs no URL scheme registered. But the
+ * Emirates Post app is not listening for it yet, so tapping sign-in falls
+ * through to opening the portal in a browser, which is where this whole problem
+ * started: "it opens the web and does not redirect".
+ *
+ * Their developer asked for a trigger he already has a handler for. A custom
+ * scheme is one: the app intercepts the navigation, signs the customer in
+ * natively, and answers with a handoff exactly as the contract describes. This
+ * changes only HOW the app is asked, never what it sends back.
+ *
+ * IN A HIDDEN IFRAME, NOT THE TOP WINDOW. Navigating the WebView itself to a
+ * scheme nothing handles replaces the conversation with an error page and there
+ * is no way back to it — the same failure this is meant to fix, arrived at from
+ * the other side. An iframe that nothing handles fails silently and the chat is
+ * untouched, which is the whole reason this technique is the usual one.
+ */
+export function askNativeToSignIn(url: string): void {
+  if (!isNative() || typeof document === "undefined" || !url) return;
+  try {
+    const frame = document.createElement("iframe");
+    frame.style.display = "none";
+    frame.setAttribute("aria-hidden", "true");
+    frame.src = url;
+    document.body.appendChild(frame);
+    // Long enough for the host to act on it, short enough that nothing
+    // accumulates in the document over a conversation.
+    setTimeout(() => frame.remove(), 1500);
+  } catch {
+    /* an app that does not answer leaves the portal fallback, as before */
+  }
+}
+
+/**
  * The customer's backend token, handed over by a native host.
  *
  * NOT a query parameter. A token in the URL is written to the server's access

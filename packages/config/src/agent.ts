@@ -77,6 +77,25 @@ export const AgentDefinition = z.object({
    * Left unset, sign-in behaves as before and runs our own UAE PASS flow.
    */
   hostLoginUrl: z.string().url().optional(),
+  /**
+   * What to navigate to, inside a NATIVE app, to ask it to sign the customer in.
+   *
+   * The documented way is a postMessage the app listens for. This is the same
+   * request made as a URL, for a host that already has an interceptor and no
+   * message handler — Emirates Post's app asked for `app://login`, where tapping
+   * sign-in otherwise opened a browser and never came back.
+   *
+   * It changes only how the app is ASKED. What it sends back is unchanged: a
+   * short-lived handoff code, as in docs/MOBILE-APP-WEBVIEW-CONTRACT.
+   *
+   * Not `z.string().url()` — a custom scheme is not a URL by that definition,
+   * which is exactly why it needs its own field. Bounded to a scheme and a path
+   * so nothing arbitrary can be navigated to.
+   */
+  nativeLoginUrl: z
+    .string()
+    .regex(/^[a-z][a-z0-9+.-]*:\/\/[^\s]{0,200}$/i, "expected a scheme like app://login")
+    .optional(),
   greeting: LocalizedString,
   theme: Theme,
   // Shown above the document upload slots in the case panel and on the mobile

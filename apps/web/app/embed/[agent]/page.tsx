@@ -50,6 +50,7 @@ export default async function EmbedPage({
       })),
     })),
     hostLoginUrl: d.hostLoginUrl,
+    nativeLoginUrl: d.nativeLoginUrl,
     uaePassEnabled: uaePassConfigured(),
     voiceEnabled: Boolean(process.env.AZURE_REALTIME_KEY && process.env.AZURE_REALTIME_ENDPOINT),
   };

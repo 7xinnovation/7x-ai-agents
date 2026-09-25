@@ -39,7 +39,7 @@ import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
 import { maskForDisplay } from "@/lib/maskIdentity";
-import { openExternal, isNative, postNative, nativeToken, nativeHandoff, onNativeEvent, type ExternalWindow } from "./nativeBridge";
+import { openExternal, isNative, postNative, nativeToken, nativeHandoff, onNativeEvent, type ExternalWindow, askNativeToSignIn } from "./nativeBridge";
 
 /** Aisha's brand azure (from the AISHA wordmark) — the single accent, applied
  *  across every tenant so the assistant reads as Aisha, not the host brand. */
@@ -1338,7 +1338,19 @@ export function Experience({
      * that has not implemented this ignores the message, and the portal below
      * is still opened — nothing regresses for an app that is not listening.
      */
-    if (isNative()) postNative({ action: "signin-needed", reason: "customer-asked" });
+    if (isNative()) {
+      postNative({ action: "signin-needed", reason: "customer-asked" });
+      /**
+       * And the same request as a URL, for an app that has an interceptor and
+       * no message handler. Emirates Post's asked for this: the message above
+       * goes unanswered today, so sign-in falls through to the portal and opens
+       * a browser that never comes back.
+       *
+       * Both are sent, deliberately. Whichever the app implements works, and an
+       * app that implements neither is exactly where it was.
+       */
+      if (agent.nativeLoginUrl) askNativeToSignIn(agent.nativeLoginUrl);
+    }
     /**
      * THE HOST PORTAL ROUTE CANNOT WORK INSIDE THE APP.
      *
