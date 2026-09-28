@@ -26,7 +26,9 @@ const page = readFileSync(new URL("../app/embed/[agent]/page.tsx", import.meta.u
 
 console.log("\nBoth ways of asking, so whichever the app implements works");
 check("the documented message is still sent", /postNative\(\{ action: "signin-needed", reason: "customer-asked" \}\)/.test(exp));
-check("...and the URL the app intercepts, when one is configured", /if \(agent\.nativeLoginUrl\) askNativeToSignIn\(agent\.nativeLoginUrl,/.test(exp));
+// Anchored on the call, not on the line it sits on: it gained a `tried.push`
+// above it when the button started reporting itself.
+check("...and the URL the app intercepts, when one is configured", /askNativeToSignIn\(agent\.nativeLoginUrl,/.test(exp));
 check("neither runs outside a native host", /if \(isNative\(\)\) \{/.test(exp) && /if \(!isNative\(\)/.test(bridge));
 check("an app answering neither is where it was", /is exactly where it was/.test(exp));
 
