@@ -62,66 +62,24 @@ export function postNative(detail: Record<string, unknown>): void {
 }
 
 /**
- * ASK THE APP TO SIGN THE CUSTOMER IN, THROUGH A URL IT RECOGNISES.
+ * HOW THE APP IS ASKED TO SIGN SOMEBODY IN — and how it used to be.
  *
- * `postNative({ action: "signin-needed" })` is the documented way and the one
- * to prefer — it carries a reason and needs no URL scheme registered. But the
- * Emirates Post app is not listening for it yet, so tapping sign-in falls
- * through to opening the portal in a browser, which is where this whole problem
- * started: "it opens the web and does not redirect".
+ * `postNative({ action: "signin-needed" })` is the whole of it: Emirates Post's
+ * app catches it in onMessage and opens its own sign-in screen, and the chat
+ * picks the customer up from the token the wrapper injects on the next load.
  *
- * Their developer asked for a trigger he already has a handler for. A custom
- * scheme is one: the app intercepts the navigation, signs the customer in
- * natively, and answers with a handoff exactly as the contract describes. This
- * changes only HOW the app is asked, never what it sends back.
+ * There was a second attempt here, `askNativeToSignIn`, which navigated a
+ * hidden iframe (and then the main frame) to a custom scheme — `app://login` —
+ * for an app that had a URL interceptor and no message handler. Both were sent
+ * deliberately while we did not know which of the two existed. Their developer
+ * has since built the handler and reported what the other one costs:
  *
- * IN A HIDDEN IFRAME, NOT THE TOP WINDOW. Navigating the WebView itself to a
- * scheme nothing handles replaces the conversation with an error page and there
- * is no way back to it — the same failure this is meant to fix, arrived at from
- * the other side. An iframe that nothing handles fails silently and the chat is
- * untouched, which is the whole reason this technique is the usual one.
+ *     Error opening URL: app://login. Unable to open URL: app://login.
+ *
+ * A native error dialog, over a sign-in that was working. Removed on 28
+ * September rather than left in as a fallback, because an unhandled scheme is
+ * not a silent fallback on iOS.
  */
-export function askNativeToSignIn(url: string, answered: () => boolean): void {
-  if (!isNative() || typeof document === "undefined" || !url) return;
-  try {
-    const frame = document.createElement("iframe");
-    frame.style.display = "none";
-    frame.setAttribute("aria-hidden", "true");
-    frame.src = url;
-    document.body.appendChild(frame);
-    // Long enough for the host to act on it, short enough that nothing
-    // accumulates in the document over a conversation.
-    setTimeout(() => frame.remove(), 1500);
-  } catch {
-    /* fall through to the attempt below */
-  }
-
-  /**
-   * AND THEN THE MAIN FRAME, BECAUSE A SUBFRAME MAY NEVER REACH THE HANDLER.
-   *
-   * Their developer confirmed he intercepts every request, main frame or not,
-   * and it still does nothing — so the navigation is not arriving at all. That
-   * is the known weak spot of the iframe trick: WKWebView does not reliably
-   * hand a SUBFRAME navigation to an unregistered scheme to the delegate, and
-   * TestFlight means iOS. Android delivers subframes to
-   * shouldOverrideUrlLoading and is likely fine; the two platforms differ here.
-   *
-   * So if nothing has answered shortly after, the same URL is tried in the main
-   * frame, where every platform calls the handler. An app that intercepts it —
-   * which is the whole reason nativeLoginUrl was configured — cancels the
-   * navigation and nothing moves. An app that does NOT would leave the WebView
-   * on an error page, which is why this is gated on the setting being present
-   * rather than attempted for every host, and why the iframe goes first.
-   */
-  setTimeout(() => {
-    if (answered()) return;
-    try {
-      window.location.href = url;
-    } catch {
-      /* nothing further to try; the caller's timeout tells the customer */
-    }
-  }, 1200);
-}
 
 /**
  * The customer's backend token, handed over by a native host.

@@ -39,7 +39,7 @@ import { useVoiceChat } from "./useVoiceChat";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
 import { maskForDisplay } from "@/lib/maskIdentity";
-import { openExternal, isNative, postNative, nativeToken, nativeHandoff, onNativeEvent, type ExternalWindow, askNativeToSignIn } from "./nativeBridge";
+import { openExternal, isNative, postNative, nativeToken, nativeHandoff, onNativeEvent, type ExternalWindow } from "./nativeBridge";
 
 /** Aisha's brand azure (from the AISHA wordmark) — the single accent, applied
  *  across every tenant so the assistant reads as Aisha, not the host brand. */
@@ -1332,6 +1332,49 @@ export function Experience({
     }
   }, [agent.slug]);
 
+  /**
+   * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.
+   *
+   * A button that does nothing is the worst of the failures here: "when I click
+   * the login button nothing happens on the mobile version", three rounds of it.
+   * So if nobody has signed the customer in a while later, the widget says what
+   * it tried, in plain language, and points at the app's own sign-in.
+   *
+   * THE WAIT IS NOT THE SAME IN BOTH PLACES. A pop-up either opens or it does
+   * not, and six seconds is generous for finding that out. Signing in inside the
+   * app is a journey — their screen, UAE PASS, an app switch, an OTP — and six
+   * seconds through it put an amber "sign-in could not be started" over a
+   * sign-in that was working perfectly well, which is exactly what their
+   * developer photographed. It is a last resort, so it waits like one.
+   *
+   * Cleared the moment a handoff arrives, so an app that answers slowly never
+   * shows it at all.
+   */
+  const armSignInFallback = useCallback(
+    (tried: string[]) => {
+      if (typeof window === "undefined") return;
+      const inApp = isNative();
+      if (nativeAskTimer.current) window.clearTimeout(nativeAskTimer.current);
+      nativeAskTimer.current = window.setTimeout(
+        () => {
+          if (authenticatedRef.current) return;
+          const advice = inApp
+            ? locale === "ar"
+              ? "تعذّر بدء تسجيل الدخول داخل التطبيق. يرجى تسجيل الدخول من التطبيق ثم العودة إلى المحادثة."
+              : "Sign-in could not be started inside the app. Please sign in from the app, then come back to this chat."
+            : locale === "ar"
+              ? "لم تُفتح نافذة تسجيل الدخول. يرجى السماح بالنوافذ المنبثقة والمحاولة مرة أخرى."
+              : "The sign-in window did not open. Please allow pop-ups and try again.";
+          // The detail is for whoever is testing, and it is the difference
+          // between "nothing happened" and a report somebody can act on.
+          setAuthReason(`${advice} (${inApp ? "in-app" : "browser"}: ${tried.join(", ") || "nothing to try"})`);
+        },
+        inApp ? 45000 : 6000
+      );
+    },
+    [locale]
+  );
+
   const signIn = useCallback(() => {
     // Asking to sign in is what lifts a sign-out.
     signedOut.current = false;
@@ -1364,41 +1407,34 @@ export function Experience({
      * the detail only appears once the attempt has already failed.
      */
     const tried: string[] = [];
+    /**
+     * IN THE APP, WE ASK THE APP. ONCE.
+     *
+     * Emirates Post's developer has the handler now — "onMessage works fine" —
+     * so `signin-needed` reaches their own sign-in screen, which is what this
+     * was always meant to do: the customer signs in where the app already knows
+     * how, and the chat picks the identity up from the token the wrapper
+     * injects when the WebView is reloaded.
+     *
+     * TWO THINGS THAT USED TO HAPPEN HERE NO LONGER DO.
+     *
+     * `app://login` is gone. It was for an app with a URL interceptor and no
+     * message handler, and both attempts were sent deliberately while we did
+     * not know which existed. Now we do, and the unhandled scheme is not
+     * harmless — iOS answers it with "Unable to open URL: app://login" and the
+     * customer gets a native error dialog over a sign-in that is working.
+     *
+     * And UAE PASS is not asked for either. Falling through to it posted
+     * `open-url` as well, so an app that honours both would put its own
+     * sign-in screen up AND open UAE PASS in a browser behind it, for one tap.
+     * The host portal below is already skipped in the app for its own reasons;
+     * this is the same argument one step further.
+     */
     if (isNative()) {
       tried.push("asked the app");
       postNative({ action: "signin-needed", reason: "customer-asked" });
-      /**
-       * And the same request as a URL, for an app that has an interceptor and
-       * no message handler. Emirates Post's asked for this: the message above
-       * goes unanswered today, so sign-in falls through to the portal and opens
-       * a browser that never comes back.
-       *
-       * Both are sent, deliberately. Whichever the app implements works, and an
-       * app that implements neither is exactly where it was.
-       */
-      // The escalation reads auth live: an app that answers the message or the
-      // iframe must not then have its main frame navigated out from under it.
-      if (agent.nativeLoginUrl) {
-        tried.push(`opened ${agent.nativeLoginUrl}`);
-        askNativeToSignIn(agent.nativeLoginUrl, () => authenticatedRef.current);
-      }
-      /**
-       * AND SILENCE IS NOT AN ACCEPTABLE ANSWER TO A BUTTON.
-       *
-       * "When I click the login button nothing happens on the mobile version."
-       * Everything above had fired correctly and the app acted on none of it —
-       * not the message, not the URL, not the open-url that follows — so the
-       * customer tapped a control and the world did not change. A tester can
-       * report that; a customer just leaves.
-       *
-       * So if nobody has signed them in shortly afterwards, say so. It is the
-       * honest reading: we asked the app three ways and it did not answer, and
-       * the one thing the person holding the phone can do is use the app's own
-       * sign-in and come back.
-       *
-       * Cleared the moment a handoff arrives, so an app that answers slowly
-       * never shows it.
-       */
+      armSignInFallback(tried);
+      return;
     }
     /**
      * THE HOST PORTAL ROUTE CANNOT WORK INSIDE THE APP.
@@ -1474,31 +1510,8 @@ export function Experience({
       setAuthenticated(true);
       setAuthReason(null);
     }
-    /**
-     * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.
-     *
-     * This lived inside the native branch and covered only one of three ways
-     * this can fail silently: a host that ignores us, a pop-up that never
-     * opens, a scheme nothing handles. A customer cannot tell those apart and
-     * should not have to; they only need to know the button did not work and
-     * what to do instead.
-     */
-    if (nativeAskTimer.current) window.clearTimeout(nativeAskTimer.current);
-    nativeAskTimer.current = window.setTimeout(() => {
-      if (authenticatedRef.current) return;
-      const inApp = isNative();
-      const advice = inApp
-        ? locale === "ar"
-          ? "تعذّر بدء تسجيل الدخول داخل التطبيق. يرجى تسجيل الدخول من التطبيق ثم العودة إلى المحادثة."
-          : "Sign-in could not be started inside the app. Please sign in from the app, then come back to this chat."
-        : locale === "ar"
-          ? "لم تُفتح نافذة تسجيل الدخول. يرجى السماح بالنوافذ المنبثقة والمحاولة مرة أخرى."
-          : "The sign-in window did not open. Please allow pop-ups and try again.";
-      // The detail is for whoever is testing, and it is the difference between
-      // "nothing happened" and a report somebody can act on.
-      setAuthReason(`${advice} (${inApp ? "in-app" : "browser"}: ${tried.join(", ") || "nothing to try"})`);
-    }, 6000);
-  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.nativeLoginUrl, agent.slug, locale]);
+    armSignInFallback(tried);
+  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.slug, locale, armSignInFallback]);
 
   /**
    * The host sign-in popup closed. If no token reached us, say so instead of

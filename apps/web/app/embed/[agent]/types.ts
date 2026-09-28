@@ -62,7 +62,6 @@ export interface PublicAgent {
   // flow. See hostLoginUrl in packages/config/src/agent.ts.
   hostLoginUrl?: string;
   /** A URL a native host intercepts to run sign-in itself. See nativeBridge. */
-  nativeLoginUrl?: string;
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;
   // Whether GPT Realtime voice mode is configured (AZURE_REALTIME_* env present).

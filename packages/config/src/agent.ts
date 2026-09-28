@@ -78,19 +78,17 @@ export const AgentDefinition = z.object({
    */
   hostLoginUrl: z.string().url().optional(),
   /**
-   * What to navigate to, inside a NATIVE app, to ask it to sign the customer in.
+   * DISUSED (28 September). The widget no longer navigates to this, anywhere.
    *
-   * The documented way is a postMessage the app listens for. This is the same
-   * request made as a URL, for a host that already has an interceptor and no
-   * message handler — Emirates Post's app asked for `app://login`, where tapping
-   * sign-in otherwise opened a browser and never came back.
+   * It held a custom scheme — `app://login` — to ask a native app for a sign-in
+   * through a URL, for a host that had an interceptor and no message handler.
+   * Emirates Post's app now handles the postMessage (`signin-needed`) that was
+   * always the documented way, and an UNHANDLED scheme is not a free fallback:
+   * iOS answers it with "Unable to open URL: app://login" in a native dialog,
+   * over a sign-in that is working.
    *
-   * It changes only how the app is ASKED. What it sends back is unchanged: a
-   * short-lived handoff code, as in docs/MOBILE-APP-WEBVIEW-CONTRACT.
-   *
-   * Not `z.string().url()` — a custom scheme is not a URL by that definition,
-   * which is exactly why it needs its own field. Bounded to a scheme and a path
-   * so nothing arbitrary can be navigated to.
+   * Kept in the schema so definitions that still carry it continue to parse.
+   * Nothing reads it; setting it does nothing.
    */
   nativeLoginUrl: z
     .string()
