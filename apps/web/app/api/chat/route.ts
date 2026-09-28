@@ -60,7 +60,7 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
-import { collectedUploadGuard, asksSomethingElse } from "@/lib/uploadGuard";
+import { collectedUploadGuard, asksSomethingElse, asksToReplace } from "@/lib/uploadGuard";
 import { docKeyGuard } from "@/lib/docKeyGuard";
 import { epglDocumentLabels } from "@/lib/epglDocumentLabel";
 import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
@@ -2833,7 +2833,14 @@ export async function POST(req: NextRequest) {
             if (liveState.data[NAME_CONFLICT_DOC_KEY] === key) return null;
             const aliases = docAliases.get(key);
             return aliases?.length ? { aliases } : null;
-          }
+          },
+          /**
+           * The customer just asked to send a different file for one that is
+           * already in — "Upload a different Emirates ID for Partner 2", which
+           * was a button we offered them. Their own words, never the model's:
+           * the offer is not the acceptance.
+           */
+          !isPulse && !isPaymentSettled && !isDocumentUploaded && asksToReplace(body.userMessage)
         );
         /**
          * A FIELD KEY IS NOT A NAME THE CUSTOMER KNOWS. `partner_1_passport`
