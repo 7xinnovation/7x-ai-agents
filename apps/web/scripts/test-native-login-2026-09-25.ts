@@ -44,7 +44,9 @@ check("...and removed again", /frame\.remove\(\)/.test(bridge));
 check("the main frame is tried only after the subframe gets no answer", /if \(answered\(\)\) return;[\s\S]{0,120}window\.location\.href = url/.test(bridge));
 check("...after the iframe, not instead of it", bridge.indexOf("createElement(\"iframe\")") < bridge.indexOf("window.location.href = url"));
 check("...and never once something has answered", /askNativeToSignIn\(agent\.nativeLoginUrl, \(\) => authenticatedRef\.current\)/.test(exp));
-check("the platform difference is written down", /does not reliably hand a\s+\*?\s*SUBFRAME navigation/.test(bridge.replace(/\n \* /g, " ")));
+// Flattened first: the sentence wraps across comment lines.
+const bridgeProse = bridge.replace(/\s*\n\s*\*\s?/g, " ");
+check("the platform difference is written down", /does not reliably hand a SUBFRAME navigation/.test(bridgeProse));
 check("a host that throws is not an error the customer sees", /catch \{/.test(bridge));
 check("the reason for the iframe is written down", /replaces the conversation with an error page/.test(bridge));
 
