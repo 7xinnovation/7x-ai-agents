@@ -1451,7 +1451,22 @@ export function Experience({
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
         `&returnTo=${encodeURIComponent(returnTo)}${mock}`;
       const win = openExternal(`${base}&popup=1`, { name: "dlg-uaepass", kind: "signin" });
-      tried.push(win ? "opened UAE PASS" : "UAE PASS would not open");
+      /**
+       * "opened" was too strong inside the app. openExternal cannot open
+       * anything there — it POSTS to the host and returns a handle if the
+       * message went out. Saying it opened UAE PASS when the app did nothing
+       * with the message reads as our failure and sent the last round of
+       * diagnosis in the wrong direction.
+       */
+      tried.push(
+        isNative()
+          ? win
+            ? "asked the app to open UAE PASS"
+            : "could not reach the app"
+          : win
+            ? "opened UAE PASS"
+            : "UAE PASS would not open"
+      );
       // Nothing opened, and only a browser can fall back by navigating itself:
       // in a WebView that would replace the conversation with a login page.
       if (!win && !isNative()) window.location.href = base;
