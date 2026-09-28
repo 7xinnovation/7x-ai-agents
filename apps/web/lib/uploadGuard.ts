@@ -103,6 +103,63 @@ export function namesDocument(prose: string, aliases: string[]): boolean {
   return false;
 }
 
+/**
+ * AND A REPLACEMENT IS NOT A REPEAT ASK.
+ *
+ * EPGL, 28 September. Partner 2's Emirates ID came back with the same number as
+ * Partner 1's, the assistant flagged it — correctly — and offered two buttons:
+ * "The document is correct" and "Upload a different Emirates ID for Partner 2".
+ * The customer pressed the second. The reply was "Please upload Isam Eldien
+ * Garieballa's correct Emirates ID here:" and underneath it, instead of a file
+ * picker:
+ *
+ *     Already uploaded: Partner 2 — Emirates ID — Mr. Isam golden eid.pdf.
+ *     Nothing to do here.
+ *
+ * The guard above is right about the case it was built for — a model asking
+ * again, unprompted, for a file the customer can see marked Uploaded. It cannot
+ * tell that from the customer ASKING to send a different one, and in the second
+ * case "nothing to do here" is not merely unhelpful, it is wrong: there is
+ * something to do, they just asked to do it, and the wrong Emirates ID stays on
+ * the application because the only way to correct it was taken away.
+ *
+ * So the customer's own message decides. Nothing here fires on the assistant's
+ * words — the model offering to replace something is not the customer accepting
+ * — and `setDocument` has always replaced by key, so the upload itself needed no
+ * change. Only the control had to survive.
+ *
+ * Deliberately narrow, and the shape that matters most is the OTHER button:
+ * "The document is correct" must never read as a request to change it. It does
+ * not — every branch below needs an upload verb, a replace verb, or the word
+ * wrong.
+ */
+const REPLACE_EN = [
+  /\bupload\b[^.!?]{0,40}\b(different|another|correct|right|new|updated|replacement)\b/i,
+  /\b(re-?upload|replace|swap|change)\b[^.!?]{0,40}\b(document|file|copy|scan|photo|id|emirates id|passport|licen[cs]e|one|it|this|that)\b/i,
+  /\b(wrong|incorrect)\b[^.!?]{0,30}\b(document|file|copy|scan|photo|one|id|emirates id|passport|licen[cs]e)\b/i,
+];
+const REPLACE_AR = [
+  // A VERB IS REQUIRED, exactly as in English. Without one, "المستند صحيح" —
+  // "the document is correct", which is the OTHER button — reads as a request
+  // for a correct document, and pressing "it's fine" would reopen the picker.
+  /(ارفع|أرفع|رفع|ترفع|تحميل|حمل|حمّل|أرسل|ارسل|إرسال|ارسال)[^.!؟]{0,30}(مستند|ملف|صورة|نسخة|هوية|جواز)[^.!؟]{0,20}(مختلف|مختلفة|آخر|اخر|أخرى|اخرى|صحيح|صحيحة|جديد|جديدة)/,
+  /(استبدال|أستبدل|استبدل|تغيير|أغير|اغير)[^.!؟]{0,20}(المستند|الملف|الصورة|النسخة|الهوية|الجواز)/,
+  /(إعادة|اعادة)\s*(رفع|تحميل)/,
+  /(خطأ|الخاطئ|الخاطئة)[^.!؟]{0,20}(المستند|الملف|النسخة|الهوية|الجواز)/,
+];
+
+/**
+ * Did the CUSTOMER ask to send a different file for something already in?
+ *
+ * Only ever called with the customer's own message. Called with the
+ * assistant's, it would fire on the offer rather than on the acceptance.
+ */
+export function asksToReplace(message: string): boolean {
+  const t = String(message ?? "").trim();
+  if (!t) return false;
+  return REPLACE_EN.some((re) => re.test(t)) || REPLACE_AR.some((re) => re.test(t));
+}
+
 /** The longest tail of `s` that is a proper prefix of `OPEN`. */
 function heldTail(s: string): number {
   const max = Math.min(OPEN.length - 1, s.length);
@@ -148,7 +205,13 @@ export function collectedUploadGuard(
    * Non-null for a document nothing is waiting on. See namesDocument: an offer
    * has to be made in words, or it is not an offer, it is a demand nobody made.
    */
-  optional: (key: string) => OptionalDoc | null = () => null
+  optional: (key: string) => OptionalDoc | null = () => null,
+  /**
+   * The customer asked, in this turn, to send a different file for something
+   * already uploaded. Their ask outranks the rule against asking twice — see
+   * asksToReplace — so a block goes out as a block.
+   */
+  replacing = false
 ) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
@@ -250,7 +313,10 @@ export function collectedUploadGuard(
       if (deferred || unaskedOptional(block)) {
         // The sentence stays; only the control goes.
       } else {
-        out += replaceCollected(block, collected) + trailing;
+        // `replacing` leaves the block exactly as the model wrote it: the
+        // customer asked for this control, and rewriting it to "already
+        // uploaded" is the answer to a question they did not ask.
+        out += (replacing ? block : replaceCollected(block, collected)) + trailing;
         kept = true;
       }
       buf = buf.slice(end);
