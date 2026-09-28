@@ -8,7 +8,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-viban-2026-09-08.ts
  */
-import { notifyOpsForSubmission } from "../lib/opsNotify";
+import { notifyVibanRequest } from "../lib/opsNotify";
 
 let pass = 0;
 let fail = 0;
@@ -30,35 +30,46 @@ const CASE = {
   contact_phone: "0553708434",
 };
 
+/**
+ * The sender moved out of notifyOpsForSubmission on 28 September.
+ *
+ * It used to ride along with the submission notifications, so Finance heard
+ * about a Virtual IBAN only if the method had already been chosen by the time
+ * the application was submitted. That held the payment question BEFORE the
+ * submission, which is what 2026-09-28 reorders — and it meant an applicant who
+ * switched to a Virtual IBAN afterwards reached nobody at all.
+ *
+ * So the sender no longer decides WHETHER: the turn does, on the case's own
+ * answer, whichever order the two happened in. What is asserted here is what it
+ * sends and to whom; the condition is asserted against the route below.
+ */
 const notify = (data: Record<string, unknown>) =>
-  notifyOpsForSubmission({ reference: "a11FW000VfuZVYGYI4", journeyKey: "new_license", data, agentName: "EPGL Dialog" });
+  notifyVibanRequest({ reference: "a11FW000VfuZVYGYI4", data, agentName: "EPGL Dialog" });
 
 console.log("\nFinance is asked to raise the IBAN");
 {
   // No recipient configured: the outcome must still be produced and reported,
   // never silently skipped -- that is how a submission goes unnoticed.
   delete process.env.EPGL_FINANCE_EMAIL;
-  const out = await notify(CASE);
-  const v = out.find((o) => o.kind === "viban_request");
-  check("a viban_request outcome is produced", !!v, out.map((o) => o.kind));
-  check("and it reports why nothing was sent", v?.result.ok === false && (v.result as any).reason === "recipient_not_configured", v?.result);
+  const v = await notify(CASE);
+  check("a viban_request outcome is produced", v.kind === "viban_request", v.kind);
+  check("and it reports why nothing was sent", v.result.ok === false && (v.result as any).reason === "recipient_not_configured", v.result);
 }
 {
   process.env.EPGL_FINANCE_EMAIL = "finance@example.com";
-  const out = await notify(CASE);
-  const v = out.find((o) => o.kind === "viban_request");
-  check("addressed to the configured Finance mailbox", v?.to === "finance@example.com", v?.to);
+  const v = await notify(CASE);
+  check("addressed to the configured Finance mailbox", v.to === "finance@example.com", v.to);
 }
 
-console.log("\nOnly when the Virtual IBAN was actually chosen");
+console.log("\nOnly when the Virtual IBAN was actually chosen — decided by the turn now");
 {
-  process.env.EPGL_FINANCE_EMAIL = "finance@example.com";
-  const card = await notify({ ...CASE, payment_method: "gateway" });
-  check("a card payment raises nothing", !card.some((o) => o.kind === "viban_request"), card.map((o) => o.kind));
-  const none = await notify({ ...CASE, payment_method: "" });
-  check("an unanswered choice raises nothing", !none.some((o) => o.kind === "viban_request"), none.map((o) => o.kind));
-  const upper = await notify({ ...CASE, payment_method: "VIBAN" });
-  check("the value is read case-insensitively", upper.some((o) => o.kind === "viban_request"), upper.map((o) => o.kind));
+  const route = (await import("node:fs")).readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  check("the case's answer is what triggers it",
+    /String\(finalState\.data\.payment_method \?\? ""\)\.toLowerCase\(\) === "viban"/.test(route));
+  check("...read case-insensitively", /payment_method \?\? ""\)\.toLowerCase\(\)/.test(route));
+  check("...so a card payment and an unanswered choice raise nothing", /=== "viban" &&/.test(route));
+  check("...and it is not sent twice", /!finalState\.data\[VIBAN_NOTIFIED_KEY\]/.test(route));
+  check("...nor only on the turn that submitted", /const vibanRef = finalState\.reference \?\? submittedRef \?\? null;/.test(route));
 }
 
 console.log("\nrequest_payment refuses a Virtual IBAN outright");

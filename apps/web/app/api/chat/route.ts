@@ -23,7 +23,7 @@ import {
 import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, rememberVerifiedEmiratesId, rememberVerifiedAccountId, VERIFIED_EID_KEY, VERIFIED_ACCOUNT_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
-import { notifyOpsForSubmission } from "@/lib/opsNotify";
+import { notifyOpsForSubmission, notifyVibanRequest } from "@/lib/opsNotify";
 import { completionEmail, completionRecipient, plainLinks } from "@/lib/completionEmail";
 import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
@@ -173,6 +173,9 @@ const PULSE_DIRECTIVE =
  * one line before any tool runs, so the customer is not watching a spinner
  * through the lookups; then what is on the account; then what they can do.
  */
+/** When EPGL Finance were asked to raise this application's Virtual IBAN. */
+const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
+
 const EPGL_PULSE_DIRECTIVE =
   "(System: the customer just signed in. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
   "1) FIRST, before calling any tool, write ONE short line of greeting and say you are pulling their account up. It is the only thing they can see while the lookups run, so it must not wait on one. Use their name only if you have already been given it; never call a tool to find it. " +
@@ -3484,6 +3487,64 @@ export async function POST(req: NextRequest) {
               }
             } catch (e) {
               log.error("ops_notify_failed", e, { agentId: agent.id, reference: ref });
+            }
+          });
+        }
+
+        /**
+         * EPGL FINANCE HEAR ABOUT A VIRTUAL IBAN WHEN IT IS CHOSEN (2026-09-28).
+         *
+         * This used to ride along with the submission notifications above, which
+         * run on the turn the application is submitted — so Finance were told
+         * only if the customer had already picked the Virtual IBAN by then. That
+         * worked while the order was ask-then-submit, and it FORCED that order:
+         * three separate rules in the journey guidance said to ask first
+         * "because Finance are notified the moment the application is
+         * submitted". An applicant who changed their mind afterwards reached
+         * nobody at all.
+         *
+         * The application is now filed before the payment question, so the
+         * trigger is the CHOICE. Keyed off the case rather than this turn, so it
+         * fires whether the choice came before the submission or after it, and
+         * stamped on success so Finance are asked exactly once — and so a send
+         * that failed is retried on the next turn rather than lost, which is the
+         * failure that leaves an applicant waiting for an IBAN nobody raised.
+         */
+        const vibanRef = finalState.reference ?? submittedRef ?? null;
+        if (
+          agent.definition.tenantSlug === "epgl" &&
+          vibanRef &&
+          String(finalState.data.payment_method ?? "").toLowerCase() === "viban" &&
+          !finalState.data[VIBAN_NOTIFIED_KEY]
+        ) {
+          const ref = vibanRef;
+          const data = finalState.data as Record<string, unknown>;
+          deferred.push(async () => {
+            try {
+              const o = await notifyVibanRequest({
+                reference: ref,
+                data,
+                agentName: agent.definition.name,
+                tenant: agent.definition.tenantSlug,
+              });
+              await audit({
+                ...a,
+                actor: "system",
+                action: o.result.ok ? "ops_notified" : "ops_notify_skipped",
+                payload: { kind: o.kind, to: o.to, reason: o.result.ok ? undefined : o.result.reason },
+              });
+              // Stamped only once it has actually gone, so a transient failure is
+              // retried next turn. A recipient that is not configured is not
+              // transient and would retry forever, so it stamps too — the audit
+              // above is what says nobody was told.
+              if (o.result.ok || o.result.reason === "recipient_not_configured") {
+                await mutateCase(session.caseId, (fresh) => ({
+                  ...fresh,
+                  data: { ...fresh.data, [VIBAN_NOTIFIED_KEY]: new Date().toISOString() },
+                }));
+              }
+            } catch (e) {
+              log.error("viban_notify_failed", e, { agentId: agent.id, reference: ref });
             }
           });
         }
