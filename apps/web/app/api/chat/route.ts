@@ -8,6 +8,18 @@ import { getDb, payments, documents as documentsTable, documentBlobs } from "@di
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug, getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
+import {
+  HALL_ACCEPTED_KEY,
+  HALL_PENDING_KEY,
+  hallAcceptedFor,
+  hallDirective,
+  hallNoticeBlock,
+  mustAcceptReply,
+  pendingHall,
+  readsAsAcceptance,
+  readsAsAnotherBranch,
+  readsAsBarePush,
+} from "@/lib/hallNotice";
 import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, rememberVerifiedEmiratesId, rememberVerifiedAccountId, VERIFIED_EID_KEY, VERIFIED_ACCOUNT_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
@@ -924,6 +936,10 @@ export async function POST(req: NextRequest) {
     // the same question came back on each one -- after the customer had already
     // answered it.
     duplicateDecision: () => str(session.state.data.__duplicate_decision) ?? null,
+    // Read live, and per BRANCH: the acceptance is written before this turn's
+    // stream opens, so a customer who accepts and is answered in the same turn
+    // gets their boxes rather than the refusal they just cleared.
+    hallLimitationsAccepted: (officeId: string) => hallAcceptedFor(liveState.data as Record<string, unknown>, officeId),
     // Read from the live case, not remembered in the tool layer: `case` events
     // update this within the turn, so a submission and the resubmission that
     // follows it two messages later both see the same answer.
@@ -1143,6 +1159,103 @@ export async function POST(req: NextRequest) {
   const isPaymentSettled = Boolean(body.paymentSettled) && !isPulse;
   const isDocumentUploaded = Boolean(body.documentUploaded) && !isPulse && !isPaymentSettled;
 
+  /**
+   * THE P.O. BOX HALL LIMITATIONS ARE A CHECKBOX, NOT A PARAGRAPH (2026-09-28).
+   *
+   * Reported on Emirates Post: pick a branch that is a hall/complex, the
+   * service-limitations notice appears, type "Proceed" — and the rental carries
+   * on to box numbers with nothing accepted. Their website and app put the same
+   * words behind a mandatory tick that nothing gets past.
+   *
+   * Three things now stand between a hall and a rental, and only the first of
+   * them is a sentence the model chose to write:
+   *
+   *   1. the notice comes back on every reply until it is accepted (below, at
+   *      the end of the turn), with its two buttons;
+   *   2. the box lookup for that branch is REFUSED until it is (integrations);
+   *   3. and a bare "proceed" is answered HERE, without the model, because that
+   *      is the exact keystroke this was reported for.
+   *
+   * Acceptance is recorded by us off the customer's own words — never by the
+   * model, which is what made it unenforceable before.
+   */
+  const hallToAccept = pendingHall(session.state.data as Record<string, unknown>);
+  const hallOutstanding =
+    Boolean(hallToAccept) &&
+    !hallAcceptedFor(session.state.data as Record<string, unknown>, hallToAccept?.officeId) &&
+    !isPulse &&
+    !isPaymentSettled &&
+    !isDocumentUploaded;
+  let hallStillOutstanding = hallOutstanding;
+  if (hallOutstanding && hallToAccept) {
+    if (readsAsAcceptance(body.userMessage)) {
+      // What they accepted, and when. Emirates Post's requirement is a record of
+      // acceptance, so it is stored as one: the branch, the branch their key is
+      // actually issued at, and the timestamp.
+      const at = new Date().toISOString();
+      session.state = await mutateCase(session.caseId, (st: CaseState) => ({
+        ...st,
+        data: {
+          ...st.data,
+          [HALL_ACCEPTED_KEY]: {
+            at,
+            branch: hallToAccept.name,
+            officeId: hallToAccept.officeId ?? null,
+            alternativeBranch: hallToAccept.alternative,
+          },
+        },
+      }));
+      liveState = session.state;
+      hallStillOutstanding = false;
+      await audit({
+        agentId: agent.id,
+        conversationId: session.conversationId,
+        actor: "user",
+        action: "hall_limitations_accepted",
+        payload: { branch: hallToAccept.name, officeId: hallToAccept.officeId ?? null, alternativeBranch: hallToAccept.alternative, at },
+      });
+    } else if (readsAsAnotherBranch(body.userMessage)) {
+      // The other button. Drop the pending hall so the notice stops following
+      // them around a branch they are no longer choosing; picking another hall
+      // sets it again, and picking an ordinary branch never does.
+      session.state = await mutateCase(session.caseId, (st: CaseState) => {
+        const data = { ...st.data };
+        delete data[HALL_PENDING_KEY];
+        return { ...st, data };
+      });
+      liveState = session.state;
+      hallStillOutstanding = false;
+    } else if (readsAsBarePush(body.userMessage)) {
+      /**
+       * "Proceed". Answered here, with the notice and the two buttons, and the
+       * model is not run at all — there is nothing for it to decide, and every
+       * turn it does run is a turn it might decide to be helpful.
+       */
+      const reply = mustAcceptReply(hallToAccept, body.locale);
+      await appendMessage(session.conversationId, "user", body.userMessage);
+      await appendMessage(session.conversationId, "assistant", reply);
+      await audit({
+        agentId: agent.id,
+        conversationId: session.conversationId,
+        actor: "system",
+        action: "hall_limitations_push_blocked",
+        payload: { branch: hallToAccept.name, officeId: hallToAccept.officeId ?? null, said: body.userMessage },
+      });
+      const enc = new TextEncoder();
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(enc.encode(sse({ type: "session", conversationId: session.conversationId })));
+            c.enqueue(enc.encode(sse({ type: "text", delta: reply })));
+            c.enqueue(enc.encode(sse({ type: "done", state: session.state, message: reply })));
+            c.close();
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } }
+      );
+    }
+  }
+
   // Returning customer: boxes we already know from their previous authenticated
   // sessions (current conversation's case included — it's stored per turn).
   // Injected into the system prompt on EVERY authenticated turn, so both the
@@ -1285,6 +1398,15 @@ export async function POST(req: NextRequest) {
       `${session.expired === "idle" ? "idle too long" : "open too long"}. Say so in ONE short line before anything else — plainly, as a security measure and not as a fault of theirs or an error — ` +
       `and ask them to sign in again to carry on. Everything they had already given is still here and must NOT be asked for again once they are back. ` +
       `Until they sign in you cannot read their account, their boxes, their licences or anything else that needs identity: do not call those tools and do not guess at what they would return.`.trim();
+  }
+  /**
+   * And the reply agrees with what the tools will allow.
+   *
+   * The refusal in the tool layer is the enforcement; this is so the customer is
+   * not told a box is on its way by a model that has not tried to fetch one yet.
+   */
+  if (hallStillOutstanding && hallToAccept) {
+    customerContext = `${customerContext ?? ""}${hallDirective(hallToAccept, body.locale)}`.trim();
   }
   const effectiveMessage = isPulse
     ? pulseDirective
@@ -3036,60 +3158,54 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // The PO Box hall notice, rendered by US.
+        // The PO Box hall notice, rendered by US — and repeated until it is
+        // accepted.
         //
         // Emirates Post require it before a customer commits to a location that
         // is boxes-only — no counter, no parcels, and the key issued somewhere
         // else. It was asked for in the tool guidance, word for word, and the
         // model still did not print it: prose instructions lose to whatever else
-        // the turn is doing. So it is appended here whenever the branch list this
-        // turn contained a hall and the reply did not already carry the notice,
-        // the same way the map block beside it is.
-        // WHEN it appears matters as much as whether. Listing every hall in the
-        // emirate on the branch cards buried the notice under branches nobody had
-        // picked; Emirates Post shows it when a hall is CHOSEN. Choosing one is
-        // exactly what asking for its box numbers means, so that is the trigger —
-        // and the fallback still covers the cards, in case they never get that far.
-        const chosen = apiTools.getChosenHall();
-        const halls = chosen ? [chosen] : [];
-        // Show the hall notice ONCE per conversation. getChosenHall() stays
-        // truthy after the customer picks a hall, so a guard that only checked
-        // THIS turn re-appended the notice (and its accept/choose buttons) on
-        // every later turn — e.g. stapled onto the key-collection question,
-        // giving the customer a second, duplicate set of buttons for something
-        // they had already acknowledged. Suppress it if the notice already
-        // appeared in this reply OR in any earlier assistant message.
-        const noticeAlreadyShown =
-          /Important Notice/i.test(finalText) ||
-          session.history.some((m) => m.role === "assistant" && /Important Notice/i.test(m.content));
-        if (halls.length && !noticeAlreadyShown) {
-          const alt = halls.find((h) => h.alternative)?.alternative ?? "the designated operational branch";
-          const named = halls.map((h) => h.name).filter(Boolean).join(", ");
-          const notice =
-            `\n\n> **Important Notice** — ${named || "This location"} ` +
-            `${halls.length > 1 ? "operate" : "operates"} as a P.O. Box Hall/complex and ` +
-            `${halls.length > 1 ? "provide" : "provides"} P.O. Box access only.\n` +
-            ">\n" +
-            "> The P.O. Box is designated for normal mail items that fit within the physical dimensions of the selected box size.\n" +
-            ">\n" +
-            "> Counter services, large parcel handling, registered mail processing, and additional services are not available at this location.\n" +
-            ">\n" +
-            "> P.O. Box keys can only be collected from the respective operational branch, or through the approved delivery option (if available). Keys are not issued at this P.O. Box Hall location.\n" +
-            ">\n" +
-            `> To obtain services beyond P.O. Box access, please visit the designated Alternative Operational Branch: **${alt}**.\n` +
-            ">\n" +
-            "> By proceeding, you acknowledge and accept these service limitations.\n";
-          // Emirates Post's requirement is that the customer ACKNOWLEDGES it,
-          // not merely that they are shown it — their own site makes them click
-          // before it will go on. So the notice comes with the two answers, and
-          // the choice is theirs to make rather than ours to assume.
-          const ack =
-            body.locale === "ar"
-              ? "\n\n```buttons\n- أوافق على هذه الشروط، تابع\n- اختيار فرع آخر\n```\n"
-              : "\n\n```buttons\n- I accept these limitations, continue\n- Choose a different branch\n```\n";
-          const withAck = notice + ack;
-          send({ type: "text", delta: withAck });
-          finalText += withAck;
+        // the turn is doing. So it is appended here, the same way the map block
+        // beside it is.
+        //
+        // WHEN it appears: on the turn the branch is CHOSEN. Asking for a hall's
+        // boxes is what choosing one means, and that lookup is now refused until
+        // the acceptance is on record — so the notice arrives instead of the box
+        // numbers rather than underneath them. Listing every hall in the emirate
+        // on the branch cards buried it under branches nobody had picked, so the
+        // fallback there is the chosen hall only.
+        //
+        // HOW OFTEN: until they accept. It used to be shown exactly once per
+        // conversation, which is why "Proceed" worked — the notice was gone by
+        // the next turn and nothing had been agreed to. Once accepted it never
+        // appears again, which is what that guard was really protecting against.
+        const chosen = apiTools.getUnacceptedHall() ?? apiTools.getChosenHall() ?? hallToAccept;
+        const accepted = hallAcceptedFor(finalState.data as Record<string, unknown>, chosen?.officeId);
+        if (chosen && !accepted) {
+          // Written down so the gate at the top of the next turn knows what is
+          // outstanding: the tool layer's memory of this conversation's halls is
+          // in-process and does not survive a restart, and an acceptance has to.
+          finalState = {
+            ...finalState,
+            data: {
+              ...finalState.data,
+              [HALL_PENDING_KEY]: {
+                officeId: chosen.officeId ?? null,
+                name: chosen.name,
+                alternative: chosen.alternative,
+                nameAr: chosen.nameAr ?? null,
+                alternativeAr: chosen.alternativeAr ?? null,
+              },
+            },
+          };
+          // Not twice in one reply: the model is told the block is appended for
+          // it, but a model that writes the notice anyway should not produce two
+          // sets of buttons for one decision.
+          if (!/Important Notice|تنبيه مهم/i.test(finalText)) {
+            const withAck = hallNoticeBlock(chosen, body.locale);
+            send({ type: "text", delta: withAck });
+            finalText += withAck;
+          }
         }
 
         /**

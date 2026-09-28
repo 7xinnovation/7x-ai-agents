@@ -10,6 +10,7 @@ import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
 import { parseHours, openNow } from "./branchHours";
 import { prepareBranches, poBoxHallNotice, type BranchRow } from "./branchList";
+import type { HallRef } from "./hallNotice";
 import { rentalTotal, bundlePeriods, describePeriods, periodSavings, describeSavings, registrationFee, type BundlePeriod } from "./rentalTotal";
 import { registrationFees, observedRents, observedServices, rememberFees, feesInSelectResponse, rentInSelectResponse, rentKey } from "./registrationFees";
 import { gatewayOrderState } from "./gatewayOrder";
@@ -410,7 +411,7 @@ function officeIdForBranch(conversationId: string | undefined, branch: string | 
   return ids.size === 1 ? [...ids][0]! : null;
 }
 
-const hallMemory = new Map<string, { at: number; halls: { officeId: string; name: string; alternative: string }[] }>();
+const hallMemory = new Map<string, { at: number; halls: HallRef[] }>();
 const HALL_TTL_MS = 2 * 60 * 60 * 1000;
 
 /**
@@ -503,7 +504,7 @@ const RENEWED_BY_EN: Record<string, string> = {
   "19151": "Someone else",
 };
 
-function rememberHalls(conversationId: string | undefined, halls: { officeId: string; name: string; alternative: string }[]) {
+function rememberHalls(conversationId: string | undefined, halls: HallRef[]) {
   if (!conversationId) return;
   if (hallMemory.size > 500) for (const [k, v] of hallMemory) if (Date.now() - v.at > HALL_TTL_MS) hallMemory.delete(k);
   hallMemory.set(conversationId, { at: Date.now(), halls });
@@ -1059,6 +1060,8 @@ export async function buildApiTools(
     gsbCompanies?: string[];
     /** What the customer already decided about existing applications, if anything. */
     duplicateDecision?: () => string | null;
+    /** Has the customer accepted the limitations of THIS P.O. Box hall? */
+    hallLimitationsAccepted?: (officeId: string) => boolean;
     /**
      * The licence request this CASE already has, read fresh on every call.
      *
@@ -1176,9 +1179,11 @@ export async function buildApiTools(
   getCapturedToken: () => string | null;
   getLastBranchQuery: () => { emirate: string; bundle: string } | null;
   /** PO Box halls in the branch list this turn, and where their keys are issued. */
-  getLastBranchHalls: () => { officeId: string; name: string; alternative: string }[];
+  getLastBranchHalls: () => HallRef[];
   /** The hall the customer chose, if the box lookup was made against one. */
-  getChosenHall: () => { name: string; alternative: string } | null;
+  getChosenHall: () => HallRef | null;
+  /** The hall the customer chose but has not accepted the limitations of. */
+  getUnacceptedHall: () => HallRef | null;
   /** The one-time registration fee, as Emirates Post has priced it. */
   getRegistrationFee: () => number | null;
   /**
@@ -1356,7 +1361,7 @@ export async function buildApiTools(
    * which is what guidance does under pressure, and why the map block beside it
    * is appended deterministically too.
    */
-  let lastBranchHalls: { officeId: string; name: string; alternative: string }[] = recallHalls(opts.conversationId);
+  let lastBranchHalls: HallRef[] = recallHalls(opts.conversationId);
   /**
    * The hall the customer actually PICKED, if they picked one.
    *
@@ -1365,7 +1370,9 @@ export async function buildApiTools(
    * not a thing the model reports — but asking FreeBoxes for a hall's officeId
    * is exactly what choosing it does, so that is the signal.
    */
-  let chosenHall: { name: string; alternative: string } | null = null;
+  let chosenHall: HallRef | null = null;
+  /** A hall whose box lookup was refused this turn for want of an acceptance. */
+  let unacceptedHall: HallRef | null = null;
   /** Registration fees observed for this integration, loaded when bundles are listed. */
   let feeBook: Map<string, number> = new Map();
   /** The rental end dates Emirates Post offered for a bundle, exactly as written. */
@@ -2621,6 +2628,42 @@ export async function buildApiTools(
       const inp = { ...((input ?? {}) as Record<string, unknown>) };
       const bundle = asStr(inp.BundleId ?? inp.bundleId).toUpperCase();
       const loc = asStr(inp.LocationId ?? inp.locationId);
+
+      /**
+       * A HALL'S BOXES ARE NOT SHOWN UNTIL ITS LIMITATIONS ARE ACCEPTED.
+       *
+       * Reported 28 September: the notice was shown, the customer typed
+       * "Proceed", and the box numbers came anyway. On Emirates Post's own site
+       * and app the same words sit in a modal behind a mandatory checkbox, and
+       * nothing moves until it is ticked.
+       *
+       * Asking for a hall's boxes IS choosing that hall — it is already the
+       * trigger for the notice — so it is also the right thing to refuse. This
+       * is the enforcement: prose in the guidance asked for an acknowledgement
+       * for three weeks and got one whenever the model felt like it. A refusal
+       * here cannot be talked round, and it lands on the turn the branch is
+       * chosen rather than after a box number has been picked.
+       */
+      const askedHall = loc ? lastBranchHalls.find((h) => h.officeId === loc) : undefined;
+      if (askedHall && opts.hallLimitationsAccepted && !opts.hallLimitationsAccepted(loc)) {
+        unacceptedHall = askedHall;
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "hall_limitations_lookup_blocked",
+          payload: { tool: toolName, officeId: loc, branch: askedHall.name, alternativeBranch: askedHall.alternative },
+        }).catch(() => {});
+        return {
+          result:
+            `${askedHall.name} is a P.O. Box hall and the customer has NOT accepted its service limitations, so its box numbers cannot be looked up yet. ` +
+            `This is not an error and nothing is wrong with the branch — it is the same mandatory acceptance Emirates Post's website and app ask for before they will show boxes at a hall. ` +
+            `The notice and its two buttons are appended to your reply for you: do NOT write the notice out yourself, do NOT list or invent box numbers, and do NOT ask again for something they have already given. ` +
+            `Say only that this branch has service limitations they need to accept first, and leave the choice to them. ` +
+            `Once they have accepted, call this again with the same LocationId and it will answer normally. If they choose a different branch instead, use that branch's officeId.`,
+        };
+      }
+
       if (/^MYHOME/.test(bundle) && /^\d+$/.test(loc)) {
         // lastBranchQuery only holds within a turn, and the branch is usually chosen
         // in an earlier one — which is why the first version of this silently did
@@ -3543,6 +3586,11 @@ export async function buildApiTools(
             officeId: String(h.officeId ?? ""),
             name: String(h.nameEn ?? h.officeId ?? ""),
             alternative: String(h.alternativeBranchEn ?? ""),
+            // Carried so the notice can NAME the hall and its operational branch
+            // in the language the notice itself is written in. A customer cannot
+            // check a branch name we hand them in a script they are not reading.
+            nameAr: String(h.nameAr ?? "") || undefined,
+            alternativeAr: String(h.alternativeBranchAr ?? "") || undefined,
           }));
           rememberHalls(opts.conversationId, lastBranchHalls);
           rememberBranches(opts.conversationId, rows as { officeId?: unknown; nameEn?: unknown; nameAr?: unknown }[]);
@@ -3569,7 +3617,7 @@ export async function buildApiTools(
                         return `${name} (keys and counter services at ${alt ?? "another branch"})`;
                       })
                       .join("; ") +
-                    ". A box hall gives access to boxes only — no counter, no parcels, no registered mail — and the KEY IS NOT ISSUED THERE. Mark each one on its card (e.g. `badge: P.O. Box Hall`). If the customer chooses one, you MUST show them this notice WORD FOR WORD before going any further, and get their explicit acknowledgement before reserving anything:\n\n" +
+                    ". A box hall gives access to boxes only — no counter, no parcels, no registered mail — and the KEY IS NOT ISSUED THERE. Mark each one on its card (e.g. `badge: P.O. Box Hall`). If the customer chooses one, the notice below and its two buttons are APPENDED TO YOUR REPLY AUTOMATICALLY and the box lookup for that branch is refused until they accept — so do not write the notice out yourself, do not offer a third option, and do not treat \"proceed\", \"continue\", \"ok\" or \"yes\" as an acceptance. It is recorded for them, from their own words. This is the notice they will be shown, so that you know what you are waiting on:\n\n" +
                     poBoxHallNotice(
                       opts.locale === "ar"
                         ? "<اسم الفرع الذي يُسلَّم منه المفتاح، كما هو مكتوب في القائمة>"
@@ -3577,7 +3625,7 @@ export async function buildApiTools(
                       opts.locale
                     ) +
                     (opts.locale === "ar" ? "\n\nThe notice above is already in Arabic — give it to the customer exactly as written." : "") +
-                    "\n\nSubstitute the real branch name where the placeholder is. Do not paraphrase, shorten or summarise the notice, and do not proceed on an assumed yes — a customer who is not told turns up at a room of boxes expecting a post office, with their key in another building. A hall is still a REAL OPTION and is offered like any other location on this list: the notice is a condition of choosing it, not a reason to steer them away from it."
+                    "\n\nDo not proceed on an assumed yes — a customer who is not told turns up at a room of boxes expecting a post office, with their key in another building. A hall is still a REAL OPTION and is offered like any other location on this list: the notice is a condition of choosing it, not a reason to steer them away from it."
                   : "") +
                 "\n\nopenNow says whether the branch is open at this moment, in UAE time; when it is false, opensAt is when it next opens. A CLOSED branch can still be rented — say so — but the customer must be told before they pick it, not after: put `badge: Closed now` on its card and give the opening time in the line beneath (e.g. `desc: Closed now, opens 08:00`). If the branch they choose is closed, tell them plainly, say when it opens, and in the same reply name a branch from this list that is open now and has boxes, as an alternative they can take instead. Never let a customer walk to a closed counter because we did not mention it.",
               raw: JSON.stringify(b),
@@ -4101,7 +4149,7 @@ export async function buildApiTools(
       const inp = (input ?? {}) as Record<string, unknown>;
       const loc = asStr(inp.LocationId ?? inp.locationId ?? inp.OfficeId ?? inp.officeId);
       const hall = loc ? lastBranchHalls.find((h) => h.officeId === loc) : undefined;
-      if (hall) chosenHall = { name: hall.name, alternative: hall.alternative };
+      if (hall) chosenHall = hall;
       else if (loc) chosenHall = null;
     }
     rememberExpiry(toolName, res);
@@ -4201,6 +4249,7 @@ export async function buildApiTools(
     getLastBranchQuery: () => lastBranchQuery,
     getLastBranchHalls: () => lastBranchHalls,
     getChosenHall: () => chosenHall,
+    getUnacceptedHall: () => unacceptedHall,
     getRegistrationFee: () => {
       // The bundle they chose, when we know it. Otherwise: every bundle Emirates
       // Post prices charges the same registration fee, and while that stays true
