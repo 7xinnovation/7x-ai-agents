@@ -81,7 +81,7 @@ export function postNative(detail: Record<string, unknown>): void {
  * the other side. An iframe that nothing handles fails silently and the chat is
  * untouched, which is the whole reason this technique is the usual one.
  */
-export function askNativeToSignIn(url: string): void {
+export function askNativeToSignIn(url: string, answered: () => boolean): void {
   if (!isNative() || typeof document === "undefined" || !url) return;
   try {
     const frame = document.createElement("iframe");
@@ -93,8 +93,34 @@ export function askNativeToSignIn(url: string): void {
     // accumulates in the document over a conversation.
     setTimeout(() => frame.remove(), 1500);
   } catch {
-    /* an app that does not answer leaves the portal fallback, as before */
+    /* fall through to the attempt below */
   }
+
+  /**
+   * AND THEN THE MAIN FRAME, BECAUSE A SUBFRAME MAY NEVER REACH THE HANDLER.
+   *
+   * Their developer confirmed he intercepts every request, main frame or not,
+   * and it still does nothing — so the navigation is not arriving at all. That
+   * is the known weak spot of the iframe trick: WKWebView does not reliably
+   * hand a SUBFRAME navigation to an unregistered scheme to the delegate, and
+   * TestFlight means iOS. Android delivers subframes to
+   * shouldOverrideUrlLoading and is likely fine; the two platforms differ here.
+   *
+   * So if nothing has answered shortly after, the same URL is tried in the main
+   * frame, where every platform calls the handler. An app that intercepts it —
+   * which is the whole reason nativeLoginUrl was configured — cancels the
+   * navigation and nothing moves. An app that does NOT would leave the WebView
+   * on an error page, which is why this is gated on the setting being present
+   * rather than attempted for every host, and why the iframe goes first.
+   */
+  setTimeout(() => {
+    if (answered()) return;
+    try {
+      window.location.href = url;
+    } catch {
+      /* nothing further to try; the caller's timeout tells the customer */
+    }
+  }, 1200);
 }
 
 /**

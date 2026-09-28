@@ -1362,7 +1362,9 @@ export function Experience({
        * Both are sent, deliberately. Whichever the app implements works, and an
        * app that implements neither is exactly where it was.
        */
-      if (agent.nativeLoginUrl) askNativeToSignIn(agent.nativeLoginUrl);
+      // The escalation reads auth live: an app that answers the message or the
+      // iframe must not then have its main frame navigated out from under it.
+      if (agent.nativeLoginUrl) askNativeToSignIn(agent.nativeLoginUrl, () => authenticatedRef.current);
       /**
        * AND SILENCE IS NOT AN ACCEPTABLE ANSWER TO A BUTTON.
        *

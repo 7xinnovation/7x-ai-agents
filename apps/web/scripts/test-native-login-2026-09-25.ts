@@ -36,7 +36,15 @@ console.log("\nAnd a scheme nothing handles cannot eat the conversation");
 check("it fires in a hidden iframe, not the top window", /document\.createElement\("iframe"\)/.test(bridge));
 check("...hidden from sight and from screen readers", /style\.display = "none"/.test(bridge) && /aria-hidden/.test(bridge));
 check("...and removed again", /frame\.remove\(\)/.test(bridge));
-check("nothing navigates the window itself", !/window\.location\.href\s*=\s*url/.test(bridge));
+/**
+ * Their developer confirmed he intercepts every request, main frame or not, and
+ * it still did nothing — so the subframe navigation never reached him. That is
+ * the known limit of the iframe trick on WKWebView, and TestFlight is iOS.
+ */
+check("the main frame is tried only after the subframe gets no answer", /if \(answered\(\)\) return;[\s\S]{0,120}window\.location\.href = url/.test(bridge));
+check("...after the iframe, not instead of it", bridge.indexOf("createElement(\"iframe\")") < bridge.indexOf("window.location.href = url"));
+check("...and never once something has answered", /askNativeToSignIn\(agent\.nativeLoginUrl, \(\) => authenticatedRef\.current\)/.test(exp));
+check("the platform difference is written down", /does not reliably hand a SUBFRAME navigation/.test(bridge));
 check("a host that throws is not an error the customer sees", /catch \{/.test(bridge));
 check("the reason for the iframe is written down", /replaces the conversation with an error page/.test(bridge));
 
