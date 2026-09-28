@@ -37,11 +37,15 @@ const bridge = readFileSync(new URL("../app/embed/[agent]/nativeBridge.ts", impo
 const exp = readFileSync(new URL("../app/embed/[agent]/Experience.tsx", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../../../packages/config/src/agent.ts", import.meta.url), "utf8");
 const page = readFileSync(new URL("../app/embed/[agent]/page.tsx", import.meta.url), "utf8");
+const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
 console.log("\nOne way of asking");
 check("the documented message is sent", /postNative\(\{ action: "signin-needed", reason: "customer-asked" \}\)/.test(exp));
 check("...only inside a native host", /if \(isNative\(\)\) \{[\s\S]{0,200}postNative\(\{ action: "signin-needed"/.test(exp));
-check("...and nothing else is attempted after it", /postNative\(\{ action: "signin-needed", reason: "customer-asked" \}\);\s*\n\s*armSignInFallback\(tried\);\s*\n\s*return;/.test(exp));
+// Nothing between the ask and the return but the line that acknowledges it.
+check("...and nothing else is attempted after it",
+  /postNative\(\{ action: "signin-needed", reason: "customer-asked" \}\);[\s\S]{0,420}armSignInFallback\(tried\);\s*\n\s*return;/.test(exp) &&
+    !/askNativeToSignIn|openExternal/.test(exp.slice(exp.indexOf('postNative({ action: "signin-needed"'), exp.indexOf("armSignInFallback(tried);"))));
 
 console.log("\nAnd the scheme that produced a native error is gone");
 // "Error opening URL: app://login. Unable to open URL: app://login."
@@ -62,6 +66,18 @@ const nativeBranch = exp.slice(exp.indexOf('if (isNative()) {\n      tried.push(
 check("the native branch returns before the UAE PASS route", nativeBranch.indexOf("return;") < nativeBranch.indexOf("agent.uaePassEnabled"));
 check("...and the host portal is still skipped in the app", /const hostLoginUsable = Boolean\(agent\.hostLoginUrl\) && !isNative\(\);/.test(exp));
 check("a browser still opens UAE PASS as it did", /openExternal\(`\$\{base\}&popup=1`/.test(exp));
+
+console.log("\nThe tap is acknowledged before the app answers");
+// "When I click the sign in still nothing is happening" — a fourth time. The
+// request goes out correctly every time; what was missing is the button saying
+// so, which never should have depended on the far end.
+check("a neutral line appears straight away", /setAuthInfo\(\s*locale === "ar"[\s\S]{0,120}Opening sign-in in the app/.test(exp));
+check("...in both languages", /جارٍ فتح تسجيل الدخول في التطبيق/.test(exp));
+check("...as information, not as a warning", /dlg-auth-banner is-info/.test(exp));
+check("...with nothing to act on", /<div className="dlg-auth-banner is-info">\s*\n\s*<span>\{authInfo\}<\/span>\s*\n\s*<\/div>/.test(exp));
+check("...and it is styled apart from the amber one", /\.dlg-auth-banner\.is-info \{/.test(css));
+check("signing in clears it", /setAuthReason\(null\);\s*\n\s*setAuthInfo\(null\);\s*\n\s*\}\s*\n\s*\}, \[authenticated\]\);/.test(exp));
+check("...and so does the warning taking over", /setAuthInfo\(null\);\s*\n\s*const advice = inApp/.test(exp));
 
 console.log("\nA button that does nothing still says so — later");
 check("a timer is armed whichever route was taken", /armSignInFallback\(tried\)/.test(exp));

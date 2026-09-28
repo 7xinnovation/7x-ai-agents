@@ -567,9 +567,24 @@ export function Experience({
       window.clearTimeout(nativeAskTimer.current);
       nativeAskTimer.current = null;
       setAuthReason(null);
+      setAuthInfo(null);
     }
   }, [authenticated]);
   const [authReason, setAuthReason] = useState<string | null>(null);
+  /**
+   * THE BUTTON SAYS SOMETHING THE MOMENT IT IS PRESSED.
+   *
+   * "When I click the sign in still nothing is happening", now for the fourth
+   * time. Every round of this has had the same shape: the request goes out
+   * correctly, the app does not act on it, and the customer is left looking at a
+   * control that gave them nothing back. Whether the app answers is the app's
+   * business; whether the button ACKNOWLEDGES is ours, and it should never have
+   * depended on the far end.
+   *
+   * So a neutral line appears straight away, and the warning below replaces it
+   * only once the wait is genuinely over. Not an error — it is not one yet.
+   */
+  const [authInfo, setAuthInfo] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
   /**
    * WHAT the assistant is doing, not the SENTENCE that says so.
@@ -1358,6 +1373,7 @@ export function Experience({
       nativeAskTimer.current = window.setTimeout(
         () => {
           if (authenticatedRef.current) return;
+          setAuthInfo(null);
           const advice = inApp
             ? locale === "ar"
               ? "تعذّر بدء تسجيل الدخول داخل التطبيق. يرجى تسجيل الدخول من التطبيق ثم العودة إلى المحادثة."
@@ -1433,6 +1449,14 @@ export function Experience({
     if (isNative()) {
       tried.push("asked the app");
       postNative({ action: "signin-needed", reason: "customer-asked" });
+      // Said before we know whether the app is listening, deliberately: the tap
+      // is acknowledged either way, and the warning takes over if nothing comes.
+      setAuthReason(null);
+      setAuthInfo(
+        locale === "ar"
+          ? "جارٍ فتح تسجيل الدخول في التطبيق…"
+          : "Opening sign-in in the app…"
+      );
       armSignInFallback(tried);
       return;
     }
@@ -1574,6 +1598,7 @@ export function Experience({
     if (!silent && !text) return;
     if (!silent) setInput("");
     setAuthReason(null);
+    setAuthInfo(null);
     // Silent turns (post-sign-in account pulse, payment settled) add no user
     // bubble — only the assistant's response is shown.
     const said = new Date().toISOString();
@@ -2344,6 +2369,12 @@ export function Experience({
               <button className="dlg-chip" onClick={signIn}>
                 {t.signIn}
               </button>
+            </div>
+          ) : authInfo ? (
+            // Not a warning and not a dead end: no icon, no button, nothing to
+            // act on. It is the tap being acknowledged while the app is asked.
+            <div className="dlg-auth-banner is-info">
+              <span>{authInfo}</span>
             </div>
           ) : null}
 
