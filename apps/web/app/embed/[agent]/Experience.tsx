@@ -1351,7 +1351,21 @@ export function Experience({
      * that has not implemented this ignores the message, and the portal below
      * is still opened — nothing regresses for an app that is not listening.
      */
+    /**
+     * WHAT WE TRIED, SO THE NEXT REPORT IS AN ANSWER RATHER THAN A ROUND TRIP.
+     *
+     * "I'm still clicking the button but nothing is happening", three times
+     * over, and each round has been a guess: is the app react-native-webview,
+     * does the scheme arrive, is a pop-up blocked. None of that is visible from
+     * here and all of it is visible from THERE — so the widget writes down what
+     * it attempted and shows it on the banner when nothing comes of it.
+     *
+     * Plain language, because the person reading it is testing on a phone, and
+     * the detail only appears once the attempt has already failed.
+     */
+    const tried: string[] = [];
     if (isNative()) {
+      tried.push("asked the app");
       postNative({ action: "signin-needed", reason: "customer-asked" });
       /**
        * And the same request as a URL, for an app that has an interceptor and
@@ -1364,7 +1378,10 @@ export function Experience({
        */
       // The escalation reads auth live: an app that answers the message or the
       // iframe must not then have its main frame navigated out from under it.
-      if (agent.nativeLoginUrl) askNativeToSignIn(agent.nativeLoginUrl, () => authenticatedRef.current);
+      if (agent.nativeLoginUrl) {
+        tried.push(`opened ${agent.nativeLoginUrl}`);
+        askNativeToSignIn(agent.nativeLoginUrl, () => authenticatedRef.current);
+      }
       /**
        * AND SILENCE IS NOT AN ACCEPTABLE ANSWER TO A BUTTON.
        *
@@ -1382,15 +1399,6 @@ export function Experience({
        * Cleared the moment a handoff arrives, so an app that answers slowly
        * never shows it.
        */
-      if (nativeAskTimer.current) window.clearTimeout(nativeAskTimer.current);
-      nativeAskTimer.current = window.setTimeout(() => {
-        if (authenticatedRef.current) return;
-        setAuthReason(
-          locale === "ar"
-            ? "تعذّر بدء تسجيل الدخول داخل التطبيق. يرجى تسجيل الدخول من التطبيق ثم العودة إلى المحادثة."
-            : "Sign-in could not be started inside the app. Please sign in from the app, then come back to this chat."
-        );
-      }, 6000);
     }
     /**
      * THE HOST PORTAL ROUTE CANNOT WORK INSIDE THE APP.
@@ -1443,6 +1451,7 @@ export function Experience({
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
         `&returnTo=${encodeURIComponent(returnTo)}${mock}`;
       const win = openExternal(`${base}&popup=1`, { name: "dlg-uaepass", kind: "signin" });
+      tried.push(win ? "opened UAE PASS" : "UAE PASS would not open");
       // Nothing opened, and only a browser can fall back by navigating itself:
       // in a WebView that would replace the conversation with a login page.
       if (!win && !isNative()) window.location.href = base;
@@ -1450,7 +1459,31 @@ export function Experience({
       setAuthenticated(true);
       setAuthReason(null);
     }
-  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.slug, locale]);
+    /**
+     * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.
+     *
+     * This lived inside the native branch and covered only one of three ways
+     * this can fail silently: a host that ignores us, a pop-up that never
+     * opens, a scheme nothing handles. A customer cannot tell those apart and
+     * should not have to; they only need to know the button did not work and
+     * what to do instead.
+     */
+    if (nativeAskTimer.current) window.clearTimeout(nativeAskTimer.current);
+    nativeAskTimer.current = window.setTimeout(() => {
+      if (authenticatedRef.current) return;
+      const inApp = isNative();
+      const advice = inApp
+        ? locale === "ar"
+          ? "تعذّر بدء تسجيل الدخول داخل التطبيق. يرجى تسجيل الدخول من التطبيق ثم العودة إلى المحادثة."
+          : "Sign-in could not be started inside the app. Please sign in from the app, then come back to this chat."
+        : locale === "ar"
+          ? "لم تُفتح نافذة تسجيل الدخول. يرجى السماح بالنوافذ المنبثقة والمحاولة مرة أخرى."
+          : "The sign-in window did not open. Please allow pop-ups and try again.";
+      // The detail is for whoever is testing, and it is the difference between
+      // "nothing happened" and a report somebody can act on.
+      setAuthReason(`${advice} (${inApp ? "in-app" : "browser"}: ${tried.join(", ") || "nothing to try"})`);
+    }, 6000);
+  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.nativeLoginUrl, agent.slug, locale]);
 
   /**
    * The host sign-in popup closed. If no token reached us, say so instead of

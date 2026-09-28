@@ -53,10 +53,19 @@ check("the reason for the iframe is written down", /replaces the conversation wi
 console.log("\nAnd a button that does nothing says so");
 // "When I click the login button nothing happens on the mobile version." All
 // three requests had fired correctly and the app acted on none of them.
-check("a timer starts when the app is asked", /nativeAskTimer\.current = window\.setTimeout/.test(exp));
+check("a timer starts when the button is tapped", /nativeAskTimer\.current = window\.setTimeout/.test(exp));
 check("...and says the app did not answer", /Sign-in could not be started inside the app/.test(exp));
 check("...in both languages", /تعذّر بدء تسجيل الدخول داخل التطبيق/.test(exp));
 check("...telling them the one thing they can do", /sign in from the app, then come back/.test(exp));
+/**
+ * Three ways this fails silently — a host that ignores us, a pop-up that never
+ * opens, a scheme nothing handles — and the timer used to cover only the first.
+ */
+check("it covers the browser too, not just the app", /The sign-in window did not open/.test(exp));
+check("...and says which of the two it was", /inApp \? "in-app" : "browser"/.test(exp));
+check("every attempt is recorded", /tried\.push\("asked the app"\)/.test(exp) && /tried\.push\(`opened \$\{agent\.nativeLoginUrl\}`\)/.test(exp));
+check("...including whether UAE PASS opened at all", /tried\.push\(win \? "opened UAE PASS" : "UAE PASS would not open"\)/.test(exp));
+check("...and the list is shown with the message", /tried\.join\(", "\)/.test(exp));
 // An app that answers slowly must never be told it did not.
 check("a late answer cancels it", /if \(authenticated && nativeAskTimer\.current\)/.test(exp));
 check("...and clears the message with it", /setAuthReason\(null\)/.test(exp));
