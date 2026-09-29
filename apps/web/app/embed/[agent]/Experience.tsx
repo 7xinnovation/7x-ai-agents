@@ -7,10 +7,12 @@ import {
   ShieldSlash,
   GlobeSimple,
   SignIn,
+  SignOut,
   UserCircleCheck,
   TextAlignLeft,
   FileText,
   ListChecks,
+  CaretDown,
   CheckCircle,
   Circle,
   Warning,
@@ -115,7 +117,9 @@ export const STR = {
     receipt: "Download receipt",
     signIn: "Sign in",
     signedIn: "Signed in",
+    account: "Account",
     signOut: "Sign out",
+    signOutHint: "to use a different Emirates ID",
     signedOut: "You are signed out.",
     signOutConfirm: "Sign out?",
     expand: "Expand",
@@ -186,7 +190,9 @@ export const STR = {
     receipt: "تحميل الإيصال",
     signIn: "تسجيل الدخول",
     signedIn: "تم الدخول",
+    account: "الحساب",
     signOut: "تسجيل الخروج",
+    signOutHint: "لاستخدام هوية إماراتية أخرى",
     signedOut: "تم تسجيل خروجك.",
     signOutConfirm: "تسجيل الخروج؟",
     expand: "توسيع",
@@ -783,6 +789,48 @@ export function Experience({
     return { done, total, pct: Math.round((done / total) * 100) };
   }, [caseState, agent, docApplies]);
 
+  /**
+   * THE JOURNEY AS STEPS, NOT AS A PERCENTAGE (FB-1794).
+   *
+   * "The current status bar is not useful." It was one flat bar and a number:
+   * 13% tells a customer how much is left but nothing about WHERE they are or
+   * what comes next, and a percentage that moves in eighths moves rarely enough
+   * to look stuck. Emirates Post asked for a stepper instead, and sent one.
+   *
+   * The journey already has steps with names in both languages, so there is
+   * nothing to invent: a step is DONE when nothing required in it is still
+   * missing, and the CURRENT step is the first that is not. Only the current
+   * one is named — the others are numbers — which is how the example they sent
+   * behaves and the only thing that fits "Identify & terms" into a phone width.
+   *
+   * Derived here beside the percentage rather than in the markup, so the bar
+   * and the steps can never disagree about which step is live.
+   */
+  const journeySteps = useMemo(() => {
+    if (!caseState?.journeyKey) return null;
+    const j = agent.journeys.find((x) => x.key === caseState.journeyKey);
+    if (!j) return null;
+    const missingSet = new Set(caseState.readiness.missing.map((m) => `${m.kind}:${m.key}`));
+    const steps = j.steps
+      .map((s) => {
+        const required = [
+          ...s.fields.filter((f) => f.required && docApplies(f.condition)).map((f) => `field:${f.key}`),
+          ...s.documents.filter((d) => d.requirement === "mandatory" && docApplies(d.condition)).map((d) => `document:${d.key}`),
+        ];
+        return {
+          key: s.key,
+          // A step with nothing required in it has nothing to be waiting for.
+          title: (locale === "ar" ? s.title?.ar : s.title?.en) || s.title?.en || s.key,
+          required: required.length,
+          done: required.length > 0 && required.every((k) => !missingSet.has(k)),
+        };
+      })
+      .filter((s) => s.required > 0);
+    if (steps.length < 2) return null;
+    const currentIndex = steps.findIndex((s) => !s.done);
+    return { steps, currentIndex: currentIndex === -1 ? steps.length - 1 : currentIndex, complete: currentIndex === -1 };
+  }, [caseState, agent, docApplies, locale]);
+
   // Full requirements checklist (feedback FB-1437: completed items must STAY
   // visible, marked done — not vanish from the list once satisfied).
   const checklist = useMemo(() => {
@@ -992,7 +1040,25 @@ export function Experience({
   const [coarsePointer, setCoarsePointer] = useState(false);
   useEffect(() => setCoarsePointer(window.matchMedia?.("(hover: none) and (pointer: coarse)").matches ?? false), []);
   /** The signed-in chip, tapped once on a phone: it asks before it acts. */
-  const [signOutArmed, setSignOutArmed] = useState(false);
+  /**
+   * Whose session this is, if the case happens to know.
+   *
+   * Read from the case rather than fetched: the name is there when UAE PASS
+   * handed one over or the customer gave it, and a menu that says "Signed in"
+   * with nothing under it is still the answer to "who am I signed in as" — so
+   * this is a nicety, never a condition for showing the way out.
+   */
+  const signedInName = useMemo(() => {
+    const d = (caseState?.data ?? {}) as Record<string, unknown>;
+    for (const k of ["contact_name", "full_name", "applicant_name", "customer_name"]) {
+      const v = d[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    return null;
+  }, [caseState]);
+  /** The profile menu, and the click-anywhere-else that closes it. */
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement | null>(null);
   const toggleExpanded = useCallback(() => {
     const next = !expanded;
     setExpanded(next);
@@ -1325,6 +1391,24 @@ export function Experience({
    * is authenticated. Clearing only the client's view of it was FB-1485 — the
    * header said signed out while the session was still live.
    */
+  useEffect(() => {
+    if (!profileOpen) return;
+    const away = (e: MouseEvent | TouchEvent) => {
+      if (!profileRef.current?.contains(e.target as Node)) setProfileOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setProfileOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("touchstart", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("touchstart", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [profileOpen]);
+  // Signed out by any route — the menu must not outlive the session it describes.
+  useEffect(() => { if (!authenticated) setProfileOpen(false); }, [authenticated]);
+
   const signOut = useCallback(async () => {
     signedOut.current = true;
     uaePass.current = undefined;
@@ -2180,30 +2264,64 @@ export function Experience({
               So on a touch device it asks first: the tap arms it and says "Sign
               out?" in words, and a second tap within four seconds does it. On a
               desktop the tooltip is there and it behaves as it always has. */}
-          <button
-            className={`dlg-chip is-auth ${authenticated ? "is-on" : ""}`}
-            onClick={() => {
-              if (!authenticated) { signIn(); return; }
-              if (!coarsePointer || signOutArmed) { setSignOutArmed(false); void signOut(); return; }
-              setSignOutArmed(true);
-              window.setTimeout(() => setSignOutArmed(false), 4000);
-            }}
-            aria-label={authenticated ? t.signOut : t.signIn}
-            title={authenticated ? `${t.signedIn} — ${t.signOut}` : t.signIn}
-          >
-            {authenticated ? <UserCircleCheck size={20} weight="fill" /> : <SignIn size={20} weight={iconWeight} />}
-            {/* IN WORDS, ALWAYS (FB-1793, FB-1802).
-                "Add logout button from the agent, or activate it" — there is
-                one, and it is this. It has been reported twice as missing and
-                once as a sign-IN button that signed somebody out, which is three
-                people telling us the same thing: an icon and a tooltip is not a
-                control on a phone, and a green circle is not the word "out".
-                So it says what it is, at every width. The icons beside it stay
-                icons — they are secondary, and six labels would not fit — but
-                this one is the difference between a customer being able to hand
-                the screen to someone else and not. */}
-            <span className="dlg-chip-tag">{signOutArmed ? t.signOutConfirm : authenticated ? t.signOut : t.signIn}</span>
-          </button>
+          {/* THE PROFILE CONTROL, AND SIGNING OUT FROM INSIDE IT.
+              "It should be something like where they click on the profile icon
+              and sign out, in case they want to sign in with another Emirates
+              ID on the same session."
+
+              What was here before: one chip that signed you out on a tap, armed
+              itself on a touch screen, and said what it did only in a tooltip —
+              which a phone has not got. It was reported twice as a missing
+              logout and once as a sign-IN button that ended somebody's session
+              mid-application. Three people, one control.
+
+              A menu answers all of it. The icon is a profile again rather than
+              a verb, tapping it shows who is signed in and offers the way out
+              in words, and "sign in with another Emirates ID" is one action
+              instead of a guess. Signed out, it is simply the sign-in button
+              and opens nothing. */}
+          {authenticated ? (
+            <div className="dlg-profile" ref={profileRef}>
+              <button
+                className={`dlg-chip is-auth is-on${profileOpen ? " is-open" : ""}`}
+                onClick={() => setProfileOpen((v) => !v)}
+                aria-label={t.account}
+                aria-expanded={profileOpen}
+                aria-haspopup="menu"
+                title={t.signedIn}
+              >
+                <UserCircleCheck size={20} weight="fill" />
+                <CaretDown size={12} weight="bold" />
+              </button>
+              {profileOpen ? (
+                <div className="dlg-profile-menu" role="menu">
+                  <div className="dlg-profile-who">
+                    <span className="dlg-profile-label">{t.signedIn}</span>
+                    {signedInName ? <strong>{signedInName}</strong> : null}
+                  </div>
+                  <button
+                    className="dlg-profile-item"
+                    role="menuitem"
+                    onClick={() => { setProfileOpen(false); void signOut(); }}
+                  >
+                    <SignOut size={16} weight={iconWeight} />
+                    <span>
+                      {t.signOut}
+                      {/* The reason they are here: another Emirates ID on the
+                          same screen. Said out loud so nobody has to work out
+                          that signing out is how you do it. */}
+                      <em>{t.signOutHint}</em>
+                    </span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <button className="dlg-chip is-auth" onClick={signIn} aria-label={t.signIn} title={t.signIn}>
+              <SignIn size={20} weight={iconWeight} />
+              <span className="dlg-chip-tag">{t.signIn}</span>
+            </button>
+          )}
           {/* Withdraw permission in one step (pre-launch gate; FB-1737). Shown
               once there is a granted permission or collected data to pull back —
               revokes consent, stops everything, and reports what was erased. */}
@@ -2269,14 +2387,40 @@ export function Experience({
               thing out of sight. */}
           {progress && agent.progressPlacement === "top" ? (
             <div className="dlg-progress-top" role="status" aria-live="polite">
-              <div className="dlg-progress-top-row">
-                <span className="dlg-progress-step">{progress.pct === 100 ? t.ready : t.missing}</span>
-                <span className="dlg-progress-count">
-                  <strong>{progress.pct}%</strong>
-                  <span className="sep">·</span>
-                  {progress.done}/{progress.total} {t.readyShort}
-                </span>
-              </div>
+              {/* The steps, where there are steps to show. The percentage keeps
+                  its place on the right — it is the one number the readiness
+                  checks actually produce, and Emirates Post's example carries
+                  one too. Falls back to the old label + count for a journey with
+                  a single step, where a stepper of one is just a dot. */}
+              {journeySteps ? (
+                <div className="dlg-progress-top-row">
+                  <ol className="dlg-steps">
+                    {journeySteps.steps.map((s, i) => {
+                      const state = s.done ? "done" : i === journeySteps.currentIndex ? "now" : "todo";
+                      return (
+                        <li key={s.key} className={`dlg-step is-${state}`} aria-current={state === "now" ? "step" : undefined}>
+                          {state === "done" ? <CheckCircle size={15} weight="fill" /> : <span className="dlg-step-n">{i + 1}</span>}
+                          {/* Only the live step is named: the others are
+                              numbers, which is what makes this fit a phone. */}
+                          {state === "now" ? <span className="dlg-step-name">{s.title}</span> : null}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <span className="dlg-progress-count">
+                    <strong>{progress.pct}%</strong>
+                  </span>
+                </div>
+              ) : (
+                <div className="dlg-progress-top-row">
+                  <span className="dlg-progress-step">{progress.pct === 100 ? t.ready : t.missing}</span>
+                  <span className="dlg-progress-count">
+                    <strong>{progress.pct}%</strong>
+                    <span className="sep">·</span>
+                    {progress.done}/{progress.total} {t.readyShort}
+                  </span>
+                </div>
+              )}
               <div className="dlg-progress-track">
                 <div
                   className={`dlg-progress-fill ${progress.pct === 100 ? "done" : ""}`}

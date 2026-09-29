@@ -251,6 +251,81 @@ body {
   background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
   color: var(--c-text);
 }
+/* THE PROFILE MENU (FB-1802, and the UAE PASS session report).
+   "Click on the profile icon and sign out, in case they want to sign in with
+   another Emirates ID on the same session." The icon is a profile again rather
+   than a verb, and the way out is a menu item in words. */
+.dlg-profile {
+  position: relative;
+  display: inline-flex;
+}
+.dlg-profile-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 20;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 32px -10px color-mix(in srgb, var(--c-text) 28%, transparent);
+}
+.dlg-profile-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 9px;
+  border-bottom: 1px solid var(--c-border);
+  margin-bottom: 4px;
+}
+.dlg-profile-label {
+  font-size: 11.5px;
+  color: var(--c-text-muted);
+}
+.dlg-profile-who strong {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-profile-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--c-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 560;
+  text-align: start;
+  cursor: pointer;
+}
+.dlg-profile-item:hover,
+.dlg-profile-item:focus-visible {
+  background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
+  outline: none;
+}
+.dlg-profile-item span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+/* Why you would sign out, said rather than left to be worked out. */
+.dlg-profile-item em {
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--c-text-muted);
+}
+
 /* THE ONE CONTROL THAT SAYS WHAT IT IS.
    Reported three times over — twice as a missing logout, once as a sign-in
    button that signed somebody out. It keeps its label at every width. */
@@ -2074,6 +2149,65 @@ body {
   border-bottom: 1px solid var(--c-border);
   background: color-mix(in srgb, var(--c-primary) 3%, var(--c-surface));
   flex-shrink: 0;
+}
+/* THE JOURNEY AS STEPS (FB-1794).
+   "The current status bar is not useful" — one flat bar and a number told the
+   customer how much was left and nothing about where they were. Emirates Post
+   sent an example: numbered pills, the live one named, a percentage beside
+   them. Only the live step carries its name, which is the only way
+   "Identify & terms" fits a phone.
+
+   SCOPED TO THE TOP BAR ON PURPOSE. EPGL shows its readiness in the side panel
+   (progressPlacement: panel) and nothing here touches that — their UI is not to
+   change on the back of Emirates Post's feedback. */
+.dlg-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+  overflow: hidden;
+}
+.dlg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  border: 1.5px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  color: var(--c-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.dlg-step-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.dlg-step.is-done {
+  border-color: color-mix(in srgb, var(--c-primary) 35%, transparent);
+  color: var(--c-primary);
+}
+.dlg-step.is-now {
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  background: color-mix(in srgb, var(--c-primary) 8%, transparent);
+}
+/* The live step is the one that has to survive a narrow screen. */
+.dlg-step.is-now .dlg-step-name {
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-step.is-todo {
+  opacity: 0.6;
 }
 .dlg-progress-top-row {
   display: flex;
