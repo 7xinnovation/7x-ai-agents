@@ -2059,6 +2059,37 @@ export async function buildApiTools(
         body.keyDeliveryAddress = facts.keyDeliveryAddress;
         patched = true;
       }
+      /**
+       * AND A COURIER WITH NOWHERE TO GO IS NOT SAVED (2026-09-29).
+       *
+       * The two repairs above cover a payload that forgot the service line or
+       * forgot to copy an address we hold. Neither covers the case that was
+       * reported: nobody ever ASKED for the address, so the case has none, the
+       * payload has none, and there is nothing to copy.
+       *
+       * Emirates Post accepts that save. The customer pays AED 30 for a
+       * delivery, the order carries no destination, and the failure surfaces
+       * days later as a key that never came. Refusing costs one more question;
+       * not refusing costs the customer their key.
+       */
+      if (courierAsked && !body.keyDeliveryAddress) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "rental_save_blocked_no_address",
+          payload: { tool: toolName, method: entry.op.method, path: entry.op.path },
+        }).catch(() => {});
+        return {
+          result:
+            `NOT SAVED, AND NOTHING HAS GONE WRONG. This rental asks Emirates Post to COURIER the key, and the payload carries no address to deliver it to. ` +
+            `Saving it would charge the customer for a delivery with no destination, and they would find out when the key did not arrive. ` +
+            `Ask them where to send it — a map control is offered in the chat for exactly this, so let them pin it or type it — and record what they give you with collect_field: home_building, home_street, home_area, and home_villa_apt if there is one. Then call this again. ` +
+            `Do NOT tell the customer the booking failed, do NOT offer a callback, and do NOT re-reserve the box: the reservation is intact and nothing has been charged. ` +
+            `If they would rather collect the key from the branch after all, record that instead and save without the courier.`,
+          isError: true,
+        };
+      }
       if (courierAsked !== Boolean(services.length) || !body.keyDeliveryAddress) {
         void audit({
           agentId,

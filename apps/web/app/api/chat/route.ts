@@ -3397,6 +3397,46 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        /**
+         * A COURIER NEEDS AN ADDRESS, AND NOBODY WAS ASKING FOR ONE (2026-09-29).
+         *
+         * "When I clicked deliver to my address it used to give me the option to
+         * put in the address based on the map, but it's skipped it."
+         *
+         * It had. The reply went straight to "Emirates Post customer service
+         * will contact you to arrange the key delivery" and then to the contact
+         * details, and the case came out of it with no home_street, no
+         * home_area, no address of any kind — for a delivery the customer is
+         * paying AED 30 for. keyDeliveryAddressFrom would have returned null and
+         * the rental would have been saved with a courier and nowhere to go.
+         *
+         * The map block is appended here for the same reason the branch map
+         * above it is: the guidance names it, the model does not always emit it,
+         * and a promise of a control is not a control. The difference is that
+         * this one is not gated on the reply PROMISING a map — that was the gap.
+         * Choosing the courier is the trigger.
+         *
+         * Suppressed once an address exists, so a customer who has already
+         * pinned one is not asked again, and suppressed if the reply already
+         * carries the block.
+         */
+        if (agent.definition.tenantSlug === "nxn") {
+          const data = finalState.data as Record<string, unknown>;
+          const courier = wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) || courierSeen;
+          const haveAddress = Boolean(keyDeliveryAddressFrom(data)) || addressAlreadyKnown(data);
+          if (courier && !haveAddress && !/```\s*locate/i.test(finalText)) {
+            const ask = locateBlock(body.locale);
+            send({ type: "text", delta: ask });
+            finalText += ask;
+            await audit({
+              ...a,
+              actor: "system",
+              action: "key_delivery_address_asked",
+              payload: { reason: "courier chosen, no address on the case" },
+            });
+          }
+        }
+
         // The PO Box hall notice, rendered by US — and repeated until it is
         // accepted.
         //
