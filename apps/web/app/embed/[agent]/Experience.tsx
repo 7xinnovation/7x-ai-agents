@@ -519,6 +519,19 @@ function PaymentCard({
   );
 }
 
+/**
+ * A short, non-reversible mark for a token we already hold.
+ *
+ * Only ever compared against a token in memory, so it needs to distinguish and
+ * nothing more — there is nothing to be gained from what is stored, which is
+ * the point of not storing the token.
+ */
+function fingerprint(token: string): string {
+  let h = 5381;
+  for (let i = 0; i < token.length; i++) h = ((h << 5) + h + token.charCodeAt(i)) | 0;
+  return `${token.length.toString(36)}.${(h >>> 0).toString(36)}`;
+}
+
 export function Experience({
   agent,
   initialLocale,
@@ -641,6 +654,53 @@ export function Experience({
    * out would last until the next tick. It is lifted only by an explicit sign-in.
    */
   const signedOut = useRef(false);
+  /** Where the dismissed token's fingerprint lives across a reload. */
+  const dismissedKey = `dlg-signedout-${agent.slug}`;
+  /**
+   * THE HOST PAGE DOES NOT KNOW THEY SIGNED OUT, AND KEEPS OFFERING ITS TOKEN.
+   *
+   * On box-stg.emiratespost.ae our relay reads the portal's own token and posts
+   * it into the widget, repeatedly, because that is how a customer who is
+   * already signed in to Emirates Post arrives here signed in. Signing out of
+   * the chat does not sign them out of the portal, so the token is still there
+   * and still being offered.
+   *
+   * `signedOut` blocked it — until they pressed Sign in, which lifted the flag
+   * ("asking to sign in is what lifts a sign-out"). True of UAE PASS, and
+   * catastrophic here: the relay's next poll landed before UAE PASS was
+   * anywhere near, and they were back in as the same person. Which is exactly
+   * what was reported, three times, while I was fixing UAE PASS.
+   *
+   * So the TOKEN is what is refused, not the channel. The one they signed out
+   * of is dead to this conversation; a DIFFERENT one — they went and signed in
+   * to the portal as somebody else, which is the whole point of signing out —
+   * is taken as it always was.
+   */
+  const dismissedHostToken = useRef<string | null>(null);
+  /**
+   * Is this the token they signed out of?
+   *
+   * In memory for this session, and by fingerprint for one that survived a
+   * reload. Cleared the moment a DIFFERENT token arrives, because that is a
+   * customer who has gone and signed in as somebody else — which is the whole
+   * reason they signed out.
+   */
+  const isDismissed = useCallback(
+    (token: string) => {
+      if (dismissedHostToken.current === token) return true;
+      let stored: string | null = null;
+      try { stored = window.localStorage.getItem(dismissedKey); } catch { /* private mode */ }
+      if (stored && stored === fingerprint(token)) {
+        dismissedHostToken.current = token;
+        return true;
+      }
+      // A different token: they have signed in somewhere as somebody, and the
+      // old refusal has nothing left to refuse.
+      if (stored) { try { window.localStorage.removeItem(dismissedKey); } catch { /* private mode */ } }
+      return false;
+    },
+    [dismissedKey]
+  );
   /**
    * The customer was signed in by the NATIVE app, not by a token we hold.
    *
@@ -1149,6 +1209,10 @@ export function Experience({
       // its token; taking it would sign them back in without them asking.
       if (signedOut.current) return;
       const token = m.uaePassToken;
+      // And the one they signed OUT of stays refused even once they have asked
+      // to sign in again — see dismissedHostToken. Pressing Sign in is a request
+      // to choose an identity, not consent to the previous one.
+      if (isDismissed(token)) return;
       uaePass.current = token;
       // Reflect the sign-in now rather than at the next message. The token is
       // verified SERVER-side before the UI changes -- a host that hands us junk
@@ -1239,6 +1303,7 @@ export function Experience({
     }
     const token = nativeToken();
     if (!token || uaePass.current || signedOut.current) return;
+    if (isDismissed(token)) return;
     uaePass.current = token;
     void (async () => {
       try {
@@ -1434,6 +1499,19 @@ export function Experience({
 
   const signOut = useCallback(async () => {
     signedOut.current = true;
+    // The token the host is holding is the one they just signed out of. It will
+    // keep being offered; it must stop being taken. See dismissedHostToken.
+    if (uaePass.current) {
+      dismissedHostToken.current = uaePass.current;
+      // AND IT SURVIVES A REFRESH, because the host's token does. A sign-out
+      // that a page reload undoes is not a sign-out — the relay would offer the
+      // same token to the new page and sign them straight back in.
+      //
+      // A fingerprint, not the token: this is only ever compared against one we
+      // already hold in memory, so there is nothing to be gained from what is
+      // stored and nothing lost if it cannot be.
+      try { window.localStorage.setItem(dismissedKey, fingerprint(uaePass.current)); } catch { /* private mode */ }
+    }
     uaePass.current = undefined;
     setAuthenticated(false);
     setAuthReason(null);

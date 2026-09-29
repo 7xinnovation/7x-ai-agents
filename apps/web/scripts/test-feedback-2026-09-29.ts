@@ -217,6 +217,33 @@ check("...and passed to both renderers", /stackChoices=\{agent\.stackedChoices\}
 check("...through the typewriter too, which wraps the other", /stackChoices=\{stackChoices\} \/>/.test(md));
 check("off by default, so nothing changes for an agent that did not ask", !/stackedChoices: z\.boolean\(\)\.default\(true\)/.test(schema));
 
+console.log("\nThe host page keeps offering the token they signed out of");
+/**
+ * box-stg.emiratespost.ae runs our relay: it reads the portal's own token and
+ * posts it into the widget, repeatedly, because that is how a customer already
+ * signed in to Emirates Post arrives here signed in.
+ *
+ * Signing out of the chat does not sign them out of the portal, so the token is
+ * still there and still being offered. `signedOut` blocked it — until they
+ * pressed Sign in, which lifted the flag. The relay's next poll landed before
+ * UAE PASS was anywhere near and they were back in as the same person. Three
+ * reports of "it signed me in instantly", while I was fixing UAE PASS.
+ */
+check("the token itself is refused, not the channel", /const dismissedHostToken = useRef<string \| null>\(null\);/.test(exp));
+check("...remembered at sign-out", /if \(uaePass\.current\) \{\s*\n\s*dismissedHostToken\.current = uaePass\.current;/.test(exp));
+check("...and refused on the relay's path", /if \(isDismissed\(token\)\) return;/.test(exp));
+check("...on both intake paths", (exp.match(/if \(isDismissed\(token\)\) return;/g) ?? []).length === 2);
+// Pressing Sign in is a request to choose an identity, not consent to the
+// previous one — which is exactly what lifting `signedOut` there amounted to.
+check("...even after they have pressed Sign in", exp.indexOf("signedOut.current = false;") < exp.lastIndexOf("isDismissed"));
+// A sign-out a refresh undoes is not a sign-out: the host's token survives the
+// reload, so the refusal has to as well.
+check("it survives a reload", /window\.localStorage\.setItem\(dismissedKey, fingerprint\(uaePass\.current\)\)/.test(exp));
+check("...as a fingerprint, not the token", /function fingerprint\(token: string\): string \{/.test(exp));
+// The whole reason they signed out: to come back as somebody else.
+check("a DIFFERENT token is still taken", /A different token: they have signed in somewhere as somebody/.test(exp));
+check("...and clears the refusal with it", /if \(stored\) \{ try \{ window\.localStorage\.removeItem\(dismissedKey\); \}/.test(exp));
+
 console.log("\nSigning out of us is not signing out of UAE PASS");
 /**
  * "I signed out and when I signed in, my UAE PASS was already signed in."
