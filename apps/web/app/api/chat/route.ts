@@ -47,7 +47,7 @@ import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredEr
 import { trackShipment, TrackingNotConfiguredError } from "@/lib/emxTracking";
 import { notifyEpglPayment, paymentAdviceExists } from "@/lib/epglPayment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
-import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode } from "@/lib/gsbLookup";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode, type CustomerPoBox } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
 import { savedCards, describeCard } from "@/lib/epSavedCards";
@@ -137,7 +137,22 @@ const PULSE_DIRECTIVE =
    */
   "Use their FIRST NAME only, not their full legal name, and only if you have already been given it — do not call a tool to find it. A UAE PASS name arrives in full and often in capitals; take the first part and write it as a name is written, \"Emre\", never \"EMRE KARAYALCIN\". If all you have is a full name in capitals, still use just the first word of it. " +
   "2) Then use your tools to pull everything you can about their account. " +
-  "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
+  /**
+   * THE COUNT, NOT THE TABLE (FB-1792).
+   *
+   * "Put all the boxes on the side panel so it gets rid of the clutter, and
+   * keep the number of boxes in the chat." An account with forty-six boxes was
+   * printing forty-six rows into the conversation — box, bundle, expiry, status
+   * — above a side panel that said "Nothing to assemble yet". The full list is
+   * now in the panel, where it can be scrolled without burying the reply.
+   *
+   * What stays in the chat is what a person would say out loud: how many boxes
+   * there are, and the ones that need something doing. A box that is fine needs
+   * no line of its own.
+   */
+  "3) Show a concise section titled \"Account Pulse\". Say HOW MANY boxes are on the account — the number, in one sentence — and then ONLY the boxes that need something: expired, expiring soon (with the fee from pricing), or with a payment pending. " +
+  "Do NOT list every box, and do NOT draw a table of them. The full list is shown to the customer in the panel beside the conversation, so repeating it here buries your reply under it; say \"the full list is in the panel beside us\" once, and leave it at that. " +
+  "If NOTHING needs attention, say so plainly — \"all of them are active, nothing needs doing right now\" — rather than listing boxes to prove it. " +
   "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
   "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. " +
   /**
@@ -194,6 +209,9 @@ const PULSE_DIRECTIVE =
  */
 /** When EPGL Finance were asked to raise this application's Virtual IBAN. */
 const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
+
+/** The customer's PO Boxes, for the panel to list rather than the chat (FB-1792). */
+const ACCOUNT_BOXES_KEY = "__account_boxes";
 
 const EPGL_PULSE_DIRECTIVE =
   "(System: the customer just signed in. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
@@ -875,29 +893,45 @@ export async function POST(req: NextRequest) {
     }
   };
 
-  let ownedBoxesCache: { at: number; boxes: string[] | null } | null = null;
-  const ownedBoxes = async (): Promise<string[] | null> => {
-    if (ownedBoxesCache) return ownedBoxesCache.boxes;
+  /**
+   * The customer's boxes, kept WHOLE (FB-1792).
+   *
+   * This lookup has always returned the full row — number, emirate, bundle,
+   * expiry, status — and thrown all but the number away, because the only
+   * caller was the ownership gate. The account pulse then printed the rest of
+   * it back into the chat as a table: forty-six rows above a side panel reading
+   * "Nothing to assemble yet".
+   *
+   * Emirates Post asked for the boxes in the panel and the COUNT in the chat.
+   * So the rows are kept here, handed to the widget on the case, and the pulse
+   * stops drawing tables. Same single lookup either way.
+   */
+  let ownedBoxesCache: { at: number; rows: CustomerPoBox[] | null } | null = null;
+  const accountBoxRows = async (): Promise<CustomerPoBox[] | null> => {
+    if (ownedBoxesCache) return ownedBoxesCache.rows;
     const eid = verifiedEmiratesId ?? str(session.state.data[VERIFIED_EID_KEY]);
     const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
-    let boxes: string[] | null = null;
+    let rows: CustomerPoBox[] | null = null;
     if (eid && caller && agent.definition.tenantSlug === "nxn") {
       try {
-        const rows = await customerPoBoxes(
+        rows = await customerPoBoxes(
           agent.id,
           agent.definition.activeEnvironment ?? "production",
           eid,
           caller
         );
-        boxes = rows.map((b) => String(b.boxNumber ?? "")).filter(Boolean);
       } catch (e) {
         // A lookup that could not run is NOT proof of ownership.
         log.warn("owned_boxes_lookup_failed", { agentId: agent.id, conversationId: session.conversationId, reason: String((e as Error).message ?? e) });
-        boxes = null;
+        rows = null;
       }
     }
-    ownedBoxesCache = { at: Date.now(), boxes };
-    return boxes;
+    ownedBoxesCache = { at: Date.now(), rows };
+    return rows;
+  };
+  const ownedBoxes = async (): Promise<string[] | null> => {
+    const rows = await accountBoxRows();
+    return rows ? rows.map((b) => String(b.boxNumber ?? "")).filter(Boolean) : null;
   };
 
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
@@ -4163,6 +4197,34 @@ export async function POST(req: NextRequest) {
                 payload: { to: emailTo, reference: customerRef, reason: res.reason },
               });
             });
+          }
+        }
+
+        /**
+         * THE BOXES GO ON THE CASE, SO THE PANEL CAN SHOW THEM (FB-1792).
+         *
+         * Written once we have them and only while they are worth writing: the
+         * pulse is where the lookup runs, and after that the panel keeps what it
+         * was given rather than re-fetching on every turn. Numbers, emirate,
+         * bundle, expiry and status — the same row the ownership gate already
+         * fetches, kept whole instead of reduced to a box number.
+         */
+        if (agent.definition.tenantSlug === "nxn" && authenticated) {
+          const rows = ownedBoxesCache?.rows ?? (isPulse ? await accountBoxRows() : null);
+          if (rows?.length) {
+            finalState = {
+              ...finalState,
+              data: {
+                ...finalState.data,
+                [ACCOUNT_BOXES_KEY]: rows.map((b) => ({
+                  box: String(b.boxNumber ?? ""),
+                  emirate: b.emirateName || b.emirateCode || "",
+                  bundle: b.bundleId ?? "",
+                  expiry: String(b.expiryDate ?? "").slice(0, 10),
+                  status: b.expired ? "Expired" : String(b.status ?? ""),
+                })).filter((b) => b.box),
+              },
+            };
           }
         }
 

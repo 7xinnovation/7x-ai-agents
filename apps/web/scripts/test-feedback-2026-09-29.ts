@@ -40,6 +40,40 @@ check("...and the old list is gone, not merely discouraged", !/add a short .{0,3
 // EPGL's pulse is a different service and was not part of this feedback.
 check("EPGL's own pulse is untouched", /add a short .{0,3}Recent activity.{0,3} list/.test(route.slice(route.indexOf("const EPGL_PULSE_DIRECTIVE"))));
 
+console.log("\nFB-1792 — the boxes are in the panel, the count is in the chat");
+/**
+ * An account with forty-six boxes printed forty-six rows into the conversation
+ * — box, bundle, expiry, status — above a side panel reading "Nothing to
+ * assemble yet". The lookup behind it has always returned the whole row and
+ * thrown all but the number away, because its only caller was the ownership
+ * gate.
+ */
+check("the lookup keeps the whole row now", /const accountBoxRows = async \(\): Promise<CustomerPoBox\[\] \| null>/.test(route));
+check("...and the ownership gate still gets its numbers from it", /const rows = await accountBoxRows\(\);\s*\n\s*return rows \? rows\.map/.test(route));
+check("...one lookup, not two", /if \(ownedBoxesCache\) return ownedBoxesCache\.rows;/.test(route));
+check("the rows are written onto the case", /\[ACCOUNT_BOXES_KEY\]: rows\.map/.test(route));
+check("...for Emirates Post only, and only when signed in", /agent\.definition\.tenantSlug === "nxn" && authenticated\) \{\s*\n\s*const rows = ownedBoxesCache/.test(route));
+// The pulse is where the lookup runs; after that the panel keeps what it has
+// rather than re-fetching every turn.
+check("...fetched on the pulse, reused after it", /ownedBoxesCache\?\.rows \?\? \(isPulse \? await accountBoxRows\(\) : null\)/.test(route));
+check("an expired box is marked as one", /status: b\.expired \? "Expired" : String\(b\.status \?\? ""\)/.test(route));
+
+check("the panel reads them off the case, never fetches", /const raw = \(caseState\?\.data as Record<string, unknown> \| undefined\)\?\.__account_boxes;/.test(exp));
+check("...above the case builder, where they asked for it", exp.indexOf('className="dlg-boxes"') < exp.indexOf('className="dlg-case-head"'));
+check("...with the count on the header", /<span className="dlg-boxes-count">\{accountBoxes\.length\}<\/span>/.test(exp));
+check("...in both languages", /yourBoxes: "Your PO Boxes"/.test(exp) && /yourBoxes: "صناديق البريد الخاصة بك"/.test(exp));
+check("...and nothing renders when there are none", /\{accountBoxes\.length \? \(/.test(exp));
+check("a long list scrolls without taking the application with it", /max-height: 264px;/.test(css));
+check("an expired box is findable at a glance", /\.dlg-boxes-list li\.is-expired \{/.test(css));
+
+console.log("\nFB-1792 — and the pulse stops drawing tables");
+check("it states the number", /Say HOW MANY boxes are on the account — the number, in one sentence/.test(nxnPulse));
+check("...then only what needs something doing", /ONLY the boxes that need something: expired, expiring soon/.test(nxnPulse));
+check("...and never a table", /do NOT draw a table of them/.test(nxnPulse));
+check("...pointing at the panel once", /the full list is in the panel beside us/.test(nxnPulse));
+// "All fine" is a sentence, not a list of forty-six boxes proving it.
+check("nothing outstanding is said, not proved", /rather than listing boxes to prove it/.test(nxnPulse));
+
 console.log("\nFB-1793 / FB-1802 — signing out lives in a profile menu");
 /**
  * "It should be something like where they click on the profile icon and sign

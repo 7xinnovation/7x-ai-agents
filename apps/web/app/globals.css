@@ -251,6 +251,96 @@ body {
   background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
   color: var(--c-text);
 }
+/* THE CUSTOMER'S BOXES, IN THE PANEL (FB-1792).
+   Forty-six of them used to be printed into the conversation as a table, above
+   a panel that said "Nothing to assemble yet". A list that can be long has to
+   be able to scroll without taking the application with it. */
+.dlg-boxes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-bottom: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 16px;
+  background: var(--c-surface);
+  overflow: hidden;
+}
+.dlg-boxes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+.dlg-boxes-head h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--c-text);
+}
+.dlg-boxes-count {
+  min-width: 22px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c-primary) 10%, transparent);
+  color: var(--c-primary);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.dlg-boxes-list {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+  /* Long enough to be worth scrolling, short enough that the application
+     underneath is still on screen. */
+  max-height: 264px;
+}
+.dlg-boxes-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+.dlg-boxes-list li + li {
+  border-top: 1px solid color-mix(in srgb, var(--c-border) 60%, transparent);
+}
+.dlg-box-no {
+  font-weight: 650;
+  color: var(--c-text);
+  font-variant-numeric: tabular-nums;
+}
+.dlg-box-no em {
+  margin-inline-start: 6px;
+  font-style: normal;
+  font-weight: 450;
+  color: var(--c-text-muted);
+}
+.dlg-box-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--c-text-muted);
+  text-align: end;
+}
+.dlg-box-expiry {
+  font-variant-numeric: tabular-nums;
+}
+/* An expired box is the one thing on the list worth finding at a glance. */
+.dlg-boxes-list li.is-expired .dlg-box-status,
+.dlg-boxes-list li.is-expired .dlg-box-no {
+  color: var(--c-danger);
+}
+.dlg-boxes-list li.is-expired {
+  background: color-mix(in srgb, var(--c-danger) 6%, transparent);
+}
+
 /* THE PROFILE MENU (FB-1802, and the UAE PASS session report).
    "Click on the profile icon and sign out, in case they want to sign in with
    another Emirates ID on the same session." The icon is a profile again rather

@@ -118,6 +118,7 @@ export const STR = {
     signIn: "Sign in",
     signedIn: "Signed in",
     account: "Account",
+    yourBoxes: "Your PO Boxes",
     signOut: "Sign out",
     signOutHint: "to use a different Emirates ID",
     signedOut: "You are signed out.",
@@ -191,6 +192,7 @@ export const STR = {
     signIn: "تسجيل الدخول",
     signedIn: "تم الدخول",
     account: "الحساب",
+    yourBoxes: "صناديق البريد الخاصة بك",
     signOut: "تسجيل الخروج",
     signOutHint: "لاستخدام هوية إماراتية أخرى",
     signedOut: "تم تسجيل خروجك.",
@@ -1048,6 +1050,25 @@ export function Experience({
    * with nothing under it is still the answer to "who am I signed in as" — so
    * this is a nicety, never a condition for showing the way out.
    */
+  /**
+   * The boxes the server put on the case. Read, never fetched: the widget has
+   * no credential of its own and this list is already on the state it is given.
+   */
+  const accountBoxes = useMemo(() => {
+    const raw = (caseState?.data as Record<string, unknown> | undefined)?.__account_boxes;
+    if (!Array.isArray(raw)) return [] as { box: string; emirate: string; bundle: string; expiry: string; status: string }[];
+    return raw
+      .filter((b): b is Record<string, unknown> => Boolean(b) && typeof b === "object")
+      .map((b) => ({
+        box: String(b.box ?? ""),
+        emirate: String(b.emirate ?? ""),
+        bundle: String(b.bundle ?? ""),
+        expiry: String(b.expiry ?? ""),
+        status: String(b.status ?? ""),
+      }))
+      .filter((b) => b.box);
+  }, [caseState]);
+
   const signedInName = useMemo(() => {
     const d = (caseState?.data ?? {}) as Record<string, unknown>;
     for (const k of ["contact_name", "full_name", "applicant_name", "customer_name"]) {
@@ -2602,6 +2623,40 @@ export function Experience({
         {/* RIGHT: realtime case builder */}
         <aside className="dlg-case">
           <div className="dlg-case-inner">
+            {/* THE CUSTOMER'S BOXES, ABOVE THE APPLICATION (FB-1792).
+                An account with forty-six of them was printing forty-six rows
+                into the conversation — box, bundle, expiry, status — above a
+                panel that said "Nothing to assemble yet". Emirates Post asked
+                for them here and the COUNT in the chat.
+                It sits above the case builder because that is where they asked
+                for it, and because it is the thing a signed-in customer with
+                boxes is most likely to want to look at. */}
+            {accountBoxes.length ? (
+              <section className="dlg-boxes">
+                <div className="dlg-boxes-head">
+                  <h2>{t.yourBoxes}</h2>
+                  <span className="dlg-boxes-count">{accountBoxes.length}</span>
+                </div>
+                <ul className="dlg-boxes-list">
+                  {accountBoxes.map((b) => (
+                    <li key={`${b.box}-${b.emirate}`} className={b.status === "Expired" ? "is-expired" : ""}>
+                      <span className="dlg-box-no">
+                        {b.box}
+                        {b.emirate ? <em>{b.emirate}</em> : null}
+                      </span>
+                      <span className="dlg-box-meta">
+                        {b.bundle ? <span>{b.bundle}</span> : null}
+                        {/* The expiry is the one fact worth showing for a box
+                            that is fine, and the whole story for one that is
+                            not. */}
+                        {b.expiry ? <span className="dlg-box-expiry">{b.expiry}</span> : null}
+                        {b.status ? <span className="dlg-box-status">{b.status}</span> : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
             <div className="dlg-case-head">
               <button className="dlg-back-chat" onClick={() => setMobileCaseOpen(false)} aria-label={t.backToChat}>
                 <CaretLeft size={14} weight="bold" /> {t.backToChat}
