@@ -556,7 +556,35 @@ export function Experience({
   const [authenticated, setAuthenticated] = useState(false);
   /** Host sign-in popup, so a window closed without a token can be reported. */
   const hostLoginWin = useRef<ExternalWindow | null>(null);
+  /** The "the app never answered" timer, so a later answer can cancel it. */
+  const nativeAskTimer = useRef<number | null>(null);
+  /** Auth as it stands NOW, for callbacks that outlive the render they were made in. */
+  const authenticatedRef = useRef(false);
+  useEffect(() => {
+    authenticatedRef.current = authenticated;
+    // An app that answered — however slowly — must not then be told it did not.
+    if (authenticated && nativeAskTimer.current) {
+      window.clearTimeout(nativeAskTimer.current);
+      nativeAskTimer.current = null;
+      setAuthReason(null);
+      setAuthInfo(null);
+    }
+  }, [authenticated]);
   const [authReason, setAuthReason] = useState<string | null>(null);
+  /**
+   * THE BUTTON SAYS SOMETHING THE MOMENT IT IS PRESSED.
+   *
+   * "When I click the sign in still nothing is happening", now for the fourth
+   * time. Every round of this has had the same shape: the request goes out
+   * correctly, the app does not act on it, and the customer is left looking at a
+   * control that gave them nothing back. Whether the app answers is the app's
+   * business; whether the button ACKNOWLEDGES is ours, and it should never have
+   * depended on the far end.
+   *
+   * So a neutral line appears straight away, and the warning below replaces it
+   * only once the wait is genuinely over. Not an error — it is not one yet.
+   */
+  const [authInfo, setAuthInfo] = useState<string | null>(null);
   // Friendly "what the assistant is doing" line shown during silent tool rounds.
   /**
    * WHAT the assistant is doing, not the SENTENCE that says so.
@@ -1319,6 +1347,50 @@ export function Experience({
     }
   }, [agent.slug]);
 
+  /**
+   * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.
+   *
+   * A button that does nothing is the worst of the failures here: "when I click
+   * the login button nothing happens on the mobile version", three rounds of it.
+   * So if nobody has signed the customer in a while later, the widget says what
+   * it tried, in plain language, and points at the app's own sign-in.
+   *
+   * THE WAIT IS NOT THE SAME IN BOTH PLACES. A pop-up either opens or it does
+   * not, and six seconds is generous for finding that out. Signing in inside the
+   * app is a journey — their screen, UAE PASS, an app switch, an OTP — and six
+   * seconds through it put an amber "sign-in could not be started" over a
+   * sign-in that was working perfectly well, which is exactly what their
+   * developer photographed. It is a last resort, so it waits like one.
+   *
+   * Cleared the moment a handoff arrives, so an app that answers slowly never
+   * shows it at all.
+   */
+  const armSignInFallback = useCallback(
+    (tried: string[]) => {
+      if (typeof window === "undefined") return;
+      const inApp = isNative();
+      if (nativeAskTimer.current) window.clearTimeout(nativeAskTimer.current);
+      nativeAskTimer.current = window.setTimeout(
+        () => {
+          if (authenticatedRef.current) return;
+          setAuthInfo(null);
+          const advice = inApp
+            ? locale === "ar"
+              ? "تعذّر بدء تسجيل الدخول داخل التطبيق. يرجى تسجيل الدخول من التطبيق ثم العودة إلى المحادثة."
+              : "Sign-in could not be started inside the app. Please sign in from the app, then come back to this chat."
+            : locale === "ar"
+              ? "لم تُفتح نافذة تسجيل الدخول. يرجى السماح بالنوافذ المنبثقة والمحاولة مرة أخرى."
+              : "The sign-in window did not open. Please allow pop-ups and try again.";
+          // The detail is for whoever is testing, and it is the difference
+          // between "nothing happened" and a report somebody can act on.
+          setAuthReason(`${advice} (${inApp ? "in-app" : "browser"}: ${tried.join(", ") || "nothing to try"})`);
+        },
+        inApp ? 45000 : 6000
+      );
+    },
+    [locale]
+  );
+
   const signIn = useCallback(() => {
     // Asking to sign in is what lifts a sign-out.
     signedOut.current = false;
@@ -1338,7 +1410,76 @@ export function Experience({
      * that has not implemented this ignores the message, and the portal below
      * is still opened — nothing regresses for an app that is not listening.
      */
-    if (isNative()) postNative({ action: "signin-needed", reason: "customer-asked" });
+    /**
+     * WHAT WE TRIED, SO THE NEXT REPORT IS AN ANSWER RATHER THAN A ROUND TRIP.
+     *
+     * "I'm still clicking the button but nothing is happening", three times
+     * over, and each round has been a guess: is the app react-native-webview,
+     * does the scheme arrive, is a pop-up blocked. None of that is visible from
+     * here and all of it is visible from THERE — so the widget writes down what
+     * it attempted and shows it on the banner when nothing comes of it.
+     *
+     * Plain language, because the person reading it is testing on a phone, and
+     * the detail only appears once the attempt has already failed.
+     */
+    const tried: string[] = [];
+    /**
+     * IN THE APP, WE ASK THE APP. ONCE.
+     *
+     * Emirates Post's developer has the handler now — "onMessage works fine" —
+     * so `signin-needed` reaches their own sign-in screen, which is what this
+     * was always meant to do: the customer signs in where the app already knows
+     * how, and the chat picks the identity up from the token the wrapper
+     * injects when the WebView is reloaded.
+     *
+     * TWO THINGS THAT USED TO HAPPEN HERE NO LONGER DO.
+     *
+     * `app://login` is gone. It was for an app with a URL interceptor and no
+     * message handler, and both attempts were sent deliberately while we did
+     * not know which existed. Now we do, and the unhandled scheme is not
+     * harmless — iOS answers it with "Unable to open URL: app://login" and the
+     * customer gets a native error dialog over a sign-in that is working.
+     *
+     * And UAE PASS is not asked for either. Falling through to it posted
+     * `open-url` as well, so an app that honours both would put its own
+     * sign-in screen up AND open UAE PASS in a browser behind it, for one tap.
+     * The host portal below is already skipped in the app for its own reasons;
+     * this is the same argument one step further.
+     */
+    if (isNative()) {
+      tried.push("asked the app");
+      postNative({ action: "signin-needed", reason: "customer-asked" });
+      // Said before we know whether the app is listening, deliberately: the tap
+      // is acknowledged either way, and the warning takes over if nothing comes.
+      setAuthReason(null);
+      setAuthInfo(
+        locale === "ar"
+          ? "جارٍ فتح تسجيل الدخول في التطبيق…"
+          : "Opening sign-in in the app…"
+      );
+      /**
+       * AND, WHERE THE APP IS NOT LISTENING YET, THE ROUTE THAT ACTUALLY WORKS.
+       *
+       * `signin-needed` is the right way and the only way once their handler
+       * ships. It is not in TestFlight yet, and on PRODUCTION what signs
+       * customers in inside the app today is the older path: ask the app to
+       * open UAE PASS, whose callback returns to this embed's own URL with
+       * ?uaepass=ok, which this page reads itself.
+       *
+       * Removing that everywhere to tidy up a TestFlight build would have taken
+       * sign-in away from live customers, so it is a per-environment setting
+       * instead of a deploy — on where the handler does not exist yet, off
+       * where it does, and one line to turn off when their build lands.
+       *
+       * app://login does NOT come back with it. That was the half their
+       * developer objected to, and rightly: an unhandled scheme is a native
+       * error dialog over a sign-in that is working.
+       */
+      if (!agent.nativeUaePassFallback) {
+        armSignInFallback(tried);
+        return;
+      }
+    }
     /**
      * THE HOST PORTAL ROUTE CANNOT WORK INSIDE THE APP.
      *
@@ -1390,6 +1531,22 @@ export function Experience({
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
         `&returnTo=${encodeURIComponent(returnTo)}${mock}`;
       const win = openExternal(`${base}&popup=1`, { name: "dlg-uaepass", kind: "signin" });
+      /**
+       * "opened" was too strong inside the app. openExternal cannot open
+       * anything there — it POSTS to the host and returns a handle if the
+       * message went out. Saying it opened UAE PASS when the app did nothing
+       * with the message reads as our failure and sent the last round of
+       * diagnosis in the wrong direction.
+       */
+      tried.push(
+        isNative()
+          ? win
+            ? "asked the app to open UAE PASS"
+            : "could not reach the app"
+          : win
+            ? "opened UAE PASS"
+            : "UAE PASS would not open"
+      );
       // Nothing opened, and only a browser can fall back by navigating itself:
       // in a WebView that would replace the conversation with a login page.
       if (!win && !isNative()) window.location.href = base;
@@ -1397,7 +1554,8 @@ export function Experience({
       setAuthenticated(true);
       setAuthReason(null);
     }
-  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.slug, locale]);
+    armSignInFallback(tried);
+  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.nativeUaePassFallback, agent.slug, locale, armSignInFallback]);
 
   /**
    * The host sign-in popup closed. If no token reached us, say so instead of
@@ -1460,6 +1618,7 @@ export function Experience({
     if (!silent && !text) return;
     if (!silent) setInput("");
     setAuthReason(null);
+    setAuthInfo(null);
     // Silent turns (post-sign-in account pulse, payment settled) add no user
     // bubble — only the assistant's response is shown.
     const said = new Date().toISOString();
@@ -2230,6 +2389,12 @@ export function Experience({
               <button className="dlg-chip" onClick={signIn}>
                 {t.signIn}
               </button>
+            </div>
+          ) : authInfo ? (
+            // Not a warning and not a dead end: no icon, no button, nothing to
+            // act on. It is the tap being acknowledged while the app is asked.
+            <div className="dlg-auth-banner is-info">
+              <span>{authInfo}</span>
             </div>
           ) : null}
 

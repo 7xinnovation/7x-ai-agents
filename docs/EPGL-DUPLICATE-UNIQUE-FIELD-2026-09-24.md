@@ -24,7 +24,137 @@ Every item reports the same message because `allOrNone: true` unwinds the whole
 composite, so the response does not say WHICH field collided. That is the
 question we need answered.
 
-## Our reading, for what it is worth
+## ANSWERED by EPGL, 29 September 2026
+
+Their replies, verbatim, against the three questions below:
+
+| Question | Their answer |
+|---|---|
+| Which field is the unique constraint on? | "its the company name — there is duplicate rule on SF to prevent any company name duplication", and "`EPG_TRN_No__c` should be unique also" |
+| Should a second open request for the same trade licence be possible? | "Yes it's possible, and the `recommendedAction` is just a recommendation, not a rule" |
+| Can `User` / `Contact` be upserted on an external id? | Already are: "we are using email for contact to match and update; for user it's on `EPG_Emirates_Id__c`" |
+
+**So our reading was wrong.** We had `NewUser` down as the likeliest culprit —
+a `Username` is unique org-wide and this applicant had submitted before. It is
+not: their handler matches the User on `EPG_Emirates_Id__c` and the Contact on
+`Email`, so a returning applicant updates rather than collides. The Account was
+the one item we ruled out, on the grounds that it carries an `Id` and is
+therefore an update.
+
+### What we changed, 29 September
+
+**We tried dropping `Name` from the Account when we hold its `Id`, and reverted
+it the same day.** The reasoning looked sound — a renewal does not rename a
+company, and a name we resend is a name your duplicate rule can match on. The
+first renewal through it, **LR-37641**, came back with **EMRE KARAYALCIN** on
+the record where **TRAHEEL DELIVERY SERVICES L.L.C** belongs: the applicant's
+name, which is the only other name in that composite (the `User` item).
+
+**So your handler does not leave an absent `Name` alone — something downstream
+fills it.** Please confirm what, because it matters beyond us: any caller
+omitting a field on an update would expect the stored value to stand.
+
+**And please check the Account for trade licence 1196781 in PreProd2.** If its
+`Name` was overwritten with the applicant's, it needs restoring to TRAHEEL
+DELIVERY SERVICES L.L.C.
+
+The Account is now sent exactly as it was before, with both its `Id` and its
+`Name`.
+
+**The rollback now explains itself.** `allOrNone` echoes one sentence onto every
+item, so the applicant used to be told "a record already exists with the same
+unique value for one of the unique fields", which nobody can act on. It now
+names the company-name rule, says nothing was created and nothing they gave is
+wrong, forbids the retry that fails identically, and offers to update the
+existing application instead.
+
+**`EPG_TRN_No__c` we have never sent** — it appears nowhere in the payload
+below. Nothing to fix, but worth recording: we do not collect a TRN anywhere in
+this journey, so if EPGL expect one on the request it has to be added on both
+sides.
+
+**We will go on offering "submit as new".** Their answer says a second open
+request is allowed, so the recommendation stays a recommendation and the choice
+stays the customer's.
+
+### PROVED, 29 September — your duplicate-name check does not exclude the record being updated
+
+Three renewals for TRAHEEL that afternoon, from our audit log, same Account id
+(`001FW00B34EmqMWYEZ`) every time:
+
+| | Account item | Result |
+|---|---|---|
+| 12:05, 12:06 | `Id` + **no** `Name` | **succeeded** — LR-37641 created |
+| 12:19, 12:20 | `Id` + `Name` (as always) | rolled back |
+
+And the 12:19 message names it in your own words, which the 24 September one did
+not:
+
+```
+Rolled back due to allOrNone=true: A company with the same name already exists.
+Please choose a different name and try again. | Value does not exist or does not
+match filter criteria.
+```
+
+So the company-name answer was right, and the mechanism is now visible: **we send
+the Account addressed by its own `Id`, carrying its own existing `Name`, and your
+check finds that same record and calls it a duplicate.** A record is not its own
+duplicate — the lookup needs to exclude the `Id` being updated.
+
+We cannot work around it. Omitting the `Name` gets past the check, and that is
+what the 12:05 and 12:06 submissions did — but **the company was then renamed to
+the applicant, EMRE KARAYALCIN**, because something downstream fills an absent
+`Name`. We reverted that the same day.
+
+**Two things we need from you:**
+
+1. **Exclude the record being updated from the duplicate-name check.** This is
+   the fix; there is nothing on our side that substitutes for it.
+2. **Please check the Account for trade licence 1196781** and restore its `Name`
+   to TRAHEEL DELIVERY SERVICES L.L.C if our 12:05/12:06 submissions overwrote
+   it. And tell us what fills an omitted `Name` on an update — any caller
+   omitting a field would expect the stored value to stand.
+
+### Two other errors from the same afternoon
+
+Both were reported to the applicant as one vague failure, so they are recorded
+here even though only the first is yours:
+
+**`INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST: Designation: bad value for restricted
+picklist field: Applicant`** — raised by your flow "Populating the primary
+contact information on account contact_2". `Accountant` is accepted; `Applicant`
+is not. **Please send us the allowed values for `EPG_Designation__c`.** We are
+otherwise guessing at a restricted picklist, and a wrong guess rolls back the
+whole submission.
+
+**`Value does not exist or does not match filter criteria`** — this one is ours.
+The Contact item went out carrying `EPG_Company__c`, which is correct on
+`EPG_Partner__c` and wrong here; the payload you reviewed from 24 September used
+`EPG_Account__c` on the Contact. Corrected on our side on 29 September, the same
+way we corrected it on the `User` item on 16 September. One composite spells the
+company three ways across three objects, which is worth knowing if anyone else
+integrates with it.
+
+### Still open with EPGL
+
+1. **Why does a name-matching duplicate rule fire on a record we address by
+   `Id`?** A record is not its own duplicate. Either PreProd2 holds a SECOND
+   Account named TRAHEEL DELIVERY SERVICES L.L.C — plausible, since submissions
+   before 16 September could insert one — or the rule is matching the record
+   against itself. **This is now the whole question.** Withholding the name was
+   the one fix available on our side and it cannot be used, so 24 September's
+   rollback is unresolved until this is answered.
+2. **Can the error name the field?** Still the single change that would save the
+   most time on both sides. "One of the unique fields" cost a week.
+3. **Contact is matched on `Email` — which makes the email the key.** In the
+   payload below the ACCOUNTANT's contact goes out under
+   `emre.karayalcin@7x.ae` with `LastName: HALL`. If the applicant's own contact
+   already uses that address, matching on email would overwrite the applicant's
+   record with the accountant's name. We are checking our side; EPGL should
+   confirm what their handler does when one email arrives twice with two names.
+
+## Our reading at the time, which was wrong
+
 
 `Account` is sent with an `Id`, so it is an update and cannot be the collision.
 That leaves `NewLicenseRequest`, `Partner1`, `Partner2`, `NewUser`, `NewContact`
@@ -39,7 +169,7 @@ the same user again.
 We may well be wrong. We cannot see your validation rules, duplicate rules or
 custom unique fields, which is why this is a question rather than a report.
 
-## What we would like to know
+## What we asked (answered above)
 
 1. **Which field is the unique constraint on?** The response does not name it —
    if the error could carry the field, that alone would save a lot of time.

@@ -61,6 +61,9 @@ export interface PublicAgent {
   // popup and we wait for the host's token rather than running our own UAE PASS
   // flow. See hostLoginUrl in packages/config/src/agent.ts.
   hostLoginUrl?: string;
+  /** In-app: still fall through to UAE PASS when the app ignores signin-needed. */
+  nativeUaePassFallback?: boolean;
+  /** A URL a native host intercepts to run sign-in itself. See nativeBridge. */
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;
   // Whether GPT Realtime voice mode is configured (AZURE_REALTIME_* env present).

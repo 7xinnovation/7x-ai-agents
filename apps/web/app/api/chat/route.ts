@@ -962,6 +962,8 @@ export async function POST(req: NextRequest) {
             // Decides whether the request is submitted as awaiting a transfer.
             paymentMethod: str(liveState.data.payment_method),
             regulator: str(liveState.data.regulator),
+            // A key, not a detail: EPGL match a Contact on its email address.
+            accountantEmail: str(liveState.data.accountant_email),
             termsAccepted:
               isTrue(liveState.data.terms_accepted) || isTrue(liveState.data.declaration_accepted),
             amountPaid:
@@ -1618,12 +1620,155 @@ export async function POST(req: NextRequest) {
       "If they ask about something else entirely — a new licence, a general question — you may help with that as normal."
     );
   };
+  /**
+   * Once a LICENSED record is latched, an unlicensed one cannot replace it.
+   *
+   * Several lookups run in a turn — the signed-in company, the Emirates ID, the
+   * trade licence — and they do not agree: the customer is a Contact on one
+   * account and the licence lives on another. Whichever ran last used to win,
+   * which is how a renewal ended up addressed to a record with no licence on it
+   * three times in one afternoon.
+   */
   const rememberLicenceRecordId = (c: { licenseRecordId?: string; accountId?: string } | undefined) => {
     const id = String(c?.licenseRecordId ?? "").trim();
-    if (id) epglLicenceRecordId.value = id;
     const acc = String(c?.accountId ?? "").trim();
+    if (!id && epglLicenceRecordId.value) return; // do not downgrade
+    if (id) epglLicenceRecordId.value = id;
     if (/^[a-zA-Z0-9]{15,18}$/.test(acc)) epglAccountId.value = acc;
   };
+  /**
+   * A COMPANY WITHOUT A LICENCE IS NOT THE COMPANY BEING RENEWED.
+   *
+   * Trade licence 1196781 matches three accounts in PreProd2, and only one of
+   * them holds postal licence 377. The signed-in customer is a Contact on a
+   * DIFFERENT one — an unlicensed duplicate carrying the same Arabic and trade
+   * names — so every renewal that afternoon was submitted against a record with
+   * no licence on it, asking to give it the licensed company's name. EPGL's
+   * duplicate rule refused that, correctly, and it took a day to see why.
+   *
+   * Latching by trade licence rather than by whoever signed in: the account a
+   * person is attached to is not necessarily the account a LICENCE is attached
+   * to, and it is the licence being renewed. Only when exactly one match holds
+   * one — two licensed records under one trade licence is a real ambiguity and
+   * stays the customer's to resolve.
+   *
+   * Read-only, and it only ever moves the target towards a licensed record.
+   */
+  /**
+   * WHICH OF SEVERAL RECORDS IS THE ONE WITH THE LIVE LICENCE.
+   *
+   * Trade licence 1196781 matches three accounts and TWO of them hold a licence
+   * record — postal licence 377 (Active) and 479 (Inactive). A rule that only
+   * acts when exactly one is licensed therefore never acted, which is why the
+   * fourth and fifth attempts failed exactly like the first three.
+   *
+   * An inactive licence is not the one being renewed and not the one a new
+   * application belongs against, so ACTIVE decides first. Only where that still
+   * leaves exactly one is anything latched: two live licences under one trade
+   * licence is a real ambiguity and stays the customer's to resolve.
+   */
+  const pickLicensedCompany = <T extends { licenseRecordId?: string; licenseStatus?: string }>(all: T[]): T | null => {
+    const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
+    const active = licensed.filter((x) => /^active\b/i.test(String(x.licenseStatus ?? "").trim()));
+    if (active.length === 1) return active[0]!;
+    if (licensed.length === 1) return licensed[0]!;
+    return null;
+  };
+
+  const latchLicensedCompany = async (
+    c: { licenseRecordId?: string; accountId?: string; tradeLicenseNumber?: string; name?: string } | undefined
+  ): Promise<string> => {
+    rememberLicenceRecordId(c);
+    if (!c || String(c.licenseRecordId ?? "").trim()) return "";
+    const licence = String(c.tradeLicenseNumber ?? "").trim();
+    if (!licence) return "";
+    try {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const all = await companyByTradeLicense(agent.id, env, licence);
+      const pick = pickLicensedCompany(all);
+      if (!pick || pick.accountId === c.accountId) return "";
+      const licensed = [pick];
+      rememberLicenceRecordId(pick);
+      await audit({
+        agentId: agent.id,
+        conversationId: session.conversationId,
+        actor: "system",
+        action: "epgl_account_redirected_to_licensed",
+        payload: {
+          tradeLicenseNumber: licence,
+          was: c.accountId ?? null,
+          now: licensed[0]!.accountId ?? null,
+          postalLicenseNumber: licensed[0]!.postalLicenseNumber ?? null,
+          matches: all.length,
+        },
+      }).catch(() => {});
+      return (
+        `\n\nNOTE ON WHICH RECORD THIS IS: EPGL hold ${all.length} companies under trade licence ${licence}, and the one this customer's sign-in is attached to does NOT hold the postal licence. ` +
+        `The licence is on "${licensed[0]!.name ?? licensed[0]!.accountId}" (postal licence ${licensed[0]!.postalLicenseNumber ?? "on file"}), and a renewal is only possible against that record — so it has been selected for you. ` +
+        `Do not pass an accountId of your own, and do not describe this to the customer as a problem: it is the same company, and EPGL simply hold the licence on one of its records.`
+      );
+    } catch {
+      // A lookup that fails leaves the latch exactly as it was.
+      return "";
+    }
+  };
+  /**
+   * AND IT IS SETTLED AT THE START OF THE TURN, not left to whichever lookup
+   * the model happens to call.
+   *
+   * 29 September, three submissions across an afternoon, every one addressed to
+   * 001FW00B34EmqMWYEZ — a record with no licence — while postal licence 377
+   * sits on 0015f00000ic9okAAA. Fixing the lookup paths was not enough: a turn
+   * that calls none of them still submits, carrying whatever account id the
+   * conversation was already holding.
+   *
+   * The trade licence number is on the case by then, and it is the thing a
+   * renewal is actually about. One query, EPGL renewals only, and only where
+   * exactly one account under that licence holds a licence record.
+   */
+  /**
+   * NOT GATED ON THE JOURNEY. The 15:03 attempt ran as `new_license` — a
+   * company EPGL already hold a record for, applying through the other
+   * journey — and a gate reading `journeyKey === "renewal"` skipped it, so the
+   * fourth attempt failed exactly like the first three.
+   *
+   * Which Salesforce Account a submission is addressed to has nothing to do
+   * with which journey the conversation is in. A company with no trade licence
+   * number on the case, or one EPGL have never seen, matches nothing and is
+   * left alone — so this costs a lookup and changes nothing for a genuinely new
+   * applicant.
+   */
+  if (hasEpglSalesforce) {
+    const licenceNo = str(liveState.data.trade_license_number) ?? str(liveState.data.trade_licence_number);
+    if (licenceNo) {
+      try {
+        const env = agent.definition.activeEnvironment ?? "production";
+        const all = await companyByTradeLicense(agent.id, env, licenceNo);
+        const pick = pickLicensedCompany(all);
+        const licensed = pick ? [pick] : [];
+        if (pick) {
+          rememberLicenceRecordId(pick);
+          if (all.length > 1) {
+            await audit({
+              agentId: agent.id,
+              conversationId: session.conversationId,
+              actor: "system",
+              action: "epgl_account_resolved_at_turn_start",
+              payload: {
+                tradeLicenseNumber: licenceNo,
+                chosen: licensed[0]!.accountId ?? null,
+                postalLicenseNumber: licensed[0]!.postalLicenseNumber ?? null,
+                matches: all.length,
+              },
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // A lookup that fails leaves the turn exactly as it was.
+      }
+    }
+  }
+
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
         {
@@ -2496,13 +2641,14 @@ export async function POST(req: NextRequest) {
               "THEIR LOGIN IS NOT LINKED TO A COMPANY RECORD. Normal, and not an error — ask for the trade licence number and continue as usual.",
           };
         }
-        rememberLicenceRecordId(found);
+        const redirect = await latchLicensedCompany(found);
         const stop = await blockedNotice(found);
         if (stop) return { result: stop };
         return {
           result:
             "THE COMPANY THIS CUSTOMER IS SIGNED IN AS. Ask them to confirm it is the one this application is for before you use it.\n" +
-            (await withOutstanding(found)),
+            (await withOutstanding(found)) +
+            redirect,
         };
       } catch (err) {
         log.error("epgl_my_company_failed", err as Error, { ...a, tool: name });
@@ -2533,14 +2679,15 @@ export async function POST(req: NextRequest) {
                 JSON.stringify(found),
             };
           }
-          rememberLicenceRecordId(found[0]);
+          const redirect = await latchLicensedCompany(found[0]);
           const stop = await blockedNotice(found[0]!);
           if (stop) return { result: stop };
-          return { result: await withOutstanding(found[0]!) };
+          return { result: (await withOutstanding(found[0]!)) + redirect };
         }
         if (name === COMPANY_TOOL) {
           const found = await companyByTradeLicense(agent.id, env, String(input.tradeLicenseNumber ?? ""));
-          if (found.length === 1) rememberLicenceRecordId(found[0]);
+          let redirect = "";
+          if (found.length === 1) redirect = await latchLicensedCompany(found[0]);
           if (found.length === 1) {
             const stop = await blockedNotice(found[0]!);
             if (stop) return { result: stop };
@@ -2554,14 +2701,43 @@ export async function POST(req: NextRequest) {
           // A licence number can match a parent AND its branches; the filing always
           // belongs to the main company, so never silently pick one.
           if (found.length > 1) {
+            /**
+             * ONLY ONE OF THEM CAN BE RENEWED, AND IT IS NOT THE MODEL'S TO PICK.
+             *
+             * Trade licence 1196781 matches THREE accounts in PreProd2 — the
+             * licensed company (postal licence 377), an inactive one (479), and
+             * a third carrying the same Arabic and trade names with no postal
+             * licence at all. On 29 September a renewal went to the third.
+             *
+             * Everything that followed came from that: the composite carried a
+             * Name for a company that already exists under another id, EPGL's
+             * duplicate-name rule refused it — correctly — and we spent a day
+             * reporting their rule as broken. It is not. We were asking to give
+             * an unlicensed record the licensed company's name.
+             *
+             * A renewal is only possible against the record that HOLDS the
+             * licence. Where exactly one match does, that is the account, and it
+             * is latched here rather than left to whichever card the customer
+             * happens to tap — the name on a card is not what decides which
+             * record a licence lives on.
+             */
+            const licensed = found.filter((c) => String(c.licenseRecordId ?? "").trim());
+            if (licensed.length === 1) rememberLicenceRecordId(licensed[0]);
             return {
               result:
                 `MORE THAN ONE COMPANY is registered under that trade licence number (${found.length}). ` +
-                "Show the customer the names and ask which is theirs before using any of them:\n" +
+                "Show the customer the names and ask which is theirs before using any of them.\n" +
+                (licensed.length === 1
+                  ? `ONLY ONE OF THEM HOLDS A POSTAL LICENCE: ${licensed[0]!.name ?? licensed[0]!.accountId} (postal licence ${licensed[0]!.postalLicenseNumber ?? "on file"}). ` +
+                    `A RENEWAL IS ONLY POSSIBLE AGAINST THAT RECORD — the others have no licence to renew, whatever their names say. It is already selected for you: do not pass an accountId of your own for a renewal, and do not switch to another of these records because its name reads better. ` +
+                    `If the customer says one of the others is theirs, tell them plainly that EPGL hold the postal licence against ${licensed[0]!.name ?? "the first"} and ask them to confirm before going on.\n`
+                  : licensed.length === 0
+                    ? "NONE of them holds a postal licence, so there is nothing here to renew. Say so plainly and offer to start a new licence application instead of submitting one.\n"
+                    : "") +
                 JSON.stringify(found),
             };
           }
-          return { result: await withOutstanding(found[0]!) };
+          return { result: (await withOutstanding(found[0]!)) + redirect };
         }
         const quarters = await form9ByAccountId(agent.id, env, String(input.accountId ?? ""));
         return {

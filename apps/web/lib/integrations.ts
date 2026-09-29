@@ -674,6 +674,21 @@ export interface EpglRequestFacts {
    */
   accountId?: string;
   /**
+   * The ACCOUNTANT's own email, from the case rather than from the composite.
+   *
+   * EPGL confirmed on 29 September that their handler matches a Contact on
+   * EMAIL — "we are using email for contact to match and update". That makes
+   * the address a key, not a detail: a renewal's accountant Contact sent under
+   * the applicant's address does not create a second contact, it overwrites the
+   * applicant's with the accountant's name.
+   *
+   * The two are collected separately (contact_email vs accountant_email) and the
+   * guidance has said so since 15 September, which is exactly the kind of rule
+   * that holds most of the time. On 24 September's renewal the accountant's
+   * Contact went out carrying the applicant's address.
+   */
+  accountantEmail?: string;
+  /**
    * The partners AS THE TRADE LICENCE NAMES THEM, in order.
    *
    * LR-37377, 15 September: the licence and the MOA both name partner 2
@@ -754,9 +769,60 @@ export function withEpglRequestFields(
    * Names are not the model's to get right by memory: it composes the payload
    * from guidance, and guidance drifts. Corrected here, where it is one map.
    */
+  /**
+   * THE DESIGNATIONS THEIR PICKLIST ACTUALLY ACCEPTS (2026-09-29).
+   *
+   * Sent by EPGL after a submission was rolled back by their own flow —
+   * "Populating the primary contact information on account contact_2" —
+   * with INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST: Designation: bad value for
+   * restricted picklist field: Applicant.
+   *
+   * A restricted picklist fails the WHOLE composite under allOrNone, so a
+   * designation the model reaches for reasonably — "Applicant" is the obvious
+   * word for the person applying — loses every record in the submission. They
+   * may add Applicant to the list; until they do, a value that is not on it is
+   * dropped rather than sent. A contact with no designation is recorded; a
+   * composite that rolls back is not.
+   */
+  const DESIGNATIONS = [
+    "Manager",
+    "Owner",
+    "Accountant",
+    "General Manager",
+    "Finance Manager",
+    "External Auditor",
+    "Agent",
+    "Sponsor",
+    "Partner",
+  ];
+  const designation = (raw: unknown): string | undefined => {
+    // Multi-select: their own reads split on ";", so each part is judged alone.
+    const kept = String(raw ?? "")
+      .split(";")
+      .map((part) => DESIGNATIONS.find((d) => d.toLowerCase() === part.trim().toLowerCase()))
+      .filter((d): d is string => Boolean(d));
+    return kept.length ? [...new Set(kept)].join(";") : undefined;
+  };
+
   let patched0 = false;
   const RENAME: Record<string, Record<string, string>> = {
     User: { EPG_Company__c: "EPG_Account__c" },
+    /**
+     * The same rename, on the object it drifted to next (2026-09-29).
+     *
+     * TRAHEEL's renewal, 12:19: the Contact item went out carrying
+     * `EPG_Company__c`, and the composite came back with "Value does not exist
+     * or does not match filter criteria" — the identical message this exact
+     * field name produced on the User item on 16 September. The payload EPGL
+     * reviewed from 24 September had `EPG_Account__c` on the Contact and got
+     * past this error to a different one, so the working name is not in doubt.
+     *
+     * `EPG_Company__c` IS correct on EPG_Partner__c, which is why the model
+     * keeps reaching for it: one composite, three objects, and the company is
+     * spelled differently on each. That is not something to keep re-teaching in
+     * prose.
+     */
+    Contact: { EPG_Company__c: "EPG_Account__c" },
     Members__c: {
       EPG_Role__c: "DUL_License_Members_MemberRoleEn__c",
       EPG_Nationality__c: "DULLicenseMembersNationalityEn__c",
@@ -846,6 +912,69 @@ export function withEpglRequestFields(
       if (changed) { item.body = b; patched = true; }
     }
   }
+  /**
+   * THE ACCOUNTANT'S CONTACT CARRIES THE ACCOUNTANT'S EMAIL.
+   *
+   * Corrected rather than filled, which is rare here and is what the email
+   * being a MATCH KEY buys it: an address the model borrowed from the applicant
+   * does not make a wrong contact, it rewrites the right one. The case is
+   * authoritative — the customer typed it into a field labelled for it.
+   *
+   * Only the contact marked as the accountant, and only when the case actually
+   * holds an accountant address.
+   */
+  for (const item of items) {
+    if (!/\/sobjects\/Contact$/i.test(String(item?.url ?? ""))) continue;
+    for (const row of (Array.isArray(item.body) ? item.body : [item.body]) as Record<string, unknown>[]) {
+      if (!row || typeof row !== "object" || row.EPG_Designation__c === undefined) continue;
+      const ok = designation(row.EPG_Designation__c);
+      if (ok === row.EPG_Designation__c) continue;
+      if (ok) row.EPG_Designation__c = ok;
+      else delete row.EPG_Designation__c;
+      patched0 = true;
+    }
+  }
+
+  if (facts.accountantEmail && /.@./.test(facts.accountantEmail)) {
+    for (const item of items) {
+      if (!/\/sobjects\/Contact$/i.test(String(item?.url ?? ""))) continue;
+      const rows = (Array.isArray(item.body) ? item.body : [item.body]) as Record<string, unknown>[];
+      for (const row of rows) {
+        if (!row || typeof row !== "object") continue;
+        if (!/accountant/i.test(String(row.EPG_Designation__c ?? ""))) continue;
+        if (String(row.Email ?? "").trim().toLowerCase() === facts.accountantEmail.trim().toLowerCase()) continue;
+        row.Email = facts.accountantEmail.trim();
+        patched = true;
+      }
+    }
+  }
+
+  /**
+   * THE COMPANY NAME STAYS ON THE ACCOUNT. REVERTED SAME DAY (2026-09-29).
+   *
+   * For a few hours this dropped `Name` from the Account item whenever we held
+   * its `Id`. The reasoning looked sound: EPGL had just told us the unique
+   * constraint behind 24 September's rollback is "the company name — there is
+   * duplicate rule on SF to prevent any company name duplication", a renewal
+   * does not rename a company, and a name we resend is a name their rule can
+   * match on.
+   *
+   * The first renewal through it, LR-37641, came back showing EMRE KARAYALCIN
+   * where TRAHEEL DELIVERY SERVICES L.L.C belongs — the applicant's name on the
+   * company. Their handler does not leave an absent Name alone; something
+   * downstream fills it, and the only name left in that composite is the
+   * applicant's, from the User item.
+   *
+   * So the Account is sent exactly as it was: with its Id AND its Name. That
+   * reopens the duplicate-rule question, and reopening it is correct — a record
+   * is not its own duplicate, so a name rule firing on a record addressed by Id
+   * was never fully explained by the name being present. The likelier reading
+   * is the one already in the write-up: PreProd2 holds a SECOND account with
+   * that name, from a submission before the account id was stamped on
+   * 16 September. That is a question for EPGL, not a field for us to withhold.
+   *
+   * A guess about another team's handler is not worth a company record.
+   */
   patched = fill(account, {
     EPG_Regulator__c: facts.regulator,
     EPG_Emirates__c: facts.emirate,
@@ -2404,6 +2533,33 @@ export async function buildApiTools(
     // remembered value is empty on the next turn, which is the one a duplicate
     // submission and a status check both arrive on.
     const thisCasesRequest = lastLicenceRequestId ?? opts.submittedReference?.() ?? null;
+    /**
+     * AND NOTHING IS RESUBMITTED ONCE THE MONEY HAS LANDED.
+     *
+     * 29 September, LR-37650. The submission succeeded at 11:22, the payment
+     * settled at 11:24, the payment notification went out — and the model then
+     * called the submit tool AGAIN, in the update shape, which the guard below
+     * lets through because an update is how a real amendment is made. That one
+     * rolled back, and the customer who had just paid AED 100,700 was told
+     * "EPGL's system is blocking the final filing step... this needs EPGL to
+     * clear it manually", with a callback offered. Their renewal was on file,
+     * approved and paid, the whole time.
+     *
+     * A paid application is not a draft to re-send. An amendment after payment
+     * is a real thing, but it is something a CUSTOMER asks for in words — never
+     * something to do unprompted in the same breath as a payment notification.
+     */
+    const paidAlready = typeof opts.epglRequestFacts?.().amountPaid === "number";
+    if (/submitlicenserequest$/i.test(toolName) && thisCasesRequest && paidAlready) {
+      return {
+        result:
+          `ALREADY SUBMITTED AND ALREADY PAID — NOTHING WAS SENT, and nothing is wrong. ` +
+          `Licence request ${thisCasesRequest} is on file with EPGL and the payment has settled against it. There is no filing step left to do and nothing for this tool to add. ` +
+          `Do NOT tell the customer their submission is blocked, incomplete, or waiting on EPGL to clear anything. Do NOT offer a callback for it, and do NOT arrange one. ` +
+          `Confirm the renewal is submitted and paid, give them ${thisCasesRequest} as their reference, and tell them what happens next. ` +
+          `If the customer asks to CHANGE something on the application, say you will pass the amendment to EPGL — do not re-send the application to do it.`,
+      };
+    }
     if (/submitlicenserequest$/i.test(toolName) && thisCasesRequest) {
       const items = ((input?.body as Record<string, unknown> | undefined)?.compositeRequest ?? []) as Record<string, unknown>[];
       const licence = Array.isArray(items)
@@ -3724,6 +3880,75 @@ export async function buildApiTools(
     }
 
     if (!res.isError && /submitlicenserequest$/i.test(toolName)) {
+      /**
+       * A ROLLED-BACK COMPOSITE IS NOT A DIAGNOSIS.
+       *
+       * HTTP is always 200 here, and allOrNone echoes ONE message onto every
+       * item — so a failure arrives as seven identical sentences that say
+       * nothing about which item caused it. Left to read that, the model
+       * invents. TRAHEEL's renewal, 29 September, in one reply:
+       *
+       *   "that's the known signal that the same contact email is already
+       *    registered as the primary contact on this company"   — invented
+       *   "I'll send you as the applicant via the User record only, with no
+       *    separate Contact"                                    — it then
+       *    resubmitted with items REMOVED, of its own accord
+       *   "the error ... on the Account item itself"            — it is on
+       *    every item; that is what allOrNone means
+       *   "This is a system-side issue that needs EPGL's team"  — offered a
+       *    callback for what was, in part, our own field name
+       *
+       * The audit had the real answer the whole time: "A company with the same
+       * name already exists. Please choose a different name and try again. |
+       * Value does not exist or does not match filter criteria." Two errors,
+       * joined — one theirs, one ours.
+       *
+       * So the rollback is framed for the model rather than handed over raw.
+       * Salesforce's own words stay, because they are the evidence; what is
+       * added is what they mean and what must not be done about them.
+       */
+      if (/Rolled back due to allOrNone/i.test(res.result)) {
+        const dup = /company with the same name already exists/i.test(res.result);
+        /**
+         * A ROLLBACK IS NOT A LOST APPLICATION IF ONE IS ALREADY ON FILE.
+         *
+         * The framing below was written for a FIRST submission failing, where
+         * "EPGL are blocking this" is the honest reading. Applied to a resubmit
+         * it told a customer whose renewal was filed, approved and paid that
+         * their filing was stuck. Nothing about the rollback says what already
+         * exists — so that is said here, where it is known.
+         */
+        const already = lastLicenceRequestId ?? opts.submittedReference?.() ?? null;
+        if (already) {
+          res = {
+            ...res,
+            isError: true,
+            result:
+              res.result +
+              `\n\nNOTHING WAS LOST AND NOTHING IS STUCK. Licence request ${already} is ALREADY ON FILE with EPGL — this call was a second send of the same application and it changed nothing. ` +
+              `Do NOT tell the customer their submission failed, was blocked, or is waiting for EPGL to clear anything. Do NOT offer a callback about it. ` +
+              `Give them ${already} as their reference and carry on with whatever comes next.`,
+          };
+        } else {
+        res = {
+          ...res,
+          isError: true,
+          // Appended, never substituted: the backend's own words are what the
+          // audit keeps, and a failure nobody can read back afterwards is the
+          // failure mode this whole file exists to avoid.
+          result:
+            res.result +
+            `\n\nSUBMISSION ROLLED BACK — NOTHING WAS CREATED. Read this before you reply.\n` +
+            `THE SAME MESSAGE APPEARS ON EVERY ITEM. That is what allOrNone does: one failure unwinds the whole composite and every item echoes it. You therefore do NOT know which item failed, and you must NOT tell the customer which one did — not the Account, not the Contact, not any of them.\n` +
+            `DO NOT INVENT A CAUSE. Say only what the message above actually says. If it does not name a field, neither do you.\n` +
+            `DO NOT RESUBMIT WITH ITEMS REMOVED. Dropping the User or the Contact to "avoid a conflict" files an application missing the records EPGL need, and it is not a fix. Submit the same complete application or do not submit.\n` +
+            `DO NOT tell the customer their application was rejected, that anything is wrong with what they gave you, or that they must re-enter or re-upload anything. Nothing they did caused this.\n` +
+            (dup
+              ? `WHAT THIS ONE IS: EPGL's own duplicate-name check on the company. It is a known issue on their side — their check does not exclude the record being updated, so a renewal that sends the company's existing name is blocked by the company's own record. It is NOT something the customer can fix by changing anything, and it is NOT a reason to alter the company name. Tell them plainly that EPGL's system is blocking the submission on their company record, that their application is complete and nothing is lost, and that it needs EPGL to clear it. A callback is the right offer HERE, and only here.\n`
+              : `WHAT TO DO: if the message names something concrete, say that plainly. Otherwise say the submission was refused by EPGL's system, that their application is complete and nothing is lost, and offer a callback so EPGL can look at it. Do not retry the identical payload — it will fail identically.\n`),
+        };
+        }
+      }
       try {
         const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         for (const item of b?.compositeResponse ?? []) {

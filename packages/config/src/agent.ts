@@ -77,6 +77,41 @@ export const AgentDefinition = z.object({
    * Left unset, sign-in behaves as before and runs our own UAE PASS flow.
    */
   hostLoginUrl: z.string().url().optional(),
+  /**
+   * DISUSED (28 September). The widget no longer navigates to this, anywhere.
+   *
+   * It held a custom scheme — `app://login` — to ask a native app for a sign-in
+   * through a URL, for a host that had an interceptor and no message handler.
+   * Emirates Post's app now handles the postMessage (`signin-needed`) that was
+   * always the documented way, and an UNHANDLED scheme is not a free fallback:
+   * iOS answers it with "Unable to open URL: app://login" in a native dialog,
+   * over a sign-in that is working.
+   *
+   * Kept in the schema so definitions that still carry it continue to parse.
+   * Nothing reads it; setting it does nothing.
+   */
+  nativeLoginUrl: z
+    .string()
+    .regex(/^[a-z][a-z0-9+.-]*:\/\/[^\s]{0,200}$/i, "expected a scheme like app://login")
+    .optional(),
+  /**
+   * Inside a native app, may sign-in still fall through to UAE PASS?
+   *
+   * The chat asks the app to sign the customer in — `signin-needed` — and an
+   * app that listens for it opens its own screen. Emirates Post's app has that
+   * handler in a build that is not in TestFlight yet, so on PRODUCTION it hears
+   * nothing, and what actually signs customers in there today is the older
+   * behaviour: ask the app to open UAE PASS, whose callback returns to this
+   * embed's own URL. Screenshots show customers signed in exactly that way.
+   *
+   * Removing it everywhere would have broken a working path for live customers
+   * to fix a TestFlight build. So it is a setting rather than a deploy: ON for
+   * production until their app ships the handler, OFF wherever the handler
+   * exists, and one line to turn off when it does.
+   *
+   * Browsers are unaffected — UAE PASS is the ordinary route there.
+   */
+  nativeUaePassFallback: z.boolean().optional(),
   greeting: LocalizedString,
   theme: Theme,
   // Shown above the document upload slots in the case panel and on the mobile

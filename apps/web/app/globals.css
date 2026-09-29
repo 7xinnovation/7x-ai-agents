@@ -1659,6 +1659,14 @@ body {
 .dlg-auth-banner span {
   flex: 1;
 }
+/* The same banner, saying something is in progress rather than something is
+   wrong. Amber for "your sign-in did not start" is right; amber for "we are
+   asking the app" is not — it reads as a failure before anything has failed. */
+.dlg-auth-banner.is-info {
+  color: var(--c-text-muted);
+  background: color-mix(in srgb, var(--c-text) 4%, var(--c-surface));
+  border-color: var(--c-border);
+}
 
 /* ---- Input ---- */
 /* The composer floats over the conversation: messages scroll under a soft

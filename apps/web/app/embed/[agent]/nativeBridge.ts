@@ -62,6 +62,26 @@ export function postNative(detail: Record<string, unknown>): void {
 }
 
 /**
+ * HOW THE APP IS ASKED TO SIGN SOMEBODY IN — and how it used to be.
+ *
+ * `postNative({ action: "signin-needed" })` is the whole of it: Emirates Post's
+ * app catches it in onMessage and opens its own sign-in screen, and the chat
+ * picks the customer up from the token the wrapper injects on the next load.
+ *
+ * There was a second attempt here, `askNativeToSignIn`, which navigated a
+ * hidden iframe (and then the main frame) to a custom scheme — `app://login` —
+ * for an app that had a URL interceptor and no message handler. Both were sent
+ * deliberately while we did not know which of the two existed. Their developer
+ * has since built the handler and reported what the other one costs:
+ *
+ *     Error opening URL: app://login. Unable to open URL: app://login.
+ *
+ * A native error dialog, over a sign-in that was working. Removed on 28
+ * September rather than left in as a fallback, because an unhandled scheme is
+ * not a silent fallback on iOS.
+ */
+
+/**
  * The customer's backend token, handed over by a native host.
  *
  * NOT a query parameter. A token in the URL is written to the server's access
