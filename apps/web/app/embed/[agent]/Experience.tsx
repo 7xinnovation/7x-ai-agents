@@ -2159,7 +2159,7 @@ export function Experience({
               onClick={() => setLocale(locale === "ar" ? "en" : "ar")}
               aria-label="Switch language"
             >
-              <GlobeSimple size={16} weight={iconWeight} />
+              <GlobeSimple size={20} weight={iconWeight} />
               <span className="dlg-chip-tag">{locale === "ar" ? "EN" : "عربي"}</span>
             </button>
           ) : null}
@@ -2181,7 +2181,7 @@ export function Experience({
               out?" in words, and a second tap within four seconds does it. On a
               desktop the tooltip is there and it behaves as it always has. */}
           <button
-            className={`dlg-chip ${signOutArmed ? "" : "icon-only "}${authenticated ? "is-on" : ""}`}
+            className={`dlg-chip is-auth ${authenticated ? "is-on" : ""}`}
             onClick={() => {
               if (!authenticated) { signIn(); return; }
               if (!coarsePointer || signOutArmed) { setSignOutArmed(false); void signOut(); return; }
@@ -2191,8 +2191,18 @@ export function Experience({
             aria-label={authenticated ? t.signOut : t.signIn}
             title={authenticated ? `${t.signedIn} — ${t.signOut}` : t.signIn}
           >
-            {authenticated ? <UserCircleCheck size={17} weight="fill" /> : <SignIn size={16} weight={iconWeight} />}
-            {signOutArmed ? <span className="dlg-chip-tag">{t.signOutConfirm}</span> : null}
+            {authenticated ? <UserCircleCheck size={20} weight="fill" /> : <SignIn size={20} weight={iconWeight} />}
+            {/* IN WORDS, ALWAYS (FB-1793, FB-1802).
+                "Add logout button from the agent, or activate it" — there is
+                one, and it is this. It has been reported twice as missing and
+                once as a sign-IN button that signed somebody out, which is three
+                people telling us the same thing: an icon and a tooltip is not a
+                control on a phone, and a green circle is not the word "out".
+                So it says what it is, at every width. The icons beside it stay
+                icons — they are secondary, and six labels would not fit — but
+                this one is the difference between a customer being able to hand
+                the screen to someone else and not. */}
+            <span className="dlg-chip-tag">{signOutArmed ? t.signOutConfirm : authenticated ? t.signOut : t.signIn}</span>
           </button>
           {/* Withdraw permission in one step (pre-launch gate; FB-1737). Shown
               once there is a granted permission or collected data to pull back —
@@ -2205,7 +2215,7 @@ export function Experience({
               aria-label={t.withdraw}
               title={t.withdrawHint}
             >
-              <ShieldSlash size={16} weight={withdrawBusy ? "fill" : iconWeight} />
+              <ShieldSlash size={20} weight={withdrawBusy ? "fill" : iconWeight} />
             </button>
           ) : null}
           <button
@@ -2223,7 +2233,7 @@ export function Experience({
                 circular arrow was the only thing telling the customer what it
                 did, and it was telling them the wrong thing. They pressed what
                 they read as reload and lost the conversation. */}
-            <NotePencil size={16} weight={iconWeight} />
+            <NotePencil size={20} weight={iconWeight} />
           </button>
           {embedded && canExpand ? (
             <button
@@ -2232,7 +2242,7 @@ export function Experience({
               aria-label={expanded ? t.collapse : t.expand}
               title={expanded ? t.collapse : t.expand}
             >
-              {expanded ? <ArrowsInSimple size={16} weight={iconWeight} /> : <ArrowsOutSimple size={16} weight={iconWeight} />}
+              {expanded ? <ArrowsInSimple size={20} weight={iconWeight} /> : <ArrowsOutSimple size={20} weight={iconWeight} />}
             </button>
           ) : null}
           {hasCase ? (
@@ -2242,7 +2252,7 @@ export function Experience({
               aria-label={t.caseTab}
               title={t.caseTab}
             >
-              <ListChecks size={16} weight={iconWeight} />
+              <ListChecks size={20} weight={iconWeight} />
               {pendingDocCount > 0 ? <span className="count">{pendingDocCount}</span> : null}
             </button>
           ) : null}

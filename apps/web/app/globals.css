@@ -213,11 +213,17 @@ body {
   gap: 2px;
   align-items: center;
 }
+/* TOUCH TARGETS BIG ENOUGH TO HIT (FB-1791, FB-1793).
+   The standard asked for is 24px minimum and 48px recommended, with the touch
+   area larger than the icon. These were 33px squares around a 16px glyph in a
+   header six controls wide — inside the minimum, nowhere near the recommendation,
+   and reported as icons nobody could read. 44px with a 20px glyph is the usual
+   compromise and clears the minimum comfortably. */
 .dlg-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
+  height: 44px;
   padding: 0 12px;
   border: 1px solid var(--c-border);
   background: var(--c-surface);
@@ -233,7 +239,7 @@ body {
 /* Icon buttons read as a light toolbar: ghost until hover, then a soft rounded
    surface. Declutters the header vs. five bordered pills competing for weight. */
 .dlg-chip.icon-only {
-  width: 33px;
+  width: 44px;
   padding: 0;
   justify-content: center;
   border-radius: 10px;
@@ -244,6 +250,16 @@ body {
 .dlg-chip.icon-only:hover {
   background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
   color: var(--c-text);
+}
+/* THE ONE CONTROL THAT SAYS WHAT IT IS.
+   Reported three times over — twice as a missing logout, once as a sign-in
+   button that signed somebody out. It keeps its label at every width. */
+.dlg-chip.is-auth {
+  padding: 0 12px 0 10px;
+}
+.dlg-chip.is-auth.is-on {
+  border-color: color-mix(in srgb, var(--c-success, #16a34a) 40%, var(--c-border));
+  background: color-mix(in srgb, var(--c-success, #16a34a) 8%, var(--c-surface));
 }
 /* Bordered (text) chips like the language toggle keep their outline. */
 .dlg-chip:not(.icon-only):hover {

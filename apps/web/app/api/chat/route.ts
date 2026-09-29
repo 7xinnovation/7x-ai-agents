@@ -127,11 +127,30 @@ const PULSE_DIRECTIVE =
    * the status beside it says what is being fetched, and the pulse arrives
    * underneath when it is ready.
    */
-  "1) FIRST, before calling any tool, write ONE short line of greeting and say you are pulling their account up — this is the only thing the customer can see while the lookups run, so it must not wait on them. Use their name only if you have already been given it; do not call a tool to find it. " +
+  "1) FIRST, before calling any tool, write ONE short line of greeting and say you are pulling their account up — this is the only thing the customer can see while the lookups run, so it must not wait on them. " +
+  /**
+   * THEIR FIRST NAME, NOT THE ONE ON THE CARD (FB-1792).
+   *
+   * UAE PASS hands over a full legal name, and greeting somebody with four of
+   * them reads as a form letter: "Good afternoon, EMRE KARAYALCIN". The name we
+   * have is the name to use — the first part of it, the way a person would.
+   */
+  "Use their FIRST NAME only, not their full legal name, and only if you have already been given it — do not call a tool to find it. A UAE PASS name arrives in full and often in capitals; take the first part and write it as a name is written, \"Emre\", never \"EMRE KARAYALCIN\". If all you have is a full name in capitals, still use just the first word of it. " +
   "2) Then use your tools to pull everything you can about their account. " +
   "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
   "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
-  "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. If completed requests are on file (see the known customer record), add a short \"Recent activity\" list — but write each line as something a person would recognise: what was done, on which box, and when. \"NXN-B295AF15: Manage PO Box, 07-09-2026\" is our filing system talking to itself; \"You added an authorised agent to box 450866 on 7 September\" is the same fact addressed to the customer. Keep the reference if it is one they might need to quote, but put it at the end in brackets, never at the front. " +
+  "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. " +
+  /**
+   * AND NO RECENT-ACTIVITY LIST (FB-1792).
+   *
+   * It used to go here, written carefully so each line read as something a
+   * person would recognise rather than our filing system talking to itself.
+   * Emirates Post do not want it: the pulse is about what needs attention on
+   * the account TODAY, and a history of what has already been done is not that.
+   * It is still in the panel under "What has been done", where somebody looking
+   * for it will find it.
+   */
+  "Do NOT list recent activity, past requests or a history of what has already been done. The pulse is what needs attention now. " +
   "4) Only if NO PO Box is on file: welcome them, explain their account isn't linked to a PO Box yet, and offer — not require — to link one (\"if you have a box, tell me its number and emirate and I'll add it to your account\"). Never present the box number as a prerequisite for the pulse. " +
   /**
    * HAVING FORTY-ONE BOXES IS NOT A REASON YOU CANNOT RENT A FORTY-SECOND.
