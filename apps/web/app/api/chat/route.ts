@@ -1654,6 +1654,27 @@ export async function POST(req: NextRequest) {
    *
    * Read-only, and it only ever moves the target towards a licensed record.
    */
+  /**
+   * WHICH OF SEVERAL RECORDS IS THE ONE WITH THE LIVE LICENCE.
+   *
+   * Trade licence 1196781 matches three accounts and TWO of them hold a licence
+   * record — postal licence 377 (Active) and 479 (Inactive). A rule that only
+   * acts when exactly one is licensed therefore never acted, which is why the
+   * fourth and fifth attempts failed exactly like the first three.
+   *
+   * An inactive licence is not the one being renewed and not the one a new
+   * application belongs against, so ACTIVE decides first. Only where that still
+   * leaves exactly one is anything latched: two live licences under one trade
+   * licence is a real ambiguity and stays the customer's to resolve.
+   */
+  const pickLicensedCompany = <T extends { licenseRecordId?: string; licenseStatus?: string }>(all: T[]): T | null => {
+    const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
+    const active = licensed.filter((x) => /^active\b/i.test(String(x.licenseStatus ?? "").trim()));
+    if (active.length === 1) return active[0]!;
+    if (licensed.length === 1) return licensed[0]!;
+    return null;
+  };
+
   const latchLicensedCompany = async (
     c: { licenseRecordId?: string; accountId?: string; tradeLicenseNumber?: string; name?: string } | undefined
   ): Promise<string> => {
@@ -1664,9 +1685,10 @@ export async function POST(req: NextRequest) {
     try {
       const env = agent.definition.activeEnvironment ?? "production";
       const all = await companyByTradeLicense(agent.id, env, licence);
-      const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
-      if (licensed.length !== 1 || licensed[0]!.accountId === c.accountId) return "";
-      rememberLicenceRecordId(licensed[0]);
+      const pick = pickLicensedCompany(all);
+      if (!pick || pick.accountId === c.accountId) return "";
+      const licensed = [pick];
+      rememberLicenceRecordId(pick);
       await audit({
         agentId: agent.id,
         conversationId: session.conversationId,
@@ -1704,15 +1726,28 @@ export async function POST(req: NextRequest) {
    * renewal is actually about. One query, EPGL renewals only, and only where
    * exactly one account under that licence holds a licence record.
    */
-  if (hasEpglSalesforce && (liveState.journeyKey ?? session.state.journeyKey) === "renewal") {
+  /**
+   * NOT GATED ON THE JOURNEY. The 15:03 attempt ran as `new_license` — a
+   * company EPGL already hold a record for, applying through the other
+   * journey — and a gate reading `journeyKey === "renewal"` skipped it, so the
+   * fourth attempt failed exactly like the first three.
+   *
+   * Which Salesforce Account a submission is addressed to has nothing to do
+   * with which journey the conversation is in. A company with no trade licence
+   * number on the case, or one EPGL have never seen, matches nothing and is
+   * left alone — so this costs a lookup and changes nothing for a genuinely new
+   * applicant.
+   */
+  if (hasEpglSalesforce) {
     const licenceNo = str(liveState.data.trade_license_number) ?? str(liveState.data.trade_licence_number);
     if (licenceNo) {
       try {
         const env = agent.definition.activeEnvironment ?? "production";
         const all = await companyByTradeLicense(agent.id, env, licenceNo);
-        const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
-        if (licensed.length === 1) {
-          rememberLicenceRecordId(licensed[0]);
+        const pick = pickLicensedCompany(all);
+        const licensed = pick ? [pick] : [];
+        if (pick) {
+          rememberLicenceRecordId(pick);
           if (all.length > 1) {
             await audit({
               agentId: agent.id,

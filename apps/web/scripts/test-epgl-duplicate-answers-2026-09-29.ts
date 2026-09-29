@@ -215,9 +215,9 @@ console.log("\nAnd a signed-in customer is not necessarily on the licensed recor
  */
 check("a company with no licence record is looked up again by trade licence",
   /const latchLicensedCompany = async \(/.test(route) && /if \(!c \|\| String\(c\.licenseRecordId \?\? ""\)\.trim\(\)\) return "";/.test(route));
-check("...and only where exactly one match holds one",
-  /if \(licensed\.length !== 1 \|\| licensed\[0\]!\.accountId === c\.accountId\) return "";/.test(route));
-check("...the licensed record becomes the target", /rememberLicenceRecordId\(licensed\[0\]\);\s*\n\s*await audit\(/.test(route));
+check("...and only where the pick is unambiguous and different",
+  /if \(!pick \|\| pick\.accountId === c\.accountId\) return "";/.test(route));
+check("...the licensed record becomes the target", /const licensed = \[pick\];\s*\n\s*rememberLicenceRecordId\(pick\);/.test(route));
 check("...it is recorded", /action: "epgl_account_redirected_to_licensed"/.test(route));
 check("...the model is told, and told not to alarm the customer", /do not describe this to the customer as a problem/.test(route));
 check("a failed lookup leaves the latch alone", /A lookup that fails leaves the latch exactly as it was/.test(route));
@@ -227,10 +227,22 @@ check("...and the Emirates-ID lookup too", /const redirect = await latchLicensed
 console.log("\nAnd which record it is, is settled before the model runs");
 // Fixing the lookup paths was not enough: a turn that calls none of them still
 // submits, carrying whatever account id the conversation was already holding.
-check("a renewal resolves its account from the trade licence at turn start",
-  /\(liveState\.journeyKey \?\? session\.state\.journeyKey\) === "renewal"/.test(route) &&
+check("the account is resolved from the trade licence at turn start",
   /const all = await companyByTradeLicense\(agent\.id, env, licenceNo\);/.test(route));
-check("...only where exactly one match holds a licence", /if \(licensed\.length === 1\) \{\s*\n\s*rememberLicenceRecordId\(licensed\[0\]\);/.test(route));
+// The 15:03 attempt ran as new_license — a company EPGL already hold a record
+// for, applying through the other journey — and a `journeyKey === "renewal"`
+// gate skipped it. Which Account a submission is addressed to has nothing to do
+// with which journey the conversation is in.
+check("...for any EPGL journey, not just a renewal", /NOT GATED ON THE JOURNEY/.test(route) && !/=== "renewal"\) \{\s*\n\s*const licenceNo/.test(route));
+check("...and the pick is made by one rule, used everywhere", /const pickLicensedCompany = /.test(route));
+/**
+ * Two of the three records hold a licence — 377 Active and 479 Inactive — so
+ * "exactly one is licensed" was never true and the rule never acted. An
+ * inactive licence is not the one being renewed.
+ */
+check("an ACTIVE licence decides first", /const active = licensed\.filter\(\(x\) => \/\^active\\b\/i\.test\(String\(x\.licenseStatus \?\? ""\)\.trim\(\)\)\);\s*\n\s*if \(active\.length === 1\) return active\[0\]!;/.test(route));
+check("...then a single licensed record", /if \(licensed\.length === 1\) return licensed\[0\]!;/.test(route));
+check("...and two live licences stay the customer's ambiguity", /return null;\s*\n\s*\};/.test(route));
 check("...and it is recorded when there was a choice to make", /action: "epgl_account_resolved_at_turn_start"/.test(route));
 check("a failed lookup changes nothing", /A lookup that fails leaves the turn exactly as it was/.test(route));
 // Several lookups run per turn and they disagree; last-write-wins is what put a
