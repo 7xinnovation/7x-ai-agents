@@ -21,7 +21,7 @@
  * Run from apps/web:  npx tsx scripts/test-key-delivery-address-2026-09-29.ts
  */
 import { readFileSync } from "node:fs";
-import { wantsKeyDelivery } from "../lib/rentalTotal";
+import { wantsKeyDelivery, choseKeyDelivery } from "../lib/rentalTotal";
 import { addressAlreadyKnown } from "../lib/locateGuard";
 
 let pass = 0, fail = 0;
@@ -32,9 +32,25 @@ const check = (n: string, ok: boolean, got?: unknown) => {
 const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
 const integrations = readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8");
 
-console.log("\nChoosing the courier is what asks for an address");
-check("the trigger is the choice, not a promise of a map",
-  /const courier = wantsKeyDelivery\(data\.key_delivery \?\? data\.key_delivery_option\) \|\| courierSeen;/.test(route));
+console.log("\nTheir tap is the trigger, not the model's note of it");
+/**
+ * The first pass read key_delivery off the CASE — a field the model has to
+ * record with collect_field — and on the turn that matters it had not. So the
+ * fix inherited the bug it was fixing, and the address was skipped again.
+ */
+check("the customer's own message decides", /choseKeyDelivery\(body\.userMessage\) \|\|/.test(route));
+check("...with the case and the priced summary as extra triggers", /wantsKeyDelivery\(data\.key_delivery \?\? data\.key_delivery_option\) \|\|\s*\n\s*courierSeen;/.test(route));
+// The exact label on the button that was pressed, twice, in two different
+// wordings.
+check('"Deliver to my address (AED 30 courier fee)"', choseKeyDelivery("Deliver to my address (AED 30 courier fee)"));
+check('"Deliver to address (AED 30)"', choseKeyDelivery("Deliver to address (AED 30)"));
+check('"have it delivered"', choseKeyDelivery("have it delivered"));
+check("...and Arabic", choseKeyDelivery("التوصيل إلى العنوان"));
+// The OTHER button must never match it.
+check('"Collect from branch (free)" does not', !choseKeyDelivery("Collect from branch (free)"));
+check('"Collect from Al Barsha Post Office (free)" does not', !choseKeyDelivery("Collect from Al Barsha Post Office (free)"));
+check("...nor the Arabic for it", !choseKeyDelivery("الاستلام من الفرع"));
+check("...nor an empty message", !choseKeyDelivery("") && !choseKeyDelivery("   "));
 check("...and the block is appended, not hoped for", /const ask = locateBlock\(body\.locale\);\s*\n\s*send\(\{ type: "text", delta: ask \}\);/.test(route));
 check("...for Emirates Post only", /if \(agent\.definition\.tenantSlug === "nxn"\) \{\s*\n\s*const data = finalState\.data/.test(route));
 check("...and it is recorded", /action: "key_delivery_address_asked"/.test(route));

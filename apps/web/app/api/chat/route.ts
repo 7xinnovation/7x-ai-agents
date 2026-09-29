@@ -46,7 +46,7 @@ import {
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { trackShipment, TrackingNotConfiguredError } from "@/lib/emxTracking";
 import { notifyEpglPayment, paymentAdviceExists } from "@/lib/epglPayment";
-import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
+import { rentalTotal, agentCountFrom, wantsKeyDelivery, choseKeyDelivery } from "@/lib/rentalTotal";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode, type CustomerPoBox } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
@@ -3422,7 +3422,23 @@ export async function POST(req: NextRequest) {
          */
         if (agent.definition.tenantSlug === "nxn") {
           const data = finalState.data as Record<string, unknown>;
-          const courier = wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) || courierSeen;
+          /**
+           * THEIR TAP, NOT THE MODEL'S NOTE OF IT.
+           *
+           * The first pass read `key_delivery` off the case — a field the model
+           * has to record with collect_field — and on the turn that matters it
+           * had not: the customer pressed "Deliver to address (AED 30)", the
+           * reply moved on, and the case came out with no key_delivery and no
+           * address. So the fix inherited the bug it was fixing.
+           *
+           * Their own message is the signal that cannot go missing. The case
+           * and the priced summary stay as additional triggers for the turns
+           * after this one.
+           */
+          const courier =
+            choseKeyDelivery(body.userMessage) ||
+            wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) ||
+            courierSeen;
           const haveAddress = Boolean(keyDeliveryAddressFrom(data)) || addressAlreadyKnown(data);
           if (courier && !haveAddress && !/```\s*locate/i.test(finalText)) {
             const ask = locateBlock(body.locale);
