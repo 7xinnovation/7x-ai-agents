@@ -42,8 +42,11 @@ check("...selected by agent", /agent\.definition\.slug === "epgl-dialog" \? EPGL
 // changed deliberately on 29 September (FB-1792: the boxes moved to the panel
 // and the chat keeps the count). What this assertion is actually for is that
 // the two directives stayed SEPARATE, so that is what it checks now.
-check("Emirates Post's is still about PO Boxes", /PO Box/.test(nxn) && /boxes are on the account/.test(nxn));
-check("...and is not EPGL's", !/postal ACTIVITY/.test(nxn));
+// What the MODEL is sent, not what the file says — the doc comment introducing
+// EPGL's directive sits inside this slice and explains the bug by quoting it.
+const nxnSent = nxn.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+check("Emirates Post's is still about PO Boxes", /PO Box/.test(nxnSent) && /boxes are on the account/.test(nxnSent));
+check("...and is not EPGL's", !/postal ACTIVITY/.test(nxnSent));
 
 console.log("\nAnd EPGL's says nothing about PO Boxes");
 /**

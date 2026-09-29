@@ -1078,6 +1078,8 @@ export function Experience({
     return null;
   }, [caseState]);
   /** The profile menu, and the click-anywhere-else that closes it. */
+  /** Set by a sign-out: the next sign-in must ask, not resume. See signOut. */
+  const switchAccount = useRef(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement | null>(null);
   const toggleExpanded = useCallback(() => {
@@ -1450,6 +1452,20 @@ export function Experience({
     } catch {
       /* the widget is signed out either way — never leave it saying otherwise */
     }
+    /**
+     * AND THE NEXT SIGN-IN ASKS WHO THEY ARE.
+     *
+     * "I signed out and when I signed in, my UAE PASS was already signed in."
+     * Exactly so: UAE PASS is single sign-on. Our sign-out ends OUR session and
+     * their browser keeps theirs, so the next tap walks straight back in as the
+     * same person — the one thing somebody who signed out to switch Emirates ID
+     * does not want.
+     *
+     * Remembered rather than forced on everyone: the sign-in that FOLLOWS a
+     * sign-out carries prompt=login, and a first sign-in still gets the benefit
+     * of an existing session, which is what single sign-on is for.
+     */
+    switchAccount.current = true;
   }, [agent.slug]);
 
   /**
@@ -1631,10 +1647,14 @@ export function Experience({
       // simulate a login (only honoured where the server permits it). Real users on
       // the plain URL always get genuine UAE PASS.
       const mock = new URLSearchParams(window.location.search).get("mock") === "1" ? "&mock=1" : "";
+      // Only after a sign-out — see signOut. Cleared as it is used, so a second
+      // sign-in in the same session is an ordinary one.
+      const swap = switchAccount.current ? "&switch=1" : "";
+      switchAccount.current = false;
       const base =
         `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
-        `&returnTo=${encodeURIComponent(returnTo)}${mock}`;
+        `&returnTo=${encodeURIComponent(returnTo)}${mock}${swap}`;
       const win = openExternal(`${base}&popup=1`, { name: "dlg-uaepass", kind: "signin" });
       /**
        * "opened" was too strong inside the app. openExternal cannot open

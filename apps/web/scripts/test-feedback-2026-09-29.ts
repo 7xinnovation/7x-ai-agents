@@ -125,5 +125,29 @@ for (const icon of ["ShieldSlash", "NotePencil", "ListChecks", "GlobeSimple"]) {
 }
 check("the reason is written where the next person will change it", /TOUCH TARGETS BIG ENOUGH TO HIT \(FB-1791, FB-1793\)/.test(css));
 
+console.log("\nSigning out of us is not signing out of UAE PASS");
+/**
+ * "I signed out and when I signed in, my UAE PASS was already signed in."
+ * Exactly so — UAE PASS is single sign-on, our sign-out ends OUR session, and
+ * the browser keeps theirs. The next tap walks straight back in as the same
+ * person, which is the one thing somebody who signed out to change Emirates ID
+ * does not want.
+ */
+const uaepass = readFileSync(new URL("../lib/uaepass.ts", import.meta.url), "utf8");
+const loginRoute = readFileSync(new URL("../app/api/uaepass/login/route.ts", import.meta.url), "utf8");
+check("the authorize call can force a fresh login", /if \(opts\.forceLogin\) u\.searchParams\.set\("prompt", "login"\);/.test(uaepass));
+check("...driven by an explicit switch, not by default", /const forceLogin = req\.nextUrl\.searchParams\.get\("switch"\) === "1";/.test(loginRoute));
+check("...and passed through", /buildAuthorizeUrl\(resolveRedirectUri\(origin\), state, tenant, \{ forceLogin \}\)/.test(loginRoute));
+// A first sign-in still gets the benefit of an existing session — that is what
+// single sign-on is for. Only the person who asked to change accounts is asked
+// to authenticate again.
+check("a sign-out arms it", /switchAccount\.current = true;/.test(exp));
+check("...the next sign-in spends it", /const swap = switchAccount\.current \? "&switch=1" : "";\s*\n\s*switchAccount\.current = false;/.test(exp));
+check("...and an ordinary first sign-in does not carry it", /\$\{mock\}\$\{swap\}/.test(exp));
+// The belt to prompt=login's braces: the only thing that genuinely clears the
+// SSO cookie rather than asking the IdP to ignore it.
+check("the UAE PASS logout endpoint is available to callers", /export function buildLogoutUrl/.test(uaepass));
+check("...and refuses to build one for an unconfigured tenant", /if \(!uaePassConfigured\(tenant\)\) return null;/.test(uaepass));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

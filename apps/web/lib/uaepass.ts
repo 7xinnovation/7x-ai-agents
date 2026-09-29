@@ -181,7 +181,27 @@ export function uaePassTenantsConfigured(): string[] {
 }
 
 /** Build the UAE PASS authorize URL the customer is redirected to. */
-export function buildAuthorizeUrl(redirectUri: string, state: string, tenant?: string): string {
+export function buildAuthorizeUrl(
+  redirectUri: string,
+  state: string,
+  tenant?: string,
+  /**
+   * SIGNING OUT OF US IS NOT SIGNING OUT OF UAE PASS.
+   *
+   * Reported 29 September: "I signed out and when I signed in, my UAE PASS was
+   * already signed in." Exactly so — UAE PASS is a single sign-on, our sign-out
+   * ends OUR session, and their browser still holds theirs. Tapping sign-in
+   * then walks straight back in as the same person, which is the one thing
+   * somebody who just signed out to switch Emirates ID does not want.
+   *
+   * `prompt=login` is the OIDC way to say "ask them again even if you know
+   * them", and it is set only when the customer has just signed out. A first
+   * sign-in still gets the benefit of an existing UAE PASS session, which is
+   * what single sign-on is for; only the person who has asked to change
+   * accounts is made to authenticate again.
+   */
+  opts: { forceLogin?: boolean } = {}
+): string {
   const c = cfg(tenant);
   const u = new URL(`${c.base}/idshub/authorize`);
   u.searchParams.set("response_type", "code");
@@ -191,6 +211,26 @@ export function buildAuthorizeUrl(redirectUri: string, state: string, tenant?: s
   u.searchParams.set("state", state);
   u.searchParams.set("acr_values", c.acr);
   u.searchParams.set("ui_locales", "en");
+  if (opts.forceLogin) u.searchParams.set("prompt", "login");
+  return u.toString();
+}
+
+/**
+ * Where to send a browser to end the UAE PASS session itself.
+ *
+ * The belt to `prompt=login`'s braces, and the only thing that genuinely clears
+ * the SSO cookie rather than asking the IdP to ignore it. Opened best-effort
+ * when the customer signs out — an IdP that does not honour it costs us
+ * nothing, because the next authorize carries `prompt=login` anyway.
+ *
+ * Null when UAE PASS is not configured for this tenant, so a caller cannot send
+ * somebody to a half-built URL.
+ */
+export function buildLogoutUrl(redirectTo: string, tenant?: string): string | null {
+  if (!uaePassConfigured(tenant)) return null;
+  const c = cfg(tenant);
+  const u = new URL(`${c.base}/idshub/logout`);
+  u.searchParams.set("redirect_uri", redirectTo);
   return u.toString();
 }
 
