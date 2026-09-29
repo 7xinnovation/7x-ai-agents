@@ -130,8 +130,29 @@ async function main() {
         j.guidance = g.replace(STALE_RULE, "");
         changes.push(`${j.key}.guidance -= "payment is not taken in this chat"`);
       }
-      if (!String(j.guidance ?? "").includes(MARKER)) {
-        j.guidance = String(j.guidance ?? "") + RULE;
+      /**
+       * AND NEVER PUT BACK A RULE SOMETHING NEWER REPLACED.
+       *
+       * This rule says ASK, SUBMIT, THEN PAY. On 28 September that order was
+       * reversed — the application is filed BEFORE the payment question, so a
+       * customer who stops at the two buttons still leaves a record — and the
+       * newer script removes every PAYMENT OPTIONS block before adding its own.
+       *
+       * Which means re-running this one afterwards re-added a superseded rule
+       * that contradicts the live one, silently, because its own marker was no
+       * longer there to find. Caught on production, 29 September, in the
+       * idempotence check rather than in the chat.
+       */
+      const guidanceNow = String(j.guidance ?? "");
+      const newer = [...guidanceNow.matchAll(/PAYMENT OPTIONS \((\d{4}-\d{2}-\d{2})[a-z]?\)/g)].some(
+        (m) => m[1]! > "2026-09-09"
+      );
+      if (newer) {
+        // A note, not a change: counting it would write an unchanged definition
+        // to production every time somebody re-ran this.
+        console.log(`  · ${j.key}: a newer payment-options rule is in place — leaving the guidance alone`);
+      } else if (!guidanceNow.includes(MARKER)) {
+        j.guidance = guidanceNow + RULE;
         changes.push(`${j.key}.guidance += payment options`);
       }
 
