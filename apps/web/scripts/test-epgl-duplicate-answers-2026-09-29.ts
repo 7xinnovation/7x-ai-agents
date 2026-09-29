@@ -144,7 +144,7 @@ check("the company-name block is named for what it is", /duplicate-name check on
 check("...as EPGL's, not the customer's to fix", /NOT something the customer can fix/.test(integrations));
 check("...and never by changing the company name", /NOT a reason to alter the company name/.test(integrations));
 check("a callback is offered there and not everywhere", /A callback is the right offer HERE, and only here/.test(integrations));
-check("it is an error, so the model cannot read past it", /Rolled back due to allOrNone[\s\S]{0,600}isError: true/.test(integrations));
+check("it is an error, so the model cannot read past it", /Rolled back due to allOrNone[\s\S]{0,1400}isError: true/.test(integrations));
 check("...appended, never substituted", /result:\s*\n\s*res\.result \+\s*\n\s*`\\n\\nSUBMISSION ROLLED BACK/.test(integrations));
 
 console.log("\nThe company is spelled differently on each object");
@@ -223,6 +223,27 @@ check("...the model is told, and told not to alarm the customer", /do not descri
 check("a failed lookup leaves the latch alone", /A lookup that fails leaves the latch exactly as it was/.test(route));
 check("the signed-in company tool uses it", /const redirect = await latchLicensedCompany\(found\);/.test(route));
 check("...and the Emirates-ID lookup too", /const redirect = await latchLicensedCompany\(found\[0\]\);/.test(route));
+
+console.log("\nA paid application is not resubmitted, and a rollback after one is not a failure");
+/**
+ * LR-37650. Submitted 11:22, paid 11:24, payment notification sent — and the
+ * model then called the submit tool AGAIN in the update shape, which the
+ * already-submitted guard lets through because an update is how a real
+ * amendment is made. That one rolled back, and a customer who had just paid
+ * AED 100,700 was told "EPGL's system is blocking the final filing step... this
+ * needs EPGL to clear it manually", with a callback offered. Their renewal was
+ * on file, approved and paid the whole time.
+ */
+check("a submit is refused once the case is submitted AND paid",
+  /const paidAlready = typeof opts\.epglRequestFacts\?\.\(\)\.amountPaid === "number";/.test(integrations) &&
+  /thisCasesRequest && paidAlready\) \{/.test(integrations));
+check("...saying nothing is wrong rather than nothing was sent", /ALREADY SUBMITTED AND ALREADY PAID — NOTHING WAS SENT, and nothing is wrong/.test(integrations));
+check("...and forbidding the callback outright", /Do NOT offer a callback for it, and do NOT arrange one/.test(integrations));
+check("...while a real amendment is still possible, just not by resending", /do not re-send the application to do it/.test(integrations));
+// And if one slips through anyway, the rollback must not read as a lost filing.
+check("a rollback when a request already exists says so", /NOTHING WAS LOST AND NOTHING IS STUCK/.test(integrations));
+check("...naming the reference already on file", /is ALREADY ON FILE with EPGL — this call was a second send/.test(integrations));
+check("...and it is still audited as a failure", !/return res;\s*\n\s*\}\s*\n\s*const already/.test(integrations));
 
 console.log("\nA designation their picklist refuses is dropped, not sent");
 /**

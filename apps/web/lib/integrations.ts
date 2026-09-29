@@ -2533,6 +2533,33 @@ export async function buildApiTools(
     // remembered value is empty on the next turn, which is the one a duplicate
     // submission and a status check both arrive on.
     const thisCasesRequest = lastLicenceRequestId ?? opts.submittedReference?.() ?? null;
+    /**
+     * AND NOTHING IS RESUBMITTED ONCE THE MONEY HAS LANDED.
+     *
+     * 29 September, LR-37650. The submission succeeded at 11:22, the payment
+     * settled at 11:24, the payment notification went out — and the model then
+     * called the submit tool AGAIN, in the update shape, which the guard below
+     * lets through because an update is how a real amendment is made. That one
+     * rolled back, and the customer who had just paid AED 100,700 was told
+     * "EPGL's system is blocking the final filing step... this needs EPGL to
+     * clear it manually", with a callback offered. Their renewal was on file,
+     * approved and paid, the whole time.
+     *
+     * A paid application is not a draft to re-send. An amendment after payment
+     * is a real thing, but it is something a CUSTOMER asks for in words — never
+     * something to do unprompted in the same breath as a payment notification.
+     */
+    const paidAlready = typeof opts.epglRequestFacts?.().amountPaid === "number";
+    if (/submitlicenserequest$/i.test(toolName) && thisCasesRequest && paidAlready) {
+      return {
+        result:
+          `ALREADY SUBMITTED AND ALREADY PAID — NOTHING WAS SENT, and nothing is wrong. ` +
+          `Licence request ${thisCasesRequest} is on file with EPGL and the payment has settled against it. There is no filing step left to do and nothing for this tool to add. ` +
+          `Do NOT tell the customer their submission is blocked, incomplete, or waiting on EPGL to clear anything. Do NOT offer a callback for it, and do NOT arrange one. ` +
+          `Confirm the renewal is submitted and paid, give them ${thisCasesRequest} as their reference, and tell them what happens next. ` +
+          `If the customer asks to CHANGE something on the application, say you will pass the amendment to EPGL — do not re-send the application to do it.`,
+      };
+    }
     if (/submitlicenserequest$/i.test(toolName) && thisCasesRequest) {
       const items = ((input?.body as Record<string, unknown> | undefined)?.compositeRequest ?? []) as Record<string, unknown>[];
       const licence = Array.isArray(items)
@@ -3882,6 +3909,27 @@ export async function buildApiTools(
        */
       if (/Rolled back due to allOrNone/i.test(res.result)) {
         const dup = /company with the same name already exists/i.test(res.result);
+        /**
+         * A ROLLBACK IS NOT A LOST APPLICATION IF ONE IS ALREADY ON FILE.
+         *
+         * The framing below was written for a FIRST submission failing, where
+         * "EPGL are blocking this" is the honest reading. Applied to a resubmit
+         * it told a customer whose renewal was filed, approved and paid that
+         * their filing was stuck. Nothing about the rollback says what already
+         * exists — so that is said here, where it is known.
+         */
+        const already = lastLicenceRequestId ?? opts.submittedReference?.() ?? null;
+        if (already) {
+          res = {
+            ...res,
+            isError: true,
+            result:
+              res.result +
+              `\n\nNOTHING WAS LOST AND NOTHING IS STUCK. Licence request ${already} is ALREADY ON FILE with EPGL — this call was a second send of the same application and it changed nothing. ` +
+              `Do NOT tell the customer their submission failed, was blocked, or is waiting for EPGL to clear anything. Do NOT offer a callback about it. ` +
+              `Give them ${already} as their reference and carry on with whatever comes next.`,
+          };
+        } else {
         res = {
           ...res,
           isError: true,
@@ -3899,6 +3947,7 @@ export async function buildApiTools(
               ? `WHAT THIS ONE IS: EPGL's own duplicate-name check on the company. It is a known issue on their side — their check does not exclude the record being updated, so a renewal that sends the company's existing name is blocked by the company's own record. It is NOT something the customer can fix by changing anything, and it is NOT a reason to alter the company name. Tell them plainly that EPGL's system is blocking the submission on their company record, that their application is complete and nothing is lost, and that it needs EPGL to clear it. A callback is the right offer HERE, and only here.\n`
               : `WHAT TO DO: if the message names something concrete, say that plainly. Otherwise say the submission was refused by EPGL's system, that their application is complete and nothing is lost, and offer a callback so EPGL can look at it. Do not retry the identical payload — it will fail identically.\n`),
         };
+        }
       }
       try {
         const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
