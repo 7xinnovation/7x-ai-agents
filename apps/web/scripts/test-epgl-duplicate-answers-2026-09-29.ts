@@ -224,6 +224,32 @@ check("a failed lookup leaves the latch alone", /A lookup that fails leaves the 
 check("the signed-in company tool uses it", /const redirect = await latchLicensedCompany\(found\);/.test(route));
 check("...and the Emirates-ID lookup too", /const redirect = await latchLicensedCompany\(found\[0\]\);/.test(route));
 
+console.log("\nA designation their picklist refuses is dropped, not sent");
+/**
+ * EPGL sent the list on 29 September, after their own flow rolled a submission
+ * back on INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST: "Applicant". A restricted
+ * picklist fails the WHOLE composite under allOrNone, so one reasonable-looking
+ * word loses every record in the submission. A contact with no designation is
+ * recorded; a composite that rolls back is not.
+ */
+{
+  const withDes = (v: string) => {
+    const input: any = renewal();
+    input.body.compositeRequest[1].body.EPG_Designation__c = v;
+    return item(withEpglRequestFields(input, {}) as any, "NewContact").EPG_Designation__c;
+  };
+  check("Accountant is kept", withDes("Accountant") === "Accountant");
+  check("...and every other value they listed", ["Manager", "Owner", "General Manager", "Finance Manager", "External Auditor", "Agent", "Sponsor", "Partner"].every((d) => withDes(d) === d));
+  check("...case-insensitively, since the model writes prose", withDes("accountant") === "Accountant");
+  // The exact value that rolled back a submission.
+  check('"Applicant" is dropped rather than sent', withDes("Applicant") === undefined);
+  check("...and so is anything else invented", withDes("Authorised Signatory") === undefined);
+  // Multi-select: their own reads split on ";", so each part is judged alone.
+  check("a multi-value keeps only what is allowed", withDes("Applicant;Accountant") === "Accountant");
+  check("...and drops the field when none survives", withDes("Applicant;Signatory") === undefined);
+  check("the allowed list is the one EPGL sent", /"External Auditor",/.test(integrations) && /"Finance Manager",/.test(integrations));
+}
+
 console.log("\nAnd which record it is, is settled before the model runs");
 // Fixing the lookup paths was not enough: a turn that calls none of them still
 // submits, carrying whatever account id the conversation was already holding.

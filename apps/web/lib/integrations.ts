@@ -769,6 +769,41 @@ export function withEpglRequestFields(
    * Names are not the model's to get right by memory: it composes the payload
    * from guidance, and guidance drifts. Corrected here, where it is one map.
    */
+  /**
+   * THE DESIGNATIONS THEIR PICKLIST ACTUALLY ACCEPTS (2026-09-29).
+   *
+   * Sent by EPGL after a submission was rolled back by their own flow —
+   * "Populating the primary contact information on account contact_2" —
+   * with INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST: Designation: bad value for
+   * restricted picklist field: Applicant.
+   *
+   * A restricted picklist fails the WHOLE composite under allOrNone, so a
+   * designation the model reaches for reasonably — "Applicant" is the obvious
+   * word for the person applying — loses every record in the submission. They
+   * may add Applicant to the list; until they do, a value that is not on it is
+   * dropped rather than sent. A contact with no designation is recorded; a
+   * composite that rolls back is not.
+   */
+  const DESIGNATIONS = [
+    "Manager",
+    "Owner",
+    "Accountant",
+    "General Manager",
+    "Finance Manager",
+    "External Auditor",
+    "Agent",
+    "Sponsor",
+    "Partner",
+  ];
+  const designation = (raw: unknown): string | undefined => {
+    // Multi-select: their own reads split on ";", so each part is judged alone.
+    const kept = String(raw ?? "")
+      .split(";")
+      .map((part) => DESIGNATIONS.find((d) => d.toLowerCase() === part.trim().toLowerCase()))
+      .filter((d): d is string => Boolean(d));
+    return kept.length ? [...new Set(kept)].join(";") : undefined;
+  };
+
   let patched0 = false;
   const RENAME: Record<string, Record<string, string>> = {
     User: { EPG_Company__c: "EPG_Account__c" },
@@ -888,6 +923,18 @@ export function withEpglRequestFields(
    * Only the contact marked as the accountant, and only when the case actually
    * holds an accountant address.
    */
+  for (const item of items) {
+    if (!/\/sobjects\/Contact$/i.test(String(item?.url ?? ""))) continue;
+    for (const row of (Array.isArray(item.body) ? item.body : [item.body]) as Record<string, unknown>[]) {
+      if (!row || typeof row !== "object" || row.EPG_Designation__c === undefined) continue;
+      const ok = designation(row.EPG_Designation__c);
+      if (ok === row.EPG_Designation__c) continue;
+      if (ok) row.EPG_Designation__c = ok;
+      else delete row.EPG_Designation__c;
+      patched0 = true;
+    }
+  }
+
   if (facts.accountantEmail && /.@./.test(facts.accountantEmail)) {
     for (const item of items) {
       if (!/\/sobjects\/Contact$/i.test(String(item?.url ?? ""))) continue;

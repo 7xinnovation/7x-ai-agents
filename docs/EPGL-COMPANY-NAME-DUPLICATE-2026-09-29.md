@@ -53,8 +53,23 @@ whichever record the conversation happened to be carrying.
 2. **What fills an omitted `Name` on an update?** Any caller leaving a field out
    of an update would expect the stored value to stand. That behaviour is what
    turned a cautious change on our side into a renamed company record.
-3. **The allowed values for `EPG_Designation__c`** (see the last section) —
-   still outstanding, and unrelated to the above.
+3. ~~The allowed values for `EPG_Designation__c`~~ — **received 29 September**:
+   Manager, Owner, Accountant, General Manager, Finance Manager, External
+   Auditor, Agent, Sponsor, Partner. Anything outside that list is now dropped
+   on our side rather than sent, so a restricted picklist can no longer roll a
+   whole submission back. `Applicant` is the one the model reaches for
+   naturally — please do add it if you can.
+
+**And please do NOT rename the licensed record.** Your reply offers to "change
+the existing record name" so our update can complete. The record that needs
+changing is `001FW00B34EmqMWYEZ` — the unlicensed duplicate whose name WE
+overwrote — not `0015f00000ic9okAAA`, which holds active postal licence 377 and
+is correctly named. Freeing the name by renaming the licensed company would
+leave the live licence on a record called something else.
+
+It is no longer needed either way: from 29 September we address the record that
+holds the ACTIVE licence, so the name we send belongs to the record we send it
+to and your rule has nothing to match on.
 
 The error message itself is worth a word too: "A company with the same name
 already exists" named the rule but not the **other record**. Had it said which
