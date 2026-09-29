@@ -1453,20 +1453,35 @@ export function Experience({
       /* the widget is signed out either way — never leave it saying otherwise */
     }
     /**
-     * AND THE NEXT SIGN-IN ASKS WHO THEY ARE.
+     * AND UAE PASS IS SIGNED OUT OF TOO.
      *
-     * "I signed out and when I signed in, my UAE PASS was already signed in."
-     * Exactly so: UAE PASS is single sign-on. Our sign-out ends OUR session and
-     * their browser keeps theirs, so the next tap walks straight back in as the
-     * same person — the one thing somebody who signed out to switch Emirates ID
-     * does not want.
+     * "I literally clicked sign out and when I clicked sign in, it signed me in
+     * instantly without asking me to login again with UAE PASS."
      *
-     * Remembered rather than forced on everyone: the sign-in that FOLLOWS a
-     * sign-out carries prompt=login, and a first sign-in still gets the benefit
-     * of an existing session, which is what single sign-on is for.
+     * Because ours is a session against the conversation and theirs is a single
+     * sign-on cookie on id.uaepass.ae — and theirs is the one that decides
+     * whether the customer is asked for their phone. The first attempt added
+     * `prompt=login` to the authorize call, which asks UAE PASS to ignore a
+     * session it still holds. They evidently do not honour it.
+     *
+     * Only a top-level navigation on THEIR origin can clear a cookie there, so
+     * the window opens for as long as that takes and closes itself. It is the
+     * same window the sign-in would have used, and it is the difference between
+     * signing out and appearing to.
+     *
+     * `prompt=login` stays on the next sign-in as well. It costs nothing, and
+     * it covers the case where this window is blocked or closed early.
      */
     switchAccount.current = true;
-  }, [agent.slug]);
+    if (agent.uaePassEnabled) {
+      openExternal(`/api/uaepass/logout?agent=${encodeURIComponent(agent.slug)}`, {
+        name: "dlg-uaepass-logout",
+        kind: "signout",
+        width: 420,
+        height: 320,
+      });
+    }
+  }, [agent.slug, agent.uaePassEnabled]);
 
   /**
    * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.

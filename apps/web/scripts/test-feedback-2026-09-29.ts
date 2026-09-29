@@ -167,5 +167,18 @@ check("...and an ordinary first sign-in does not carry it", /\$\{mock\}\$\{swap\
 check("the UAE PASS logout endpoint is available to callers", /export function buildLogoutUrl/.test(uaepass));
 check("...and refuses to build one for an unconfigured tenant", /if \(!uaePassConfigured\(tenant\)\) return null;/.test(uaepass));
 
+// prompt=login asks UAE PASS to IGNORE a session it still holds. They do not
+// honour it: "I literally clicked sign out and when I clicked sign in, it
+// signed me in instantly." Only a top-level navigation on their origin can
+// clear a cookie there.
+const logoutRoute = readFileSync(new URL("../app/api/uaepass/logout/route.ts", import.meta.url), "utf8");
+check("signing out opens UAE PASS's own logout", /openExternal\(`\/api\/uaepass\/logout\?agent=\$\{encodeURIComponent\(agent\.slug\)\}`/.test(exp));
+check("...only where UAE PASS is the way in", /if \(agent\.uaePassEnabled\) \{/.test(exp));
+check("...redirecting to their endpoint, not ours", /buildLogoutUrl\(`\$\{origin\}\/uaepass\/done`/.test(logoutRoute));
+check("...and coming back to a page that closes itself", /window\.close\(\)/.test(readFileSync(new URL("../app/uaepass/done/page.tsx", import.meta.url), "utf8")));
+// An unconfigured tenant must still get its window closed rather than an error.
+check("nothing to log out of still closes the window", /NextResponse\.redirect\(target \?\? `\$\{origin\}\/uaepass\/done`\)/.test(logoutRoute));
+check("prompt=login stays as the belt to that braces", /switchAccount\.current = true;/.test(exp));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
