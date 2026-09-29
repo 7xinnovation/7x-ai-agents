@@ -35,9 +35,15 @@ const nxn = route.slice(route.indexOf("const PULSE_DIRECTIVE ="), route.indexOf(
 console.log("\nThere are two pulses now, and the right one is chosen");
 check("EPGL has its own", /const EPGL_PULSE_DIRECTIVE =/.test(route));
 check("...selected by agent", /agent\.definition\.slug === "epgl-dialog" \? EPGL_PULSE_DIRECTIVE : PULSE_DIRECTIVE/.test(route));
-// Everything else keeps exactly what it had. This change is about EPGL being
+// Everything else keeps exactly what it had. This change was about EPGL being
 // wrong, not about the Emirates Post pulse being wrong.
-check("Emirates Post's is untouched", /covering EVERY PO Box on their account/.test(nxn));
+//
+// The wording it used to pin — "covering EVERY PO Box on their account" — was
+// changed deliberately on 29 September (FB-1792: the boxes moved to the panel
+// and the chat keeps the count). What this assertion is actually for is that
+// the two directives stayed SEPARATE, so that is what it checks now.
+check("Emirates Post's is still about PO Boxes", /PO Box/.test(nxn) && /boxes are on the account/.test(nxn));
+check("...and is not EPGL's", !/postal ACTIVITY/.test(nxn));
 
 console.log("\nAnd EPGL's says nothing about PO Boxes");
 /**
