@@ -772,6 +772,22 @@ export function withEpglRequestFields(
   let patched0 = false;
   const RENAME: Record<string, Record<string, string>> = {
     User: { EPG_Company__c: "EPG_Account__c" },
+    /**
+     * The same rename, on the object it drifted to next (2026-09-29).
+     *
+     * TRAHEEL's renewal, 12:19: the Contact item went out carrying
+     * `EPG_Company__c`, and the composite came back with "Value does not exist
+     * or does not match filter criteria" — the identical message this exact
+     * field name produced on the User item on 16 September. The payload EPGL
+     * reviewed from 24 September had `EPG_Account__c` on the Contact and got
+     * past this error to a different one, so the working name is not in doubt.
+     *
+     * `EPG_Company__c` IS correct on EPG_Partner__c, which is why the model
+     * keeps reaching for it: one composite, three objects, and the company is
+     * spelled differently on each. That is not something to keep re-teaching in
+     * prose.
+     */
+    Contact: { EPG_Company__c: "EPG_Account__c" },
     Members__c: {
       EPG_Role__c: "DUL_License_Members_MemberRoleEn__c",
       EPG_Nationality__c: "DULLicenseMembersNationalityEn__c",
@@ -3791,36 +3807,50 @@ export async function buildApiTools(
 
     if (!res.isError && /submitlicenserequest$/i.test(toolName)) {
       /**
-       * THE ROLLBACK THAT NAMES NO FIELD.
+       * A ROLLED-BACK COMPOSITE IS NOT A DIAGNOSIS.
        *
-       * HTTP is always 200 here and allOrNone echoes one message onto every
-       * item, so a failed submit reads as seven identical sentences that do not
-       * say what collided. Relayed as it stands, an applicant is told "a record
-       * already exists with the same unique value for one of the unique
-       * fields", which is not a thing anybody can act on — and the model's
-       * instinct is to retry, which fails the same way, or to blame EPGL.
+       * HTTP is always 200 here, and allOrNone echoes ONE message onto every
+       * item — so a failure arrives as seven identical sentences that say
+       * nothing about which item caused it. Left to read that, the model
+       * invents. TRAHEEL's renewal, 29 September, in one reply:
        *
-       * EPGL answered on 29 September: it is the company NAME, via a duplicate
-       * rule on their org, and a second open request for the same trade licence
-       * IS allowed — their duplicate-check's "Update existing application" is a
-       * recommendation, not a rule. So the reply says which field, says the
-       * application is not at fault, and points at the one thing that resolves
-       * it.
+       *   "that's the known signal that the same contact email is already
+       *    registered as the primary contact on this company"   — invented
+       *   "I'll send you as the applicant via the User record only, with no
+       *    separate Contact"                                    — it then
+       *    resubmitted with items REMOVED, of its own accord
+       *   "the error ... on the Account item itself"            — it is on
+       *    every item; that is what allOrNone means
+       *   "This is a system-side issue that needs EPGL's team"  — offered a
+       *    callback for what was, in part, our own field name
+       *
+       * The audit had the real answer the whole time: "A company with the same
+       * name already exists. Please choose a different name and try again. |
+       * Value does not exist or does not match filter criteria." Two errors,
+       * joined — one theirs, one ours.
+       *
+       * So the rollback is framed for the model rather than handed over raw.
+       * Salesforce's own words stay, because they are the evidence; what is
+       * added is what they mean and what must not be done about them.
        */
-      if (/same unique value/i.test(res.result)) {
+      if (/Rolled back due to allOrNone/i.test(res.result)) {
+        const dup = /company with the same name already exists/i.test(res.result);
         res = {
           ...res,
           isError: true,
           // Appended, never substituted: the backend's own words are what the
           // audit keeps, and a failure nobody can read back afterwards is the
-          // failure mode this whole file is built around avoiding.
+          // failure mode this whole file exists to avoid.
           result:
             res.result +
-            `\n\nSUBMISSION ROLLED BACK — NOTHING WAS CREATED, and nothing the customer gave you is wrong. ` +
-            `EPGL's org carries a duplicate rule on the COMPANY NAME, and it is what this collides with; allOrNone repeats the same sentence on every item, which is why the response does not name the field. ` +
-            `Do NOT retry the same payload — it will fail identically. Do NOT ask the customer to re-enter or re-upload anything, do NOT tell them their application was rejected, and do NOT say EPGL have a system fault. ` +
-            `Their record already exists, which is the whole reason this fired. Offer to UPDATE the existing application instead: call epglsalesforce__duplicateCheck for the Account Id and the existing licence request's Name, and resubmit in the update shape. ` +
-            `If the customer wants a genuinely new request rather than an update, say plainly that EPGL's duplicate rule is blocking it for this company and that it needs someone at EPGL to allow it — that is a decision on their side, not a retry on ours.`,
+            `\n\nSUBMISSION ROLLED BACK — NOTHING WAS CREATED. Read this before you reply.\n` +
+            `THE SAME MESSAGE APPEARS ON EVERY ITEM. That is what allOrNone does: one failure unwinds the whole composite and every item echoes it. You therefore do NOT know which item failed, and you must NOT tell the customer which one did — not the Account, not the Contact, not any of them.\n` +
+            `DO NOT INVENT A CAUSE. Say only what the message above actually says. If it does not name a field, neither do you.\n` +
+            `DO NOT RESUBMIT WITH ITEMS REMOVED. Dropping the User or the Contact to "avoid a conflict" files an application missing the records EPGL need, and it is not a fix. Submit the same complete application or do not submit.\n` +
+            `DO NOT tell the customer their application was rejected, that anything is wrong with what they gave you, or that they must re-enter or re-upload anything. Nothing they did caused this.\n` +
+            (dup
+              ? `WHAT THIS ONE IS: EPGL's own duplicate-name check on the company. It is a known issue on their side — their check does not exclude the record being updated, so a renewal that sends the company's existing name is blocked by the company's own record. It is NOT something the customer can fix by changing anything, and it is NOT a reason to alter the company name. Tell them plainly that EPGL's system is blocking the submission on their company record, that their application is complete and nothing is lost, and that it needs EPGL to clear it. A callback is the right offer HERE, and only here.\n`
+              : `WHAT TO DO: if the message names something concrete, say that plainly. Otherwise say the submission was refused by EPGL's system, that their application is complete and nothing is lost, and offer a callback so EPGL can look at it. Do not retry the identical payload — it will fail identically.\n`),
         };
       }
       try {

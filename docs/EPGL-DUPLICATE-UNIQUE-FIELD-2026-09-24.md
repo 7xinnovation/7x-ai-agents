@@ -77,6 +77,64 @@ sides.
 request is allowed, so the recommendation stays a recommendation and the choice
 stays the customer's.
 
+### PROVED, 29 September — your duplicate-name check does not exclude the record being updated
+
+Three renewals for TRAHEEL that afternoon, from our audit log, same Account id
+(`001FW00B34EmqMWYEZ`) every time:
+
+| | Account item | Result |
+|---|---|---|
+| 12:05, 12:06 | `Id` + **no** `Name` | **succeeded** — LR-37641 created |
+| 12:19, 12:20 | `Id` + `Name` (as always) | rolled back |
+
+And the 12:19 message names it in your own words, which the 24 September one did
+not:
+
+```
+Rolled back due to allOrNone=true: A company with the same name already exists.
+Please choose a different name and try again. | Value does not exist or does not
+match filter criteria.
+```
+
+So the company-name answer was right, and the mechanism is now visible: **we send
+the Account addressed by its own `Id`, carrying its own existing `Name`, and your
+check finds that same record and calls it a duplicate.** A record is not its own
+duplicate — the lookup needs to exclude the `Id` being updated.
+
+We cannot work around it. Omitting the `Name` gets past the check, and that is
+what the 12:05 and 12:06 submissions did — but **the company was then renamed to
+the applicant, EMRE KARAYALCIN**, because something downstream fills an absent
+`Name`. We reverted that the same day.
+
+**Two things we need from you:**
+
+1. **Exclude the record being updated from the duplicate-name check.** This is
+   the fix; there is nothing on our side that substitutes for it.
+2. **Please check the Account for trade licence 1196781** and restore its `Name`
+   to TRAHEEL DELIVERY SERVICES L.L.C if our 12:05/12:06 submissions overwrote
+   it. And tell us what fills an omitted `Name` on an update — any caller
+   omitting a field would expect the stored value to stand.
+
+### Two other errors from the same afternoon
+
+Both were reported to the applicant as one vague failure, so they are recorded
+here even though only the first is yours:
+
+**`INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST: Designation: bad value for restricted
+picklist field: Applicant`** — raised by your flow "Populating the primary
+contact information on account contact_2". `Accountant` is accepted; `Applicant`
+is not. **Please send us the allowed values for `EPG_Designation__c`.** We are
+otherwise guessing at a restricted picklist, and a wrong guess rolls back the
+whole submission.
+
+**`Value does not exist or does not match filter criteria`** — this one is ours.
+The Contact item went out carrying `EPG_Company__c`, which is correct on
+`EPG_Partner__c` and wrong here; the payload you reviewed from 24 September used
+`EPG_Account__c` on the Contact. Corrected on our side on 29 September, the same
+way we corrected it on the `User` item on 16 September. One composite spells the
+company three ways across three objects, which is worth knowing if anyone else
+integrates with it.
+
 ### Still open with EPGL
 
 1. **Why does a name-matching duplicate rule fire on a record we address by

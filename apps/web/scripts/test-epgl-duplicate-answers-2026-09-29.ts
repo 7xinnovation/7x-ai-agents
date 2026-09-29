@@ -129,18 +129,49 @@ console.log("\nThe accountant's contact carries the accountant's email");
   check("a contact that is not the accountant is untouched", item(out, "NewContact").Email === "emre.karayalcin@7x.ae");
 }
 
-console.log("\nAnd the rollback explains itself");
+console.log("\nAnd a rolled-back composite is framed, not handed over raw");
 const integrations = readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8");
-check("the message is recognised", /if \(\/same unique value\/i\.test\(res\.result\)\)/.test(integrations));
-check("...it names the field EPGL named", /duplicate rule on the COMPANY NAME/.test(integrations));
-check("...says nothing was created", /NOTHING WAS CREATED/.test(integrations));
-check("...and that the customer is not at fault", /nothing the customer gave you is wrong/.test(integrations));
-check("...forbids the retry that fails identically", /Do NOT retry the same payload/.test(integrations));
-check("...and does not have them re-upload", /do NOT ask the customer to re-enter or re-upload anything/i.test(integrations));
-check("...offers the update instead", /Offer to UPDATE the existing application instead/.test(integrations));
-check("it is an error, so the model cannot read past it", /same unique value[\s\S]{0,400}isError: true/.test(integrations));
-// The backend's own words are what the audit keeps.
+check("every rollback is caught, not just one message", /if \(\/Rolled back due to allOrNone\/i\.test\(res\.result\)\)/.test(integrations));
+check("...says nothing was created", /SUBMISSION ROLLED BACK — NOTHING WAS CREATED/.test(integrations));
+// The model told the customer the error was "on the Account item itself". With
+// allOrNone it is on every item, which is exactly what it cannot conclude from.
+check("...forbids naming which item failed", /do NOT know which item failed, and you must NOT tell the customer/.test(integrations));
+check("...forbids inventing a cause", /DO NOT INVENT A CAUSE/.test(integrations));
+// It resubmitted with the User item removed, of its own accord.
+check("...forbids resubmitting with items removed", /DO NOT RESUBMIT WITH ITEMS REMOVED/.test(integrations));
+check("...and does not blame the customer", /Nothing they did caused this/.test(integrations));
+check("the company-name block is named for what it is", /duplicate-name check on the company/.test(integrations));
+check("...as EPGL's, not the customer's to fix", /NOT something the customer can fix/.test(integrations));
+check("...and never by changing the company name", /NOT a reason to alter the company name/.test(integrations));
+check("a callback is offered there and not everywhere", /A callback is the right offer HERE, and only here/.test(integrations));
+check("it is an error, so the model cannot read past it", /Rolled back due to allOrNone[\s\S]{0,600}isError: true/.test(integrations));
 check("...appended, never substituted", /result:\s*\n\s*res\.result \+\s*\n\s*`\\n\\nSUBMISSION ROLLED BACK/.test(integrations));
+
+console.log("\nThe company is spelled differently on each object");
+// EPG_Company__c is right on EPG_Partner__c and wrong on User and Contact. The
+// model reaches for it on all three; the map corrects two of them.
+check("User is corrected", /User: \{ EPG_Company__c: "EPG_Account__c" \}/.test(integrations));
+check("Contact is corrected too", /Contact: \{ EPG_Company__c: "EPG_Account__c" \}/.test(integrations));
+{
+  const input: any = renewal();
+  input.body.compositeRequest[1].body = { ...input.body.compositeRequest[1].body, EPG_Company__c: ACCOUNT_ID };
+  delete input.body.compositeRequest[1].body.EPG_Account__c;
+  const out: any = withEpglRequestFields(input, {});
+  const c = item(out, "NewContact");
+  check("the wrong name is renamed on the way out", c.EPG_Account__c === ACCOUNT_ID, c);
+  check("...and the wrong one is gone", c.EPG_Company__c === undefined, c);
+}
+{
+  // Partner keeps it: EPG_Company__c is correct there.
+  const input: any = renewal();
+  input.body.compositeRequest.push({
+    method: "POST", referenceId: "Partner1",
+    url: "/services/data/v66.0/sobjects/EPG_Partner__c",
+    body: { EPG_Company__c: ACCOUNT_ID, EPG_Partner_Name__c: "Zain" },
+  });
+  const out: any = withEpglRequestFields(input, {});
+  check("a partner's company field is left alone", item(out, "Partner1").EPG_Company__c === ACCOUNT_ID);
+}
 
 console.log("\nWhat their answers did NOT change");
 const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
