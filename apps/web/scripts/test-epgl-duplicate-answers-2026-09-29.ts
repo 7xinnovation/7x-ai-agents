@@ -224,6 +224,20 @@ check("a failed lookup leaves the latch alone", /A lookup that fails leaves the 
 check("the signed-in company tool uses it", /const redirect = await latchLicensedCompany\(found\);/.test(route));
 check("...and the Emirates-ID lookup too", /const redirect = await latchLicensedCompany\(found\[0\]\);/.test(route));
 
+console.log("\nAnd which record it is, is settled before the model runs");
+// Fixing the lookup paths was not enough: a turn that calls none of them still
+// submits, carrying whatever account id the conversation was already holding.
+check("a renewal resolves its account from the trade licence at turn start",
+  /\(liveState\.journeyKey \?\? session\.state\.journeyKey\) === "renewal"/.test(route) &&
+  /const all = await companyByTradeLicense\(agent\.id, env, licenceNo\);/.test(route));
+check("...only where exactly one match holds a licence", /if \(licensed\.length === 1\) \{\s*\n\s*rememberLicenceRecordId\(licensed\[0\]\);/.test(route));
+check("...and it is recorded when there was a choice to make", /action: "epgl_account_resolved_at_turn_start"/.test(route));
+check("a failed lookup changes nothing", /A lookup that fails leaves the turn exactly as it was/.test(route));
+// Several lookups run per turn and they disagree; last-write-wins is what put a
+// renewal on an unlicensed record three times in one afternoon.
+check("an unlicensed record cannot replace a licensed one",
+  /if \(!id && epglLicenceRecordId\.value\) return; \/\/ do not downgrade/.test(route));
+
 console.log("\nAnd it is written down for them");
 const doc = readFileSync(new URL("../../../docs/EPGL-DUPLICATE-UNIQUE-FIELD-2026-09-24.md", import.meta.url), "utf8");
 check("their answers are recorded", /## ANSWERED by EPGL, 29 September 2026/.test(doc));

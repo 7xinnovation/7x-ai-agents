@@ -1620,10 +1620,20 @@ export async function POST(req: NextRequest) {
       "If they ask about something else entirely — a new licence, a general question — you may help with that as normal."
     );
   };
+  /**
+   * Once a LICENSED record is latched, an unlicensed one cannot replace it.
+   *
+   * Several lookups run in a turn — the signed-in company, the Emirates ID, the
+   * trade licence — and they do not agree: the customer is a Contact on one
+   * account and the licence lives on another. Whichever ran last used to win,
+   * which is how a renewal ended up addressed to a record with no licence on it
+   * three times in one afternoon.
+   */
   const rememberLicenceRecordId = (c: { licenseRecordId?: string; accountId?: string } | undefined) => {
     const id = String(c?.licenseRecordId ?? "").trim();
-    if (id) epglLicenceRecordId.value = id;
     const acc = String(c?.accountId ?? "").trim();
+    if (!id && epglLicenceRecordId.value) return; // do not downgrade
+    if (id) epglLicenceRecordId.value = id;
     if (/^[a-zA-Z0-9]{15,18}$/.test(acc)) epglAccountId.value = acc;
   };
   /**
@@ -1680,6 +1690,50 @@ export async function POST(req: NextRequest) {
       return "";
     }
   };
+  /**
+   * AND IT IS SETTLED AT THE START OF THE TURN, not left to whichever lookup
+   * the model happens to call.
+   *
+   * 29 September, three submissions across an afternoon, every one addressed to
+   * 001FW00B34EmqMWYEZ — a record with no licence — while postal licence 377
+   * sits on 0015f00000ic9okAAA. Fixing the lookup paths was not enough: a turn
+   * that calls none of them still submits, carrying whatever account id the
+   * conversation was already holding.
+   *
+   * The trade licence number is on the case by then, and it is the thing a
+   * renewal is actually about. One query, EPGL renewals only, and only where
+   * exactly one account under that licence holds a licence record.
+   */
+  if (hasEpglSalesforce && (liveState.journeyKey ?? session.state.journeyKey) === "renewal") {
+    const licenceNo = str(liveState.data.trade_license_number) ?? str(liveState.data.trade_licence_number);
+    if (licenceNo) {
+      try {
+        const env = agent.definition.activeEnvironment ?? "production";
+        const all = await companyByTradeLicense(agent.id, env, licenceNo);
+        const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
+        if (licensed.length === 1) {
+          rememberLicenceRecordId(licensed[0]);
+          if (all.length > 1) {
+            await audit({
+              agentId: agent.id,
+              conversationId: session.conversationId,
+              actor: "system",
+              action: "epgl_account_resolved_at_turn_start",
+              payload: {
+                tradeLicenseNumber: licenceNo,
+                chosen: licensed[0]!.accountId ?? null,
+                postalLicenseNumber: licensed[0]!.postalLicenseNumber ?? null,
+                matches: all.length,
+              },
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // A lookup that fails leaves the turn exactly as it was.
+      }
+    }
+  }
+
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
         {
