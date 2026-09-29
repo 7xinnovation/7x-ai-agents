@@ -74,24 +74,34 @@ const renewal = () => ({
 const item = (out: any, ref: string) =>
   out.body.compositeRequest.find((i: any) => i.referenceId === ref).body;
 
-console.log("\nThe company name is not resent on a record we address by Id");
+console.log("\nThe company name stays on the Account — reverted same day");
+/**
+ * For a few hours the Name was dropped whenever the Account carried an Id. The
+ * reasoning looked sound — EPGL had just named the company-name duplicate rule
+ * as the constraint, and a renewal does not rename a company — and the first
+ * renewal through it, LR-37641, came back showing EMRE KARAYALCIN where TRAHEEL
+ * DELIVERY SERVICES L.L.C belongs. Their handler does not leave an absent Name
+ * alone, and the only other name in that composite is the applicant's.
+ */
 {
   const out: any = withEpglRequestFields(renewal(), { accountId: ACCOUNT_ID });
   const a = item(out, "Account");
-  check("Name is dropped", a.Name === undefined, a);
+  check("the company name is sent, Id or no Id", a.Name === "TRAHEEL DELIVERY SERVICES L.L.C", a);
   check("...and the Id it is addressed by stays", a.Id === ACCOUNT_ID);
-  // What a renewal genuinely updates.
   check("...the trade licence number stays", a.EPG_Trade_license_no__c === "1196781");
-  check("...its expiry stays", a.EPG_Trade_license_Expiry_date__c === "2027-06-07");
-  check("...and the record type stays", a.RecordTypeId === "0125f000001xIheAAE");
+  check("...and its expiry stays", a.EPG_Trade_license_Expiry_date__c === "2027-06-07");
 }
 {
-  // A NEW application has no Id: there the name is what their handler matches
-  // on, and dropping it would leave nothing to match.
   const input: any = renewal();
   delete input.body.compositeRequest[0].body.Id;
   const out: any = withEpglRequestFields(input, {});
-  check("a new application keeps its Name", item(out, "Account").Name === "TRAHEEL DELIVERY SERVICES L.L.C");
+  check("a new application keeps its Name too", item(out, "Account").Name === "TRAHEEL DELIVERY SERVICES L.L.C");
+}
+// The guard against it coming back. Nothing in here may remove a company name.
+{
+  const src = readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8");
+  check("nothing deletes the Account's Name", !/delete b\.Name|delete row\.Name|Name: undefined/.test(src));
+  check("...and why is written down where someone would try it again", /REVERTED SAME DAY \(2026-09-29\)/.test(src));
 }
 
 console.log("\nThe accountant's contact carries the accountant's email");
@@ -138,9 +148,11 @@ const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url),
 check("the customer still decides new-vs-update", /duplicateDecision: \(\) => str\(session\.state\.data\.__duplicate_decision\) \?\? null/.test(route));
 check("the accountant email is read from the case, not the composite", /accountantEmail: str\(liveState\.data\.accountant_email\)/.test(route));
 // EPG_TRN_No__c is unique on their side and we have never sent it.
-// Mentioned in a comment, never written into a payload.
-check("EPG_TRN_No__c is still not sent anywhere",
-  !/EPG_TRN_No__c\s*[:=]/.test(integrations) && /EPG_TRN_No__c should be unique too, which we have never sent/.test(integrations));
+// EPG_TRN_No__c is unique on their side and we have never populated it — we do
+// not collect a TRN anywhere in this journey.
+check("EPG_TRN_No__c is still not sent anywhere", !/EPG_TRN_No__c/.test(integrations));
+check("...and that gap is recorded for EPGL", /we do not collect a TRN anywhere in\s*\nthis journey/.test(
+  readFileSync(new URL("../../../docs/EPGL-DUPLICATE-UNIQUE-FIELD-2026-09-24.md", import.meta.url), "utf8")));
 
 console.log("\nAnd it is written down for them");
 const doc = readFileSync(new URL("../../../docs/EPGL-DUPLICATE-UNIQUE-FIELD-2026-09-24.md", import.meta.url), "utf8");

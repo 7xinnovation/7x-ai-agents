@@ -43,12 +43,23 @@ therefore an update.
 
 ### What we changed, 29 September
 
-**The Account item no longer carries `Name` when it carries an `Id`.** On a
-renewal the company already exists under that name and we are not there to
-rename it, so sending it back offers a name-matching duplicate rule something to
-match on for no gain. The trade licence number and expiry — what a renewal
-genuinely updates — still go. A NEW application is untouched: there the Account
-has no `Id` and is matched BY name and licence number.
+**We tried dropping `Name` from the Account when we hold its `Id`, and reverted
+it the same day.** The reasoning looked sound — a renewal does not rename a
+company, and a name we resend is a name your duplicate rule can match on. The
+first renewal through it, **LR-37641**, came back with **EMRE KARAYALCIN** on
+the record where **TRAHEEL DELIVERY SERVICES L.L.C** belongs: the applicant's
+name, which is the only other name in that composite (the `User` item).
+
+**So your handler does not leave an absent `Name` alone — something downstream
+fills it.** Please confirm what, because it matters beyond us: any caller
+omitting a field on an update would expect the stored value to stand.
+
+**And please check the Account for trade licence 1196781 in PreProd2.** If its
+`Name` was overwritten with the applicant's, it needs restoring to TRAHEEL
+DELIVERY SERVICES L.L.C.
+
+The Account is now sent exactly as it was before, with both its `Id` and its
+`Name`.
 
 **The rollback now explains itself.** `allOrNone` echoes one sentence onto every
 item, so the applicant used to be told "a record already exists with the same
@@ -72,9 +83,9 @@ stays the customer's.
    `Id`?** A record is not its own duplicate. Either PreProd2 holds a SECOND
    Account named TRAHEEL DELIVERY SERVICES L.L.C — plausible, since submissions
    before 16 September could insert one — or the rule is matching the record
-   against itself. Worth a look at their end before we conclude the change above
-   fixes it. **This is the one thing that decides whether 24 September's failure
-   is now fixed or merely less likely.**
+   against itself. **This is now the whole question.** Withholding the name was
+   the one fix available on our side and it cannot be used, so 24 September's
+   rollback is unresolved until this is answered.
 2. **Can the error name the field?** Still the single change that would save the
    most time on both sides. "One of the unique fields" cost a week.
 3. **Contact is matched on `Email` — which makes the email the key.** In the

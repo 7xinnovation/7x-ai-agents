@@ -887,37 +887,31 @@ export function withEpglRequestFields(
   }
 
   /**
-   * AND A COMPANY WE ARE UPDATING IS NOT BEING RENAMED.
+   * THE COMPANY NAME STAYS ON THE ACCOUNT. REVERTED SAME DAY (2026-09-29).
    *
-   * TRAHEEL DELIVERY SERVICES L.L.C, 24 September: a second renewal request for
-   * a company already on file was rolled back with
+   * For a few hours this dropped `Name` from the Account item whenever we held
+   * its `Id`. The reasoning looked sound: EPGL had just told us the unique
+   * constraint behind 24 September's rollback is "the company name — there is
+   * duplicate rule on SF to prevent any company name duplication", a renewal
+   * does not rename a company, and a name we resend is a name their rule can
+   * match on.
    *
-   *     A record already exists with the same unique value for
-   *     "one of the unique fields".
+   * The first renewal through it, LR-37641, came back showing EMRE KARAYALCIN
+   * where TRAHEEL DELIVERY SERVICES L.L.C belongs — the applicant's name on the
+   * company. Their handler does not leave an absent Name alone; something
+   * downstream fills it, and the only name left in that composite is the
+   * applicant's, from the User item.
    *
-   * allOrNone echoes that on every item, so the response does not say which
-   * field. EPGL answered on 29 September: "its the company name, there is a
-   * duplicate rule on SF to prevent any company name duplication" (and
-   * EPG_TRN_No__c should be unique too, which we have never sent).
+   * So the Account is sent exactly as it was: with its Id AND its Name. That
+   * reopens the duplicate-rule question, and reopening it is correct — a record
+   * is not its own duplicate, so a name rule firing on a record addressed by Id
+   * was never fully explained by the name being present. The likelier reading
+   * is the one already in the write-up: PreProd2 holds a SECOND account with
+   * that name, from a submission before the account id was stamped on
+   * 16 September. That is a question for EPGL, not a field for us to withhold.
    *
-   * So the Account item stops carrying a Name it has no business changing. Where
-   * we hold the record's Id, the company already exists under that name and the
-   * renewal is not there to rename it — sending it back is offering a duplicate
-   * rule something to match on for no gain at all. What the renewal genuinely
-   * updates stays: the trade licence number and its expiry.
-   *
-   * A NEW application is untouched. There the Account is matched BY name and
-   * trade licence number, with no Id, and dropping the name would leave their
-   * handler nothing to match on.
+   * A guess about another team's handler is not worth a company record.
    */
-  if (account) {
-    const b = { ...((account.body ?? {}) as Record<string, unknown>) };
-    if (String(b.Id ?? "").trim() && b.Name !== undefined) {
-      delete b.Name;
-      account.body = b;
-      patched = true;
-    }
-  }
   patched = fill(account, {
     EPG_Regulator__c: facts.regulator,
     EPG_Emirates__c: facts.emirate,
