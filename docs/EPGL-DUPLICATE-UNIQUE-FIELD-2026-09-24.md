@@ -24,7 +24,68 @@ Every item reports the same message because `allOrNone: true` unwinds the whole
 composite, so the response does not say WHICH field collided. That is the
 question we need answered.
 
-## Our reading, for what it is worth
+## ANSWERED by EPGL, 29 September 2026
+
+Their replies, verbatim, against the three questions below:
+
+| Question | Their answer |
+|---|---|
+| Which field is the unique constraint on? | "its the company name — there is duplicate rule on SF to prevent any company name duplication", and "`EPG_TRN_No__c` should be unique also" |
+| Should a second open request for the same trade licence be possible? | "Yes it's possible, and the `recommendedAction` is just a recommendation, not a rule" |
+| Can `User` / `Contact` be upserted on an external id? | Already are: "we are using email for contact to match and update; for user it's on `EPG_Emirates_Id__c`" |
+
+**So our reading was wrong.** We had `NewUser` down as the likeliest culprit —
+a `Username` is unique org-wide and this applicant had submitted before. It is
+not: their handler matches the User on `EPG_Emirates_Id__c` and the Contact on
+`Email`, so a returning applicant updates rather than collides. The Account was
+the one item we ruled out, on the grounds that it carries an `Id` and is
+therefore an update.
+
+### What we changed, 29 September
+
+**The Account item no longer carries `Name` when it carries an `Id`.** On a
+renewal the company already exists under that name and we are not there to
+rename it, so sending it back offers a name-matching duplicate rule something to
+match on for no gain. The trade licence number and expiry — what a renewal
+genuinely updates — still go. A NEW application is untouched: there the Account
+has no `Id` and is matched BY name and licence number.
+
+**The rollback now explains itself.** `allOrNone` echoes one sentence onto every
+item, so the applicant used to be told "a record already exists with the same
+unique value for one of the unique fields", which nobody can act on. It now
+names the company-name rule, says nothing was created and nothing they gave is
+wrong, forbids the retry that fails identically, and offers to update the
+existing application instead.
+
+**`EPG_TRN_No__c` we have never sent** — it appears nowhere in the payload
+below. Nothing to fix, but worth recording: we do not collect a TRN anywhere in
+this journey, so if EPGL expect one on the request it has to be added on both
+sides.
+
+**We will go on offering "submit as new".** Their answer says a second open
+request is allowed, so the recommendation stays a recommendation and the choice
+stays the customer's.
+
+### Still open with EPGL
+
+1. **Why does a name-matching duplicate rule fire on a record we address by
+   `Id`?** A record is not its own duplicate. Either PreProd2 holds a SECOND
+   Account named TRAHEEL DELIVERY SERVICES L.L.C — plausible, since submissions
+   before 16 September could insert one — or the rule is matching the record
+   against itself. Worth a look at their end before we conclude the change above
+   fixes it. **This is the one thing that decides whether 24 September's failure
+   is now fixed or merely less likely.**
+2. **Can the error name the field?** Still the single change that would save the
+   most time on both sides. "One of the unique fields" cost a week.
+3. **Contact is matched on `Email` — which makes the email the key.** In the
+   payload below the ACCOUNTANT's contact goes out under
+   `emre.karayalcin@7x.ae` with `LastName: HALL`. If the applicant's own contact
+   already uses that address, matching on email would overwrite the applicant's
+   record with the accountant's name. We are checking our side; EPGL should
+   confirm what their handler does when one email arrives twice with two names.
+
+## Our reading at the time, which was wrong
+
 
 `Account` is sent with an `Id`, so it is an update and cannot be the collision.
 That leaves `NewLicenseRequest`, `Partner1`, `Partner2`, `NewUser`, `NewContact`
@@ -39,7 +100,7 @@ the same user again.
 We may well be wrong. We cannot see your validation rules, duplicate rules or
 custom unique fields, which is why this is a question rather than a report.
 
-## What we would like to know
+## What we asked (answered above)
 
 1. **Which field is the unique constraint on?** The response does not name it —
    if the error could carry the field, that alone would save a lot of time.

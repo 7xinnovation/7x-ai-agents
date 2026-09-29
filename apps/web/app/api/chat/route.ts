@@ -962,6 +962,8 @@ export async function POST(req: NextRequest) {
             // Decides whether the request is submitted as awaiting a transfer.
             paymentMethod: str(liveState.data.payment_method),
             regulator: str(liveState.data.regulator),
+            // A key, not a detail: EPGL match a Contact on its email address.
+            accountantEmail: str(liveState.data.accountant_email),
             termsAccepted:
               isTrue(liveState.data.terms_accepted) || isTrue(liveState.data.declaration_accepted),
             amountPaid:

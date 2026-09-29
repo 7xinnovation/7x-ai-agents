@@ -674,6 +674,21 @@ export interface EpglRequestFacts {
    */
   accountId?: string;
   /**
+   * The ACCOUNTANT's own email, from the case rather than from the composite.
+   *
+   * EPGL confirmed on 29 September that their handler matches a Contact on
+   * EMAIL — "we are using email for contact to match and update". That makes
+   * the address a key, not a detail: a renewal's accountant Contact sent under
+   * the applicant's address does not create a second contact, it overwrites the
+   * applicant's with the accountant's name.
+   *
+   * The two are collected separately (contact_email vs accountant_email) and the
+   * guidance has said so since 15 September, which is exactly the kind of rule
+   * that holds most of the time. On 24 September's renewal the accountant's
+   * Contact went out carrying the applicant's address.
+   */
+  accountantEmail?: string;
+  /**
    * The partners AS THE TRADE LICENCE NAMES THEM, in order.
    *
    * LR-37377, 15 September: the licence and the MOA both name partner 2
@@ -844,6 +859,63 @@ export function withEpglRequestFields(
         changed = true;
       }
       if (changed) { item.body = b; patched = true; }
+    }
+  }
+  /**
+   * THE ACCOUNTANT'S CONTACT CARRIES THE ACCOUNTANT'S EMAIL.
+   *
+   * Corrected rather than filled, which is rare here and is what the email
+   * being a MATCH KEY buys it: an address the model borrowed from the applicant
+   * does not make a wrong contact, it rewrites the right one. The case is
+   * authoritative — the customer typed it into a field labelled for it.
+   *
+   * Only the contact marked as the accountant, and only when the case actually
+   * holds an accountant address.
+   */
+  if (facts.accountantEmail && /.@./.test(facts.accountantEmail)) {
+    for (const item of items) {
+      if (!/\/sobjects\/Contact$/i.test(String(item?.url ?? ""))) continue;
+      const rows = (Array.isArray(item.body) ? item.body : [item.body]) as Record<string, unknown>[];
+      for (const row of rows) {
+        if (!row || typeof row !== "object") continue;
+        if (!/accountant/i.test(String(row.EPG_Designation__c ?? ""))) continue;
+        if (String(row.Email ?? "").trim().toLowerCase() === facts.accountantEmail.trim().toLowerCase()) continue;
+        row.Email = facts.accountantEmail.trim();
+        patched = true;
+      }
+    }
+  }
+
+  /**
+   * AND A COMPANY WE ARE UPDATING IS NOT BEING RENAMED.
+   *
+   * TRAHEEL DELIVERY SERVICES L.L.C, 24 September: a second renewal request for
+   * a company already on file was rolled back with
+   *
+   *     A record already exists with the same unique value for
+   *     "one of the unique fields".
+   *
+   * allOrNone echoes that on every item, so the response does not say which
+   * field. EPGL answered on 29 September: "its the company name, there is a
+   * duplicate rule on SF to prevent any company name duplication" (and
+   * EPG_TRN_No__c should be unique too, which we have never sent).
+   *
+   * So the Account item stops carrying a Name it has no business changing. Where
+   * we hold the record's Id, the company already exists under that name and the
+   * renewal is not there to rename it — sending it back is offering a duplicate
+   * rule something to match on for no gain at all. What the renewal genuinely
+   * updates stays: the trade licence number and its expiry.
+   *
+   * A NEW application is untouched. There the Account is matched BY name and
+   * trade licence number, with no Id, and dropping the name would leave their
+   * handler nothing to match on.
+   */
+  if (account) {
+    const b = { ...((account.body ?? {}) as Record<string, unknown>) };
+    if (String(b.Id ?? "").trim() && b.Name !== undefined) {
+      delete b.Name;
+      account.body = b;
+      patched = true;
     }
   }
   patched = fill(account, {
@@ -3724,6 +3796,39 @@ export async function buildApiTools(
     }
 
     if (!res.isError && /submitlicenserequest$/i.test(toolName)) {
+      /**
+       * THE ROLLBACK THAT NAMES NO FIELD.
+       *
+       * HTTP is always 200 here and allOrNone echoes one message onto every
+       * item, so a failed submit reads as seven identical sentences that do not
+       * say what collided. Relayed as it stands, an applicant is told "a record
+       * already exists with the same unique value for one of the unique
+       * fields", which is not a thing anybody can act on — and the model's
+       * instinct is to retry, which fails the same way, or to blame EPGL.
+       *
+       * EPGL answered on 29 September: it is the company NAME, via a duplicate
+       * rule on their org, and a second open request for the same trade licence
+       * IS allowed — their duplicate-check's "Update existing application" is a
+       * recommendation, not a rule. So the reply says which field, says the
+       * application is not at fault, and points at the one thing that resolves
+       * it.
+       */
+      if (/same unique value/i.test(res.result)) {
+        res = {
+          ...res,
+          isError: true,
+          // Appended, never substituted: the backend's own words are what the
+          // audit keeps, and a failure nobody can read back afterwards is the
+          // failure mode this whole file is built around avoiding.
+          result:
+            res.result +
+            `\n\nSUBMISSION ROLLED BACK — NOTHING WAS CREATED, and nothing the customer gave you is wrong. ` +
+            `EPGL's org carries a duplicate rule on the COMPANY NAME, and it is what this collides with; allOrNone repeats the same sentence on every item, which is why the response does not name the field. ` +
+            `Do NOT retry the same payload — it will fail identically. Do NOT ask the customer to re-enter or re-upload anything, do NOT tell them their application was rejected, and do NOT say EPGL have a system fault. ` +
+            `Their record already exists, which is the whole reason this fired. Offer to UPDATE the existing application instead: call epglsalesforce__duplicateCheck for the Account Id and the existing licence request's Name, and resubmit in the update shape. ` +
+            `If the customer wants a genuinely new request rather than an update, say plainly that EPGL's duplicate rule is blocking it for this company and that it needs someone at EPGL to allow it — that is a decision on their side, not a retry on ours.`,
+        };
+      }
       try {
         const b = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
         for (const item of b?.compositeResponse ?? []) {
