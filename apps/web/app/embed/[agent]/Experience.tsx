@@ -1457,8 +1457,28 @@ export function Experience({
           ? "جارٍ فتح تسجيل الدخول في التطبيق…"
           : "Opening sign-in in the app…"
       );
-      armSignInFallback(tried);
-      return;
+      /**
+       * AND, WHERE THE APP IS NOT LISTENING YET, THE ROUTE THAT ACTUALLY WORKS.
+       *
+       * `signin-needed` is the right way and the only way once their handler
+       * ships. It is not in TestFlight yet, and on PRODUCTION what signs
+       * customers in inside the app today is the older path: ask the app to
+       * open UAE PASS, whose callback returns to this embed's own URL with
+       * ?uaepass=ok, which this page reads itself.
+       *
+       * Removing that everywhere to tidy up a TestFlight build would have taken
+       * sign-in away from live customers, so it is a per-environment setting
+       * instead of a deploy — on where the handler does not exist yet, off
+       * where it does, and one line to turn off when their build lands.
+       *
+       * app://login does NOT come back with it. That was the half their
+       * developer objected to, and rightly: an unhandled scheme is a native
+       * error dialog over a sign-in that is working.
+       */
+      if (!agent.nativeUaePassFallback) {
+        armSignInFallback(tried);
+        return;
+      }
     }
     /**
      * THE HOST PORTAL ROUTE CANNOT WORK INSIDE THE APP.
@@ -1535,7 +1555,7 @@ export function Experience({
       setAuthReason(null);
     }
     armSignInFallback(tried);
-  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.slug, locale, armSignInFallback]);
+  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.nativeUaePassFallback, agent.slug, locale, armSignInFallback]);
 
   /**
    * The host sign-in popup closed. If no token reached us, say so instead of

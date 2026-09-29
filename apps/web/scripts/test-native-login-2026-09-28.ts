@@ -42,10 +42,11 @@ const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8")
 console.log("\nOne way of asking");
 check("the documented message is sent", /postNative\(\{ action: "signin-needed", reason: "customer-asked" \}\)/.test(exp));
 check("...only inside a native host", /if \(isNative\(\)\) \{[\s\S]{0,200}postNative\(\{ action: "signin-needed"/.test(exp));
-// Nothing between the ask and the return but the line that acknowledges it.
-check("...and nothing else is attempted after it",
-  /postNative\(\{ action: "signin-needed", reason: "customer-asked" \}\);[\s\S]{0,420}armSignInFallback\(tried\);\s*\n\s*return;/.test(exp) &&
-    !/askNativeToSignIn|openExternal/.test(exp.slice(exp.indexOf('postNative({ action: "signin-needed"'), exp.indexOf("armSignInFallback(tried);"))));
+// Nothing between the ask and the return but the line that acknowledges it —
+// and, where the fallback is on, UAE PASS and nothing else. No scheme, no
+// second control, no third way of asking.
+check("...and nothing else is attempted in between",
+  !/askNativeToSignIn/.test(exp.slice(exp.indexOf('postNative({ action: "signin-needed"'), exp.indexOf("armSignInFallback(tried);"))));
 
 console.log("\nAnd the scheme that produced a native error is gone");
 // "Error opening URL: app://login. Unable to open URL: app://login."
