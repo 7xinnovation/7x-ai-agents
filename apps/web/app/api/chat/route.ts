@@ -1626,6 +1626,60 @@ export async function POST(req: NextRequest) {
     const acc = String(c?.accountId ?? "").trim();
     if (/^[a-zA-Z0-9]{15,18}$/.test(acc)) epglAccountId.value = acc;
   };
+  /**
+   * A COMPANY WITHOUT A LICENCE IS NOT THE COMPANY BEING RENEWED.
+   *
+   * Trade licence 1196781 matches three accounts in PreProd2, and only one of
+   * them holds postal licence 377. The signed-in customer is a Contact on a
+   * DIFFERENT one — an unlicensed duplicate carrying the same Arabic and trade
+   * names — so every renewal that afternoon was submitted against a record with
+   * no licence on it, asking to give it the licensed company's name. EPGL's
+   * duplicate rule refused that, correctly, and it took a day to see why.
+   *
+   * Latching by trade licence rather than by whoever signed in: the account a
+   * person is attached to is not necessarily the account a LICENCE is attached
+   * to, and it is the licence being renewed. Only when exactly one match holds
+   * one — two licensed records under one trade licence is a real ambiguity and
+   * stays the customer's to resolve.
+   *
+   * Read-only, and it only ever moves the target towards a licensed record.
+   */
+  const latchLicensedCompany = async (
+    c: { licenseRecordId?: string; accountId?: string; tradeLicenseNumber?: string; name?: string } | undefined
+  ): Promise<string> => {
+    rememberLicenceRecordId(c);
+    if (!c || String(c.licenseRecordId ?? "").trim()) return "";
+    const licence = String(c.tradeLicenseNumber ?? "").trim();
+    if (!licence) return "";
+    try {
+      const env = agent.definition.activeEnvironment ?? "production";
+      const all = await companyByTradeLicense(agent.id, env, licence);
+      const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
+      if (licensed.length !== 1 || licensed[0]!.accountId === c.accountId) return "";
+      rememberLicenceRecordId(licensed[0]);
+      await audit({
+        agentId: agent.id,
+        conversationId: session.conversationId,
+        actor: "system",
+        action: "epgl_account_redirected_to_licensed",
+        payload: {
+          tradeLicenseNumber: licence,
+          was: c.accountId ?? null,
+          now: licensed[0]!.accountId ?? null,
+          postalLicenseNumber: licensed[0]!.postalLicenseNumber ?? null,
+          matches: all.length,
+        },
+      }).catch(() => {});
+      return (
+        `\n\nNOTE ON WHICH RECORD THIS IS: EPGL hold ${all.length} companies under trade licence ${licence}, and the one this customer's sign-in is attached to does NOT hold the postal licence. ` +
+        `The licence is on "${licensed[0]!.name ?? licensed[0]!.accountId}" (postal licence ${licensed[0]!.postalLicenseNumber ?? "on file"}), and a renewal is only possible against that record — so it has been selected for you. ` +
+        `Do not pass an accountId of your own, and do not describe this to the customer as a problem: it is the same company, and EPGL simply hold the licence on one of its records.`
+      );
+    } catch {
+      // A lookup that fails leaves the latch exactly as it was.
+      return "";
+    }
+  };
   const epglReadTools: Anthropic.Tool[] = hasEpglSalesforce
     ? [
         {
@@ -2498,13 +2552,14 @@ export async function POST(req: NextRequest) {
               "THEIR LOGIN IS NOT LINKED TO A COMPANY RECORD. Normal, and not an error — ask for the trade licence number and continue as usual.",
           };
         }
-        rememberLicenceRecordId(found);
+        const redirect = await latchLicensedCompany(found);
         const stop = await blockedNotice(found);
         if (stop) return { result: stop };
         return {
           result:
             "THE COMPANY THIS CUSTOMER IS SIGNED IN AS. Ask them to confirm it is the one this application is for before you use it.\n" +
-            (await withOutstanding(found)),
+            (await withOutstanding(found)) +
+            redirect,
         };
       } catch (err) {
         log.error("epgl_my_company_failed", err as Error, { ...a, tool: name });
@@ -2535,14 +2590,15 @@ export async function POST(req: NextRequest) {
                 JSON.stringify(found),
             };
           }
-          rememberLicenceRecordId(found[0]);
+          const redirect = await latchLicensedCompany(found[0]);
           const stop = await blockedNotice(found[0]!);
           if (stop) return { result: stop };
-          return { result: await withOutstanding(found[0]!) };
+          return { result: (await withOutstanding(found[0]!)) + redirect };
         }
         if (name === COMPANY_TOOL) {
           const found = await companyByTradeLicense(agent.id, env, String(input.tradeLicenseNumber ?? ""));
-          if (found.length === 1) rememberLicenceRecordId(found[0]);
+          let redirect = "";
+          if (found.length === 1) redirect = await latchLicensedCompany(found[0]);
           if (found.length === 1) {
             const stop = await blockedNotice(found[0]!);
             if (stop) return { result: stop };
@@ -2592,7 +2648,7 @@ export async function POST(req: NextRequest) {
                 JSON.stringify(found),
             };
           }
-          return { result: await withOutstanding(found[0]!) };
+          return { result: (await withOutstanding(found[0]!)) + redirect };
         }
         const quarters = await form9ByAccountId(agent.id, env, String(input.accountId ?? ""));
         return {

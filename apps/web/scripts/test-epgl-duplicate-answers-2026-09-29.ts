@@ -205,6 +205,25 @@ check("none licensed is not a renewal at all", /NONE of them holds a postal lice
 check("two licensed records are still the customer's choice to make",
   /licensed\.length === 1\s*\n?\s*\?/.test(route));
 
+console.log("\nAnd a signed-in customer is not necessarily on the licensed record");
+/**
+ * The account a PERSON is attached to is not the account a LICENCE is attached
+ * to. Emre signs in and is a Contact on 001FW00B34EmqMWYEZ, an unlicensed
+ * duplicate; postal licence 377 lives on 0015f00000ic9okAAA. Every renewal that
+ * afternoon went to the first, which is why the composite kept asking to give
+ * an unlicensed record the licensed company's name.
+ */
+check("a company with no licence record is looked up again by trade licence",
+  /const latchLicensedCompany = async \(/.test(route) && /if \(!c \|\| String\(c\.licenseRecordId \?\? ""\)\.trim\(\)\) return "";/.test(route));
+check("...and only where exactly one match holds one",
+  /if \(licensed\.length !== 1 \|\| licensed\[0\]!\.accountId === c\.accountId\) return "";/.test(route));
+check("...the licensed record becomes the target", /rememberLicenceRecordId\(licensed\[0\]\);\s*\n\s*await audit\(/.test(route));
+check("...it is recorded", /action: "epgl_account_redirected_to_licensed"/.test(route));
+check("...the model is told, and told not to alarm the customer", /do not describe this to the customer as a problem/.test(route));
+check("a failed lookup leaves the latch alone", /A lookup that fails leaves the latch exactly as it was/.test(route));
+check("the signed-in company tool uses it", /const redirect = await latchLicensedCompany\(found\);/.test(route));
+check("...and the Emirates-ID lookup too", /const redirect = await latchLicensedCompany\(found\[0\]\);/.test(route));
+
 console.log("\nAnd it is written down for them");
 const doc = readFileSync(new URL("../../../docs/EPGL-DUPLICATE-UNIQUE-FIELD-2026-09-24.md", import.meta.url), "utf8");
 check("their answers are recorded", /## ANSWERED by EPGL, 29 September 2026/.test(doc));
