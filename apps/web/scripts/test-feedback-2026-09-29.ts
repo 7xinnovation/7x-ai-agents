@@ -116,14 +116,88 @@ check("the live step is announced to a screen reader", /aria-current=\{state ===
 check("EPGL's panel readiness is untouched", /SCOPED TO THE TOP BAR ON PURPOSE/.test(css));
 check("...because the stepper only renders in the top bar", exp.indexOf("dlg-steps") > exp.indexOf('className="dlg-progress-top"'));
 
-console.log("\nFB-1791 — targets big enough to hit");
-check("chips are 44px, not 33", /\.dlg-chip \{[\s\S]{0,200}height: 44px;/.test(css));
-check("...icon-only ones are square at 44", /\.dlg-chip\.icon-only \{\s*\n\s*width: 44px;/.test(css));
-check("...comfortably past the 24px minimum", !/height: 34px;/.test(css.slice(css.indexOf(".dlg-chip {"), css.indexOf(".dlg-chip.icon-only"))));
-for (const icon of ["ShieldSlash", "NotePencil", "ListChecks", "GlobeSimple"]) {
-  check(`  ${icon} is 20px, not 16`, new RegExp(`<${icon} size=\\{20\\}`).test(exp));
-}
-check("the reason is written where the next person will change it", /TOUCH TARGETS BIG ENOUGH TO HIT \(FB-1791, FB-1793\)/.test(css));
+/**
+ * The first pass at FB-1791 went to 44px targets and 20px icons — past the 24px
+ * minimum, short of the 48px recommendation. Emirates Post restated the
+ * standard, so the assertions live in "as they restated it" below and this
+ * section is gone rather than left asserting a number we have since moved off.
+ */
+
+console.log("\nFB-1792 — the boxes are in the panel, the count is in the chat");
+/**
+ * An account with forty-six boxes printed forty-six rows into the conversation
+ * — box, bundle, expiry, status — above a side panel reading "Nothing to
+ * assemble yet". The lookup behind it has always returned the whole row and
+ * thrown all but the number away, because its only caller was the ownership
+ * gate.
+ */
+check("the lookup keeps the whole row now", /const accountBoxRows = async \(\): Promise<CustomerPoBox\[\] \| null>/.test(route));
+check("...and the ownership gate still gets its numbers from it", /const rows = await accountBoxRows\(\);\s*\n\s*return rows \? rows\.map/.test(route));
+check("...one lookup, not two", /if \(ownedBoxesCache\) return ownedBoxesCache\.rows;/.test(route));
+check("the rows are written onto the case", /\[ACCOUNT_BOXES_KEY\]: rows\.map/.test(route));
+check("...for Emirates Post only, and only when signed in", /agent\.definition\.tenantSlug === "nxn" && authenticated\) \{\s*\n\s*const rows = ownedBoxesCache/.test(route));
+// The pulse is where the lookup runs; after that the panel keeps what it has
+// rather than re-fetching every turn.
+check("...fetched on the pulse, reused after it", /ownedBoxesCache\?\.rows \?\? \(isPulse \? await accountBoxRows\(\) : null\)/.test(route));
+check("an expired box is marked as one", /status: b\.expired \? "Expired" : String\(b\.status \?\? ""\)/.test(route));
+
+check("the panel reads them off the case, never fetches", /const raw = \(caseState\?\.data as Record<string, unknown> \| undefined\)\?\.__account_boxes;/.test(exp));
+check("...above the case builder, where they asked for it", exp.indexOf('className="dlg-boxes"') < exp.indexOf('className="dlg-case-head"'));
+check("...with the count on the header", /<span className="dlg-boxes-count">\{accountBoxes\.length\}<\/span>/.test(exp));
+check("...in both languages", /yourBoxes: "Your PO Boxes"/.test(exp) && /yourBoxes: "صناديق البريد الخاصة بك"/.test(exp));
+check("...and nothing renders when there are none", /\{accountBoxes\.length \? \(/.test(exp));
+check("a long list scrolls without taking the application with it", /max-height: 264px;/.test(css));
+check("an expired box is findable at a glance", /\.dlg-boxes-list li\.is-expired \{/.test(css));
+
+console.log("\nFB-1792 — and the pulse stops drawing tables");
+check("it states the number", /Say HOW MANY boxes are on the account — the number, in one sentence/.test(nxnPulse));
+check("...then only what needs something doing", /ONLY the boxes that need something: expired, expiring soon/.test(nxnPulse));
+check("...and never a table", /do NOT draw a table of them/.test(nxnPulse));
+check("...pointing at the panel once", /the full list is in the panel beside us/.test(nxnPulse));
+// "All fine" is a sentence, not a list of forty-six boxes proving it.
+check("nothing outstanding is said, not proved", /rather than listing boxes to prove it/.test(nxnPulse));
+
+console.log("\nFB-1793 / FB-1802 — signing out lives in a profile menu");
+/**
+ * "It should be something like where they click on the profile icon and sign
+ * out, in case they want to sign in with another Emirates ID on the same
+ * session." What was there was one chip that signed you out on a tap, armed
+ * itself on a touch screen, and said what it did only in a tooltip — which a
+ * phone has not got. Reported twice as a missing logout and once as a sign-IN
+ * button that ended somebody's session mid-application.
+ */
+check("the icon opens a menu rather than acting", /onClick=\{\(\) => setProfileOpen\(\(v\) => !v\)\}/.test(exp));
+check("...announced as one", /aria-haspopup="menu"/.test(exp) && /aria-expanded=\{profileOpen\}/.test(exp));
+check("...saying who is signed in", /\{t\.signedIn\}<\/span>/.test(exp) && /signedInName \? <strong>\{signedInName\}<\/strong>/.test(exp));
+check("...with a name read from the case, never fetched", /for \(const k of \["contact_name", "full_name", "applicant_name", "customer_name"\]\)/.test(exp));
+check("sign out is a menu item, in words", /<span>\s*\n\s*\{t\.signOut\}/.test(exp));
+// The reason they are here: another Emirates ID on the same screen.
+check("...saying why you would", /signOutHint: "to use a different Emirates ID"/.test(exp));
+check("...in both languages", /signOutHint: "لاستخدام هوية إماراتية أخرى"/.test(exp));
+check("it closes on a click away", /if \(!profileRef\.current\?\.contains\(e\.target as Node\)\) setProfileOpen\(false\);/.test(exp));
+check("...and on Escape", /if \(e\.key === "Escape"\) setProfileOpen\(false\);/.test(exp));
+// A menu describing a session must not outlive it.
+check("...and whenever the session ends by any route", /useEffect\(\(\) => \{ if \(!authenticated\) setProfileOpen\(false\); \}, \[authenticated\]\);/.test(exp));
+check("signed out, it is simply the sign-in button", /<button className="dlg-chip is-auth" onClick=\{signIn\}/.test(exp));
+check("...and the server session is what actually ends", /signOutConversation/.test(readFileSync(new URL("../lib/conversation.ts", import.meta.url), "utf8")));
+
+console.log("\nFB-1794 — the journey as steps, not a percentage");
+check("steps come from the journey's own step titles", /title: \(locale === "ar" \? s\.title\?\.ar : s\.title\?\.en\)/.test(exp));
+// A step with nothing required in it has nothing to be waiting for.
+check("...counting only steps that require something", /\.filter\(\(s\) => s\.required > 0\)/.test(exp));
+check("...done when nothing in it is still missing", /done: required\.length > 0 && required\.every\(\(k\) => !missingSet\.has\(k\)\)/.test(exp));
+check("...and the live one is the first that is not", /const currentIndex = steps\.findIndex\(\(s\) => !s\.done\);/.test(exp));
+check("only the live step is named, the rest are numbers", /\{state === "now" \? <span className="dlg-step-name">\{s\.title\}<\/span> : null\}/.test(exp));
+check("...which is what fits a phone", /max-width: 42vw;/.test(css));
+check("a done step is ticked", /state === "done" \? <CheckCircle size=\{15\} weight="fill" \/>/.test(exp));
+check("the percentage keeps its place", /<strong>\{progress\.pct\}%<\/strong>/.test(exp));
+// One step is not a stepper.
+check("a single-step journey keeps the old bar", /\{journeySteps \? \(/.test(exp) && /if \(steps\.length < 2\) return null;/.test(exp));
+check("the live step is announced to a screen reader", /aria-current=\{state === "now" \? "step" : undefined\}/.test(exp));
+// EPGL shows readiness in the side panel; their UI is not to change on the
+// back of Emirates Post's feedback.
+check("EPGL's panel readiness is untouched", /SCOPED TO THE TOP BAR ON PURPOSE/.test(css));
+check("...because the stepper only renders in the top bar", exp.indexOf("dlg-steps") > exp.indexOf('className="dlg-progress-top"'));
 
 console.log("\nFB-1795 — a two-option choice reads as one thing");
 const md = readFileSync(new URL("../app/embed/[agent]/Markdown.tsx", import.meta.url), "utf8");
@@ -179,6 +253,50 @@ check("...and coming back to a page that closes itself", /window\.close\(\)/.tes
 // An unconfigured tenant must still get its window closed rather than an error.
 check("nothing to log out of still closes the window", /NextResponse\.redirect\(target \?\? `\$\{origin\}\/uaepass\/done`\)/.test(logoutRoute));
 check("prompt=login stays as the belt to that braces", /switchAccount\.current = true;/.test(exp));
+
+console.log("\nFB-1800 — the display face is for headlines only");
+// The arrows pointed at "Your application" and "Nothing to assemble yet" — a
+// panel title and an empty state, neither of which is a headline. A display
+// face set at 13-15px is being asked to do a job it was not cut for.
+check("the panel title is no longer set in it", !/\.dlg-case-head h2,/.test(css));
+check("...nor the empty state", !/\.dlg-empty h4 \{\s*\n\s*font-family: var\(--c-font-heading/.test(css));
+check("the brand name keeps it — that is the headline", /\.dlg-brand-name \{\s*\n\s*font-family: var\(--c-font-heading/.test(css));
+check("...and Arabic still overrides it", /\.dlg-root\[dir="rtl"\] \.dlg-brand-name \{/.test(css));
+check("the reason is written down", /HEADLINES ONLY \(FB-1800\)/.test(css));
+
+console.log("\nFB-1791 — the standard as they restated it");
+check("targets are 48px, the recommendation not the floor", /\.dlg-chip \{[\s\S]{0,260}height: 48px;/.test(css));
+check("...square at 48 when icon-only", /\.dlg-chip\.icon-only \{\s*\n\s*width: 48px;/.test(css));
+check("icons are 24px, the minimum they gave", !/size=\{20\} weight=\{iconWeight\}/.test(exp) && /size=\{24\} weight=\{iconWeight\}/.test(exp));
+
+console.log("\nFB-1796 — start over, said as start over");
+check("the pen is gone", !/NotePencil/.test(exp));
+check("...replaced with a start-over icon", /<ArrowCounterClockwise size=\{24\} weight=\{iconWeight\} \/>/.test(exp));
+check("...still labelled, which is where a phone reads it", /aria-label=\{t\.reset\}/.test(exp));
+
+console.log("\nFB-1797 — the map frames the branches, not the customer");
+const map = readFileSync(new URL("../app/embed/[agent]/ChatMap.tsx", import.meta.url), "utf8");
+// Choose Abu Dhabi from Dubai and fitBounds zoomed out to cover both, opening
+// on a stretch of desert between them.
+check("the view centres on a branch", /const center = \{ lat: branches\[0\]!\.lat, lng: branches\[0\]!\.lng \};/.test(map));
+check("...and the customer's pin only joins the bounds if they are near", /if \(nearby\) bounds\.extend\(\[userLoc\.lng, userLoc\.lat\]\);/.test(map));
+check("...with 'near' defined, not assumed", /const NEAR_KM = 60;/.test(map));
+check("their pin is still drawn either way", /setText\(t\.youAreHere\)/.test(map));
+// "Nearest branches to you" described the sort order and was read as the
+// contents, with Abu Dhabi's branches under it.
+check("the heading names the emirate instead of claiming proximity", /\{nearby \? t\.nearest : emirateName \? t\.inEmirate\(emirateName\) : t\.branches\}/.test(map));
+check("...in both languages", /inEmirate: \(e: string\) => `Branches in \$\{e\}`/.test(map) && /الفروع في/.test(map));
+check("distance stays on every row", /t\.km\(b\.dist\.toFixed\(1\)\)/.test(map));
+
+console.log("\nFB-1801 — search an area to pick a branch");
+check("a search box appears once the list is long", /\{branches\.length > 6 \? \(/.test(map));
+check("...matching the branch name as shown", /branches\.filter\(\(b\) => label\(b\)\.toLowerCase\(\)\.includes\(needle\)/.test(map));
+// Six is a sensible preview of a list nobody asked to filter, and a wall when
+// somebody did.
+check("...and the six-row cap lifts while searching", /const topN = needle \? matched\.slice\(0, 20\) : matched\.slice\(0, 6\);/.test(map));
+check("no match says so rather than showing nothing", /\{needle && !matched\.length \? <div className="dlg-map-status">\{t\.noMatch\}<\/div> : null\}/.test(map));
+check("...in both languages", /searchArea: "Search by area or branch name"/.test(map) && /ابحث بالمنطقة أو باسم الفرع/.test(map));
+check("it is disabled once a branch is chosen", /disabled=\{!!selected\}/.test(map));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

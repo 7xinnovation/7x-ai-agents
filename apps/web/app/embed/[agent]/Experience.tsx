@@ -13,13 +13,13 @@ import {
   FileText,
   ListChecks,
   CaretDown,
+  ArrowCounterClockwise,
   CheckCircle,
   Circle,
   Warning,
   ArrowRight,
   UploadSimple,
   ArrowClockwise,
-  NotePencil,
   LockSimple,
   ArrowSquareOut,
   ArrowsOutSimple,
@@ -2299,7 +2299,7 @@ export function Experience({
               onClick={() => setLocale(locale === "ar" ? "en" : "ar")}
               aria-label="Switch language"
             >
-              <GlobeSimple size={20} weight={iconWeight} />
+              <GlobeSimple size={24} weight={iconWeight} />
               <span className="dlg-chip-tag">{locale === "ar" ? "EN" : "عربي"}</span>
             </button>
           ) : null}
@@ -2346,7 +2346,7 @@ export function Experience({
                 aria-haspopup="menu"
                 title={t.signedIn}
               >
-                <UserCircleCheck size={20} weight="fill" />
+                <UserCircleCheck size={24} weight="fill" />
                 <CaretDown size={12} weight="bold" />
               </button>
               {profileOpen ? (
@@ -2374,7 +2374,7 @@ export function Experience({
             </div>
           ) : (
             <button className="dlg-chip is-auth" onClick={signIn} aria-label={t.signIn} title={t.signIn}>
-              <SignIn size={20} weight={iconWeight} />
+              <SignIn size={24} weight={iconWeight} />
               <span className="dlg-chip-tag">{t.signIn}</span>
             </button>
           )}
@@ -2389,7 +2389,7 @@ export function Experience({
               aria-label={t.withdraw}
               title={t.withdrawHint}
             >
-              <ShieldSlash size={20} weight={withdrawBusy ? "fill" : iconWeight} />
+              <ShieldSlash size={24} weight={withdrawBusy ? "fill" : iconWeight} />
             </button>
           ) : null}
           <button
@@ -2399,6 +2399,17 @@ export function Experience({
             aria-label={t.reset}
             title={t.reset}
           >
+            {/* START OVER, SAID AS "START OVER" (FB-1796).
+
+                It was a reload arrow, which customers read as refresh and
+                pressed, losing the conversation. It became a pencil, which says
+                "new note" and was read as "edit". Emirates Post asked for a
+                start-over icon, so it is one — with the label in the tooltip and
+                the aria-label, which is where a phone reads it from.
+
+                The earlier note is kept below because the reason the reload
+                arrow was wrong has not changed; it was the wrong reading of it
+                that had to go, not the reasoning. */}
             {/* A PENCIL, NOT A RELOAD ARROW.
                 Reported from the mobile app, 11 September: "refreshing the chat
                 window using the refresh button prompts the user to sign in
@@ -2407,7 +2418,7 @@ export function Experience({
                 circular arrow was the only thing telling the customer what it
                 did, and it was telling them the wrong thing. They pressed what
                 they read as reload and lost the conversation. */}
-            <NotePencil size={20} weight={iconWeight} />
+            <ArrowCounterClockwise size={24} weight={iconWeight} />
           </button>
           {embedded && canExpand ? (
             <button
@@ -2416,7 +2427,7 @@ export function Experience({
               aria-label={expanded ? t.collapse : t.expand}
               title={expanded ? t.collapse : t.expand}
             >
-              {expanded ? <ArrowsInSimple size={20} weight={iconWeight} /> : <ArrowsOutSimple size={20} weight={iconWeight} />}
+              {expanded ? <ArrowsInSimple size={24} weight={iconWeight} /> : <ArrowsOutSimple size={24} weight={iconWeight} />}
             </button>
           ) : null}
           {hasCase ? (
@@ -2426,7 +2437,7 @@ export function Experience({
               aria-label={t.caseTab}
               title={t.caseTab}
             >
-              <ListChecks size={20} weight={iconWeight} />
+              <ListChecks size={24} weight={iconWeight} />
               {pendingDocCount > 0 ? <span className="count">{pendingDocCount}</span> : null}
             </button>
           ) : null}

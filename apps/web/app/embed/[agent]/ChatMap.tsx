@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { NavigationArrow, MapPin, ArrowClockwise, Warning } from "@phosphor-icons/react";
+import { NavigationArrow, MapPin, MagnifyingGlass, ArrowClockwise, Warning } from "@phosphor-icons/react";
 
 /**
  * In-chat "Browse nearby branches" map (a ```map block naming emirate + bundle).
@@ -74,6 +74,10 @@ export const MAP_STR = {
     failed: "Couldn't load the map. You can still pick a branch from the list above.",
     nearest: "Nearest branches to you",
     branches: "Branches",
+    inEmirate: (e: string) => `Branches in ${e}`,
+    searchArea: "Search by area or branch name",
+    noMatch: "No branch matches that. Try another area.",
+    showingAll: (n: number) => `${n} branches`,
     metres: (n: number) => `${n} m`,
     km: (n: string) => `${n} km`,
     youAreHere: "You are here",
@@ -84,11 +88,33 @@ export const MAP_STR = {
     failed: "تعذّر تحميل الخريطة. لا يزال بإمكانك اختيار فرع من القائمة أعلاه.",
     nearest: "أقرب الفروع إليك",
     branches: "الفروع",
+    inEmirate: (e: string) => `الفروع في ${e}`,
+    searchArea: "ابحث بالمنطقة أو باسم الفرع",
+    noMatch: "لا يوجد فرع مطابق. جرّب منطقة أخرى.",
+    showingAll: (n: number) => `${n} فرعاً`,
     metres: (n: number) => `${n} متر`,
     km: (n: string) => `${n} كم`,
     youAreHere: "أنت هنا",
   },
 } as const;
+
+/**
+ * The emirate in words, for a heading that has to say WHICH branches these are.
+ * The list is fetched per emirate, so "Nearest branches to you" was describing
+ * the sort order and being read as the contents.
+ */
+const EMIRATE_NAME: Record<string, { en: string; ar: string }> = {
+  AUH: { en: "Abu Dhabi", ar: "أبوظبي" },
+  DXB: { en: "Dubai", ar: "دبي" },
+  SHJ: { en: "Sharjah", ar: "الشارقة" },
+  AJM: { en: "Ajman", ar: "عجمان" },
+  UAQ: { en: "Umm Al Quwain", ar: "أم القيوين" },
+  RAK: { en: "Ras Al Khaimah", ar: "رأس الخيمة" },
+  FUJ: { en: "Fujairah", ar: "الفجيرة" },
+};
+
+/** Near enough that "nearest to you" is a true description, not a sort order. */
+const NEAR_KM = 60;
 
 export function ChatMap({
   emirate, bundle, onSelect, locale,
@@ -117,9 +143,24 @@ export function ChatMap({
   const [branches, setBranches] = React.useState<Branch[]>([]);
   const [userLoc, setUserLoc] = React.useState<{ lat: number; lng: number } | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
+  /** FB-1801: filter a long branch list by area or name. */
+  const [query, setQuery] = React.useState("");
   const mapEl = React.useRef<HTMLDivElement | null>(null);
   const mapObj = React.useRef<any>(null);
   const mapboxRef = React.useRef<any>(null);
+
+  /**
+   * Is the customer actually among these branches?
+   *
+   * The list is fetched per emirate, so a distance is always computable and
+   * always beside the point when they are in another one. This is what decides
+   * whether "nearest to you" is a description or just a sort order — and
+   * whether their pin is allowed to drag the map across the country.
+   */
+  const nearby = React.useMemo(
+    () => Boolean(userLoc) && branches.some((b) => typeof b.dist === "number" && b.dist <= NEAR_KM),
+    [userLoc, branches]
+  );
 
   const select = React.useCallback((b: Branch) => {
     if (selected) return;
@@ -166,14 +207,29 @@ export function ChatMap({
   React.useEffect(() => {
     if (phase !== "ready" || !mapEl.current || !mapboxRef.current || mapObj.current || !branches.length) return;
     const mapboxgl = mapboxRef.current;
-    const center = userLoc ?? { lat: branches[0]!.lat, lng: branches[0]!.lng };
+    /**
+     * THE BRANCHES DECIDE THE VIEW (FB-1797).
+     *
+     * "Map is not pointing to the right place (location is enabled in the
+     * browser). Selected Abu Dhabi, then clicked on near branches."
+     *
+     * The list is fetched per EMIRATE and the map was centred on the CUSTOMER,
+     * with their position folded into the bounds. Choose Abu Dhabi from Dubai
+     * and fitBounds zooms out to cover both, so the map opens on a stretch of
+     * desert between them: the wrong place, above a list of Abu Dhabi branches.
+     *
+     * So the frame is the branches. Their pin still goes on the map when they
+     * are near enough for it to mean anything — it just no longer drags the
+     * view across an emirate to include itself.
+     */
+    const center = { lat: branches[0]!.lat, lng: branches[0]!.lng };
     let map: any;
     try {
       map = new mapboxgl.Map({
         container: mapEl.current,
         style: "mapbox://styles/mapbox/streets-v12",
         center: [center.lng, center.lat],
-        zoom: userLoc ? 11 : 10,
+        zoom: 10,
         attributionControl: false,
       });
     } catch {
@@ -187,7 +243,10 @@ export function ChatMap({
         .setLngLat([userLoc.lng, userLoc.lat])
         .setPopup(new mapboxgl.Popup({ offset: 14, closeButton: false }).setText(t.youAreHere))
         .addTo(map);
-      bounds.extend([userLoc.lng, userLoc.lat]);
+      // Only if they are actually among these branches. Otherwise their pin
+      // stays on the map and out of the frame, which is the honest picture:
+      // these are that emirate's branches, and they are not there.
+      if (nearby) bounds.extend([userLoc.lng, userLoc.lat]);
     }
     branches.slice(0, 15).forEach((b) => {
       const el = document.createElement("div");
@@ -205,7 +264,7 @@ export function ChatMap({
       try { map.fitBounds(bounds, { padding: 44, maxZoom: 13, duration: 0 }); } catch { /* ignore */ }
     }
     return () => { try { map.remove(); } catch { /* ignore */ } mapObj.current = null; };
-  }, [phase, branches, userLoc, select, label, t]);
+  }, [phase, branches, userLoc, nearby, select, label, t]);
 
   if (phase === "idle") {
     return (
@@ -241,14 +300,49 @@ export function ChatMap({
   }
 
   // ready
-  const topN = branches.slice(0, 6);
+  /**
+   * SEARCH AN AREA TO PICK A BRANCH (FB-1801).
+   *
+   * Six rows of a seventy-five branch emirate, and no way past them but the
+   * map. Matched on the branch name in whichever language it is shown, which is
+   * where the area is — "Al Barsha Post Office", "Naif Post Office" — so typing
+   * a district finds it without us needing an area field we do not have.
+   *
+   * The cap lifts while searching: six is a sensible preview of a list nobody
+   * asked to filter, and a wall when somebody did.
+   */
+  const needle = query.trim().toLowerCase();
+  const matched = needle
+    ? branches.filter((b) => label(b).toLowerCase().includes(needle) || (b.hours ?? "").toLowerCase().includes(needle))
+    : branches;
+  const topN = needle ? matched.slice(0, 20) : matched.slice(0, 6);
+  const emirateName = EMIRATE_NAME[emirate.toUpperCase()]?.[locale === "ar" ? "ar" : "en"];
   return (
     <div className="dlg-map is-ready">
       {mapboxRef.current ? <div ref={mapEl} className="dlg-map-canvas" /> : null}
       <div className="dlg-map-head">
-        {userLoc ? t.nearest : t.branches}
+        {/* WHICH branches these are, not how they happen to be sorted. "Nearest
+            branches to you" described the sort order and was read as the
+            contents — with Abu Dhabi's branches under it and the customer in
+            Dubai. Their distance is still on every row. */}
+        {nearby ? t.nearest : emirateName ? t.inEmirate(emirateName) : t.branches}
       </div>
+      {branches.length > 6 ? (
+        <div className="dlg-map-search">
+          <MagnifyingGlass size={15} weight="bold" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t.searchArea}
+            aria-label={t.searchArea}
+            disabled={!!selected}
+          />
+          {needle ? <span className="dlg-map-found">{t.showingAll(matched.length)}</span> : null}
+        </div>
+      ) : null}
       <div className="dlg-map-list">
+        {needle && !matched.length ? <div className="dlg-map-status">{t.noMatch}</div> : null}
         {topN.map((b) => (
           <button
             key={b.id}

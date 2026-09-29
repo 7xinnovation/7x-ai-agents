@@ -85,15 +85,16 @@ body {
 .dlg-root[dir="rtl"] {
   font-family: var(--font-ar);
 }
-/* Per-agent heading font (theme.headingFont) on the brand name + section titles. */
-.dlg-brand-name,
-.dlg-case-head h2,
-.dlg-empty h4 {
+/* HEADLINES ONLY (FB-1800).
+   "This typeface for headlines only because it's hard to read." The arrows
+   pointed at "Your application" and "Nothing to assemble yet" — a panel title
+   and an empty state, neither of which is a headline. A display face set at
+   13-15px is being asked to do a job it was not cut for.
+   The brand name keeps it. That is the headline. */
+.dlg-brand-name {
   font-family: var(--c-font-heading, var(--c-font-body, var(--font)));
 }
-.dlg-root[dir="rtl"] .dlg-brand-name,
-.dlg-root[dir="rtl"] .dlg-case-head h2,
-.dlg-root[dir="rtl"] .dlg-empty h4 {
+.dlg-root[dir="rtl"] .dlg-brand-name {
   font-family: var(--font-ar);
 }
 
@@ -217,13 +218,13 @@ body {
    The standard asked for is 24px minimum and 48px recommended, with the touch
    area larger than the icon. These were 33px squares around a 16px glyph in a
    header six controls wide — inside the minimum, nowhere near the recommendation,
-   and reported as icons nobody could read. 44px with a 20px glyph is the usual
-   compromise and clears the minimum comfortably. */
+   and reported as icons nobody could read. The standard restated: 48px targets
+   with 24px glyphs, which is the recommendation rather than the floor. */
 .dlg-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 44px;
+  height: 48px;
   padding: 0 12px;
   border: 1px solid var(--c-border);
   background: var(--c-surface);
@@ -239,7 +240,7 @@ body {
 /* Icon buttons read as a light toolbar: ghost until hover, then a soft rounded
    surface. Declutters the header vs. five bordered pills competing for weight. */
 .dlg-chip.icon-only {
-  width: 44px;
+  width: 48px;
   padding: 0;
   justify-content: center;
   border-radius: 10px;
@@ -1353,6 +1354,41 @@ body {
   color: var(--c-text-muted);
   padding: 11px 14px 7px;
 }
+/* SEARCH AN AREA TO PICK A BRANCH (FB-1801).
+   Six rows of a seventy-five branch emirate and no way past them but the map. */
+.dlg-map-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-border);
+  color: var(--c-text-muted);
+}
+.dlg-map-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font: inherit;
+  font-size: 13px;
+}
+.dlg-map-search input::placeholder {
+  color: var(--c-text-muted);
+}
+.dlg-map-search input:focus {
+  outline: none;
+}
+.dlg-map-search input:disabled {
+  opacity: 0.5;
+}
+.dlg-map-found {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
 .dlg-map-list {
   padding: 0 8px 8px;
   display: flex;
