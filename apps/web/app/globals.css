@@ -2799,6 +2799,25 @@ body {
   margin: 12px 0 4px;
   animation: dlg-in 0.35s var(--ease) both;
 }
+/* A TWO-OPTION CHOICE READS AS ONE THING (FB-1795).
+   "Give the opposite option correct placement, right after the rent request.
+   Show both messages as one." Side by side, the confirmation and its
+   alternative are two objects floating under a sentence and the eye has to hunt
+   between them. Stacked, they read in the order they are meant to — do this, or
+   else do that — with the alternative directly beneath what it is an
+   alternative to. Three or more stay chips: a set of choices is what chips are
+   for, and stacking six makes a menu out of a question. */
+.dlg-chat-buttons.is-pair {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.dlg-chat-buttons.is-pair .dlg-chat-btn {
+  width: 100%;
+  min-height: 44px;
+  justify-content: center;
+  text-align: center;
+}
 .dlg-chat-btn {
   appearance: none;
   cursor: pointer;

@@ -2480,7 +2480,7 @@ export function Experience({
               <Orb size={25} />
               {/* Greeting gets onSelect so a ```buttons service list in it is
                   tappable (feedback FB-1434: structured options, not prose). */}
-              <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} locale={locale} /></div>
+              <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} locale={locale} stackChoices={agent.stackedChoices} /></div>
             </div>
             {messages.length === 0 && starters.length > 0 && !greetingHasButtons ? (
               <div className="dlg-starters">
@@ -2523,7 +2523,7 @@ export function Experience({
                   ) : null}
                   {m.content ? (
                     m.role === "assistant" ? (
-                      <TypewriterMarkdown text={displayContent(i, m)} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={{ ...uploadCtx, ownerIndex: uploadOwner, messageIndex: i }} locale={locale} />
+                      <TypewriterMarkdown text={displayContent(i, m)} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={{ ...uploadCtx, ownerIndex: uploadOwner, messageIndex: i }} locale={locale} stackChoices={agent.stackedChoices} />
                     ) : (
                       displayContent(i, m)
                     )

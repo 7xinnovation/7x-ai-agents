@@ -125,6 +125,24 @@ for (const icon of ["ShieldSlash", "NotePencil", "ListChecks", "GlobeSimple"]) {
 }
 check("the reason is written where the next person will change it", /TOUCH TARGETS BIG ENOUGH TO HIT \(FB-1791, FB-1793\)/.test(css));
 
+console.log("\nFB-1795 — a two-option choice reads as one thing");
+const md = readFileSync(new URL("../app/embed/[agent]/Markdown.tsx", import.meta.url), "utf8");
+const schema = readFileSync(new URL("../../../packages/config/src/agent.ts", import.meta.url), "utf8");
+const page = readFileSync(new URL("../app/embed/[agent]/page.tsx", import.meta.url), "utf8");
+check("exactly two options stack", /const asPair = Boolean\(stacked\) && labels\.length === 2;/.test(md));
+// Three or more are a set of choices, and a set of choices is what chips are
+// for — stacking six makes a menu out of a question.
+check("...three or more stay chips", /labels\.length === 2/.test(md) && !/labels\.length >= 2/.test(md));
+check("...full width, in the order they are meant to be read", /\.dlg-chat-buttons\.is-pair \{\s*\n\s*flex-direction: column;/.test(css));
+check("...and each is a 44px target", /\.dlg-chat-buttons\.is-pair \.dlg-chat-btn \{[\s\S]{0,120}min-height: 44px;/.test(css));
+// The renderer is shared, so this is a setting rather than a deploy: one
+// tenant's feedback is not a reason to change another tenant's screens.
+check("it is per agent, not global", /stackedChoices: z\.boolean\(\)\.optional\(\)/.test(schema));
+check("...reaching the widget", /stackedChoices: d\.stackedChoices/.test(page));
+check("...and passed to both renderers", /stackChoices=\{agent\.stackedChoices\}/.test(exp) && (exp.match(/stackChoices=\{agent\.stackedChoices\}/g) ?? []).length === 2);
+check("...through the typewriter too, which wraps the other", /stackChoices=\{stackChoices\} \/>/.test(md));
+check("off by default, so nothing changes for an agent that did not ask", !/stackedChoices: z\.boolean\(\)\.default\(true\)/.test(schema));
+
 console.log("\nSigning out of us is not signing out of UAE PASS");
 /**
  * "I signed out and when I signed in, my UAE PASS was already signed in."

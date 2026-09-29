@@ -147,6 +147,19 @@ export const AgentDefinition = z.object({
    */
   progressPlacement: z.enum(["panel", "top"]).default("panel"),
   /**
+   * A two-option choice stacked, full width, instead of two chips side by side.
+   *
+   * Asked for by Emirates Post (FB-1795): "Give the opposite option correct
+   * placement, right after the rent request. Show both messages as one." Side
+   * by side, a confirmation and its alternative read as two objects floating
+   * under a sentence; stacked they read in the order they are meant to, with
+   * the alternative directly beneath the thing it is an alternative to.
+   *
+   * Per agent because the chat renderer is shared, and one tenant's feedback is
+   * not a reason to change another tenant's screens.
+   */
+  stackedChoices: z.boolean().optional(),
+  /**
    * Whether the case panel carries "What has been done" — the plain-language
    * record of every action taken in the customer's name, with the consent
    * beside each one.
