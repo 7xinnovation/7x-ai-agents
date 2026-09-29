@@ -185,9 +185,39 @@ check("EPG_TRN_No__c is still not sent anywhere", !/EPG_TRN_No__c/.test(integrat
 check("...and that gap is recorded for EPGL", /we do not collect a TRN anywhere in\s*\nthis journey/.test(
   readFileSync(new URL("../../../docs/EPGL-DUPLICATE-UNIQUE-FIELD-2026-09-24.md", import.meta.url), "utf8")));
 
+console.log("\nA renewal goes to the account that holds the licence");
+/**
+ * Trade licence 1196781 matches THREE accounts in PreProd2: the licensed
+ * company (postal licence 377), an inactive one (479), and a third with the
+ * same Arabic and trade names and no licence at all. The renewal went to the
+ * third. Everything after that followed from it — the composite asked to give
+ * an unlicensed record the licensed company's name, EPGL's duplicate rule
+ * refused it correctly, and we spent a day reporting their rule as broken.
+ */
+check("a multi-match latches the one holding a postal licence",
+  /const licensed = found\.filter\(\(c\) => String\(c\.licenseRecordId \?\? ""\)\.trim\(\)\);\s*\n\s*if \(licensed\.length === 1\) rememberLicenceRecordId\(licensed\[0\]\);/.test(route));
+check("...and says so, rather than leaving it to the card they tapped",
+  /A RENEWAL IS ONLY POSSIBLE AGAINST THAT RECORD/.test(route));
+check("...forbidding the model from supplying its own", /do not pass an accountId of your own for a renewal/.test(route));
+check("...and from switching because a name reads better", /do not switch to another of these records because its name reads better/.test(route));
+check("none licensed is not a renewal at all", /NONE of them holds a postal licence, so there is nothing here to renew/.test(route));
+// Several licensed records is a real ambiguity and stays the customer's.
+check("two licensed records are still the customer's choice to make",
+  /licensed\.length === 1\s*\n?\s*\?/.test(route));
+
 console.log("\nAnd it is written down for them");
 const doc = readFileSync(new URL("../../../docs/EPGL-DUPLICATE-UNIQUE-FIELD-2026-09-24.md", import.meta.url), "utf8");
 check("their answers are recorded", /## ANSWERED by EPGL, 29 September 2026/.test(doc));
+{
+  // The report that blamed their duplicate rule is withdrawn IN PLACE, with the
+  // payloads left standing — a correction nobody can find is not a correction.
+  const payloadDoc = readFileSync(new URL("../../../docs/EPGL-COMPANY-NAME-DUPLICATE-2026-09-29.md", import.meta.url), "utf8");
+  check("the wrong conclusion is withdrawn at the top", /## WITHDRAWN — the fault was ours/.test(payloadDoc));
+  check("...naming the three accounts", /001FW00B34EmqMWYEZ/.test(payloadDoc) && /0015f00000ic9okAAA/.test(payloadDoc));
+  check("...and saying their check is correct", /your check is\s*\nbehaving correctly/.test(payloadDoc));
+  check("...without deleting what we sent them", /Kept here because it is what we sent you/.test(payloadDoc));
+  check("the rename is owned rather than reported as theirs", /the third record's name is our doing/i.test(payloadDoc));
+}
 check("...with what we changed", /### What we changed, 29 September/.test(doc));
 check("...and our wrong guess kept rather than quietly deleted", /## Our reading at the time, which was wrong/.test(doc));
 // The question that decides whether 24 September is actually fixed.

@@ -1,4 +1,6 @@
-# The company-name check blocks a renewal of the company itself
+# Renewals were going to the wrong Account under trade licence 1196781
+
+*(Originally filed as "the company-name check blocks a renewal of the company itself" — that conclusion is withdrawn; see the first section.)*
 
 For Emirates Post Group Licensing's Salesforce team.
 Environment: **PreProd2** (`epro--preprod2.sandbox.my.salesforce.com`)
@@ -10,11 +12,66 @@ Date: **29 September 2026**
 > passport number, because the payloads are reproduced exactly as sent.
 > Please keep it to the people reviewing it.
 
-## The one-line version
+## WITHDRAWN — the fault was ours, 29 September (evening)
+
+**Please disregard the analysis below.** We reported that your duplicate-name
+check fails to exclude the record being updated. It does not, and your check is
+behaving correctly. The payloads and responses are still accurate; the
+conclusion drawn from them was wrong, and we are leaving both in place rather
+than quietly editing them.
+
+**What is actually true.** Trade licence **1196781** matches **three** Accounts
+in PreProd2:
+
+| Account | Name | Postal licence |
+|---|---|---|
+| `0015f00000ic9okAAA` | TRAHEEL DELIVERY SERVICES L.L.C | **377 — Active** |
+| `001NM000009zr3pYAA` | Traheel Delivery Services LLC | 479 — Inactive |
+| `001FW00B34EmqMWYEZ` | **EMRE KARAYALCIN** (Arabic name and trade names still read TRAHEEL) | **none** |
+
+Our renewal was being submitted against the **third** one, which holds no
+licence. The composite therefore asked to set that record's `Name` to "TRAHEEL
+DELIVERY SERVICES L.L.C" — a name `0015f00000ic9okAAA` already has. Your rule
+refused it, which is exactly what it is for. There was never a self-match.
+
+**And the third record's name is our doing.** On 29 September we briefly stopped
+sending `Name` on an Account we address by `Id`. Something on your side then
+filled the empty `Name` from the `User` item, so `001FW00B34EmqMWYEZ` — whose
+Arabic name and both trade names still read TRAHEEL — is now called EMRE
+KARAYALCIN, and it shows under that name in our company picker. We reverted
+within the hour.
+
+**What we have fixed.** Where a trade licence matches several accounts, the
+renewal now targets the one that actually holds the postal licence, rather than
+whichever record the conversation happened to be carrying.
+
+**What we would still like from you**
+
+1. **Please restore the `Name` on `001FW00B34EmqMWYEZ`** — or tell us it should
+   be deleted, if it is a duplicate that should never have existed. Its Arabic
+   and trade-name fields still hold the original values if that helps.
+2. **What fills an omitted `Name` on an update?** Any caller leaving a field out
+   of an update would expect the stored value to stand. That behaviour is what
+   turned a cautious change on our side into a renamed company record.
+3. **The allowed values for `EPG_Designation__c`** (see the last section) —
+   still outstanding, and unrelated to the above.
+
+The error message itself is worth a word too: "A company with the same name
+already exists" named the rule but not the **other record**. Had it said which
+Account already holds that name, this would have been ten minutes rather than
+a week.
+
+---
+
+## The one-line version — WRONG, see above
 
 We send the Account **addressed by its own `Id`**, carrying **its own existing
 `Name`**. Your duplicate-name check finds that same record and refuses the
 update. A record is not its own duplicate.
+
+> Wrong on the last two sentences. The name was not that record's own — it
+> belongs to `0015f00000ic9okAAA`, a different account under the same trade
+> licence. Kept here because it is what we sent you.
 
 You confirmed the check "is being applied on update/create request". That is
 fine on create. On **update** it has to exclude the record being updated —

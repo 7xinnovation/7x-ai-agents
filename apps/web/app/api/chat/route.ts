@@ -2556,10 +2556,39 @@ export async function POST(req: NextRequest) {
           // A licence number can match a parent AND its branches; the filing always
           // belongs to the main company, so never silently pick one.
           if (found.length > 1) {
+            /**
+             * ONLY ONE OF THEM CAN BE RENEWED, AND IT IS NOT THE MODEL'S TO PICK.
+             *
+             * Trade licence 1196781 matches THREE accounts in PreProd2 — the
+             * licensed company (postal licence 377), an inactive one (479), and
+             * a third carrying the same Arabic and trade names with no postal
+             * licence at all. On 29 September a renewal went to the third.
+             *
+             * Everything that followed came from that: the composite carried a
+             * Name for a company that already exists under another id, EPGL's
+             * duplicate-name rule refused it — correctly — and we spent a day
+             * reporting their rule as broken. It is not. We were asking to give
+             * an unlicensed record the licensed company's name.
+             *
+             * A renewal is only possible against the record that HOLDS the
+             * licence. Where exactly one match does, that is the account, and it
+             * is latched here rather than left to whichever card the customer
+             * happens to tap — the name on a card is not what decides which
+             * record a licence lives on.
+             */
+            const licensed = found.filter((c) => String(c.licenseRecordId ?? "").trim());
+            if (licensed.length === 1) rememberLicenceRecordId(licensed[0]);
             return {
               result:
                 `MORE THAN ONE COMPANY is registered under that trade licence number (${found.length}). ` +
-                "Show the customer the names and ask which is theirs before using any of them:\n" +
+                "Show the customer the names and ask which is theirs before using any of them.\n" +
+                (licensed.length === 1
+                  ? `ONLY ONE OF THEM HOLDS A POSTAL LICENCE: ${licensed[0]!.name ?? licensed[0]!.accountId} (postal licence ${licensed[0]!.postalLicenseNumber ?? "on file"}). ` +
+                    `A RENEWAL IS ONLY POSSIBLE AGAINST THAT RECORD — the others have no licence to renew, whatever their names say. It is already selected for you: do not pass an accountId of your own for a renewal, and do not switch to another of these records because its name reads better. ` +
+                    `If the customer says one of the others is theirs, tell them plainly that EPGL hold the postal licence against ${licensed[0]!.name ?? "the first"} and ask them to confirm before going on.\n`
+                  : licensed.length === 0
+                    ? "NONE of them holds a postal licence, so there is nothing here to renew. Say so plainly and offer to start a new licence application instead of submitting one.\n"
+                    : "") +
                 JSON.stringify(found),
             };
           }
