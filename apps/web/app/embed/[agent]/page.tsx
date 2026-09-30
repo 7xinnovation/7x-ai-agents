@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getAgentBySlug } from "@/lib/agents";
-import { uaePassConfigured } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassRedirectsToUs } from "@/lib/uaepass";
+import { headers } from "next/headers";
 import { Experience } from "./Experience";
 import type { PublicAgent } from "./types";
 
@@ -20,6 +21,15 @@ export default async function EmbedPage({
   if (!agent) notFound();
 
   const d = agent.definition;
+  /**
+   * Where this page is being served from, for the UAE PASS question below: a
+   * client accepts only the redirect URIs registered against it, and whether
+   * OUR callback is one of them depends on the deployment.
+   */
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const origin = host ? `${proto}://${host}` : "";
   const pub: PublicAgent = {
     slug: d.slug,
     name: d.name,
@@ -51,6 +61,9 @@ export default async function EmbedPage({
     })),
     hostLoginUrl: d.hostLoginUrl,
     nativeUaePassFallback: d.nativeUaePassFallback,
+    // Whether OUR UAE PASS callback is one this tenant's client accepts. See
+    // uaePassRedirectsToUs — on production NXN it is Emirates Post's portal.
+    uaePassOwnFlow: uaePassRedirectsToUs(origin, d.tenantSlug),
     stackedChoices: d.stackedChoices,
     uaePassEnabled: uaePassConfigured(),
     voiceEnabled: Boolean(process.env.AZURE_REALTIME_KEY && process.env.AZURE_REALTIME_ENDPOINT),
