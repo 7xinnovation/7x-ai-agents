@@ -22,37 +22,66 @@ So the sequence is: we clear our copy, the relay finds your token still there
 two seconds later, and hands it back. There is no version of this we can fix
 from our end without making that decision on your behalf.
 
-## The change
+## Why it can only be fixed there
 
-Add `data-signout-clears-host="1"` to the existing tag:
+Your session is entirely client-side. Reading your own bundle:
 
-```html
-<script src="https://agent.7x.ae/dialog-relay.js"
-        data-domain=".emiratespost.ae"
-        data-token-key="accessToken"
-        data-signout-clears-host="1"></script>
+```
+localStorage.setItem("accessToken", ...)   // the session
+localStorage.setItem("profile", ...)       // the name on the dashboard
 ```
 
-Keep `data-token-key` and `data-domain` exactly as they are now — only the new
-attribute is being added. Staging is the same tag with
-`https://7xagents.7x-lab.com/dialog-relay.js`.
+There is no cookie and nothing server-side to expire. Only script running on
+`box.emiratespost.ae` can remove those, and the only script we have there is the
+relay you already inject from `_app`:
 
-With it set, a sign-out in the assistant removes the token from this site's
-`localStorage` as well. The next **Sign in** has nothing to resume, so it goes
-to UAE PASS and asks properly.
+```js
+let e = "https://agent.7x.ae/dialog-relay.js";
+if (!document.querySelector(`script[src="${e}"]`)) {
+  let t = document.createElement("script");
+  t.setAttribute("src", e);
+  t.setAttribute("data-domain", ".emiratespost.ae");
+  (document.body || document.head).appendChild(t);
+}
+```
 
-## What it means
+It is loading and working — that is how the assistant sees the customer as
+signed in. It refuses to delete the token because we wrote it to refuse, and it
+prints the reason in the console every time somebody signs out.
 
-One identity, one sign-out. A customer who signs out of the assistant is signed
-out of box.emiratespost.ae as well and will need to sign in again to use the
-rest of the site. We think that is the right behaviour and it is what the
-customer expects from a sign-out — but it is a real change to this site's
-session handling, which is why it is opt-in rather than something we switched on
-ourselves.
+## The change
 
-If you would rather it did not, the alternative is that the assistant's sign-out
-stays cosmetic while this site holds a session — and "sign out" then means
-"clear the chat", which we would want to relabel.
+Two attributes on that same tag:
+
+```js
+  t.setAttribute("src", e);
+  t.setAttribute("data-domain", ".emiratespost.ae");
+  t.setAttribute("data-signout-clears-host", "1");
+  t.setAttribute("data-signout-clears-keys", "accessToken,profile");
+```
+
+`accessToken` is the session. `profile` is only the name, but a dashboard still
+saying "Welcome EMRE!" after a sign-out reads as a sign-out that did not work,
+so it goes with it.
+
+Nothing else changes, and the same two lines apply on `box-stg`.
+
+## It works whether the chat is embedded or opened on its own
+
+Worth knowing, because it caught us out. The assistant announces a sign-out by
+posting a message to the page it is embedded in — which reaches the relay only
+when the chat is an iframe on your site. Opened on its own at
+`agent.7x.ae/embed/nxn-dialog`, there is no page of yours in the frame tree and
+the message reaches nothing.
+
+So as of today the assistant also opens a short-lived window on
+`https://box.emiratespost.ae/?dlg-signout=1` when it signs somebody out. The
+relay is on that page like it is on every page, sees the marker, ends the
+session and the window closes itself. The window is a blank moment, nothing is
+rendered in it, and it is not a sign-in page — pointing a sign-out at
+`/uaepass` would simply sign the customer back in.
+
+Both routes are under the same attribute. Without it, both do nothing.
 
 ## Checking it worked
 
@@ -64,5 +93,17 @@ site's own token in "accessToken" was left alone. Add
 data-signout-clears-host="1" to also sign the customer out of this site.
 ```
 
-After the change that line is gone, and `localStorage.getItem('accessToken')`
-returns `null`.
+After the change that line is gone, and both
+`localStorage.getItem('accessToken')` and `localStorage.getItem('profile')`
+return `null`.
+
+The assistant's own console also says so, from its side:
+
+```
+[dialog] https://box.emiratespost.ae was asked to sign out and declined:
+the relay tag there needs data-signout-clears-host="1".
+```
+
+That line appearing means the window opened and the tag has not been updated
+yet. Its absence, plus a Sign in that goes to UAE PASS and asks for the phone
+number, is the whole test.
