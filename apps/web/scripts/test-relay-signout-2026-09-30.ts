@@ -87,11 +87,29 @@ check("...and all of them are removed", /window\.localStorage\.removeItem\(CLEAR
 console.log("\nThe widget opens that window, where the portal is the only door");
 check("only when the portal is the door", /if \(agent\.hostLoginUrl && !agent\.uaePassOwnFlow\) \{/.test(exp));
 // A sign-in page asked to sign somebody out signs them back in.
-check("...on the site root, not the sign-in page", /\$\{origin\}\/\?dlg-signout=1/.test(exp));
-check("...from hostLoginUrl's origin", /origin = new URL\(agent\.hostLoginUrl\)\.origin/.test(exp));
-check("...and it is closed from this side", /name: "dlg-host-signout"/.test(exp) && /host\.close\(\)/.test(exp));
+check("...on the site root, not the sign-in page", /\$\{hostOrigin\}\/\?dlg-signout=1/.test(exp));
+check("...from hostLoginUrl's origin", /hostOrigin = new URL\(agent\.hostLoginUrl\)\.origin/.test(exp));
+check("...and it is closed from this side", /win\.close\(\)/.test(exp));
 check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
-check("...and only that origin is believed", /if \(e\.origin !== origin\) return;/.test(exp));
+check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
+
+console.log("\nUAE PASS and the portal are both signed out of, in one window");
+/**
+ * Three sessions, and only the first is ours: the conversation's, UAE PASS's
+ * SSO cookie, and the portal's own token. Ending any two of them leaves the
+ * third to sign the customer straight back in.
+ *
+ * One window navigated twice rather than two windows — a second pop-up this
+ * long after the click is what a blocker eats.
+ */
+check("one named window serves both", /const SIGNOUT_WINDOW = \{ name: "dlg-signout"/.test(exp));
+check("...UAE PASS first", /openExternal\(`\/api\/uaepass\/logout\?agent=\$\{encodeURIComponent\(agent\.slug\)\}`, SIGNOUT_WINDOW\)/.test(exp));
+// Closing early aborts the one request that matters, and nothing about a
+// cross-origin hop can be observed from here.
+check("...given time to finish before the window moves on", /\}, 3000\);/.test(exp));
+check("...then the portal", /if \(hostOrigin\) clearPortal\(\);/.test(exp));
+check("...and the portal is still cleared if the pop-up was blocked", /\} else \{\s*\n\s*\/\/ Pop-up blocked[\s\S]{0,200}clearPortal\(\);/.test(exp));
+check("...and when UAE PASS is not this agent's at all", /\} else \{\s*\n\s*clearPortal\(\);\s*\n\s*\}/.test(exp));
 
 console.log("\nAnd the snippet the admin panel hands over carries it");
 /**
