@@ -55,6 +55,21 @@ export function isValidEmail(addr: string): boolean {
   return EMAIL_RE.test(addr.trim());
 }
 
+/**
+ * THE CONSOLE'S OWN MAIL, WHICH IS NOT A CUSTOMER'S MAIL.
+ *
+ * Staging deliberately cannot email customers — the providers were removed so a
+ * test could not reach a real applicant. Admin invitations went with them, and
+ * an administrator could not add a colleague.
+ *
+ * They are different things and they now have different credentials. This is
+ * the tenant the console sends as, so `RESEND_API_KEY_ADMIN` on staging gives
+ * invitations a way out while NXN and EPGL still have none: a tenant only falls
+ * back to the shared account, and on staging there is no shared account to fall
+ * back to.
+ */
+export const ADMIN_TENANT = "admin";
+
 export function emailConfigured(tenant?: string): boolean {
   const { resendKey, sendgridKey, webhookUrl } = providerFor(tenant);
   return Boolean(resendKey || sendgridKey || webhookUrl);

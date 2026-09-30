@@ -34,6 +34,15 @@ export async function GET(req: NextRequest) {
   // its own iframe to UAE PASS — frame-ancestors forbids it). The callback then
   // notifies the opener via postMessage and closes instead of redirecting.
   const popup = req.nextUrl.searchParams.get("popup") === "1";
+  /**
+   * They have just signed out and want to come back as somebody else.
+   *
+   * UAE PASS is single sign-on: our sign-out ends our session and leaves
+   * theirs, so without this the next tap walks straight back in as the same
+   * person. Set by the widget only on the sign-in that FOLLOWS a sign-out —
+   * a first sign-in still gets the benefit of an existing session.
+   */
+  const forceLogin = req.nextUrl.searchParams.get("switch") === "1";
   const state = crypto.randomUUID();
   // Mock this request when the whole deployment is mocked (dev), OR when the caller
   // opted in with ?mock=1 and the deployment permits it (UAEPASS_MOCK_ALLOWED) — so
@@ -44,7 +53,7 @@ export async function GET(req: NextRequest) {
   // full flow can be tested without a real UAE PASS session.
   const target = wantMock
     ? `${origin}/api/uaepass/callback?code=MOCK_CODE&state=${state}`
-    : buildAuthorizeUrl(resolveRedirectUri(origin), state, tenant);
+    : buildAuthorizeUrl(resolveRedirectUri(origin), state, tenant, { forceLogin });
 
   const res = NextResponse.redirect(target);
   res.cookies.set("uaepass_flow", JSON.stringify({ state, cid, agent, returnTo, popup, mock: wantMock }), {

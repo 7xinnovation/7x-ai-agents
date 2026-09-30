@@ -224,13 +224,45 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
   );
 }
 
-/** Inline action buttons (a ```buttons block). Tapping sends the label as the reply. */
-function ChatButtons({ labels, onSelect }: { labels: string[]; onSelect: (text: string) => void }) {
+/**
+ * Inline action buttons (a ```buttons block). Tapping sends the label as the reply.
+ *
+ * A TWO-OPTION CHOICE READS AS ONE THING, NOT AS PROSE WITH CHIPS UNDER IT
+ * (FB-1795). "Give the opposite option correct placement, right after the rent
+ * request. Show both messages as one."
+ *
+ * Side by side, the confirmation and its alternative are two objects floating
+ * below a sentence: the eye reads the question, then hunts left and right for
+ * what to do about it. Stacked and full width they read in the order they are
+ * meant to — do this, or else do that — and the alternative sits directly under
+ * the thing it is an alternative to, which is what "right after the rent
+ * request" asks for.
+ *
+ * Only TWO. Three or more are a set of choices, and a set of choices is what
+ * chips are for; stacking six of them makes a menu out of a question. And only
+ * where the agent asks for it, because this renderer is shared.
+ */
+function ChatButtons({ labels, onSelect, stacked }: { labels: string[]; onSelect: (text: string) => void; stacked?: boolean }) {
   if (!labels.length) return null;
+  const asPair = Boolean(stacked) && labels.length === 2;
+  /**
+   * A LIST OF EQUALS HAS NO RECOMMENDED ANSWER.
+   *
+   * "Don't have Abu Dhabi a different colour on the emirate selection, all
+   * should be the same." Quite right: the first option was painted as the
+   * primary action whatever the question, so "Which emirate would you like the
+   * box in?" came back with Abu Dhabi picked out in solid blue — a
+   * recommendation nobody made, for a choice that has no better answer.
+   *
+   * Two options usually DO have a leading one: yes/no, confirm/change, and the
+   * primary is what tells them apart at a glance. Three or more are a list, and
+   * a list of places is a list of equals.
+   */
+  const hasPrimary = labels.length === 2;
   return (
-    <div className="dlg-chat-buttons">
+    <div className={`dlg-chat-buttons${asPair ? " is-pair" : ""}`}>
       {labels.map((l, i) => (
-        <button key={i} type="button" className={`dlg-chat-btn${i === 0 ? " primary" : ""}`} onClick={() => onSelect(l)}>
+        <button key={i} type="button" className={`dlg-chat-btn${hasPrimary && i === 0 ? " primary" : ""}`} onClick={() => onSelect(l)}>
           {l}
         </button>
       ))}
@@ -917,7 +949,7 @@ function applyCardKey(card: OptionCard, key: string, value: string) {
  * after a tool round) so it never lags far behind. When `animate` is false
  * (completed / resumed messages) it renders in full immediately.
  */
-export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx, locale }: { text: string; animate: boolean; onSelect?: (text: string) => void; uploadCtx?: UploadCtx; locale?: string }) {
+export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx, locale, stackChoices }: { text: string; animate: boolean; onSelect?: (text: string) => void; uploadCtx?: UploadCtx; locale?: string; stackChoices?: boolean }) {
   const [shown, setShown] = React.useState(animate ? 0 : text.length);
   const shownRef = React.useRef(shown);
   const textRef = React.useRef(text);
@@ -961,7 +993,7 @@ export function TypewriterMarkdown({ text, animate, onSelect, uploadCtx, locale 
   }, [animate, text]);
 
   // Cards/uploads are interactive only once the reply has fully rendered.
-  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} onSelect={animate ? undefined : onSelect} uploadCtx={animate ? undefined : uploadCtx} locale={locale} />;
+  return <Markdown text={animate ? text.slice(0, Math.floor(shown)) : text} onSelect={animate ? undefined : onSelect} uploadCtx={animate ? undefined : uploadCtx} locale={locale} stackChoices={stackChoices} />;
 }
 
 /**
@@ -1017,7 +1049,7 @@ export function openFencesOnTheirOwnLine(lines: string[]): string[] {
   return out;
 }
 
-export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; onSelect?: (text: string) => void; uploadCtx?: UploadCtx; locale?: string }) {
+export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { text: string; onSelect?: (text: string) => void; uploadCtx?: UploadCtx; locale?: string; stackChoices?: boolean }) {
   const lang: Locale = locale === "ar" ? "ar" : locale === "en" ? "en" : uploadCtx?.locale ?? "en";
   const lines = openFencesOnTheirOwnLine(text.split("\n"));
   const nodes: React.ReactNode[] = [];
@@ -1175,7 +1207,7 @@ export function Markdown({ text, onSelect, uploadCtx, locale }: { text: string; 
           );
           continue;
         }
-        if (onSelect && labels.length) nodes.push(<ChatButtons key={k++} labels={labels} onSelect={onSelect} />);
+        if (onSelect && labels.length) nodes.push(<ChatButtons key={k++} labels={labels} onSelect={onSelect} stacked={stackChoices} />);
         continue;
       }
       if (isToggles) {

@@ -46,8 +46,8 @@ import {
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { trackShipment, TrackingNotConfiguredError } from "@/lib/emxTracking";
 import { notifyEpglPayment, paymentAdviceExists } from "@/lib/epglPayment";
-import { rentalTotal, agentCountFrom, wantsKeyDelivery } from "@/lib/rentalTotal";
-import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode } from "@/lib/gsbLookup";
+import { rentalTotal, agentCountFrom, wantsKeyDelivery, choseKeyDelivery } from "@/lib/rentalTotal";
+import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode, type CustomerPoBox } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
 import { addressFromPin } from "@/lib/epGeocode";
 import { savedCards, describeCard } from "@/lib/epSavedCards";
@@ -127,11 +127,45 @@ const PULSE_DIRECTIVE =
    * the status beside it says what is being fetched, and the pulse arrives
    * underneath when it is ready.
    */
-  "1) FIRST, before calling any tool, write ONE short line of greeting and say you are pulling their account up — this is the only thing the customer can see while the lookups run, so it must not wait on them. Use their name only if you have already been given it; do not call a tool to find it. " +
+  "1) FIRST, before calling any tool, write ONE short line of greeting and say you are pulling their account up — this is the only thing the customer can see while the lookups run, so it must not wait on them. " +
+  /**
+   * THEIR FIRST NAME, NOT THE ONE ON THE CARD (FB-1792).
+   *
+   * UAE PASS hands over a full legal name, and greeting somebody with four of
+   * them reads as a form letter: "Good afternoon, EMRE KARAYALCIN". The name we
+   * have is the name to use — the first part of it, the way a person would.
+   */
+  "Use their FIRST NAME only, not their full legal name, and only if you have already been given it — do not call a tool to find it. A UAE PASS name arrives in full and often in capitals; take the first part and write it as a name is written, \"Emre\", never \"EMRE KARAYALCIN\". If all you have is a full name in capitals, still use just the first word of it. " +
   "2) Then use your tools to pull everything you can about their account. " +
-  "3) Show a concise, scannable section titled \"Account Pulse\" covering EVERY PO Box on their account (see the known customer record if present) — for each box: status, expiry, anything needing attention (renewals due or expiring soon with the fee from pricing), plus any pending payments; clearly flag urgent items and offer a quick \"renew now\" next step for each. " +
+  /**
+   * THE COUNT, NOT THE TABLE (FB-1792).
+   *
+   * "Put all the boxes on the side panel so it gets rid of the clutter, and
+   * keep the number of boxes in the chat." An account with forty-six boxes was
+   * printing forty-six rows into the conversation — box, bundle, expiry, status
+   * — above a side panel that said "Nothing to assemble yet". The full list is
+   * now in the panel, where it can be scrolled without burying the reply.
+   *
+   * What stays in the chat is what a person would say out loud: how many boxes
+   * there are, and the ones that need something doing. A box that is fine needs
+   * no line of its own.
+   */
+  "3) Show a concise section titled \"Account Pulse\". Say HOW MANY boxes are on the account — the number, in one sentence — and then ONLY the boxes that need something: expired, expiring soon (with the fee from pricing), or with a payment pending. " +
+  "Do NOT list every box, and do NOT draw a table of them. The full list is shown to the customer in the panel beside the conversation, so repeating it here buries your reply under it; say \"the full list is in the panel beside us\" once, and leave it at that. " +
+  "If NOTHING needs attention, say so plainly — \"all of them are active, nothing needs doing right now\" — rather than listing boxes to prove it. " +
   "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
-  "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. If completed requests are on file (see the known customer record), add a short \"Recent activity\" list — but write each line as something a person would recognise: what was done, on which box, and when. \"NXN-B295AF15: Manage PO Box, 07-09-2026\" is our filing system talking to itself; \"You added an authorised agent to box 450866 on 7 September\" is the same fact addressed to the customer. Keep the reference if it is one they might need to quote, but put it at the end in brackets, never at the front. " +
+  "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. " +
+  /**
+   * AND NO RECENT-ACTIVITY LIST (FB-1792).
+   *
+   * It used to go here, written carefully so each line read as something a
+   * person would recognise rather than our filing system talking to itself.
+   * Emirates Post do not want it: the pulse is about what needs attention on
+   * the account TODAY, and a history of what has already been done is not that.
+   * It is still in the panel under "What has been done", where somebody looking
+   * for it will find it.
+   */
+  "Do NOT list recent activity, past requests or a history of what has already been done. The pulse is what needs attention now. " +
   "4) Only if NO PO Box is on file: welcome them, explain their account isn't linked to a PO Box yet, and offer — not require — to link one (\"if you have a box, tell me its number and emirate and I'll add it to your account\"). Never present the box number as a prerequisite for the pulse. " +
   /**
    * HAVING FORTY-ONE BOXES IS NOT A REASON YOU CANNOT RENT A FORTY-SECOND.
@@ -175,6 +209,9 @@ const PULSE_DIRECTIVE =
  */
 /** When EPGL Finance were asked to raise this application's Virtual IBAN. */
 const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
+
+/** The customer's PO Boxes, for the panel to list rather than the chat (FB-1792). */
+const ACCOUNT_BOXES_KEY = "__account_boxes";
 
 const EPGL_PULSE_DIRECTIVE =
   "(System: the customer just signed in. Proactively present their \"Account Pulse\" now — do not wait to be asked. " +
@@ -856,29 +893,45 @@ export async function POST(req: NextRequest) {
     }
   };
 
-  let ownedBoxesCache: { at: number; boxes: string[] | null } | null = null;
-  const ownedBoxes = async (): Promise<string[] | null> => {
-    if (ownedBoxesCache) return ownedBoxesCache.boxes;
+  /**
+   * The customer's boxes, kept WHOLE (FB-1792).
+   *
+   * This lookup has always returned the full row — number, emirate, bundle,
+   * expiry, status — and thrown all but the number away, because the only
+   * caller was the ownership gate. The account pulse then printed the rest of
+   * it back into the chat as a table: forty-six rows above a side panel reading
+   * "Nothing to assemble yet".
+   *
+   * Emirates Post asked for the boxes in the panel and the COUNT in the chat.
+   * So the rows are kept here, handed to the widget on the case, and the pulse
+   * stops drawing tables. Same single lookup either way.
+   */
+  let ownedBoxesCache: { at: number; rows: CustomerPoBox[] | null } | null = null;
+  const accountBoxRows = async (): Promise<CustomerPoBox[] | null> => {
+    if (ownedBoxesCache) return ownedBoxesCache.rows;
     const eid = verifiedEmiratesId ?? str(session.state.data[VERIFIED_EID_KEY]);
     const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
-    let boxes: string[] | null = null;
+    let rows: CustomerPoBox[] | null = null;
     if (eid && caller && agent.definition.tenantSlug === "nxn") {
       try {
-        const rows = await customerPoBoxes(
+        rows = await customerPoBoxes(
           agent.id,
           agent.definition.activeEnvironment ?? "production",
           eid,
           caller
         );
-        boxes = rows.map((b) => String(b.boxNumber ?? "")).filter(Boolean);
       } catch (e) {
         // A lookup that could not run is NOT proof of ownership.
         log.warn("owned_boxes_lookup_failed", { agentId: agent.id, conversationId: session.conversationId, reason: String((e as Error).message ?? e) });
-        boxes = null;
+        rows = null;
       }
     }
-    ownedBoxesCache = { at: Date.now(), boxes };
-    return boxes;
+    ownedBoxesCache = { at: Date.now(), rows };
+    return rows;
+  };
+  const ownedBoxes = async (): Promise<string[] | null> => {
+    const rows = await accountBoxRows();
+    return rows ? rows.map((b) => String(b.boxNumber ?? "")).filter(Boolean) : null;
   };
 
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
@@ -3344,6 +3397,62 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        /**
+         * A COURIER NEEDS AN ADDRESS, AND NOBODY WAS ASKING FOR ONE (2026-09-29).
+         *
+         * "When I clicked deliver to my address it used to give me the option to
+         * put in the address based on the map, but it's skipped it."
+         *
+         * It had. The reply went straight to "Emirates Post customer service
+         * will contact you to arrange the key delivery" and then to the contact
+         * details, and the case came out of it with no home_street, no
+         * home_area, no address of any kind — for a delivery the customer is
+         * paying AED 30 for. keyDeliveryAddressFrom would have returned null and
+         * the rental would have been saved with a courier and nowhere to go.
+         *
+         * The map block is appended here for the same reason the branch map
+         * above it is: the guidance names it, the model does not always emit it,
+         * and a promise of a control is not a control. The difference is that
+         * this one is not gated on the reply PROMISING a map — that was the gap.
+         * Choosing the courier is the trigger.
+         *
+         * Suppressed once an address exists, so a customer who has already
+         * pinned one is not asked again, and suppressed if the reply already
+         * carries the block.
+         */
+        if (agent.definition.tenantSlug === "nxn") {
+          const data = finalState.data as Record<string, unknown>;
+          /**
+           * THEIR TAP, NOT THE MODEL'S NOTE OF IT.
+           *
+           * The first pass read `key_delivery` off the case — a field the model
+           * has to record with collect_field — and on the turn that matters it
+           * had not: the customer pressed "Deliver to address (AED 30)", the
+           * reply moved on, and the case came out with no key_delivery and no
+           * address. So the fix inherited the bug it was fixing.
+           *
+           * Their own message is the signal that cannot go missing. The case
+           * and the priced summary stay as additional triggers for the turns
+           * after this one.
+           */
+          const courier =
+            choseKeyDelivery(body.userMessage) ||
+            wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) ||
+            courierSeen;
+          const haveAddress = Boolean(keyDeliveryAddressFrom(data)) || addressAlreadyKnown(data);
+          if (courier && !haveAddress && !/```\s*locate/i.test(finalText)) {
+            const ask = locateBlock(body.locale);
+            send({ type: "text", delta: ask });
+            finalText += ask;
+            await audit({
+              ...a,
+              actor: "system",
+              action: "key_delivery_address_asked",
+              payload: { reason: "courier chosen, no address on the case" },
+            });
+          }
+        }
+
         // The PO Box hall notice, rendered by US — and repeated until it is
         // accepted.
         //
@@ -4144,6 +4253,34 @@ export async function POST(req: NextRequest) {
                 payload: { to: emailTo, reference: customerRef, reason: res.reason },
               });
             });
+          }
+        }
+
+        /**
+         * THE BOXES GO ON THE CASE, SO THE PANEL CAN SHOW THEM (FB-1792).
+         *
+         * Written once we have them and only while they are worth writing: the
+         * pulse is where the lookup runs, and after that the panel keeps what it
+         * was given rather than re-fetching on every turn. Numbers, emirate,
+         * bundle, expiry and status — the same row the ownership gate already
+         * fetches, kept whole instead of reduced to a box number.
+         */
+        if (agent.definition.tenantSlug === "nxn" && authenticated) {
+          const rows = ownedBoxesCache?.rows ?? (isPulse ? await accountBoxRows() : null);
+          if (rows?.length) {
+            finalState = {
+              ...finalState,
+              data: {
+                ...finalState.data,
+                [ACCOUNT_BOXES_KEY]: rows.map((b) => ({
+                  box: String(b.boxNumber ?? ""),
+                  emirate: b.emirateName || b.emirateCode || "",
+                  bundle: b.bundleId ?? "",
+                  expiry: String(b.expiryDate ?? "").slice(0, 10),
+                  status: b.expired ? "Expired" : String(b.status ?? ""),
+                })).filter((b) => b.box),
+              },
+            };
           }
         }
 

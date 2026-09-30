@@ -85,15 +85,16 @@ body {
 .dlg-root[dir="rtl"] {
   font-family: var(--font-ar);
 }
-/* Per-agent heading font (theme.headingFont) on the brand name + section titles. */
-.dlg-brand-name,
-.dlg-case-head h2,
-.dlg-empty h4 {
+/* HEADLINES ONLY (FB-1800).
+   "This typeface for headlines only because it's hard to read." The arrows
+   pointed at "Your application" and "Nothing to assemble yet" — a panel title
+   and an empty state, neither of which is a headline. A display face set at
+   13-15px is being asked to do a job it was not cut for.
+   The brand name keeps it. That is the headline. */
+.dlg-brand-name {
   font-family: var(--c-font-heading, var(--c-font-body, var(--font)));
 }
-.dlg-root[dir="rtl"] .dlg-brand-name,
-.dlg-root[dir="rtl"] .dlg-case-head h2,
-.dlg-root[dir="rtl"] .dlg-empty h4 {
+.dlg-root[dir="rtl"] .dlg-brand-name {
   font-family: var(--font-ar);
 }
 
@@ -213,11 +214,17 @@ body {
   gap: 2px;
   align-items: center;
 }
+/* TOUCH TARGETS BIG ENOUGH TO HIT (FB-1791, FB-1793).
+   The standard asked for is 24px minimum and 48px recommended, with the touch
+   area larger than the icon. These were 33px squares around a 16px glyph in a
+   header six controls wide — inside the minimum, nowhere near the recommendation,
+   and reported as icons nobody could read. The standard restated: 48px targets
+   with 24px glyphs, which is the recommendation rather than the floor. */
 .dlg-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
+  height: 48px;
   padding: 0 12px;
   border: 1px solid var(--c-border);
   background: var(--c-surface);
@@ -233,7 +240,7 @@ body {
 /* Icon buttons read as a light toolbar: ghost until hover, then a soft rounded
    surface. Declutters the header vs. five bordered pills competing for weight. */
 .dlg-chip.icon-only {
-  width: 33px;
+  width: 48px;
   padding: 0;
   justify-content: center;
   border-radius: 10px;
@@ -244,6 +251,181 @@ body {
 .dlg-chip.icon-only:hover {
   background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
   color: var(--c-text);
+}
+/* THE CUSTOMER'S BOXES, IN THE PANEL (FB-1792).
+   Forty-six of them used to be printed into the conversation as a table, above
+   a panel that said "Nothing to assemble yet". A list that can be long has to
+   be able to scroll without taking the application with it. */
+.dlg-boxes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-bottom: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 16px;
+  background: var(--c-surface);
+  overflow: hidden;
+}
+.dlg-boxes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+.dlg-boxes-head h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--c-text);
+}
+.dlg-boxes-count {
+  min-width: 22px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c-primary) 10%, transparent);
+  color: var(--c-primary);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.dlg-boxes-list {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+  /* Long enough to be worth scrolling, short enough that the application
+     underneath is still on screen. */
+  max-height: 264px;
+}
+.dlg-boxes-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+.dlg-boxes-list li + li {
+  border-top: 1px solid color-mix(in srgb, var(--c-border) 60%, transparent);
+}
+.dlg-box-no {
+  font-weight: 650;
+  color: var(--c-text);
+  font-variant-numeric: tabular-nums;
+}
+.dlg-box-no em {
+  margin-inline-start: 6px;
+  font-style: normal;
+  font-weight: 450;
+  color: var(--c-text-muted);
+}
+.dlg-box-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--c-text-muted);
+  text-align: end;
+}
+.dlg-box-expiry {
+  font-variant-numeric: tabular-nums;
+}
+/* An expired box is the one thing on the list worth finding at a glance. */
+.dlg-boxes-list li.is-expired .dlg-box-status,
+.dlg-boxes-list li.is-expired .dlg-box-no {
+  color: var(--c-danger);
+}
+.dlg-boxes-list li.is-expired {
+  background: color-mix(in srgb, var(--c-danger) 6%, transparent);
+}
+
+/* THE PROFILE MENU (FB-1802, and the UAE PASS session report).
+   "Click on the profile icon and sign out, in case they want to sign in with
+   another Emirates ID on the same session." The icon is a profile again rather
+   than a verb, and the way out is a menu item in words. */
+.dlg-profile {
+  position: relative;
+  display: inline-flex;
+}
+.dlg-profile-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 20;
+  min-width: 232px;
+  padding: 6px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 32px -10px color-mix(in srgb, var(--c-text) 28%, transparent);
+}
+.dlg-profile-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 9px;
+  border-bottom: 1px solid var(--c-border);
+  margin-bottom: 4px;
+}
+.dlg-profile-label {
+  font-size: 11.5px;
+  color: var(--c-text-muted);
+}
+.dlg-profile-who strong {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-profile-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--c-text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 560;
+  text-align: start;
+  cursor: pointer;
+}
+.dlg-profile-item:hover,
+.dlg-profile-item:focus-visible {
+  background: color-mix(in srgb, var(--c-text) 6%, var(--c-surface));
+  outline: none;
+}
+.dlg-profile-item span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+/* Why you would sign out, said rather than left to be worked out. */
+.dlg-profile-item em {
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--c-text-muted);
+}
+
+/* THE ONE CONTROL THAT SAYS WHAT IT IS.
+   Reported three times over — twice as a missing logout, once as a sign-in
+   button that signed somebody out. It keeps its label at every width. */
+.dlg-chip.is-auth {
+  padding: 0 12px 0 10px;
+}
+.dlg-chip.is-auth.is-on {
+  border-color: color-mix(in srgb, var(--c-success, #16a34a) 40%, var(--c-border));
+  background: color-mix(in srgb, var(--c-success, #16a34a) 8%, var(--c-surface));
 }
 /* Bordered (text) chips like the language toggle keep their outline. */
 .dlg-chip:not(.icon-only):hover {
@@ -1172,6 +1354,41 @@ body {
   color: var(--c-text-muted);
   padding: 11px 14px 7px;
 }
+/* SEARCH AN AREA TO PICK A BRANCH (FB-1801).
+   Six rows of a seventy-five branch emirate and no way past them but the map. */
+.dlg-map-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-border);
+  color: var(--c-text-muted);
+}
+.dlg-map-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font: inherit;
+  font-size: 13px;
+}
+.dlg-map-search input::placeholder {
+  color: var(--c-text-muted);
+}
+.dlg-map-search input:focus {
+  outline: none;
+}
+.dlg-map-search input:disabled {
+  opacity: 0.5;
+}
+.dlg-map-found {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
 .dlg-map-list {
   padding: 0 8px 8px;
   display: flex;
@@ -2059,6 +2276,65 @@ body {
   background: color-mix(in srgb, var(--c-primary) 3%, var(--c-surface));
   flex-shrink: 0;
 }
+/* THE JOURNEY AS STEPS (FB-1794).
+   "The current status bar is not useful" — one flat bar and a number told the
+   customer how much was left and nothing about where they were. Emirates Post
+   sent an example: numbered pills, the live one named, a percentage beside
+   them. Only the live step carries its name, which is the only way
+   "Identify & terms" fits a phone.
+
+   SCOPED TO THE TOP BAR ON PURPOSE. EPGL shows its readiness in the side panel
+   (progressPlacement: panel) and nothing here touches that — their UI is not to
+   change on the back of Emirates Post's feedback. */
+.dlg-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+  overflow: hidden;
+}
+.dlg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  border: 1.5px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  color: var(--c-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.dlg-step-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.dlg-step.is-done {
+  border-color: color-mix(in srgb, var(--c-primary) 35%, transparent);
+  color: var(--c-primary);
+}
+.dlg-step.is-now {
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  background: color-mix(in srgb, var(--c-primary) 8%, transparent);
+}
+/* The live step is the one that has to survive a narrow screen. */
+.dlg-step.is-now .dlg-step-name {
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-step.is-todo {
+  opacity: 0.6;
+}
 .dlg-progress-top-row {
   display: flex;
   align-items: baseline;
@@ -2558,6 +2834,25 @@ body {
   gap: 6px;
   margin: 12px 0 4px;
   animation: dlg-in 0.35s var(--ease) both;
+}
+/* A TWO-OPTION CHOICE READS AS ONE THING (FB-1795).
+   "Give the opposite option correct placement, right after the rent request.
+   Show both messages as one." Side by side, the confirmation and its
+   alternative are two objects floating under a sentence and the eye has to hunt
+   between them. Stacked, they read in the order they are meant to — do this, or
+   else do that — with the alternative directly beneath what it is an
+   alternative to. Three or more stay chips: a set of choices is what chips are
+   for, and stacking six makes a menu out of a question. */
+.dlg-chat-buttons.is-pair {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.dlg-chat-buttons.is-pair .dlg-chat-btn {
+  width: 100%;
+  min-height: 44px;
+  justify-content: center;
+  text-align: center;
 }
 .dlg-chat-btn {
   appearance: none;

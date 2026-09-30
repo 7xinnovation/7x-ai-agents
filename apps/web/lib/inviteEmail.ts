@@ -1,4 +1,4 @@
-import { sendEmail, isValidEmail, type EmailResult } from "./email";
+import { sendEmail, isValidEmail, ADMIN_TENANT, type EmailResult } from "./email";
 
 /**
  * The invitation to the console.
@@ -75,5 +75,6 @@ export function inviteEmailBody(input: InviteEmailInput): { subject: string; tex
 export async function sendInviteEmail(input: InviteEmailInput): Promise<EmailResult> {
   if (!isValidEmail(input.to)) return { ok: false, reason: `invalid_recipient:${input.to}` };
   const { subject, text, html } = inviteEmailBody(input);
-  return sendEmail({ to: input.to, subject, text, html });
+  // The console sends as itself, never as a tenant — see ADMIN_TENANT.
+  return sendEmail({ to: input.to, subject, text, html, tenant: ADMIN_TENANT });
 }

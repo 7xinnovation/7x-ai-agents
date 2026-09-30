@@ -7,17 +7,19 @@ import {
   ShieldSlash,
   GlobeSimple,
   SignIn,
+  SignOut,
   UserCircleCheck,
   TextAlignLeft,
   FileText,
   ListChecks,
+  CaretDown,
+  ArrowCounterClockwise,
   CheckCircle,
   Circle,
   Warning,
   ArrowRight,
   UploadSimple,
   ArrowClockwise,
-  NotePencil,
   LockSimple,
   ArrowSquareOut,
   ArrowsOutSimple,
@@ -115,7 +117,10 @@ export const STR = {
     receipt: "Download receipt",
     signIn: "Sign in",
     signedIn: "Signed in",
+    account: "Account",
+    yourBoxes: "Your PO Boxes",
     signOut: "Sign out",
+    signOutHint: "to use a different Emirates ID",
     signedOut: "You are signed out.",
     signOutConfirm: "Sign out?",
     expand: "Expand",
@@ -186,7 +191,10 @@ export const STR = {
     receipt: "تحميل الإيصال",
     signIn: "تسجيل الدخول",
     signedIn: "تم الدخول",
+    account: "الحساب",
+    yourBoxes: "صناديق البريد الخاصة بك",
     signOut: "تسجيل الخروج",
+    signOutHint: "لاستخدام هوية إماراتية أخرى",
     signedOut: "تم تسجيل خروجك.",
     signOutConfirm: "تسجيل الخروج؟",
     expand: "توسيع",
@@ -511,6 +519,19 @@ function PaymentCard({
   );
 }
 
+/**
+ * A short, non-reversible mark for a token we already hold.
+ *
+ * Only ever compared against a token in memory, so it needs to distinguish and
+ * nothing more — there is nothing to be gained from what is stored, which is
+ * the point of not storing the token.
+ */
+function fingerprint(token: string): string {
+  let h = 5381;
+  for (let i = 0; i < token.length; i++) h = ((h << 5) + h + token.charCodeAt(i)) | 0;
+  return `${token.length.toString(36)}.${(h >>> 0).toString(36)}`;
+}
+
 export function Experience({
   agent,
   initialLocale,
@@ -633,6 +654,53 @@ export function Experience({
    * out would last until the next tick. It is lifted only by an explicit sign-in.
    */
   const signedOut = useRef(false);
+  /** Where the dismissed token's fingerprint lives across a reload. */
+  const dismissedKey = `dlg-signedout-${agent.slug}`;
+  /**
+   * THE HOST PAGE DOES NOT KNOW THEY SIGNED OUT, AND KEEPS OFFERING ITS TOKEN.
+   *
+   * On box-stg.emiratespost.ae our relay reads the portal's own token and posts
+   * it into the widget, repeatedly, because that is how a customer who is
+   * already signed in to Emirates Post arrives here signed in. Signing out of
+   * the chat does not sign them out of the portal, so the token is still there
+   * and still being offered.
+   *
+   * `signedOut` blocked it — until they pressed Sign in, which lifted the flag
+   * ("asking to sign in is what lifts a sign-out"). True of UAE PASS, and
+   * catastrophic here: the relay's next poll landed before UAE PASS was
+   * anywhere near, and they were back in as the same person. Which is exactly
+   * what was reported, three times, while I was fixing UAE PASS.
+   *
+   * So the TOKEN is what is refused, not the channel. The one they signed out
+   * of is dead to this conversation; a DIFFERENT one — they went and signed in
+   * to the portal as somebody else, which is the whole point of signing out —
+   * is taken as it always was.
+   */
+  const dismissedHostToken = useRef<string | null>(null);
+  /**
+   * Is this the token they signed out of?
+   *
+   * In memory for this session, and by fingerprint for one that survived a
+   * reload. Cleared the moment a DIFFERENT token arrives, because that is a
+   * customer who has gone and signed in as somebody else — which is the whole
+   * reason they signed out.
+   */
+  const isDismissed = useCallback(
+    (token: string) => {
+      if (dismissedHostToken.current === token) return true;
+      let stored: string | null = null;
+      try { stored = window.localStorage.getItem(dismissedKey); } catch { /* private mode */ }
+      if (stored && stored === fingerprint(token)) {
+        dismissedHostToken.current = token;
+        return true;
+      }
+      // A different token: they have signed in somewhere as somebody, and the
+      // old refusal has nothing left to refuse.
+      if (stored) { try { window.localStorage.removeItem(dismissedKey); } catch { /* private mode */ } }
+      return false;
+    },
+    [dismissedKey]
+  );
   /**
    * The customer was signed in by the NATIVE app, not by a token we hold.
    *
@@ -782,6 +850,48 @@ export function Experience({
     const done = Math.max(0, total - caseState.readiness.missing.length);
     return { done, total, pct: Math.round((done / total) * 100) };
   }, [caseState, agent, docApplies]);
+
+  /**
+   * THE JOURNEY AS STEPS, NOT AS A PERCENTAGE (FB-1794).
+   *
+   * "The current status bar is not useful." It was one flat bar and a number:
+   * 13% tells a customer how much is left but nothing about WHERE they are or
+   * what comes next, and a percentage that moves in eighths moves rarely enough
+   * to look stuck. Emirates Post asked for a stepper instead, and sent one.
+   *
+   * The journey already has steps with names in both languages, so there is
+   * nothing to invent: a step is DONE when nothing required in it is still
+   * missing, and the CURRENT step is the first that is not. Only the current
+   * one is named — the others are numbers — which is how the example they sent
+   * behaves and the only thing that fits "Identify & terms" into a phone width.
+   *
+   * Derived here beside the percentage rather than in the markup, so the bar
+   * and the steps can never disagree about which step is live.
+   */
+  const journeySteps = useMemo(() => {
+    if (!caseState?.journeyKey) return null;
+    const j = agent.journeys.find((x) => x.key === caseState.journeyKey);
+    if (!j) return null;
+    const missingSet = new Set(caseState.readiness.missing.map((m) => `${m.kind}:${m.key}`));
+    const steps = j.steps
+      .map((s) => {
+        const required = [
+          ...s.fields.filter((f) => f.required && docApplies(f.condition)).map((f) => `field:${f.key}`),
+          ...s.documents.filter((d) => d.requirement === "mandatory" && docApplies(d.condition)).map((d) => `document:${d.key}`),
+        ];
+        return {
+          key: s.key,
+          // A step with nothing required in it has nothing to be waiting for.
+          title: (locale === "ar" ? s.title?.ar : s.title?.en) || s.title?.en || s.key,
+          required: required.length,
+          done: required.length > 0 && required.every((k) => !missingSet.has(k)),
+        };
+      })
+      .filter((s) => s.required > 0);
+    if (steps.length < 2) return null;
+    const currentIndex = steps.findIndex((s) => !s.done);
+    return { steps, currentIndex: currentIndex === -1 ? steps.length - 1 : currentIndex, complete: currentIndex === -1 };
+  }, [caseState, agent, docApplies, locale]);
 
   // Full requirements checklist (feedback FB-1437: completed items must STAY
   // visible, marked done — not vanish from the list once satisfied).
@@ -992,7 +1102,46 @@ export function Experience({
   const [coarsePointer, setCoarsePointer] = useState(false);
   useEffect(() => setCoarsePointer(window.matchMedia?.("(hover: none) and (pointer: coarse)").matches ?? false), []);
   /** The signed-in chip, tapped once on a phone: it asks before it acts. */
-  const [signOutArmed, setSignOutArmed] = useState(false);
+  /**
+   * Whose session this is, if the case happens to know.
+   *
+   * Read from the case rather than fetched: the name is there when UAE PASS
+   * handed one over or the customer gave it, and a menu that says "Signed in"
+   * with nothing under it is still the answer to "who am I signed in as" — so
+   * this is a nicety, never a condition for showing the way out.
+   */
+  /**
+   * The boxes the server put on the case. Read, never fetched: the widget has
+   * no credential of its own and this list is already on the state it is given.
+   */
+  const accountBoxes = useMemo(() => {
+    const raw = (caseState?.data as Record<string, unknown> | undefined)?.__account_boxes;
+    if (!Array.isArray(raw)) return [] as { box: string; emirate: string; bundle: string; expiry: string; status: string }[];
+    return raw
+      .filter((b): b is Record<string, unknown> => Boolean(b) && typeof b === "object")
+      .map((b) => ({
+        box: String(b.box ?? ""),
+        emirate: String(b.emirate ?? ""),
+        bundle: String(b.bundle ?? ""),
+        expiry: String(b.expiry ?? ""),
+        status: String(b.status ?? ""),
+      }))
+      .filter((b) => b.box);
+  }, [caseState]);
+
+  const signedInName = useMemo(() => {
+    const d = (caseState?.data ?? {}) as Record<string, unknown>;
+    for (const k of ["contact_name", "full_name", "applicant_name", "customer_name"]) {
+      const v = d[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    return null;
+  }, [caseState]);
+  /** The profile menu, and the click-anywhere-else that closes it. */
+  /** Set by a sign-out: the next sign-in must ask, not resume. See signOut. */
+  const switchAccount = useRef(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement | null>(null);
   const toggleExpanded = useCallback(() => {
     const next = !expanded;
     setExpanded(next);
@@ -1060,6 +1209,10 @@ export function Experience({
       // its token; taking it would sign them back in without them asking.
       if (signedOut.current) return;
       const token = m.uaePassToken;
+      // And the one they signed OUT of stays refused even once they have asked
+      // to sign in again — see dismissedHostToken. Pressing Sign in is a request
+      // to choose an identity, not consent to the previous one.
+      if (isDismissed(token)) return;
       uaePass.current = token;
       // Reflect the sign-in now rather than at the next message. The token is
       // verified SERVER-side before the UI changes -- a host that hands us junk
@@ -1150,6 +1303,7 @@ export function Experience({
     }
     const token = nativeToken();
     if (!token || uaePass.current || signedOut.current) return;
+    if (isDismissed(token)) return;
     uaePass.current = token;
     void (async () => {
       try {
@@ -1325,8 +1479,39 @@ export function Experience({
    * is authenticated. Clearing only the client's view of it was FB-1485 — the
    * header said signed out while the session was still live.
    */
+  useEffect(() => {
+    if (!profileOpen) return;
+    const away = (e: MouseEvent | TouchEvent) => {
+      if (!profileRef.current?.contains(e.target as Node)) setProfileOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setProfileOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("touchstart", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("touchstart", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [profileOpen]);
+  // Signed out by any route — the menu must not outlive the session it describes.
+  useEffect(() => { if (!authenticated) setProfileOpen(false); }, [authenticated]);
+
   const signOut = useCallback(async () => {
     signedOut.current = true;
+    // The token the host is holding is the one they just signed out of. It will
+    // keep being offered; it must stop being taken. See dismissedHostToken.
+    if (uaePass.current) {
+      dismissedHostToken.current = uaePass.current;
+      // AND IT SURVIVES A REFRESH, because the host's token does. A sign-out
+      // that a page reload undoes is not a sign-out — the relay would offer the
+      // same token to the new page and sign them straight back in.
+      //
+      // A fingerprint, not the token: this is only ever compared against one we
+      // already hold in memory, so there is nothing to be gained from what is
+      // stored and nothing lost if it cannot be.
+      try { window.localStorage.setItem(dismissedKey, fingerprint(uaePass.current)); } catch { /* private mode */ }
+    }
     uaePass.current = undefined;
     setAuthenticated(false);
     setAuthReason(null);
@@ -1345,7 +1530,36 @@ export function Experience({
     } catch {
       /* the widget is signed out either way — never leave it saying otherwise */
     }
-  }, [agent.slug]);
+    /**
+     * AND UAE PASS IS SIGNED OUT OF TOO.
+     *
+     * "I literally clicked sign out and when I clicked sign in, it signed me in
+     * instantly without asking me to login again with UAE PASS."
+     *
+     * Because ours is a session against the conversation and theirs is a single
+     * sign-on cookie on id.uaepass.ae — and theirs is the one that decides
+     * whether the customer is asked for their phone. The first attempt added
+     * `prompt=login` to the authorize call, which asks UAE PASS to ignore a
+     * session it still holds. They evidently do not honour it.
+     *
+     * Only a top-level navigation on THEIR origin can clear a cookie there, so
+     * the window opens for as long as that takes and closes itself. It is the
+     * same window the sign-in would have used, and it is the difference between
+     * signing out and appearing to.
+     *
+     * `prompt=login` stays on the next sign-in as well. It costs nothing, and
+     * it covers the case where this window is blocked or closed early.
+     */
+    switchAccount.current = true;
+    if (agent.uaePassEnabled) {
+      openExternal(`/api/uaepass/logout?agent=${encodeURIComponent(agent.slug)}`, {
+        name: "dlg-uaepass-logout",
+        kind: "signout",
+        width: 420,
+        height: 320,
+      });
+    }
+  }, [agent.slug, agent.uaePassEnabled]);
 
   /**
    * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.
@@ -1526,10 +1740,14 @@ export function Experience({
       // simulate a login (only honoured where the server permits it). Real users on
       // the plain URL always get genuine UAE PASS.
       const mock = new URLSearchParams(window.location.search).get("mock") === "1" ? "&mock=1" : "";
+      // Only after a sign-out — see signOut. Cleared as it is used, so a second
+      // sign-in in the same session is an ordinary one.
+      const swap = switchAccount.current ? "&switch=1" : "";
+      switchAccount.current = false;
       const base =
         `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
-        `&returnTo=${encodeURIComponent(returnTo)}${mock}`;
+        `&returnTo=${encodeURIComponent(returnTo)}${mock}${swap}`;
       const win = openExternal(`${base}&popup=1`, { name: "dlg-uaepass", kind: "signin" });
       /**
        * "opened" was too strong inside the app. openExternal cannot open
@@ -2159,7 +2377,7 @@ export function Experience({
               onClick={() => setLocale(locale === "ar" ? "en" : "ar")}
               aria-label="Switch language"
             >
-              <GlobeSimple size={16} weight={iconWeight} />
+              <GlobeSimple size={24} weight={iconWeight} />
               <span className="dlg-chip-tag">{locale === "ar" ? "EN" : "عربي"}</span>
             </button>
           ) : null}
@@ -2180,20 +2398,64 @@ export function Experience({
               So on a touch device it asks first: the tap arms it and says "Sign
               out?" in words, and a second tap within four seconds does it. On a
               desktop the tooltip is there and it behaves as it always has. */}
-          <button
-            className={`dlg-chip ${signOutArmed ? "" : "icon-only "}${authenticated ? "is-on" : ""}`}
-            onClick={() => {
-              if (!authenticated) { signIn(); return; }
-              if (!coarsePointer || signOutArmed) { setSignOutArmed(false); void signOut(); return; }
-              setSignOutArmed(true);
-              window.setTimeout(() => setSignOutArmed(false), 4000);
-            }}
-            aria-label={authenticated ? t.signOut : t.signIn}
-            title={authenticated ? `${t.signedIn} — ${t.signOut}` : t.signIn}
-          >
-            {authenticated ? <UserCircleCheck size={17} weight="fill" /> : <SignIn size={16} weight={iconWeight} />}
-            {signOutArmed ? <span className="dlg-chip-tag">{t.signOutConfirm}</span> : null}
-          </button>
+          {/* THE PROFILE CONTROL, AND SIGNING OUT FROM INSIDE IT.
+              "It should be something like where they click on the profile icon
+              and sign out, in case they want to sign in with another Emirates
+              ID on the same session."
+
+              What was here before: one chip that signed you out on a tap, armed
+              itself on a touch screen, and said what it did only in a tooltip —
+              which a phone has not got. It was reported twice as a missing
+              logout and once as a sign-IN button that ended somebody's session
+              mid-application. Three people, one control.
+
+              A menu answers all of it. The icon is a profile again rather than
+              a verb, tapping it shows who is signed in and offers the way out
+              in words, and "sign in with another Emirates ID" is one action
+              instead of a guess. Signed out, it is simply the sign-in button
+              and opens nothing. */}
+          {authenticated ? (
+            <div className="dlg-profile" ref={profileRef}>
+              <button
+                className={`dlg-chip is-auth is-on${profileOpen ? " is-open" : ""}`}
+                onClick={() => setProfileOpen((v) => !v)}
+                aria-label={t.account}
+                aria-expanded={profileOpen}
+                aria-haspopup="menu"
+                title={t.signedIn}
+              >
+                <UserCircleCheck size={24} weight="fill" />
+                <CaretDown size={12} weight="bold" />
+              </button>
+              {profileOpen ? (
+                <div className="dlg-profile-menu" role="menu">
+                  <div className="dlg-profile-who">
+                    <span className="dlg-profile-label">{t.signedIn}</span>
+                    {signedInName ? <strong>{signedInName}</strong> : null}
+                  </div>
+                  <button
+                    className="dlg-profile-item"
+                    role="menuitem"
+                    onClick={() => { setProfileOpen(false); void signOut(); }}
+                  >
+                    <SignOut size={16} weight={iconWeight} />
+                    <span>
+                      {t.signOut}
+                      {/* The reason they are here: another Emirates ID on the
+                          same screen. Said out loud so nobody has to work out
+                          that signing out is how you do it. */}
+                      <em>{t.signOutHint}</em>
+                    </span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <button className="dlg-chip is-auth" onClick={signIn} aria-label={t.signIn} title={t.signIn}>
+              <SignIn size={24} weight={iconWeight} />
+              <span className="dlg-chip-tag">{t.signIn}</span>
+            </button>
+          )}
           {/* Withdraw permission in one step (pre-launch gate; FB-1737). Shown
               once there is a granted permission or collected data to pull back —
               revokes consent, stops everything, and reports what was erased. */}
@@ -2205,7 +2467,7 @@ export function Experience({
               aria-label={t.withdraw}
               title={t.withdrawHint}
             >
-              <ShieldSlash size={16} weight={withdrawBusy ? "fill" : iconWeight} />
+              <ShieldSlash size={24} weight={withdrawBusy ? "fill" : iconWeight} />
             </button>
           ) : null}
           <button
@@ -2215,6 +2477,17 @@ export function Experience({
             aria-label={t.reset}
             title={t.reset}
           >
+            {/* START OVER, SAID AS "START OVER" (FB-1796).
+
+                It was a reload arrow, which customers read as refresh and
+                pressed, losing the conversation. It became a pencil, which says
+                "new note" and was read as "edit". Emirates Post asked for a
+                start-over icon, so it is one — with the label in the tooltip and
+                the aria-label, which is where a phone reads it from.
+
+                The earlier note is kept below because the reason the reload
+                arrow was wrong has not changed; it was the wrong reading of it
+                that had to go, not the reasoning. */}
             {/* A PENCIL, NOT A RELOAD ARROW.
                 Reported from the mobile app, 11 September: "refreshing the chat
                 window using the refresh button prompts the user to sign in
@@ -2223,7 +2496,7 @@ export function Experience({
                 circular arrow was the only thing telling the customer what it
                 did, and it was telling them the wrong thing. They pressed what
                 they read as reload and lost the conversation. */}
-            <NotePencil size={16} weight={iconWeight} />
+            <ArrowCounterClockwise size={24} weight={iconWeight} />
           </button>
           {embedded && canExpand ? (
             <button
@@ -2232,7 +2505,7 @@ export function Experience({
               aria-label={expanded ? t.collapse : t.expand}
               title={expanded ? t.collapse : t.expand}
             >
-              {expanded ? <ArrowsInSimple size={16} weight={iconWeight} /> : <ArrowsOutSimple size={16} weight={iconWeight} />}
+              {expanded ? <ArrowsInSimple size={24} weight={iconWeight} /> : <ArrowsOutSimple size={24} weight={iconWeight} />}
             </button>
           ) : null}
           {hasCase ? (
@@ -2242,7 +2515,7 @@ export function Experience({
               aria-label={t.caseTab}
               title={t.caseTab}
             >
-              <ListChecks size={16} weight={iconWeight} />
+              <ListChecks size={24} weight={iconWeight} />
               {pendingDocCount > 0 ? <span className="count">{pendingDocCount}</span> : null}
             </button>
           ) : null}
@@ -2259,14 +2532,40 @@ export function Experience({
               thing out of sight. */}
           {progress && agent.progressPlacement === "top" ? (
             <div className="dlg-progress-top" role="status" aria-live="polite">
-              <div className="dlg-progress-top-row">
-                <span className="dlg-progress-step">{progress.pct === 100 ? t.ready : t.missing}</span>
-                <span className="dlg-progress-count">
-                  <strong>{progress.pct}%</strong>
-                  <span className="sep">·</span>
-                  {progress.done}/{progress.total} {t.readyShort}
-                </span>
-              </div>
+              {/* The steps, where there are steps to show. The percentage keeps
+                  its place on the right — it is the one number the readiness
+                  checks actually produce, and Emirates Post's example carries
+                  one too. Falls back to the old label + count for a journey with
+                  a single step, where a stepper of one is just a dot. */}
+              {journeySteps ? (
+                <div className="dlg-progress-top-row">
+                  <ol className="dlg-steps">
+                    {journeySteps.steps.map((s, i) => {
+                      const state = s.done ? "done" : i === journeySteps.currentIndex ? "now" : "todo";
+                      return (
+                        <li key={s.key} className={`dlg-step is-${state}`} aria-current={state === "now" ? "step" : undefined}>
+                          {state === "done" ? <CheckCircle size={15} weight="fill" /> : <span className="dlg-step-n">{i + 1}</span>}
+                          {/* Only the live step is named: the others are
+                              numbers, which is what makes this fit a phone. */}
+                          {state === "now" ? <span className="dlg-step-name">{s.title}</span> : null}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  <span className="dlg-progress-count">
+                    <strong>{progress.pct}%</strong>
+                  </span>
+                </div>
+              ) : (
+                <div className="dlg-progress-top-row">
+                  <span className="dlg-progress-step">{progress.pct === 100 ? t.ready : t.missing}</span>
+                  <span className="dlg-progress-count">
+                    <strong>{progress.pct}%</strong>
+                    <span className="sep">·</span>
+                    {progress.done}/{progress.total} {t.readyShort}
+                  </span>
+                </div>
+              )}
               <div className="dlg-progress-track">
                 <div
                   className={`dlg-progress-fill ${progress.pct === 100 ? "done" : ""}`}
@@ -2285,7 +2584,7 @@ export function Experience({
               <Orb size={25} />
               {/* Greeting gets onSelect so a ```buttons service list in it is
                   tappable (feedback FB-1434: structured options, not prose). */}
-              <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} locale={locale} /></div>
+              <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} locale={locale} stackChoices={agent.stackedChoices} /></div>
             </div>
             {messages.length === 0 && starters.length > 0 && !greetingHasButtons ? (
               <div className="dlg-starters">
@@ -2328,7 +2627,7 @@ export function Experience({
                   ) : null}
                   {m.content ? (
                     m.role === "assistant" ? (
-                      <TypewriterMarkdown text={displayContent(i, m)} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={{ ...uploadCtx, ownerIndex: uploadOwner, messageIndex: i }} locale={locale} />
+                      <TypewriterMarkdown text={displayContent(i, m)} animate={streaming && i === messages.length - 1} onSelect={handleCardSelect} uploadCtx={{ ...uploadCtx, ownerIndex: uploadOwner, messageIndex: i }} locale={locale} stackChoices={agent.stackedChoices} />
                     ) : (
                       displayContent(i, m)
                     )
@@ -2448,6 +2747,40 @@ export function Experience({
         {/* RIGHT: realtime case builder */}
         <aside className="dlg-case">
           <div className="dlg-case-inner">
+            {/* THE CUSTOMER'S BOXES, ABOVE THE APPLICATION (FB-1792).
+                An account with forty-six of them was printing forty-six rows
+                into the conversation — box, bundle, expiry, status — above a
+                panel that said "Nothing to assemble yet". Emirates Post asked
+                for them here and the COUNT in the chat.
+                It sits above the case builder because that is where they asked
+                for it, and because it is the thing a signed-in customer with
+                boxes is most likely to want to look at. */}
+            {accountBoxes.length ? (
+              <section className="dlg-boxes">
+                <div className="dlg-boxes-head">
+                  <h2>{t.yourBoxes}</h2>
+                  <span className="dlg-boxes-count">{accountBoxes.length}</span>
+                </div>
+                <ul className="dlg-boxes-list">
+                  {accountBoxes.map((b) => (
+                    <li key={`${b.box}-${b.emirate}`} className={b.status === "Expired" ? "is-expired" : ""}>
+                      <span className="dlg-box-no">
+                        {b.box}
+                        {b.emirate ? <em>{b.emirate}</em> : null}
+                      </span>
+                      <span className="dlg-box-meta">
+                        {b.bundle ? <span>{b.bundle}</span> : null}
+                        {/* The expiry is the one fact worth showing for a box
+                            that is fine, and the whole story for one that is
+                            not. */}
+                        {b.expiry ? <span className="dlg-box-expiry">{b.expiry}</span> : null}
+                        {b.status ? <span className="dlg-box-status">{b.status}</span> : null}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
             <div className="dlg-case-head">
               <button className="dlg-back-chat" onClick={() => setMobileCaseOpen(false)} aria-label={t.backToChat}>
                 <CaretLeft size={14} weight="bold" /> {t.backToChat}

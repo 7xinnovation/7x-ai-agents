@@ -80,6 +80,38 @@ export function wantsKeyDelivery(v: unknown): boolean {
   return /^(deliver|courier|delivery|yes|true|1|نعم)$/i.test(String(v ?? "").trim());
 }
 
+/**
+ * Did the CUSTOMER just choose to have the key couriered?
+ *
+ * Read from their own message, not from the case. `wantsKeyDelivery` above
+ * reads a field the model has to have recorded with collect_field, and on
+ * 29 September it had not: the customer pressed "Deliver to address (AED 30)",
+ * the reply moved on to contact details, and the case came out of the turn with
+ * no key_delivery and no address — for a delivery they were paying for.
+ *
+ * Their tap is the one signal that does not depend on the model noticing it.
+ * Same lesson as the P.O. Box hall acceptance: gate on what the customer said.
+ *
+ * Deliberately narrow. "Collect from branch" is the other button and must never
+ * match, so a courier word alone is not enough — it has to be about delivering
+ * to THEM.
+ */
+export function choseKeyDelivery(message: string): boolean {
+  const t = String(message ?? "")
+    .toLowerCase()
+    .replace(/[\u2019']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  if (/\bcollect\b|\bpick ?up\b|من الفرع|الاستلام من/.test(t)) return false;
+  return (
+    /\bdeliver(ed|y)?\b[^.?!]{0,30}\b(to )?(my |the |your )?address\b/.test(t) ||
+    /\bhave it delivered\b/.test(t) ||
+    /\bcourier\b[^.?!]{0,20}\b(fee|delivery|deliver)\b/.test(t) ||
+    /(توصيل|التوصيل)[^.؟!]{0,25}(عنوان|العنوان)/.test(t)
+  );
+}
+
 /** How many agents the customer asked for, first included. */
 export function agentCountFrom(data: Record<string, unknown>): number {
   for (const key of ["agent_count", "agents", "number_of_agents", "authorised_agents"]) {
