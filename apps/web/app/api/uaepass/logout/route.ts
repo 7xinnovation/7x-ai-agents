@@ -31,6 +31,20 @@ export async function GET(req: NextRequest) {
   const origin = requestOrigin(req);
   const agent = req.nextUrl.searchParams.get("agent") ?? "";
   const known = agent ? await getAgentBySlug(agent) : undefined;
+  /**
+   * WHERE UAE PASS SENDS THE BROWSER IS NOT OURS TO DECIDE.
+   *
+   * We pass `redirect_uri` and they are free to ignore it — on production they
+   * did, sending the browser to the URL registered against the Emirates Post
+   * client (their own portal dashboard) instead of to our page. The logout
+   * still happens; only the landing does not.
+   *
+   * Two consequences, both handled elsewhere rather than here: the widget
+   * closes the window on a timer regardless of where it ended up, and the next
+   * sign-in carries `prompt=login`. Registering our post-logout URI with UAE
+   * PASS would make the landing ours as well — it is a request to Emirates
+   * Post, not a change we can make.
+   */
   const target = buildLogoutUrl(`${origin}/uaepass/done`, known?.definition.tenantSlug);
   // Nothing to log out of: send them to the page that closes itself, so the
   // widget's window still goes away rather than sitting on an error.

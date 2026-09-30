@@ -301,6 +301,12 @@ check("...redirecting to their endpoint, not ours", /buildLogoutUrl\(`\$\{origin
 check("...and coming back to a page that closes itself", /window\.close\(\)/.test(readFileSync(new URL("../app/uaepass/done/page.tsx", import.meta.url), "utf8")));
 // An unconfigured tenant must still get its window closed rather than an error.
 check("nothing to log out of still closes the window", /NextResponse\.redirect\(target \?\? `\$\{origin\}\/uaepass\/done`\)/.test(logoutRoute));
+// On production UAE PASS ignored our redirect_uri and sent the browser to the
+// URI registered against the Emirates Post client — their portal dashboard —
+// so our self-closing page never ran and the window sat there saying
+// "Welcome EMRE!" to somebody who had just signed out.
+check("the window is closed by us, not by where it landed", /if \(win\) window\.setTimeout\(\(\) => \{ try \{ win\.close\(\); \}/.test(exp));
+check("...and that is written down where the next person will wonder", /WHERE UAE PASS SENDS THE BROWSER IS NOT OURS TO DECIDE/.test(logoutRoute));
 check("prompt=login stays as the belt to that braces", /switchAccount\.current = true;/.test(exp));
 
 console.log("\nFB-1800 — the display face is for headlines only");

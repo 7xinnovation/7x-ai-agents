@@ -1552,12 +1552,31 @@ export function Experience({
      */
     switchAccount.current = true;
     if (agent.uaePassEnabled) {
-      openExternal(`/api/uaepass/logout?agent=${encodeURIComponent(agent.slug)}`, {
+      const win = openExternal(`/api/uaepass/logout?agent=${encodeURIComponent(agent.slug)}`, {
         name: "dlg-uaepass-logout",
         kind: "signout",
         width: 420,
         height: 320,
       });
+      /**
+       * AND WE CLOSE IT OURSELVES, WHEREVER IT ENDED UP.
+       *
+       * The plan was: our page redirects to UAE PASS's logout, they clear the
+       * session, they send the browser back to /uaepass/done, which closes
+       * itself. On production the window landed on
+       * box.emiratespost.ae/dashboard instead — UAE PASS ignored our
+       * `redirect_uri` and used the one registered against the client, which is
+       * Emirates Post's portal. So our page never ran, the window stayed open,
+       * and a customer who had just asked to sign out was shown their portal
+       * account saying "Welcome EMRE!".
+       *
+       * The logout GET has been issued by the time any of that happens, so the
+       * window has done its job either way. We opened it; we close it, on a
+       * timer, rather than depending on a redirect target that is not ours to
+       * set. /uaepass/done still closes itself when it IS reached — this is the
+       * belt to that.
+       */
+      if (win) window.setTimeout(() => { try { win.close(); } catch { /* already gone */ } }, 2500);
     }
   }, [agent.slug, agent.uaePassEnabled]);
 
