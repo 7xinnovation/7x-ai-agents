@@ -245,10 +245,24 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
 function ChatButtons({ labels, onSelect, stacked }: { labels: string[]; onSelect: (text: string) => void; stacked?: boolean }) {
   if (!labels.length) return null;
   const asPair = Boolean(stacked) && labels.length === 2;
+  /**
+   * A LIST OF EQUALS HAS NO RECOMMENDED ANSWER.
+   *
+   * "Don't have Abu Dhabi a different colour on the emirate selection, all
+   * should be the same." Quite right: the first option was painted as the
+   * primary action whatever the question, so "Which emirate would you like the
+   * box in?" came back with Abu Dhabi picked out in solid blue — a
+   * recommendation nobody made, for a choice that has no better answer.
+   *
+   * Two options usually DO have a leading one: yes/no, confirm/change, and the
+   * primary is what tells them apart at a glance. Three or more are a list, and
+   * a list of places is a list of equals.
+   */
+  const hasPrimary = labels.length === 2;
   return (
     <div className={`dlg-chat-buttons${asPair ? " is-pair" : ""}`}>
       {labels.map((l, i) => (
-        <button key={i} type="button" className={`dlg-chat-btn${i === 0 ? " primary" : ""}`} onClick={() => onSelect(l)}>
+        <button key={i} type="button" className={`dlg-chat-btn${hasPrimary && i === 0 ? " primary" : ""}`} onClick={() => onSelect(l)}>
           {l}
         </button>
       ))}

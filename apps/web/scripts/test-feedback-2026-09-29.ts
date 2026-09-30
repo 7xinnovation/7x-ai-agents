@@ -325,5 +325,30 @@ check("no match says so rather than showing nothing", /\{needle && !matched\.len
 check("...in both languages", /searchArea: "Search by area or branch name"/.test(map) && /ابحث بالمنطقة أو باسم الفرع/.test(map));
 check("it is disabled once a branch is chosen", /disabled=\{!!selected\}/.test(map));
 
+console.log("\nA list of equals has no recommended answer");
+// "Don't have Abu Dhabi a different colour on the emirate selection, all should
+// be the same." The first option was painted as the primary action whatever the
+// question, so "Which emirate?" came back with Abu Dhabi in solid blue — a
+// recommendation nobody made, for a choice with no better answer.
+check("only a pair gets a primary", /const hasPrimary = labels\.length === 2;/.test(md));
+check("...applied to the first of the two", /className=\{`dlg-chat-btn\$\{hasPrimary && i === 0 \? " primary" : ""\}`\}/.test(md));
+check("...so three or more are all the same", !/\{`dlg-chat-btn\$\{i === 0 \? " primary" : ""\}`\}/.test(md));
+
+console.log("\nThe console's mail is not a customer's mail");
+/**
+ * Staging deliberately cannot email customers — the providers were removed so a
+ * test could not reach a real applicant. Admin invitations went with them, and
+ * an administrator could not add a colleague.
+ */
+const email = readFileSync(new URL("../lib/email.ts", import.meta.url), "utf8");
+const invite = readFileSync(new URL("../lib/inviteEmail.ts", import.meta.url), "utf8");
+const users = readFileSync(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8");
+check("the console sends as its own tenant", /export const ADMIN_TENANT = "admin";/.test(email));
+check("...used by the invitation", /tenant: ADMIN_TENANT \}\);/.test(invite));
+check("...and by the check that decides whether to show the link", /emailConfigured\(ADMIN_TENANT\)/.test(users));
+// A tenant only falls back to the SHARED account, and on staging there is no
+// shared account to fall back to — so agent email stays off.
+check("a tenant's own keys are looked for first", /const resend = process\.env\[`RESEND_API_KEY\$\{suffix\}`\]/.test(email));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

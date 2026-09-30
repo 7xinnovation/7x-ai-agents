@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { listUsers, createUser, updateUser, getUserByEmail, scopeApplies, inviteUser, INVITE_TTL_MS } from "@/lib/users";
 import { verifySession } from "@/lib/session";
 import { sendInviteEmail } from "@/lib/inviteEmail";
-import { emailConfigured } from "@/lib/email";
+import { emailConfigured, ADMIN_TENANT } from "@/lib/email";
 import { getDb, agents } from "@dialog/db";
 import { inArray } from "drizzle-orm";
 
@@ -60,7 +60,7 @@ async function invite(req: NextRequest, user: { id: string; email: string; name:
   // The link is returned ONLY when no mail provider is configured, so a console
   // with no email set up is still usable and an admin can pass the link on
   // themselves. With email working it never leaves the server.
-  return { sent: result.ok, reason: result.reason, link: emailConfigured() ? undefined : link };
+  return { sent: result.ok, reason: result.reason, link: emailConfigured(ADMIN_TENANT) ? undefined : link };
 }
 
 export async function POST(req: NextRequest) {
