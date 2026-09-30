@@ -345,7 +345,12 @@ check("nothing to log out of still closes the window", /NextResponse\.redirect\(
 // URI registered against the Emirates Post client — their portal dashboard —
 // so our self-closing page never ran and the window sat there saying
 // "Welcome EMRE!" to somebody who had just signed out.
-check("the window is closed by us, not by where it landed", /if \(win\) window\.setTimeout\(\(\) => \{ try \{ win\.close\(\); \}/.test(exp));
+// The window is now taken back on a timer rather than closed on one — where
+// the portal is the door it is navigated on to end that session too — but the
+// point this pins is unchanged: WE decide when it goes, not the page it landed
+// on. See test-relay-signout-2026-09-30 for the sequence.
+check("the window is closed by us, not by where it landed",
+  /if \(win\) \{\s*\n\s*window\.setTimeout\(\(\) => \{[\s\S]{0,160}win\.close\(\)/.test(exp));
 check("...and that is written down where the next person will wonder", /WHERE UAE PASS SENDS THE BROWSER IS NOT OURS TO DECIDE/.test(logoutRoute));
 check("prompt=login stays as the belt to that braces", /switchAccount\.current = true;/.test(exp));
 
