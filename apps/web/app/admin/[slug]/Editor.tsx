@@ -102,8 +102,23 @@ export function Editor({ slug }: { slug: string }) {
     return best ? `.${best}` : ".example.ae";
   }, [def.allowedOrigins]);
 
+  /**
+   * The sign-out attributes are IN the snippet, not a footnote under it.
+   *
+   * Emirates Post installed this tag with data-domain alone, which is what the
+   * panel used to print. Sign-out then ended our session and left theirs — so
+   * the next Sign in went to their portal, the portal still held
+   * localStorage.accessToken, and the customer was signed straight back in as
+   * themselves. Three rounds of "sign out is still not working" for one missing
+   * attribute nobody was ever shown.
+   *
+   * It stays the site owner's decision — the relay does nothing without it —
+   * but the decision is now in front of them, with the consequence written
+   * underneath, instead of being a default they never knew they had taken.
+   */
   const relaySnippet = useMemo(
-    () => `<script src="${origin}/dialog-relay.js"\n        data-domain="${relayDomain}"></script>`,
+    () =>
+      `<script src="${origin}/dialog-relay.js"\n        data-domain="${relayDomain}"\n        data-signout-clears-host="1"></script>`,
     [origin, relayDomain]
   );
 
@@ -319,7 +334,7 @@ Send the developer BOTH files &mdash; the component on its own reads as a puzzle
               which the tag above then reads.
             </p>
             <div className="mt-2.5 flex items-center justify-between gap-2">
-              <span className="text-[12.5px] font-semibold">Relay snippet &mdash; sign-in page only</span>
+              <span className="text-[12.5px] font-semibold">Relay snippet &mdash; sign-in page, and every page for sign-out</span>
               <Button variant="outline" size="sm" onClick={copyRelay}>
                 {copiedRelay ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copiedRelay ? "Copied" : "Copy"}
               </Button>
@@ -344,6 +359,24 @@ Send the developer BOTH files &mdash; the component on its own reads as a puzzle
                 to <em>both</em> tags.
               </li>
               <li>
+                <strong>
+                  <code className="rounded bg-surface px-1 py-0.5 font-mono">data-signout-clears-host=&quot;1&quot;</code>{" "}
+                  is what makes sign-out mean sign-out
+                </strong>{" "}
+                &mdash; and it signs the customer out of <em>this website</em>, not only the chat, which is why
+                it is the site owner&rsquo;s call. Leave it off and the relay clears its own cookie, leaves the
+                site&rsquo;s token alone and says so in the console; the customer signs out of the chat, clicks
+                sign in, and the site hands the same session straight back.
+              </li>
+              <li>
+                Session spread across more than one key? Name them all:{" "}
+                <code className="rounded bg-surface px-1 py-0.5 font-mono">
+                  data-signout-clears-keys=&quot;accessToken,profile&quot;
+                </code>
+                . Defaults to the token key alone. The extra ones are usually cosmetic &mdash; a dashboard still
+                greeting someone by name after they signed out reads as a sign-out that failed.
+              </li>
+              <li>
                 Not in <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code> at all
                 (a cookie-session portal)? Skip the relay and push it from their page:{" "}
                 <code className="rounded bg-surface px-1 py-0.5 font-mono">window.Dialog.setUaePassToken(token)</code>.
@@ -355,6 +388,16 @@ Send the developer BOTH files &mdash; the component on its own reads as a puzzle
                 origin.
               </li>
             </ul>
+            <p className="mt-2.5 text-[12.5px] text-muted">
+              <strong>Put it on every page, not only the sign-in one.</strong> The chat announces a sign-out to
+              the page it is embedded in &mdash; which reaches this tag only while the assistant is an{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">&lt;iframe&gt;</code> on the site.
+              Opened on its own at{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">{origin}</code>, it is not in the frame
+              tree and nothing is told. So it also opens a brief window on the site root carrying{" "}
+              <code className="rounded bg-surface px-1 py-0.5 font-mono">?dlg-signout=1</code>, which this tag
+              answers wherever it is loaded. Sitewide covers both; sign-in page only covers neither.
+            </p>
             <p className="mt-2.5 text-[12.5px] text-muted">
               Either way the tag must be on the host page: a plain{" "}
               <code className="rounded bg-surface px-1 py-0.5 font-mono">&lt;iframe&gt;</code> in place of it

@@ -93,5 +93,21 @@ check("...and it is closed from this side", /name: "dlg-host-signout"/.test(exp)
 check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== origin\) return;/.test(exp));
 
+console.log("\nAnd the snippet the admin panel hands over carries it");
+/**
+ * Emirates Post installed the tag exactly as this panel printed it —
+ * data-domain and nothing else — so the sign-out attribute was a default they
+ * took without being shown it, and three rounds of "sign out is still not
+ * working" came out of one missing line.
+ */
+const editor = readFileSync(new URL("../app/admin/[slug]/Editor.tsx", import.meta.url), "utf8");
+check("the opt-in is in the snippet itself", /data-signout-clears-host="1"><\/script>/.test(editor));
+check("...with the consequence written under it", /signs the customer out of <em>this website<\/em>/.test(editor));
+check("...and the multi-key form shown", /data-signout-clears-keys=&quot;accessToken,profile&quot;/.test(editor));
+// Sign-in page only was right when this was about handing a token over. It is
+// wrong now: the page-load sign-out can only be answered where the tag is.
+check("...and it says to install it sitewide", /Put it on every page, not only the sign-in one/.test(editor));
+check("...naming the marker that reaches it there", /\?dlg-signout=1/.test(editor));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
