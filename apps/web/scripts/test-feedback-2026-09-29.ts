@@ -283,6 +283,22 @@ check("...and passed through", /buildAuthorizeUrl\(resolveRedirectUri\(origin\),
 // single sign-on is for. Only the person who asked to change accounts is asked
 // to authenticate again.
 check("a sign-out arms it", /switchAccount\.current = true;/.test(exp));
+/**
+ * AND THE HOST PORTAL IS SKIPPED WHEN IT IS ARMED.
+ *
+ * Emirates Post's agent has a hostLoginUrl, so in a browser signIn returned at
+ * that branch and never reached the UAE PASS one — making prompt=login and
+ * &switch=1 dead code on the very agent they were written for. Worse, the
+ * portal is still signed in, so opening it handed back the identity the
+ * customer had just signed out of.
+ */
+check("...and the portal is skipped while it is",
+  /Boolean\(agent\.hostLoginUrl\) && !isNative\(\) && !\(switchAccount\.current && agent\.uaePassEnabled\)/.test(exp));
+check("...so the UAE PASS branch is actually reachable after a sign-out",
+  exp.indexOf("const hostLoginUsable") < exp.indexOf('const swap = switchAccount.current ? "&switch=1" : "";'));
+// An ordinary first sign-in still goes through the portal — that is the right
+// door for somebody already signed in to Emirates Post.
+check("...but an ordinary sign-in still uses the portal", /THE PORTAL IS THE THING HOLDING THE IDENTITY THEY JUST SIGNED OUT OF/.test(exp));
 check("...the next sign-in spends it", /const swap = switchAccount\.current \? "&switch=1" : "";\s*\n\s*switchAccount\.current = false;/.test(exp));
 check("...and an ordinary first sign-in does not carry it", /\$\{mock\}\$\{swap\}/.test(exp));
 // The belt to prompt=login's braces: the only thing that genuinely clears the
