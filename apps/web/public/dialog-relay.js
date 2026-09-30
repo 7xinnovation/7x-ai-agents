@@ -47,7 +47,29 @@
  *   data-cookie     Cookie name. Default "dlg_host_token". Must match the
  *                   assistant's data-token-cookie if that is customised.
  *   data-max-age    Cookie lifetime in seconds. Default 1800. Refreshed while the
- *                   token is present, so this is an idle expiry, not a session cap.
+ *                   token is present, so this is an idle expiry, not a side cap.
+ *   data-signout-clears-host
+ *                   "1" to also DELETE the host's own token from localStorage when
+ *                   the customer signs out of the assistant. Default OFF.
+ *                   See SIGNING OUT below -- this ends the session on THIS site,
+ *                   not only in the assistant, so it is the site owner's decision.
+ *
+ * SIGNING OUT
+ *   The assistant posts { source: "dialog", action: "signed-out" } to this page when
+ *   the customer signs out of the chat. Until now nothing listened, so:
+ *
+ *     - the mirror cookie stayed, and
+ *     - this page stayed signed in, because the token in localStorage is the SITE'S
+ *       session and never ours to begin with.
+ *
+ *   The cookie is ours and is now always cleared -- leaving our own mirror of a
+ *   token behind after a sign-out is our bug, not a policy question.
+ *
+ *   The site's token is a different matter. Deleting it signs the customer out of
+ *   THIS WEBSITE, not just the assistant. That is arguably right -- one person, one
+ *   identity, one sign-out -- and it is still the site owner's call to make rather
+ *   than a side effect of embedding a chat widget. So it is opt-in:
+ *   data-signout-clears-host="1".
  *
  * ONE THING TO BE AWARE OF
  *   The cookie is readable by JavaScript on every subdomain of data-domain -- that
@@ -69,6 +91,9 @@
   var TOKEN_KEY = d.tokenKey || "accessToken";
   var COOKIE = d.cookie || "dlg_host_token";
   var MAX_AGE = parseInt(d.maxAge || "1800", 10);
+  // Opt-in: see SIGNING OUT above. Off unless the site says otherwise, because
+  // it ends the session on THIS site and not only in the assistant.
+  var SIGNOUT_CLEARS_HOST = String(d.signoutClearsHost || "") === "1";
 
   if (!isFinite(MAX_AGE) || MAX_AGE <= 0) MAX_AGE = 1800;
 
@@ -252,6 +277,46 @@
   }, 4000);
 
   sync();
+  /**
+   * THE CUSTOMER SIGNED OUT OF THE ASSISTANT.
+   *
+   * It has always told us — { source: "dialog", action: "signed-out" } — and
+   * nothing here listened, so our mirror cookie survived a sign-out and this
+   * page went on holding a session the customer had just ended somewhere else.
+   *
+   * The cookie goes unconditionally: it is OUR copy of their token and keeping
+   * it after a sign-out is indefensible.
+   *
+   * The site's own token goes only where the site has asked for it, because
+   * removing it signs the customer out of this website. One identity and one
+   * sign-out is a reasonable policy and it is not ours to adopt on a site
+   * owner's behalf.
+   *
+   * Only from the assistant's own origin. A page that can post to us can
+   * otherwise sign the customer out of the site it is embedded in.
+   */
+  function onAssistantMessage(e) {
+    if (!ASSISTANT || e.origin !== ASSISTANT) return;
+    var m = e.data;
+    if (!m || m.source !== "dialog" || m.action !== "signed-out") return;
+    if (canCookie) clear();
+    posted = null;
+    if (!SIGNOUT_CLEARS_HOST) {
+      note(
+        "the assistant signed out and our cookie is cleared, but this site's own token in \"" +
+          TOKEN_KEY + "\" was left alone. Add data-signout-clears-host=\"1\" to also sign the customer out of this site."
+      );
+      return;
+    }
+    try {
+      window.localStorage.removeItem(TOKEN_KEY);
+    } catch (err) {
+      // Storage throws outright in some privacy modes. Nothing to remove, and
+      // nothing on this page should break because of it.
+    }
+  }
+  window.addEventListener("message", onAssistantMessage);
+
   // `storage` catches a write from another tab or the sign-in popup; localStorage
   // fires nothing for a write in THIS tab, so it is polled too.
   window.addEventListener("storage", function (e) {
