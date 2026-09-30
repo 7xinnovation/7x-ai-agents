@@ -65,7 +65,11 @@ console.log("\nNor is UAE PASS opened behind the app's own sign-in");
 // browser, for one tap.
 const nativeBranch = exp.slice(exp.indexOf('if (isNative()) {\n      tried.push("asked the app");'));
 check("the native branch returns before the UAE PASS route", nativeBranch.indexOf("return;") < nativeBranch.indexOf("agent.uaePassEnabled"));
-check("...and the host portal is still skipped in the app", /const hostLoginUsable = Boolean\(agent\.hostLoginUrl\) && !isNative\(\);/.test(exp));
+// It gained a second exclusion on 30 September — the portal is also skipped
+// when the customer has asked to switch identity — but `!isNative()` is the
+// half this test is about and it still holds.
+check("...and the host portal is still skipped in the app",
+  /const hostLoginUsable =\s*\n?\s*Boolean\(agent\.hostLoginUrl\) && !isNative\(\)/.test(exp));
 check("a browser still opens UAE PASS as it did", /openExternal\(`\$\{base\}&popup=1`/.test(exp));
 
 console.log("\nThe tap is acknowledged before the app answers");
