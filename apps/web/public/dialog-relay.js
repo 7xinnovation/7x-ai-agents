@@ -53,6 +53,12 @@
  *                   the customer signs out of the assistant. Default OFF.
  *                   See SIGNING OUT below -- this ends the session on THIS site,
  *                   not only in the assistant, so it is the site owner's decision.
+ *   data-signout-clears-keys
+ *                   Comma-separated localStorage keys to remove on that sign-out.
+ *                   Default: just data-token-key. Emirates Post's portal keeps
+ *                   the name in "profile" as well, and a dashboard still saying
+ *                   "Welcome EMRE!" reads as a failed sign-out:
+ *                   data-signout-clears-keys="accessToken,profile".
  *
  * SIGNING OUT
  *   The assistant posts { source: "dialog", action: "signed-out" } to this page when
@@ -94,6 +100,20 @@
   // Opt-in: see SIGNING OUT above. Off unless the site says otherwise, because
   // it ends the session on THIS site and not only in the assistant.
   var SIGNOUT_CLEARS_HOST = String(d.signoutClearsHost || "") === "1";
+  /**
+   * WHICH keys a sign-out clears, when it is allowed to clear any.
+   *
+   * The token alone ends the session -- every guard on box.emiratespost.ae reads
+   * `accessToken`. But the portal also keeps `profile`, and a dashboard that
+   * still says "Welcome EMRE!" after a sign-out looks exactly like a sign-out
+   * that did not work, whether or not the customer is still authenticated. So
+   * the site can name the rest: data-signout-clears-keys="accessToken,profile".
+   */
+  var CLEAR_KEYS = String(d.signoutClearsKeys || "")
+    .split(",")
+    .map(function (k) { return k.trim(); })
+    .filter(Boolean);
+  if (!CLEAR_KEYS.length) CLEAR_KEYS = [TOKEN_KEY];
 
   if (!isFinite(MAX_AGE) || MAX_AGE <= 0) MAX_AGE = 1800;
 
@@ -301,21 +321,78 @@
     if (!m || m.source !== "dialog" || m.action !== "signed-out") return;
     if (canCookie) clear();
     posted = null;
+    clearHost();
+  }
+  window.addEventListener("message", onAssistantMessage);
+
+  /** Drop this site's own session, if the site has said we may. Returns whether. */
+  function clearHost() {
     if (!SIGNOUT_CLEARS_HOST) {
       note(
         "the assistant signed out and our cookie is cleared, but this site's own token in \"" +
           TOKEN_KEY + "\" was left alone. Add data-signout-clears-host=\"1\" to also sign the customer out of this site."
       );
-      return;
+      return false;
     }
+    for (var i = 0; i < CLEAR_KEYS.length; i++) {
+      try {
+        window.localStorage.removeItem(CLEAR_KEYS[i]);
+      } catch (err) {
+        // Storage throws outright in some privacy modes. Nothing to remove, and
+        // nothing on this page should break because of it.
+      }
+    }
+    return true;
+  }
+
+  /**
+   * THE SIGN-OUT THAT ARRIVES AS A PAGE LOAD, NOT AS A MESSAGE.
+   *
+   * `postMessage` to `window.parent` reaches this script only while the
+   * assistant is EMBEDDED in this site -- then the parent is us. Opened on its
+   * own at agent.7x.ae, the widget's parent is itself, and a sign-out there
+   * reaches nothing: this site is not in the frame tree and no origin can
+   * script another one's storage.
+   *
+   * That is not a corner case. On production the portal is the only way in --
+   * the UAE PASS client is registered to box.emiratespost.ae, not to us -- so
+   * the customer signs out of the assistant, clicks Sign in, the portal still
+   * holds the session, and they are back in as themselves without being asked.
+   *
+   * So the assistant opens a window on this site carrying `dlg-signout`, this
+   * script runs as part of the page like it does everywhere else, and the
+   * session ends on the origin that owns it. It is the same shape as the UAE
+   * PASS sign-out: a window, a moment, gone. Nothing is rendered and nothing is
+   * navigated -- the window is closed from the side that opened it.
+   *
+   * Under the SAME opt-in as everything above. A URL is not permission.
+   */
+  function signoutRequested() {
     try {
-      window.localStorage.removeItem(TOKEN_KEY);
+      return /(^|[?&#])dlg-signout(=|&|$)/.test(String(location.search) + String(location.hash));
     } catch (err) {
-      // Storage throws outright in some privacy modes. Nothing to remove, and
-      // nothing on this page should break because of it.
+      return false;
     }
   }
-  window.addEventListener("message", onAssistantMessage);
+
+  if (signoutRequested()) {
+    if (canCookie) clear();
+    posted = null;
+    var cleared = clearHost();
+    // Tell the opener it landed, so a sign-out that silently did nothing --
+    // the attribute missing, this script not on this page -- can be told apart
+    // from one that worked. Only ever to the assistant's own origin.
+    try {
+      if (window.opener && ASSISTANT) {
+        window.opener.postMessage(
+          { source: "dialog-relay", action: "host-signed-out", cleared: cleared },
+          ASSISTANT
+        );
+      }
+    } catch (err) {
+      /* opener gone, or severed by COOP; the clearing already happened */
+    }
+  }
 
   // `storage` catches a write from another tab or the sign-in popup; localStorage
   // fires nothing for a write in THIS tab, so it is polled too.

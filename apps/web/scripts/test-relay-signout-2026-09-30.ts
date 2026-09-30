@@ -50,7 +50,10 @@ check("...and the last posted token is forgotten with it", /posted = null;/.test
 
 console.log("\nThe site's own token only where the site asked");
 check("off unless opted in", /var SIGNOUT_CLEARS_HOST = String\(d\.signoutClearsHost \|\| ""\) === "1";/.test(relay));
-check("...and then removed", /window\.localStorage\.removeItem\(TOKEN_KEY\);/.test(relay));
+// The list it removes defaults to exactly TOKEN_KEY — see the CLEAR_KEYS
+// assertions below, which is where this moved when the portal turned out to
+// keep the name in a second key as well.
+check("...and then removed", /window\.localStorage\.removeItem\(CLEAR_KEYS\[i\]\);/.test(relay));
 check("...with storage that throws handled, as everywhere else here", /catch \(err\) \{/.test(relay));
 // Silence would be the worst outcome: the site owner never learns the option
 // exists, and the customer stays signed in with no trace of why.
@@ -60,6 +63,35 @@ console.log("\nDocumented where somebody installing it will read it");
 check("the attribute is in the attribute list", /data-signout-clears-host/.test(relay.slice(0, relay.indexOf("(function ()"))));
 check("...and the reasoning has its own section", /\* SIGNING OUT/.test(relay));
 check("...saying plainly whose session is whose", /the token in localStorage is the SITE'S/.test(relay));
+
+console.log("\nA sign-out can also arrive as a page load, for the un-embedded widget");
+/**
+ * postMessage reaches the relay only while the assistant is embedded in the
+ * host page. Opened on its own at agent.7x.ae the parent is itself, so on
+ * production — where the portal is the only door — a sign-out reached the
+ * portal's session not at all, and the next Sign in came straight back as the
+ * same person. The window our side opens is the other half of this.
+ */
+check("the relay acts on dlg-signout in the URL", /function signoutRequested\(\)/.test(relay));
+check("...matching it in the query or the hash", /dlg-signout\(=\|&\|\$\)/.test(relay));
+check("...under the same opt-in, because a URL is not permission", /var cleared = clearHost\(\);/.test(relay));
+check("...and one clearHost serves both routes", /function clearHost\(\)/.test(relay) && /^\s*clearHost\(\);$/m.test(relay));
+check("...telling the opener which happened", /action: "host-signed-out", cleared: cleared/.test(relay));
+check("...only to the assistant's origin", /window\.opener\.postMessage\(\s*\{[^}]*\},\s*ASSISTANT\s*\)/.test(relay));
+
+console.log("\nAnd the site can name the other keys its session lives in");
+check("extra keys are configurable", /d\.signoutClearsKeys/.test(relay));
+check("...defaulting to the token alone", /if \(!CLEAR_KEYS\.length\) CLEAR_KEYS = \[TOKEN_KEY\];/.test(relay));
+check("...and all of them are removed", /window\.localStorage\.removeItem\(CLEAR_KEYS\[i\]\)/.test(relay));
+
+console.log("\nThe widget opens that window, where the portal is the only door");
+check("only when the portal is the door", /if \(agent\.hostLoginUrl && !agent\.uaePassOwnFlow\) \{/.test(exp));
+// A sign-in page asked to sign somebody out signs them back in.
+check("...on the site root, not the sign-in page", /\$\{origin\}\/\?dlg-signout=1/.test(exp));
+check("...from hostLoginUrl's origin", /origin = new URL\(agent\.hostLoginUrl\)\.origin/.test(exp));
+check("...and it is closed from this side", /name: "dlg-host-signout"/.test(exp) && /host\.close\(\)/.test(exp));
+check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
+check("...and only that origin is believed", /if \(e\.origin !== origin\) return;/.test(exp));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
