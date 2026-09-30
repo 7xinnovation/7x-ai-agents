@@ -293,13 +293,37 @@ check("a sign-out arms it", /switchAccount\.current = true;/.test(exp));
  * customer had just signed out of.
  */
 check("...and the portal is skipped while it is",
-  /Boolean\(agent\.hostLoginUrl\) && !isNative\(\) && !\(switchAccount\.current && agent\.uaePassEnabled\)/.test(exp));
+  /!\(switchAccount\.current && agent\.uaePassEnabled && agent\.uaePassOwnFlow\)/.test(exp));
+/**
+ * But only where OUR UAE PASS callback is one the tenant's client accepts.
+ * Emirates Post's production client is registered to their own portal, so
+ * skipping it sent the customer to UAE PASS with an unregistered redirect and
+ * they got "Sorry! Looks like something went wrong at our end".
+ */
+const uaepassLib = readFileSync(new URL("../lib/uaepass.ts", import.meta.url), "utf8");
+check("...and whether our callback is accepted is computed, not assumed",
+  /export function uaePassRedirectsToUs\(origin: string, tenant\?: string\): boolean/.test(uaepassLib));
+check("...from the registered redirect's origin", /new URL\(registered\)\.origin === new URL\(origin\)\.origin/.test(uaepassLib));
+// Nothing registered in config: we have always used our own callback.
+check("...defaulting to ours where nothing is registered", /if \(!registered\) return true;/.test(uaepassLib));
+check("...and reaching the widget", /uaePassOwnFlow: uaePassRedirectsToUs\(origin, d\.tenantSlug\)/.test(readFileSync(new URL("../app/embed/[agent]/page.tsx", import.meta.url), "utf8")));
+/**
+ * And the flag survives an abandoned attempt. Spending it on the first click
+ * meant a second click went back through the portal — which signed them in as
+ * the person they had just signed out of.
+ */
+check("the switch is not spent by merely opening the door",
+  /const swap = switchAccount\.current \? "&switch=1" : "";\s*\n(?!\s*switchAccount\.current = false;)/.test(exp));
+check("...it is spent when they are actually signed in",
+  /if \(authenticated\) switchAccount\.current = false;/.test(exp));
 check("...so the UAE PASS branch is actually reachable after a sign-out",
   exp.indexOf("const hostLoginUsable") < exp.indexOf('const swap = switchAccount.current ? "&switch=1" : "";'));
 // An ordinary first sign-in still goes through the portal — that is the right
 // door for somebody already signed in to Emirates Post.
 check("...but an ordinary sign-in still uses the portal", /THE PORTAL IS THE THING HOLDING THE IDENTITY THEY JUST SIGNED OUT OF/.test(exp));
-check("...the next sign-in spends it", /const swap = switchAccount\.current \? "&switch=1" : "";\s*\n\s*switchAccount\.current = false;/.test(exp));
+// It used to be spent HERE, on the click. That was the second-click bug — see
+// "the switch is not spent by merely opening the door" below.
+check("...the next sign-in carries it", /const swap = switchAccount\.current \? "&switch=1" : "";/.test(exp));
 check("...and an ordinary first sign-in does not carry it", /\$\{mock\}\$\{swap\}/.test(exp));
 // The belt to prompt=login's braces: the only thing that genuinely clears the
 // SSO cookie rather than asking the IdP to ignore it.

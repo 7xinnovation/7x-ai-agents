@@ -63,6 +63,8 @@ export interface PublicAgent {
   hostLoginUrl?: string;
   /** In-app: still fall through to UAE PASS when the app ignores signin-needed. */
   nativeUaePassFallback?: boolean;
+  /** Our own UAE PASS callback is registered for this tenant's client. */
+  uaePassOwnFlow?: boolean;
   /** A two-option choice renders stacked and full width (FB-1795). */
   stackedChoices?: boolean;
   /** A URL a native host intercepts to run sign-in itself. See nativeBridge. */

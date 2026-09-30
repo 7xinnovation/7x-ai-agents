@@ -584,6 +584,8 @@ export function Experience({
   useEffect(() => {
     authenticatedRef.current = authenticated;
     // An app that answered — however slowly — must not then be told it did not.
+    // Signed in for real: whatever they were switching to, they have arrived.
+    if (authenticated) switchAccount.current = false;
     if (authenticated && nativeAskTimer.current) {
       window.clearTimeout(nativeAskTimer.current);
       nativeAskTimer.current = null;
@@ -1757,7 +1759,16 @@ export function Experience({
      * somebody who is already signed in to Emirates Post.
      */
     const hostLoginUsable =
-      Boolean(agent.hostLoginUrl) && !isNative() && !(switchAccount.current && agent.uaePassEnabled);
+      Boolean(agent.hostLoginUrl) &&
+      !isNative() &&
+      // ...and only where OUR UAE PASS callback is one this tenant's client
+      // accepts. On production Emirates Post's client is registered to their
+      // own portal, so skipping it sends the customer to UAE PASS with an
+      // unregistered redirect and they get "Sorry! Looks like something went
+      // wrong at our end". There the portal is the only door there is, and the
+      // way to make it ask again is to end the portal's session —
+      // data-signout-clears-host on the relay, not a detour around it.
+      !(switchAccount.current && agent.uaePassEnabled && agent.uaePassOwnFlow);
     if (hostLoginUsable && typeof window !== "undefined") {
       const win = openExternal(agent.hostLoginUrl!, { name: "dlg-host-login", kind: "signin" });
       if (!win) {
@@ -1780,10 +1791,18 @@ export function Experience({
       // simulate a login (only honoured where the server permits it). Real users on
       // the plain URL always get genuine UAE PASS.
       const mock = new URLSearchParams(window.location.search).get("mock") === "1" ? "&mock=1" : "";
-      // Only after a sign-out — see signOut. Cleared as it is used, so a second
-      // sign-in in the same session is an ordinary one.
+      /**
+       * Only after a sign-out — see signOut.
+       *
+       * NOT cleared here. It used to be, and that is the "second click" bug:
+       * the first click opened UAE PASS correctly and spent the flag; if that
+       * attempt was abandoned — the window closed, the login not finished — the
+       * second click found the flag gone, went back through the portal, and the
+       * portal signed them straight in as the person they had just signed out
+       * of. Opening a door is not walking through it. The flag is cleared when
+       * they are actually authenticated; see the effect on `authenticated`.
+       */
       const swap = switchAccount.current ? "&switch=1" : "";
-      switchAccount.current = false;
       const base =
         `/api/uaepass/login?agent=${encodeURIComponent(agent.slug)}` +
         `&cid=${encodeURIComponent(convId.current ?? "")}` +
