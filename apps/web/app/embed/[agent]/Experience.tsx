@@ -1736,7 +1736,28 @@ export function Experience({
      * ordering stays as it was on the web, where the portal is the right door
      * and the loader is standing behind it.
      */
-    const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative();
+    /**
+     * THE PORTAL IS THE THING HOLDING THE IDENTITY THEY JUST SIGNED OUT OF.
+     *
+     * This is why sign-out looked broken for two days, and it was ours the
+     * whole time. Emirates Post's agent has a `hostLoginUrl`
+     * (box.emiratespost.ae/uaepass), so in a browser this branch RETURNS and
+     * the UAE PASS branch below is never reached — which means `prompt=login`
+     * and `&switch=1`, written to make UAE PASS ask again, have been dead code
+     * on this agent since the day they were added.
+     *
+     * Worse than dead: the portal is still signed in, so opening it hands the
+     * customer's old identity straight back. Pressing "Sign in" after a
+     * sign-out re-admitted the exact session they had just ended.
+     *
+     * So when they have asked to CHANGE identity — which is what a sign-out
+     * followed by a sign-in means — the portal is the wrong door. Go to UAE
+     * PASS directly, where we can say "ask them again". An ordinary first
+     * sign-in still goes through the portal, which is the right door for
+     * somebody who is already signed in to Emirates Post.
+     */
+    const hostLoginUsable =
+      Boolean(agent.hostLoginUrl) && !isNative() && !(switchAccount.current && agent.uaePassEnabled);
     if (hostLoginUsable && typeof window !== "undefined") {
       const win = openExternal(agent.hostLoginUrl!, { name: "dlg-host-login", kind: "signin" });
       if (!win) {
