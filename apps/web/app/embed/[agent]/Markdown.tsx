@@ -242,9 +242,28 @@ function ChatUpload({ dkey, ctx }: { dkey: string; ctx: UploadCtx }) {
  * chips are for; stacking six of them makes a menu out of a question. And only
  * where the agent asks for it, because this renderer is shared.
  */
+/**
+ * Is the second option a way OUT rather than a second thing to do?
+ *
+ * This is what separates a confirmation from a menu, and the difference was
+ * costing us: FB-1795 asked for a confirmation and its alternative to read as
+ * one block, and the rule I wrote stacked EVERY two-option prompt. "Rent a new
+ * personal PO Box / Ask a question about services" is not a confirmation — it
+ * is two things a customer might want — and full width it reads as a wall.
+ *
+ * A confirmation's second option declines. "No, I meant something else", "No,
+ * skip", "Not now", "Cancel". A menu's does not. Matched on the decline rather
+ * than on the question, because the question is prose and the options are not.
+ */
+// `\b` is ASCII-only in JavaScript, so it never fires between an Arabic letter
+// and a comma — "لا، شكراً" slipped straight past. The Arabic alternatives use a
+// unicode-aware boundary instead.
+const DECLINES =
+  /^\s*(no\b|not now|nope|cancel|don'?t|do not|skip|maybe later|nothing|neither|لا(?!\p{L})|ليس الآن|إلغاء|الغاء|تخطي|لاحقا)/iu;
+
 function ChatButtons({ labels, onSelect, stacked }: { labels: string[]; onSelect: (text: string) => void; stacked?: boolean }) {
   if (!labels.length) return null;
-  const asPair = Boolean(stacked) && labels.length === 2;
+  const asPair = Boolean(stacked) && labels.length === 2 && DECLINES.test(labels[1] ?? "");
   /**
    * A LIST OF EQUALS HAS NO RECOMMENDED ANSWER.
    *

@@ -203,7 +203,29 @@ console.log("\nFB-1795 — a two-option choice reads as one thing");
 const md = readFileSync(new URL("../app/embed/[agent]/Markdown.tsx", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../../../packages/config/src/agent.ts", import.meta.url), "utf8");
 const page = readFileSync(new URL("../app/embed/[agent]/page.tsx", import.meta.url), "utf8");
-check("exactly two options stack", /const asPair = Boolean\(stacked\) && labels\.length === 2;/.test(md));
+check("exactly two options, and only a CONFIRMATION, stack",
+  /const asPair = Boolean\(stacked\) && labels\.length === 2 && DECLINES\.test\(labels\[1\] \?\? ""\);/.test(md));
+/**
+ * The first rule stacked EVERY two-option prompt, which is what FB-1795 asked
+ * for read literally and wrong in practice: "Rent a new personal PO Box / Ask a
+ * question about services" is not a confirmation, it is two things a customer
+ * might want, and full width it reads as a wall.
+ *
+ * A confirmation's second option DECLINES. A menu's offers something else.
+ */
+{
+  const decl = /const DECLINES =\s*\n?\s*(\/[\s\S]*?\/[a-z]*);/.exec(md);
+  check("the decline is what tells them apart", Boolean(decl));
+  const body = decl ? decl[1]! : "";
+  const cut = body.lastIndexOf("/");
+  const re = decl ? new RegExp(body.slice(1, cut), body.slice(cut + 1)) : /$^/;
+  for (const l of ["No, I meant something else", "No, skip", "Not now", "Cancel", "Don't add one", "لا، شكراً", "ليس الآن"]) {
+    check(`  "${l}" declines`, re.test(l));
+  }
+  for (const l of ["Ask a question about services", "Rent a new personal PO Box", "Bank transfer (Virtual IBAN)", "Choose a different branch", "Yes, rent a new one"]) {
+    check(`  "${l}" does not`, !re.test(l));
+  }
+}
 // Three or more are a set of choices, and a set of choices is what chips are
 // for — stacking six makes a menu out of a question.
 check("...three or more stay chips", /labels\.length === 2/.test(md) && !/labels\.length >= 2/.test(md));
