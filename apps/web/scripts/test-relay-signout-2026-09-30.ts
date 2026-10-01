@@ -151,9 +151,14 @@ console.log("\nAnd the snippet the admin panel hands over carries it");
  * working" came out of one missing line.
  */
 const editor = readFileSync(new URL("../app/admin/[slug]/Editor.tsx", import.meta.url), "utf8");
-check("the opt-in is in the snippet itself", /data-signout-clears-host="1"><\/script>/.test(editor));
+check("the opt-in is in the snippet itself", /data-signout-clears-host="1"\\n/.test(editor));
 check("...with the consequence written under it", /signs the customer out of <em>this website<\/em>/.test(editor));
-check("...and the multi-key form shown", /data-signout-clears-keys=&quot;accessToken,profile&quot;/.test(editor));
+check("...and the key list in it too", /data-signout-clears-keys="\$\{relayClearKeys\}"><\/script>/.test(editor));
+// The token alone was not enough on the one host that has used this: the
+// credential is accessToken and the logged-in FLAG is profile.
+check("...carrying the flag key for the host it was read from", /known: Record<string, string\[\]> = \{ nxn: \["profile"\] \}/.test(editor));
+check("...and not imposed on other tenants", /known\[def\.tenantSlug \?\? ""\] \?\? \[\]/.test(editor));
+check("...with the console hint when a session key is missed", /cleared " \+ CLEAR_KEYS\.join\(", "\) \+ ', but these look like session state too/.test(relay));
 // Sign-in page only was right when this was about handing a token over. It is
 // wrong now: the page-load sign-out can only be answered where the tag is.
 check("...and it says to install it sitewide", /Put it on every page, not only the sign-in one/.test(editor));

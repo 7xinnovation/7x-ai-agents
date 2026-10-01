@@ -116,10 +116,35 @@ export function Editor({ slug }: { slug: string }) {
    * but the decision is now in front of them, with the consequence written
    * underneath, instead of being a default they never knew they had taken.
    */
+  /**
+   * WHICH KEYS THE SIGN-OUT CLEARS, named rather than left to a default.
+   *
+   * The token alone was not enough on the one host that has used this. Emirates
+   * Post's portal keeps the CREDENTIAL in `accessToken` and the logged-in FLAG
+   * in `profile`:
+   *
+   *   let e = localStorage.getItem("profile");
+   *   if (e) { dispatch(profileUpdated(JSON.parse(e))); dispatch(loggedIn()); }
+   *
+   * So clearing the token left the customer signed in, /uaepass routed them to
+   * the dashboard instead of to UAE PASS, and three deploys chased a sign-out
+   * that had been working all along.
+   *
+   * Read from the bundle on box.emiratespost.ae rather than guessed, which is
+   * why it is scoped to that tenant: another site's `profile` is not ours to
+   * delete. Any host can name its own, and the relay now prints the candidates
+   * it can see once a sign-out has run.
+   */
+  const relayClearKeys = useMemo(() => {
+    const token = "accessToken";
+    const known: Record<string, string[]> = { nxn: ["profile"] };
+    return [token, ...(known[def.tenantSlug ?? ""] ?? [])].join(",");
+  }, [def.tenantSlug]);
+
   const relaySnippet = useMemo(
     () =>
-      `<script src="${origin}/dialog-relay.js"\n        data-domain="${relayDomain}"\n        data-signout-clears-host="1"></script>`,
-    [origin, relayDomain]
+      `<script src="${origin}/dialog-relay.js"\n        data-domain="${relayDomain}"\n        data-signout-clears-host="1"\n        data-signout-clears-keys="${relayClearKeys}"></script>`,
+    [origin, relayDomain, relayClearKeys]
   );
 
   const save = useCallback(async () => {
@@ -369,26 +394,12 @@ Send the developer BOTH files &mdash; the component on its own reads as a puzzle
                 sign in, and the site hands the same session straight back.
               </li>
               <li>
-                Session spread across more than one key? Name them all:{" "}
-                <code className="rounded bg-surface px-1 py-0.5 font-mono">
-                  data-signout-clears-keys=&quot;accessToken,profile&quot;
-                </code>
-                . Defaults to the token key alone, and that is often not enough. Emirates Post&rsquo;s portal sets
-                its logged-in state from <code className="rounded bg-surface px-1 py-0.5 font-mono">profile</code> and
-                not from the token, so clearing the token alone left the customer signed in and sent the next sign-in
-                straight back to their dashboard. If the site stays signed in after a sign-out, the session is in a
-                key you have not named &mdash; the relay lists the candidates in the console.
-              </li>
-              <li>
-                Not in <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code> at all
-                (a cookie-session portal)? Skip the relay and push it from their page:{" "}
-                <code className="rounded bg-surface px-1 py-0.5 font-mono">window.Dialog.setUaePassToken(token)</code>.
-              </li>
-              <li>
-                The cookie is readable by script on every subdomain of{" "}
-                <code className="rounded bg-surface px-1 py-0.5 font-mono">{relayDomain}</code>. If that is
-                not acceptable, ask 7X for the bridge-page alternative, which keeps the token on its own
-                origin.
+                <code className="rounded bg-surface px-1 py-0.5 font-mono">data-signout-clears-keys</code> is the
+                list the sign-out clears. The token alone is usually not enough: Emirates Post&rsquo;s portal keeps the
+                credential in <code className="rounded bg-surface px-1 py-0.5 font-mono">accessToken</code> and the
+                logged-in flag in <code className="rounded bg-surface px-1 py-0.5 font-mono">profile</code>, so clearing
+                the token left the customer signed in. If this site stays signed in after a sign-out, the session is in
+                a key not on this list &mdash; the relay prints the candidates it can see in the console.
               </li>
             </ul>
             <p className="mt-2.5 text-[12.5px] text-muted">
