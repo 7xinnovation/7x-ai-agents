@@ -33,6 +33,14 @@ function acceptedDocTypes(key: string, label: string): DocType[] | null {
   if (/form.?0?9|نموذج.?9/.test(k)) return ["form_9"];
   if (/audited|afs|مدقق/.test(k)) return ["audited_financial_statement", "financial_statement"];
   if (/acknowledg|إقرار.?استلام|خطاب/.test(k)) return ["acknowledgement_letter"];
+  /**
+   * A trial balance names neither "financial" nor "statement", so this slot had
+   * no type gate at all and any file whatsoever satisfied it — a passport
+   * dropped into "Trial Balance" would have gone green. It is a financial
+   * statement in the taxonomy's terms ("an unaudited statement or a plain
+   * quarterly trial balance"), so it is gated as one.
+   */
+  if (/trial.?balance|ميزان.?المراجعة/.test(k)) return ["financial_statement", "audited_financial_statement"];
   if (/financial|statement|مالي/.test(k)) return ["financial_statement", "audited_financial_statement"];
   if (/declaration|undertaking|commitment|تعهد/.test(k)) return ["declaration"];
   // Passport slots had NO rule, so any file at all satisfied one -- an Emirates

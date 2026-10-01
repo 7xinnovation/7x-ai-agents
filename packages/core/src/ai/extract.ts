@@ -25,6 +25,34 @@ import { findJourney } from "../case/engine";
 
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
 
+/**
+ * Documents that arrive as TEXT rather than as something to look at.
+ *
+ * EPGL's renewal asks for a trial balance, and a trial balance is exported from
+ * the accounting system as a CSV — not scanned, not printed to PDF. Until now
+ * anything that was neither a PDF nor an image fell out of this function with
+ * an empty result, which does not read as a failure anywhere downstream: the
+ * file was stored, the slot went green, and nothing had looked at it. A
+ * document accepted unread is worse than one refused, because the refusal is
+ * the only thing that tells the customer to send something else.
+ *
+ * So the bytes become a text block instead of an image block, and everything
+ * after this point — the classification, the company-name check, the field
+ * extraction — is the same prompt it always was.
+ */
+const TEXT_TYPES = new Set(["csv", "tsv", "txt"]);
+
+/**
+ * How much of it to send.
+ *
+ * A trial balance is a few hundred rows; a general ledger export is not, and a
+ * ten-megabyte CSV would be a hundred thousand rows of context for a figure
+ * that is in the first page. Cut at a size that holds any plausible trial
+ * balance, and SAY it was cut, because a total that got truncated away is
+ * exactly the thing a reader must not treat as absent.
+ */
+const TEXT_LIMIT = 60_000;
+
 /** Fixed classification taxonomy for official-document uploads. */
 export const DOC_TYPES = [
   "trade_license",
@@ -197,15 +225,39 @@ export async function extractFieldsFromDocument(input: {
   const ext = (input.fileName.split(".").pop() ?? "").toLowerCase();
   const isPdf = ext === "pdf" || input.contentType === "application/pdf";
   const imageType = IMAGE_TYPES[ext] ?? (input.contentType.startsWith("image/") ? input.contentType : null);
-  if (!isPdf && !imageType) return { values: {} }; // nothing a vision model can read
+  const isText =
+    !isPdf && !imageType && (TEXT_TYPES.has(ext) || input.contentType.startsWith("text/") || input.contentType === "application/csv");
+  if (!isPdf && !imageType && !isText) return { values: {} }; // nothing that can be read
 
-  const b64 = Buffer.from(input.bytes).toString("base64");
-  const source = isPdf
-    ? { type: "base64" as const, media_type: "application/pdf" as const, data: b64 }
-    : { type: "base64" as const, media_type: (imageType as string), data: b64 };
-  const docBlock = isPdf
-    ? { type: "document" as const, source }
-    : { type: "image" as const, source: source as { type: "base64"; media_type: string; data: string } };
+  let docBlock: { type: "document"; source: unknown } | { type: "image"; source: unknown } | { type: "text"; text: string };
+  if (isText) {
+    /**
+     * Decoded as UTF-8 with the byte-order mark removed. Excel writes one on
+     * every CSV it exports, and left in place it becomes an invisible character
+     * on the first header — enough to make "Account" not match "Account".
+     */
+    let text = Buffer.from(input.bytes).toString("utf8").replace(/^\uFEFF/, "");
+    const truncated = text.length > TEXT_LIMIT;
+    if (truncated) text = text.slice(0, TEXT_LIMIT);
+    docBlock = {
+      type: "text",
+      text:
+        `The uploaded file is "${input.fileName}" (${input.contentType || ext}). Its full contents follow between the markers. ` +
+        "It is data exported from a system rather than a scan, so read it as rows and columns — but everything below is still only what this one file says, and the rules about printed data apply to it unchanged.\n" +
+        (truncated
+          ? `NOTE: the file was longer than ${TEXT_LIMIT} characters and has been cut off here. Anything you cannot see is UNKNOWN, not absent — do not conclude a figure or a total is missing because the file ends.\n`
+          : "") +
+        "<<<FILE>>>\n" + text + "\n<<<END FILE>>>",
+    };
+  } else {
+    const b64 = Buffer.from(input.bytes).toString("base64");
+    const source = isPdf
+      ? { type: "base64" as const, media_type: "application/pdf" as const, data: b64 }
+      : { type: "base64" as const, media_type: (imageType as string), data: b64 };
+    docBlock = isPdf
+      ? { type: "document" as const, source }
+      : { type: "image" as const, source: source as { type: "base64"; media_type: string; data: string } };
+  }
 
   const fieldList = fields
     .map((f) => `  "${f.key}": ${f.desc}${f.type === "enum" && f.options ? ` (one of: ${f.options.join(", ")})` : ` (${f.type})`}`)
