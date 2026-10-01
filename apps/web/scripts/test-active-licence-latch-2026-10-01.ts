@@ -46,7 +46,8 @@ console.log("\nThe real registry data this failed on");
    * refusing left the renewal on an account named after the applicant.
    */
   const DEAD = /^(inactive|expired|cancelled|canceled|closed|rejected|terminated|revoked|withdrawn|suspended)\b/i;
-  const pick = <T extends { licenseRecordId?: string; licenseStatus?: string }>(all: T[]): T | null => {
+  interface Row { accountId: string; licenseRecordId?: string; licenseStatus?: string }
+  const pick = (all: Row[]): Row | null => {
     const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
     const active = licensed.filter((x) => /^active\b/i.test(String(x.licenseStatus ?? "").trim()));
     if (active.length === 1) return active[0]!;
@@ -55,7 +56,7 @@ console.log("\nThe real registry data this failed on");
     if (licensed.length === 1) return licensed[0]!;
     return null;
   };
-  const REGISTRY = [
+  const REGISTRY: Row[] = [
     { accountId: "0015f00000ic9okAAA", licenseRecordId: "a12FW001yuIav1YYAR", licenseStatus: "Draft" },
     { accountId: "001FW00B34EmqMWYEZ" },
     { accountId: "001NM000009zr3pYAA", licenseRecordId: "a12NM000003mE2DYAU", licenseStatus: "Inactive" },
@@ -64,22 +65,23 @@ console.log("\nThe real registry data this failed on");
   // The account with no licence record at all — the one named EMRE KARAYALCIN —
   // is never a candidate.
   check("...never the unlicensed record", pick(REGISTRY)?.accountId !== "001FW00B34EmqMWYEZ");
-  check("Active still wins outright where one says Active", pick([
+  const rows = (...r: Row[]): Row[] => r;
+  check("Active still wins outright where one says Active", pick(rows(
     { accountId: "A", licenseRecordId: "1", licenseStatus: "Active" },
     { accountId: "B", licenseRecordId: "2", licenseStatus: "Draft" },
-  ])?.accountId === "A");
-  check("two live licences stay ambiguous", pick([
+  ))?.accountId === "A");
+  check("two live licences stay ambiguous", pick(rows(
     { accountId: "A", licenseRecordId: "1", licenseStatus: "Draft" },
     { accountId: "B", licenseRecordId: "2", licenseStatus: "Submitted" },
-  ]) === null);
-  check("...and two ACTIVE ones too", pick([
+  )) === null);
+  check("...and two ACTIVE ones too", pick(rows(
     { accountId: "A", licenseRecordId: "1", licenseStatus: "Active" },
     { accountId: "B", licenseRecordId: "2", licenseStatus: "Active" },
-  ]) === null);
-  check("a lone licensed record is used whatever it says", pick([
+  )) === null);
+  check("a lone licensed record is used whatever it says", pick(rows(
     { accountId: "A", licenseRecordId: "1", licenseStatus: "Inactive" },
-  ])?.accountId === "A");
-  check("no licensed record, no pick", pick([{ accountId: "A" }]) === null);
+  ))?.accountId === "A");
+  check("no licensed record, no pick", pick(rows({ accountId: "A" })) === null);
 }
 
 console.log("\nAnd ACTIVE decides which of them it is");
