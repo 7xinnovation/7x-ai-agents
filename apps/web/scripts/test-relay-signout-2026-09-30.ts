@@ -97,10 +97,12 @@ check("...defaulting to the token alone", /if \(!CLEAR_KEYS\.length\) CLEAR_KEYS
 check("...and all of them are removed", /window\.localStorage\.removeItem\(CLEAR_KEYS\[i\]\)/.test(relay));
 
 console.log("\nThe widget opens that window wherever the portal is the door");
-check("whenever a host login exists", /if \(agent\.hostLoginUrl\) \{\s*\n\s*\/\/ The site ROOT/.test(exp));
-// A sign-in page asked to sign somebody out signs them back in.
-check("...on the site root, not the sign-in page", /\$\{hostOrigin\}\/\?dlg-signout=1/.test(exp));
-check("...from hostLoginUrl's origin", /hostOrigin = new URL\(agent\.hostLoginUrl\)\.origin/.test(exp));
+check("whenever a host login exists", /if \(agent\.hostLoginUrl\) \{\s*\n\s*try \{/.test(exp));
+// The PARENT of the sign-in page: not the page itself, which would sign them
+// back in, and not the bare root, which loses the marker on a Salesforce
+// community. See test-epgl-signout-2026-10-01.
+check("...on the parent of the sign-in page", /const url = hostSignoutUrl;/.test(exp) && /parts\.pop\(\);/.test(exp));
+check("...from hostLoginUrl's origin", /hostOrigin = u\.origin;/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
 check("...with a success worth seeing too", /signed out\.`\);/.test(exp));
 

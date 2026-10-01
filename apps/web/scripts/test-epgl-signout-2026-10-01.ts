@@ -48,6 +48,33 @@ check("...and before UAE PASS", /window\.setTimeout\(\(\) => toUaePass\(win\), 2
 // agent without one must go straight on rather than stall.
 check("skipped where the portal has none", /if \(!agent\.hostLogoutUrl \|\| !win\) \{ toUaePass\(win\); return; \}/.test(exp));
 
+console.log("\nAnd the sign-out is carried to the PARENT of the sign-in page");
+/**
+ * Not the root, which was the first guess and is wrong for a Salesforce
+ * community:
+ *
+ *   app.epgl.ae/?dlg-signout=1   -> 301 -> /s/                   marker gone
+ *   app.epgl.ae/s/?dlg-signout=1 -> 301 -> /s/?...&dlg-signout=1 kept
+ *
+ * And not the sign-in page itself, which would sign them back in.
+ */
+check("the last path segment is dropped", /parts\.pop\(\);/.test(exp));
+check("...keeping the rest as a directory", /hostSignoutUrl = `\$\{u\.origin\}\/\$\{parts\.length \? `\$\{parts\.join\("\/"\)\}\/` : ""\}\?dlg-signout=1`;/.test(exp));
+check("...and that is what is opened", /const url = hostSignoutUrl;/.test(exp));
+{
+  // /s/login/ -> /s/ for EPGL, /uaepass -> / for Emirates Post.
+  const derive = (login: string) => {
+    const u = new URL(login);
+    const p = u.pathname.split("/").filter(Boolean);
+    p.pop();
+    return `${u.origin}/${p.length ? `${p.join("/")}/` : ""}?dlg-signout=1`;
+  };
+  check("EPGL lands inside the community", derive("https://app.epgl.ae/s/login/?language=en_US") === "https://app.epgl.ae/s/?dlg-signout=1");
+  check("...the sandbox too", derive("https://epro--preprod2.sandbox.my.site.com/s/login/?language=en_US") === "https://epro--preprod2.sandbox.my.site.com/s/?dlg-signout=1");
+  check("Emirates Post still lands on the root", derive("https://box.emiratespost.ae/uaepass") === "https://box.emiratespost.ae/?dlg-signout=1");
+  check("...and a bare origin is unchanged", derive("https://x.com/") === "https://x.com/?dlg-signout=1");
+}
+
 console.log("\nThe URL is derived from where they sign in");
 /**
  * Staging signs in at the epro--preprod2 sandbox and production at app.epgl.ae.

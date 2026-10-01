@@ -297,7 +297,7 @@ check("a sign-out arms it", /switchAccount\.current = true;/.test(exp));
  * and `prompt=login` on our own UAE PASS flow, for an agent that has no portal.
  */
 check("...and the portal is not skipped for it", /const hostLoginUsable = Boolean\(agent\.hostLoginUrl\) && !isNative\(\);/.test(exp));
-check("...the portal's own session being ended instead", /\$\{hostOrigin\}\/\?dlg-signout=1/.test(exp));
+check("...the portal's own session being ended instead", /hostSignoutUrl = `\$\{u\.origin\}/.test(exp));
 /**
  * And the flag survives an abandoned attempt. Spending it on the first click
  * meant a second click went back through the portal — which signed them in as

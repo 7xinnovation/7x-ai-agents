@@ -1584,11 +1584,31 @@ export function Experience({
      * about: our own relay is on that page and posts back.
      */
     const SIGNOUT_WINDOW = { name: "dlg-signout", kind: "signout", width: 420, height: 320 };
+    /**
+     * WHERE ON THEIR SITE TO CARRY THE SIGN-OUT, which is not the root.
+     *
+     * The PARENT of the sign-in page. Not the sign-in page itself — asking one
+     * of those to sign somebody out signs them back in — and not the bare root,
+     * which was the first guess and is wrong for EPGL:
+     *
+     *   app.epgl.ae/?dlg-signout=1   -> 301 -> /s/            marker gone
+     *   app.epgl.ae/s/?dlg-signout=1 -> 301 -> /s/?...&dlg-signout=1   kept
+     *
+     * Their community lives under /s/ and the root redirect drops the query, so
+     * the relay would have been asked nothing at all. Dropping the last segment
+     * of the sign-in path gives the right answer for both: /s/login/ -> /s/,
+     * and Emirates Post's /uaepass -> /.
+     */
     let hostOrigin = "";
+    let hostSignoutUrl = "";
     if (agent.hostLoginUrl) {
-      // The site ROOT, deliberately: `hostLoginUrl` is a sign-in page, and
-      // asking a sign-in page to sign somebody out signs them back in.
-      try { hostOrigin = new URL(agent.hostLoginUrl).origin; } catch { /* not a URL; nothing to open */ }
+      try {
+        const u = new URL(agent.hostLoginUrl);
+        hostOrigin = u.origin;
+        const parts = u.pathname.split("/").filter(Boolean);
+        parts.pop();
+        hostSignoutUrl = `${u.origin}/${parts.length ? `${parts.join("/")}/` : ""}?dlg-signout=1`;
+      } catch { /* not a URL; nothing to open */ }
     }
     const uaePassLogout = `/api/uaepass/logout?agent=${encodeURIComponent(agent.slug)}`;
 
@@ -1675,7 +1695,7 @@ export function Experience({
        * how this side tells a sign-out that did nothing from one that worked —
        * including the third case, no reply at all.
        */
-      const url = `${hostOrigin}/?dlg-signout=1`;
+      const url = hostSignoutUrl;
       const win = openExternal(url, SIGNOUT_WINDOW);
       if (!win) {
         console.warn(`[dialog] could not open ${url} — pop-ups are blocked, so the portal's session was NOT cleared.`);
