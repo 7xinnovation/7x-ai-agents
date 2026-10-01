@@ -1625,11 +1625,14 @@ export function Experience({
       if (win) win.navigate(url);
       else win = openExternal(url, SIGNOUT_WINDOW);
       if (!win) return;
+      let answered = false;
       const done = (e: MessageEvent) => {
         if (e.origin !== hostOrigin) return;
         const m = e.data as { source?: string; action?: string; cleared?: boolean } | null;
         if (!m || m.source !== "dialog-relay" || m.action !== "host-signed-out") return;
+        answered = true;
         window.removeEventListener("message", done);
+        if (m.cleared) console.info(`[dialog] ${hostOrigin} signed out.`);
         if (!m.cleared) {
           console.warn(
             `[dialog] ${hostOrigin} was asked to sign out and declined: the relay tag there needs data-signout-clears-host="1".`
@@ -1640,6 +1643,19 @@ export function Experience({
       window.addEventListener("message", done);
       window.setTimeout(() => {
         window.removeEventListener("message", done);
+        /**
+         * SILENCE IS A RESULT TOO, AND IT USED TO BE THE ONLY ONE WE DID NOT SAY.
+         *
+         * A refusal was reported and a success was reported; a window that
+         * never answered said nothing at all — which is the case that looks
+         * exactly like "it still signs me back in" and tells whoever is looking
+         * precisely nothing. Three rounds of screenshots went past this.
+         */
+        if (!answered) {
+          console.warn(
+            `[dialog] ${url} never answered. Either the relay is not on that page, or the page was gone before it ran — the portal's session was NOT cleared.`
+          );
+        }
         try { win.close(); } catch { /* already gone */ }
       }, 2500);
     };

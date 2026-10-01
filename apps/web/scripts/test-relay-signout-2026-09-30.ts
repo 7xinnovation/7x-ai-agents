@@ -103,6 +103,10 @@ check("...on the site root, not the sign-in page", /\$\{hostOrigin\}\/\?dlg-sign
 check("...from hostLoginUrl's origin", /hostOrigin = new URL\(agent\.hostLoginUrl\)\.origin/.test(exp));
 check("...and it is closed from this side", /win\.close\(\)/.test(exp));
 check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
+// And so is silence, which is the case that looks like "it still signs me back
+// in" while telling whoever is looking precisely nothing.
+check("...and so is no answer at all", /never answered\. Either the relay is not on that page/.test(exp));
+check("...with a success worth seeing too", /signed out\.`\);/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
 
 console.log("\nOne window, navigated — a second pop-up is blocked");
