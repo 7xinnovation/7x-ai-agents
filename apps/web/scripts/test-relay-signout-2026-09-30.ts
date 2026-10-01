@@ -101,30 +101,41 @@ check("whenever a host login exists", /if \(agent\.hostLoginUrl\) \{\s*\n\s*\/\/
 // A sign-in page asked to sign somebody out signs them back in.
 check("...on the site root, not the sign-in page", /\$\{hostOrigin\}\/\?dlg-signout=1/.test(exp));
 check("...from hostLoginUrl's origin", /hostOrigin = new URL\(agent\.hostLoginUrl\)\.origin/.test(exp));
-check("...and it is closed from this side", /win\.close\(\)/.test(exp));
-check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
-// And so is silence, which is the case that looks like "it still signs me back
-// in" while telling whoever is looking precisely nothing.
-check("...and so is no answer at all", /never answered\. Either the relay is not on that page/.test(exp));
-check("...with a success worth seeing too", /signed out\.`\);/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
+check("...with a success worth seeing too", /signed out\.`\);/.test(exp));
 
 console.log("\nOne window, navigated — a second pop-up is blocked");
 /**
  * "Keeps showing this pop-up as blocked", with
  * box.emiratespost.ae/?dlg-signout=1 named in Chrome's list. Opening by the
- * same NAME is not reuse; it is a fresh pop-up request three seconds after the
- * click. Framing them is not available either: frame-ancestors 'none'.
+ * same NAME is not reuse; it is a fresh pop-up request seconds after the click.
+ * Framing them is not available either: frame-ancestors 'none'.
  */
 const bridge = readFileSync(new URL("../app/embed/[agent]/nativeBridge.ts", import.meta.url), "utf8");
 check("a window we opened can be navigated", /navigate\(url: string\): void;/.test(bridge));
 check("...by replacing, so Back never walks into a logout", /win\.location\.replace\(u\.toString\(\)\)/.test(bridge));
 check("...with the same protocol guard as opening one", /if \(u\.protocol !== "https:" && u\.protocol !== "http:"\) return;/.test(bridge));
 check("...and the native host asked to open the next one", /action: "open-url", kind: opts\.kind \?\? opts\.name, url: next/.test(bridge));
-check("the sign-out reuses the UAE PASS window", /clearPortal\(win\);/.test(exp));
-check("...navigating it rather than opening another", /if \(win\) win\.navigate\(url\);/.test(exp));
-// Still opens one if there was nothing to reuse — UAE PASS off, or blocked.
-check("...and opens one only when there is none to reuse", /else win = openExternal\(url, SIGNOUT_WINDOW\);/.test(exp));
+
+console.log("\nThe portal goes first, and is given time to wake up");
+/**
+ * "never answered" — not blocked, not refused. The relay is injected by their
+ * _app in an effect and then fetched, so it exists only after their whole
+ * application has booted; 2.5 seconds on a cold incognito load closed the
+ * window before it ran.
+ */
+// The portal's reply is what sends the window on, so UAE PASS cannot start
+// until the portal has answered or run out of time.
+check("the portal is the first stop", /const finish = \(\) => \{[\s\S]{0,200}toUaePass\(win\);/.test(exp));
+check("...with eight seconds to answer", /\}, 8000\);/.test(exp));
+check("...ended early by the reply, not waited out", /answered = true;/.test(exp) && /finish\(\);\s*\n\s*\};\s*\n\s*window\.addEventListener\("message", done\);/.test(exp));
+check("...then the same window goes to UAE PASS", /if \(win\) w\.navigate\(uaePassLogout\);/.test(exp));
+check("...and is closed from this side", /try \{ w\.close\(\); \} catch \{[^}]*\} \}, 3500\);/.test(exp));
+check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
+check("...and so is silence", /never answered in 8s/.test(exp));
+check("...and a blocked pop-up says so too", /pop-ups are blocked, so the portal's session was NOT cleared/.test(exp));
+check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
+check("UAE PASS alone still works where there is no portal", /if \(!hostOrigin\) \{\s*\n\s*toUaePass\(null\);/.test(exp));
 
 console.log("\nAnd the sign-in after it goes back through the portal");
 /**

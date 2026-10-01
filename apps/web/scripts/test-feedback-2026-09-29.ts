@@ -326,8 +326,10 @@ check("...and refuses to build one for an unconfigured tenant", /if \(!uaePassCo
 // signed me in instantly." Only a top-level navigation on their origin can
 // clear a cookie there.
 const logoutRoute = readFileSync(new URL("../app/api/uaepass/logout/route.ts", import.meta.url), "utf8");
-check("signing out opens UAE PASS's own logout", /openExternal\(`\/api\/uaepass\/logout\?agent=\$\{encodeURIComponent\(agent\.slug\)\}`/.test(exp));
-check("...only where UAE PASS is the way in", /if \(agent\.uaePassEnabled\) \{/.test(exp));
+// The URL is built once and the window is sent to it — see
+// test-relay-signout-2026-09-30 for why the portal is visited before this.
+check("signing out opens UAE PASS's own logout", /const uaePassLogout = `\/api\/uaepass\/logout\?agent=\$\{encodeURIComponent\(agent\.slug\)\}`;/.test(exp));
+check("...only where UAE PASS is the way in", /if \(!agent\.uaePassEnabled\) \{ try \{ win\?\.close\(\); \}/.test(exp));
 check("...redirecting to their endpoint, not ours", /buildLogoutUrl\(`\$\{origin\}\/uaepass\/done`/.test(logoutRoute));
 check("...and coming back to a page that closes itself", /window\.close\(\)/.test(readFileSync(new URL("../app/uaepass/done/page.tsx", import.meta.url), "utf8")));
 // An unconfigured tenant must still get its window closed rather than an error.
@@ -341,7 +343,7 @@ check("nothing to log out of still closes the window", /NextResponse\.redirect\(
 // point this pins is unchanged: WE decide when it goes, not the page it landed
 // on. See test-relay-signout-2026-09-30 for the sequence.
 check("the window is closed by us, not by where it landed",
-  /if \(win\) \{\s*\n\s*window\.setTimeout\(\(\) => \{[\s\S]{0,160}win\.close\(\)/.test(exp));
+  /window\.setTimeout\(\(\) => \{ try \{ w\.close\(\); \}[\s\S]{0,60}\}, 3500\);/.test(exp));
 check("...and that is written down where the next person will wonder", /WHERE UAE PASS SENDS THE BROWSER IS NOT OURS TO DECIDE/.test(logoutRoute));
 check("prompt=login stays as the belt to that braces", /switchAccount\.current = true;/.test(exp));
 

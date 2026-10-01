@@ -1590,107 +1590,107 @@ export function Experience({
       // asking a sign-in page to sign somebody out signs them back in.
       try { hostOrigin = new URL(agent.hostLoginUrl).origin; } catch { /* not a URL; nothing to open */ }
     }
+    const uaePassLogout = `/api/uaepass/logout?agent=${encodeURIComponent(agent.slug)}`;
 
     /**
-     * Ask the portal's own page to end the portal's session.
+     * THE PORTAL GOES FIRST NOW, AND IT IS GIVEN TIME.
      *
-     * Only script on their origin can touch their storage, and the only script
-     * we have there is the relay they already load on every page. It hears a
-     * sign-out by `postMessage` when the chat is embedded IN their site — but
-     * opened on its own at agent.7x.ae the parent is this page itself and
-     * nothing is told, which is precisely how production was tested. So the
-     * sign-out travels as a page load instead.
+     * "[dialog] https://box.emiratespost.ae/?dlg-signout=1 never answered."
      *
-     * Still their decision: without data-signout-clears-host="1" on that tag
-     * the relay clears our cookie, leaves their token alone, and says so. The
-     * reply is how this side can tell a sign-out that did nothing from one that
-     * worked, instead of us guessing again.
+     * Not blocked, not refused — the relay never got to run. It is injected by
+     * their _app in an effect and then fetched, so it exists only after their
+     * whole application has booted and hydrated, and on a cold incognito load
+     * that is comfortably more than the 2.5 seconds we were giving it before
+     * closing the window. We were asking a page to sign somebody out and
+     * shutting it before it woke up.
+     *
+     * So: the portal is visited FIRST, with the pop-up allowance that the click
+     * still carries, and it gets as long as it needs up to eight seconds —
+     * though it almost always answers in well under one, because we close on
+     * its reply rather than on the clock. Only then is the same window sent on
+     * to UAE PASS, whose logout is a redirect chain that needs no script of
+     * ours to run and cannot report back either way.
+     *
+     * The order also protects the half we can verify. UAE PASS sends the window
+     * to whatever URI is registered against Emirates Post's client when it is
+     * done — their portal — and a sign-in page reached with a live session is
+     * how a sign-out undoes itself. Doing the portal first means anything that
+     * bounce writes is written to a session we have already ended.
      */
-    const clearPortal = (reuse?: ExternalWindow | null) => {
-      if (!hostOrigin) return;
-      /**
-       * REUSE THE WINDOW. A SECOND ONE IS BLOCKED.
-       *
-       * "Keeps showing this pop-up as blocked" — with
-       * box.emiratespost.ae/?dlg-signout=1 named in Chrome's list, and the
-       * portal therefore never cleared, and the next Sign in therefore still
-       * signed in. Opening by the same NAME is not reuse: it is a fresh pop-up
-       * request, three seconds after the click, which is exactly what a blocker
-       * exists to stop. A window we already hold can be navigated instead, and
-       * nothing blocks that. Framing them is not available either —
-       * box.emiratespost.ae sends `frame-ancestors 'none'`.
-       */
-      const url = `${hostOrigin}/?dlg-signout=1`;
-      let win: ExternalWindow | null = reuse ?? null;
-      if (win) win.navigate(url);
-      else win = openExternal(url, SIGNOUT_WINDOW);
-      if (!win) return;
-      let answered = false;
-      const done = (e: MessageEvent) => {
-        if (e.origin !== hostOrigin) return;
-        const m = e.data as { source?: string; action?: string; cleared?: boolean } | null;
-        if (!m || m.source !== "dialog-relay" || m.action !== "host-signed-out") return;
-        answered = true;
-        window.removeEventListener("message", done);
-        if (m.cleared) console.info(`[dialog] ${hostOrigin} signed out.`);
-        if (!m.cleared) {
-          console.warn(
-            `[dialog] ${hostOrigin} was asked to sign out and declined: the relay tag there needs data-signout-clears-host="1".`
-          );
-        }
-        try { win.close(); } catch { /* already gone */ }
-      };
-      window.addEventListener("message", done);
-      window.setTimeout(() => {
-        window.removeEventListener("message", done);
-        /**
-         * SILENCE IS A RESULT TOO, AND IT USED TO BE THE ONLY ONE WE DID NOT SAY.
-         *
-         * A refusal was reported and a success was reported; a window that
-         * never answered said nothing at all — which is the case that looks
-         * exactly like "it still signs me back in" and tells whoever is looking
-         * precisely nothing. Three rounds of screenshots went past this.
-         */
-        if (!answered) {
-          console.warn(
-            `[dialog] ${url} never answered. Either the relay is not on that page, or the page was gone before it ran — the portal's session was NOT cleared.`
-          );
-        }
-        try { win.close(); } catch { /* already gone */ }
-      }, 2500);
-    };
-
-    if (agent.uaePassEnabled) {
-      const win = openExternal(`/api/uaepass/logout?agent=${encodeURIComponent(agent.slug)}`, SIGNOUT_WINDOW);
+    const toUaePass = (win: ExternalWindow | null) => {
+      if (!agent.uaePassEnabled) { try { win?.close(); } catch { /* already gone */ } return; }
+      const w = win ?? openExternal(uaePassLogout, SIGNOUT_WINDOW);
+      if (!w) return;
+      if (win) w.navigate(uaePassLogout);
       /**
        * AND WE TAKE THE WINDOW BACK, WHEREVER IT ENDED UP.
        *
-       * The plan was: our page redirects to UAE PASS's logout, they clear the
-       * session, they send the browser back to /uaepass/done, which closes
-       * itself. On production the window landed on
-       * box.emiratespost.ae/dashboard instead — UAE PASS ignored our
-       * `redirect_uri` and used the one registered against the client, which is
-       * Emirates Post's portal. So our page never ran, the window stayed open,
-       * and a customer who had just asked to sign out was shown their portal
-       * account saying "Welcome EMRE!".
-       *
-       * The logout has been issued by the time any of that happens, so the
-       * window has done its job either way. We opened it; we take it back, on a
-       * timer, rather than depending on a redirect target that is not ours to
-       * set. /uaepass/done still closes itself when it IS reached.
+       * The plan was that UAE PASS would send the browser to /uaepass/done,
+       * which closes itself. On production it ignored our `redirect_uri` and
+       * used the one registered against Emirates Post's client, so our page
+       * never ran and the window sat open on their dashboard saying "Welcome
+       * EMRE!" to somebody who had just signed out. The logout has been issued
+       * by then either way, so we close it on a timer rather than depending on
+       * a redirect target that is not ours to set.
        */
-      if (win) {
-        window.setTimeout(() => {
-          if (hostOrigin) clearPortal(win);
-          else try { win.close(); } catch { /* already gone */ }
-        }, 3000);
-      } else {
-        // Pop-up blocked. The portal's session is still worth ending, and this
-        // call is the one that might survive: it is a fresh window request.
-        clearPortal();
-      }
+      window.setTimeout(() => { try { w.close(); } catch { /* already gone */ } }, 3500);
+    };
+
+    if (!hostOrigin) {
+      toUaePass(null);
     } else {
-      clearPortal();
+      /**
+       * Ask the portal's own page to end the portal's session.
+       *
+       * Only script on their origin can touch their storage, and the only
+       * script we have there is the relay they already load on every page. It
+       * hears a sign-out by `postMessage` when the chat is embedded IN their
+       * site — but opened on its own at agent.7x.ae the parent is this page
+       * itself and nothing is told, which is how production was tested. So the
+       * sign-out travels as a page load instead.
+       *
+       * Still their decision: without data-signout-clears-host="1" the relay
+       * clears our cookie, leaves their keys alone and says so. The reply is
+       * how this side tells a sign-out that did nothing from one that worked —
+       * including the third case, no reply at all.
+       */
+      const url = `${hostOrigin}/?dlg-signout=1`;
+      const win = openExternal(url, SIGNOUT_WINDOW);
+      if (!win) {
+        console.warn(`[dialog] could not open ${url} — pop-ups are blocked, so the portal's session was NOT cleared.`);
+      } else {
+        let answered = false;
+        const finish = () => {
+          window.removeEventListener("message", done);
+          window.clearTimeout(timer);
+          toUaePass(win);
+        };
+        const done = (e: MessageEvent) => {
+          if (e.origin !== hostOrigin) return;
+          const m = e.data as { source?: string; action?: string; cleared?: boolean } | null;
+          if (!m || m.source !== "dialog-relay" || m.action !== "host-signed-out") return;
+          answered = true;
+          if (m.cleared) console.info(`[dialog] ${hostOrigin} signed out.`);
+          else {
+            console.warn(
+              `[dialog] ${hostOrigin} was asked to sign out and declined: the relay tag there needs data-signout-clears-host="1".`
+            );
+          }
+          finish();
+        };
+        window.addEventListener("message", done);
+        // Eight seconds is a cold application boot on a slow connection, not a
+        // guess at one. Nobody waits it out: the reply ends it, and the reply
+        // is what normally happens.
+        const timer = window.setTimeout(() => {
+          if (!answered) {
+            console.warn(
+              `[dialog] ${url} never answered in 8s. Either the relay is not on that page, or it had not loaded — the portal's session was NOT cleared.`
+            );
+          }
+          finish();
+        }, 8000);
+      }
     }
   }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl]);
 
