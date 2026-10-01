@@ -373,8 +373,11 @@ Send the developer BOTH files &mdash; the component on its own reads as a puzzle
                 <code className="rounded bg-surface px-1 py-0.5 font-mono">
                   data-signout-clears-keys=&quot;accessToken,profile&quot;
                 </code>
-                . Defaults to the token key alone. The extra ones are usually cosmetic &mdash; a dashboard still
-                greeting someone by name after they signed out reads as a sign-out that failed.
+                . Defaults to the token key alone, and that is often not enough. Emirates Post&rsquo;s portal sets
+                its logged-in state from <code className="rounded bg-surface px-1 py-0.5 font-mono">profile</code> and
+                not from the token, so clearing the token alone left the customer signed in and sent the next sign-in
+                straight back to their dashboard. If the site stays signed in after a sign-out, the session is in a
+                key you have not named &mdash; the relay lists the candidates in the console.
               </li>
               <li>
                 Not in <code className="rounded bg-surface px-1 py-0.5 font-mono">localStorage</code> at all

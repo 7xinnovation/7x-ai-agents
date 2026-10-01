@@ -342,6 +342,37 @@
         // nothing on this page should break because of it.
       }
     }
+    /**
+     * AND SAY WHAT WAS LEFT BEHIND THAT LOOKS LIKE A SESSION.
+     *
+     * Emirates Post's token went and the customer stayed signed in, because
+     * their app sets its logged-in state from a SECOND key:
+     *
+     *   let e = localStorage.getItem("profile");
+     *   if (e) { dispatch(profileUpdated(JSON.parse(e))); dispatch(loggedIn()); }
+     *
+     * The token is the credential; `profile` was the flag. Clearing one and not
+     * the other looks exactly like clearing neither, and it cost two days of
+     * "it still signs me back in". Nothing here can know which key a given site
+     * trusts — but it can read the names and say what it sees, so the next site
+     * finds this in a console line instead of in a fortnight.
+     */
+    try {
+      var left = [];
+      for (var k = 0; k < window.localStorage.length; k++) {
+        var name = window.localStorage.key(k);
+        if (name && /user|profile|session|auth|token|login|account/i.test(name)) left.push(name);
+      }
+      if (left.length) {
+        note(
+          "cleared " + CLEAR_KEYS.join(", ") + ', but these look like session state too: "' +
+            left.join('", "') +
+            '". If this site stays signed in, name them in data-signout-clears-keys.'
+        );
+      }
+    } catch (err) {
+      /* storage refused to enumerate; the clearing above still happened */
+    }
     return true;
   }
 
