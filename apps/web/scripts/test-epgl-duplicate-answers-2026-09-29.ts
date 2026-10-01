@@ -222,8 +222,16 @@ console.log("\nAnd a signed-in customer is not necessarily on the licensed recor
  * afternoon went to the first, which is why the composite kept asking to give
  * an unlicensed record the licensed company's name.
  */
-check("a company with no licence record is looked up again by trade licence",
-  /const latchLicensedCompany = async \(/.test(route) && /if \(!c \|\| String\(c\.licenseRecordId \?\? ""\)\.trim\(\)\) return "";/.test(route));
+/**
+ * WIDENED 1 OCTOBER. This required the lookup to be skipped whenever the
+ * current record held a licenceRecordId — and that is exactly what broke it:
+ * TWO accounts under this trade licence hold one, 377 (Active) and 479
+ * (Inactive), so landing on the lapsed record meant keeping it. The lookup now
+ * runs regardless and the ACTIVE rule decides. See
+ * test-active-licence-latch-2026-10-01.
+ */
+check("the company is looked up again by trade licence",
+  /const latchLicensedCompany = async \(/.test(route) && /if \(!c\) return "";\s*\n\s*const licence = String\(c\.tradeLicenseNumber/.test(route));
 check("...and only where the pick is unambiguous and different",
   /if \(!pick \|\| pick\.accountId === c\.accountId\) return "";/.test(route));
 check("...the licensed record becomes the target", /const licensed = \[pick\];\s*\n\s*rememberLicenceRecordId\(pick\);/.test(route));
