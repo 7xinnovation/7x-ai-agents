@@ -1585,7 +1585,7 @@ export function Experience({
      */
     const SIGNOUT_WINDOW = { name: "dlg-signout", kind: "signout", width: 420, height: 320 };
     let hostOrigin = "";
-    if (agent.hostLoginUrl && !agent.uaePassOwnFlow) {
+    if (agent.hostLoginUrl) {
       // The site ROOT, deliberately: `hostLoginUrl` is a sign-in page, and
       // asking a sign-in page to sign somebody out signs them back in.
       try { hostOrigin = new URL(agent.hostLoginUrl).origin; } catch { /* not a URL; nothing to open */ }
@@ -1661,7 +1661,7 @@ export function Experience({
     } else {
       clearPortal();
     }
-  }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.uaePassOwnFlow]);
+  }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl]);
 
   /**
    * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.
@@ -1839,17 +1839,31 @@ export function Experience({
      * sign-in still goes through the portal, which is the right door for
      * somebody who is already signed in to Emirates Post.
      */
-    const hostLoginUsable =
-      Boolean(agent.hostLoginUrl) &&
-      !isNative() &&
-      // ...and only where OUR UAE PASS callback is one this tenant's client
-      // accepts. On production Emirates Post's client is registered to their
-      // own portal, so skipping it sends the customer to UAE PASS with an
-      // unregistered redirect and they get "Sorry! Looks like something went
-      // wrong at our end". There the portal is the only door there is, and the
-      // way to make it ask again is to end the portal's session —
-      // data-signout-clears-host on the relay, not a detour around it.
-      !(switchAccount.current && agent.uaePassEnabled && agent.uaePassOwnFlow);
+    /**
+     * AND AFTER A SIGN-OUT IT IS STILL THE PORTAL. THAT WAS THE MISTAKE.
+     *
+     * For two days this had a third clause: after a sign-out, go to UAE PASS
+     * ourselves instead of through the portal, because the portal would not ask
+     * the customer who they were. It worked, and it cost the account.
+     *
+     * "When I signed out a third time and signed back in, it shows no boxes
+     * under my name. I had around 46. The second time it showed 5."
+     *
+     * Emirates Post's boxes come from Emirates Post's own endpoints, and those
+     * take THEIR session token — the one the portal mints and the relay hands
+     * over. Our UAE PASS flow proves who somebody is and mints nothing: there
+     * is no exchange from a UAE PASS identity to an Emirates Post session
+     * anywhere in this codebase. So every sign-in that went around the portal
+     * produced a customer we could name and an account we could not read, and
+     * 46 boxes became 5 became none.
+     *
+     * The detour existed because the portal would not re-ask. It does now:
+     * data-signout-clears-host="1" is on the tag on box-stg and box, so the
+     * sign-out ends the portal's session and the next visit goes to UAE PASS
+     * properly. The reason is gone, so the clause is gone with it — the portal
+     * is the only door that comes with an account attached.
+     */
+    const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative();
     if (hostLoginUsable && typeof window !== "undefined") {
       const win = openExternal(agent.hostLoginUrl!, { name: "dlg-host-login", kind: "signin" });
       if (!win) {

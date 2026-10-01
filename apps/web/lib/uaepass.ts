@@ -173,38 +173,6 @@ function cfg(tenant?: string) {
   };
 }
 
-/**
- * CAN WE RUN OUR OWN UAE PASS FLOW HERE, OR ONLY THE HOST'S?
- *
- * A UAE PASS client accepts exactly the redirect URIs registered against it, and
- * Emirates Post's production client — `epg_retail_web` — is registered to
- * `https://box.emiratespost.ae/uaepass`. Their PORTAL, not us.
- *
- * So on production, sending a customer to UAE PASS from agent.7x.ae with our
- * own callback as `redirect_uri` is an unregistered redirect, and UAE PASS
- * answers with its "Sorry! Looks like something went wrong at our end" page.
- * That is not a fault at their end; it is us asking for a door we were never
- * given a key to. The portal is the only sign-in route there.
- *
- * On staging the client is the shared sandbox, registered to OUR callback, so
- * our own flow works — which is why the same build behaves differently on the
- * two environments.
- *
- * Nothing here is about credentials being wrong. It is about which redirect the
- * client will accept, and only the deployment knows that.
- */
-export function uaePassRedirectsToUs(origin: string, tenant?: string): boolean {
-  if (!uaePassConfigured(tenant)) return false;
-  const registered = (envFor("UAEPASS_REDIRECT_URI", tenant) || "").trim();
-  // Nothing registered in config: we have always used our own callback, and
-  // nothing observed says otherwise.
-  if (!registered) return true;
-  try {
-    return new URL(registered).origin === new URL(origin).origin;
-  } catch {
-    return false;
-  }
-}
 
 /** Which tenants have their own UAE PASS client configured. For diagnostics. */
 export function uaePassTenantsConfigured(): string[] {

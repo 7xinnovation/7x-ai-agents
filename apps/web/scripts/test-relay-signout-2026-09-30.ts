@@ -84,8 +84,8 @@ check("extra keys are configurable", /d\.signoutClearsKeys/.test(relay));
 check("...defaulting to the token alone", /if \(!CLEAR_KEYS\.length\) CLEAR_KEYS = \[TOKEN_KEY\];/.test(relay));
 check("...and all of them are removed", /window\.localStorage\.removeItem\(CLEAR_KEYS\[i\]\)/.test(relay));
 
-console.log("\nThe widget opens that window, where the portal is the only door");
-check("only when the portal is the door", /if \(agent\.hostLoginUrl && !agent\.uaePassOwnFlow\) \{/.test(exp));
+console.log("\nThe widget opens that window wherever the portal is the door");
+check("whenever a host login exists", /if \(agent\.hostLoginUrl\) \{\s*\n\s*\/\/ The site ROOT/.test(exp));
 // A sign-in page asked to sign somebody out signs them back in.
 check("...on the site root, not the sign-in page", /\$\{hostOrigin\}\/\?dlg-signout=1/.test(exp));
 check("...from hostLoginUrl's origin", /hostOrigin = new URL\(agent\.hostLoginUrl\)\.origin/.test(exp));
@@ -93,23 +93,26 @@ check("...and it is closed from this side", /win\.close\(\)/.test(exp));
 check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
 
-console.log("\nUAE PASS and the portal are both signed out of, in one window");
+console.log("\nAnd the sign-in after it goes back through the portal");
 /**
- * Three sessions, and only the first is ours: the conversation's, UAE PASS's
- * SSO cookie, and the portal's own token. Ending any two of them leaves the
- * third to sign the customer straight back in.
- *
- * One window navigated twice rather than two windows — a second pop-up this
- * long after the click is what a blocker eats.
+ * The detour around the portal worked and cost the account: Emirates Post's
+ * boxes need Emirates Post's session token, which only the portal mints. 46
+ * boxes became 5 became none. The portal re-asks now that its session is
+ * cleared, so there is nothing left for the detour to buy.
  */
-check("one named window serves both", /const SIGNOUT_WINDOW = \{ name: "dlg-signout"/.test(exp));
-check("...UAE PASS first", /openExternal\(`\/api\/uaepass\/logout\?agent=\$\{encodeURIComponent\(agent\.slug\)\}`, SIGNOUT_WINDOW\)/.test(exp));
-// Closing early aborts the one request that matters, and nothing about a
-// cross-origin hop can be observed from here.
-check("...given time to finish before the window moves on", /\}, 3000\);/.test(exp));
-check("...then the portal", /if \(hostOrigin\) clearPortal\(\);/.test(exp));
-check("...and the portal is still cleared if the pop-up was blocked", /\} else \{\s*\n\s*\/\/ Pop-up blocked[\s\S]{0,200}clearPortal\(\);/.test(exp));
-check("...and when UAE PASS is not this agent's at all", /\} else \{\s*\n\s*clearPortal\(\);\s*\n\s*\}/.test(exp));
+check("no third clause on the host door", /const hostLoginUsable = Boolean\(agent\.hostLoginUrl\) && !isNative\(\);/.test(exp));
+check("...and the flag that drove it is gone", !/uaePassOwnFlow/.test(exp));
+const types = readFileSync(new URL("../app/embed/[agent]/types.ts", import.meta.url), "utf8");
+const page = readFileSync(new URL("../app/embed/[agent]/page.tsx", import.meta.url), "utf8");
+const lib = readFileSync(new URL("../lib/uaepass.ts", import.meta.url), "utf8");
+check("...from the widget's contract too", !/uaePassOwnFlow/.test(types) && !/uaePassOwnFlow/.test(page));
+check("...and its helper not left behind", !/uaePassRedirectsToUs/.test(lib) && !/uaePassRedirectsToUs/.test(page));
+
+console.log("\nA lookup that failed is not an empty account");
+const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+check("the pulse is told the difference", /A LOOKUP THAT FAILED IS NOT AN EMPTY ACCOUNT/.test(route));
+check("...that step 4 needs an ANSWER, not silence", /applies ONLY when the tool answered and returned no boxes/.test(route));
+check("...and what to say instead", /could not reach their Emirates Post account just now and that their boxes are not lost/.test(route));
 
 console.log("\nAnd the snippet the admin panel hands over carries it");
 /**
