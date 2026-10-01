@@ -99,6 +99,21 @@ const TEXT: { find: string; replace: string }[] = [
  * leave behind than a vector computed from a figure one word out.
  */
 const KB: { find: RegExp; replace: string }[] = [
+  /**
+   * Tidy first, so the replacement below cannot nest inside its own brackets.
+   *
+   * "Pay the prescribed postal fees (AED 100,700)" became "(AED 100,000 (AED
+   * 101,000 if paid by card …))" — correct, and read aloud by an agent it is a
+   * sentence that loses the reader halfway through.
+   */
+  {
+    find: /\(AED 100,000 \(AED 101,000 if paid by card, which adds an online payment fee of AED 1,000\)\)/g,
+    replace: "(AED 100,000, or AED 101,000 if paid by card, which adds an online payment fee of AED 1,000)",
+  },
+  {
+    find: /\(AED 100,700\)/g,
+    replace: "(AED 100,000, or AED 101,000 if paid by card, which adds an online payment fee of AED 1,000)",
+  },
   {
     find: /AED 100,700/g,
     replace: "AED 100,000 (AED 101,000 if paid by card, which adds an online payment fee of AED 1,000)",
