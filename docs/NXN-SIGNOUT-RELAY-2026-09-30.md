@@ -60,9 +60,17 @@ Two attributes on that same tag:
   t.setAttribute("data-signout-clears-keys", "accessToken,profile");
 ```
 
-`accessToken` is the session. `profile` is only the name, but a dashboard still
-saying "Welcome EMRE!" after a sign-out reads as a sign-out that did not work,
-so it goes with it.
+**Both keys are required, and we were wrong to call the second one optional.**
+`accessToken` is the credential, but the logged-in state comes from `profile`:
+
+```js
+let e = localStorage.getItem("profile");
+if (e) { dispatch(profileUpdated(JSON.parse(e))); dispatch(loggedIn()); }
+```
+
+With only the token cleared, the app still considers the customer signed in, so
+`/uaepass` routes them to `/dashboard` instead of starting a UAE PASS login —
+which is exactly the symptom this document exists to fix.
 
 Nothing else changes, and the same two lines apply on `box-stg`.
 
