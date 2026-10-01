@@ -1617,6 +1617,27 @@ export function Experience({
      * how a sign-out undoes itself. Doing the portal first means anything that
      * bounce writes is written to a session we have already ended.
      */
+    /**
+     * THE PORTAL'S OWN LOGOUT, WHERE THE SESSION IS NOT IN STORAGE.
+     *
+     * Emirates Post keep their session in `localStorage`, so clearing the keys
+     * IS the sign-out. EPGL's portal is Salesforce Experience Cloud and keeps
+     * it in an HttpOnly `sid` cookie — no script of ours touches that from any
+     * origin, relay or not, so the attribute that fixed Emirates Post would
+     * have left EPGL signed in and looked identical from the outside.
+     *
+     * Salesforce's own /secur/logout.jsp ends it. Navigated, not fetched: a
+     * cookie on their origin only goes when the browser is sent there.
+     */
+    const toHostLogout = (win: ExternalWindow | null) => {
+      if (!agent.hostLogoutUrl || !win) { toUaePass(win); return; }
+      win.navigate(agent.hostLogoutUrl);
+      // Nothing to wait for and nothing that can report back — a logout page
+      // runs no script of ours. Long enough for the request to be made and the
+      // cookie to be dropped, short enough that the window is not sitting there.
+      window.setTimeout(() => toUaePass(win), 2000);
+    };
+
     const toUaePass = (win: ExternalWindow | null) => {
       if (!agent.uaePassEnabled) { try { win?.close(); } catch { /* already gone */ } return; }
       const w = win ?? openExternal(uaePassLogout, SIGNOUT_WINDOW);
@@ -1637,7 +1658,7 @@ export function Experience({
     };
 
     if (!hostOrigin) {
-      toUaePass(null);
+      toHostLogout(null);
     } else {
       /**
        * Ask the portal's own page to end the portal's session.
@@ -1663,7 +1684,7 @@ export function Experience({
         const finish = () => {
           window.removeEventListener("message", done);
           window.clearTimeout(timer);
-          toUaePass(win);
+          toHostLogout(win);
         };
         const done = (e: MessageEvent) => {
           if (e.origin !== hostOrigin) return;
@@ -1692,7 +1713,7 @@ export function Experience({
         }, 8000);
       }
     }
-  }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl]);
+  }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.hostLogoutUrl]);
 
   /**
    * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.

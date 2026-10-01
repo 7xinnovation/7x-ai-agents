@@ -50,6 +50,7 @@ export default async function EmbedPage({
       })),
     })),
     hostLoginUrl: d.hostLoginUrl,
+    hostLogoutUrl: d.hostLogoutUrl,
     nativeUaePassFallback: d.nativeUaePassFallback,
     stackedChoices: d.stackedChoices,
     uaePassEnabled: uaePassConfigured(),
