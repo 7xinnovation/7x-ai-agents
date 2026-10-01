@@ -1740,7 +1740,28 @@ export async function POST(req: NextRequest) {
     c: { licenseRecordId?: string; accountId?: string; tradeLicenseNumber?: string; name?: string } | undefined
   ): Promise<string> => {
     rememberLicenceRecordId(c);
-    if (!c || String(c.licenseRecordId ?? "").trim()) return "";
+    /**
+     * HOLDING *A* LICENCE IS NOT HOLDING *THE* LICENCE (2026-10-01).
+     *
+     * This gave up the moment the signed-in account carried any
+     * licenseRecordId at all — and under trade licence 1196781 TWO accounts
+     * carry one: postal licence 377 (Active) and 479 (Inactive). Land on the
+     * inactive record and we stopped here, kept it, and sent the renewal to a
+     * record whose name then collided with the live company's:
+     *
+     *   Rolled back due to allOrNone=true: A company with the same name
+     *   already exists. Please choose a different name and try again.
+     *
+     * The ACTIVE-first rule written for exactly this sat three lines below and
+     * was never reached. It is reached now: the lookup runs whatever the
+     * current record holds, and the latch moves only when a DIFFERENT account
+     * holds the active licence. Where the current record is already the active
+     * one, pick comes back as itself and nothing changes.
+     *
+     * It is why a renewal that went through on 29 September stopped going
+     * through: not the documents, not EPGL — which account this resolves to.
+     */
+    if (!c) return "";
     const licence = String(c.tradeLicenseNumber ?? "").trim();
     if (!licence) return "";
     try {
@@ -1764,7 +1785,7 @@ export async function POST(req: NextRequest) {
         },
       }).catch(() => {});
       return (
-        `\n\nNOTE ON WHICH RECORD THIS IS: EPGL hold ${all.length} companies under trade licence ${licence}, and the one this customer's sign-in is attached to does NOT hold the postal licence. ` +
+        `\n\nNOTE ON WHICH RECORD THIS IS: EPGL hold ${all.length} companies under trade licence ${licence}, and the one this customer's sign-in is attached to is not the one holding the LIVE postal licence — it may hold none, or hold a lapsed one. ` +
         `The licence is on "${licensed[0]!.name ?? licensed[0]!.accountId}" (postal licence ${licensed[0]!.postalLicenseNumber ?? "on file"}), and a renewal is only possible against that record — so it has been selected for you. ` +
         `Do not pass an accountId of your own, and do not describe this to the customer as a problem: it is the same company, and EPGL simply hold the licence on one of its records.`
       );
