@@ -16,6 +16,21 @@ export interface ExternalWindow {
   /** True once the customer has closed or finished with it. */
   closed: boolean;
   close(): void;
+  /**
+   * Send this SAME window somewhere else.
+   *
+   * Opening a second window is not the same thing, even with the same name.
+   * The sign-out has two foreign origins to visit — UAE PASS's logout and then
+   * the portal's own page — and the second `window.open` lands three seconds
+   * after the click that started it, which Chrome blocks outright:
+   *
+   *   Pop-ups blocked:  https://box.emiratespost.ae/?dlg-signout=1
+   *
+   * A window we already hold a reference to can be navigated anywhere, gesture
+   * or no gesture, and nothing is blocked. Framing them instead is not an
+   * option either: box.emiratespost.ae sends `frame-ancestors 'none'`.
+   */
+  navigate(url: string): void;
 }
 
 export interface NativeEvent {
@@ -159,7 +174,21 @@ export function openExternal(
     return null;
   }
   if (isNative()) {
-    const handle = { closed: false, close() { this.closed = true; } };
+    const handle = {
+      closed: false,
+      close() { this.closed = true; },
+      // A native host owns the browser it opened; the nearest thing to a
+      // navigation is asking it to open the next URL under the same kind.
+      navigate(next: string) {
+        try {
+          window.ReactNativeWebView!.postMessage(
+            JSON.stringify({ source: "dialog-native", action: "open-url", kind: opts.kind ?? opts.name, url: next })
+          );
+        } catch {
+          /* the host is gone; the caller's timer still closes this handle */
+        }
+      },
+    };
     open.add(handle);
     try {
       window.ReactNativeWebView!.postMessage(
@@ -180,6 +209,17 @@ export function openExternal(
   return {
     get closed() { return win.closed; },
     close() { try { win.close(); } catch { /* already gone */ } },
+    navigate(next: string) {
+      // Same guard as above: this sends a window we own to an arbitrary URL.
+      try {
+        const u = new URL(next, window.location.href);
+        if (u.protocol !== "https:" && u.protocol !== "http:") return;
+        // `replace`, so the customer's Back button never walks into a logout.
+        win.location.replace(u.toString());
+      } catch {
+        /* closed, or navigated somewhere that will not let us; nothing to do */
+      }
+    },
   };
 }
 

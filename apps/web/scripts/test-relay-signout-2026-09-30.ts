@@ -93,6 +93,23 @@ check("...and it is closed from this side", /win\.close\(\)/.test(exp));
 check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
 
+console.log("\nOne window, navigated — a second pop-up is blocked");
+/**
+ * "Keeps showing this pop-up as blocked", with
+ * box.emiratespost.ae/?dlg-signout=1 named in Chrome's list. Opening by the
+ * same NAME is not reuse; it is a fresh pop-up request three seconds after the
+ * click. Framing them is not available either: frame-ancestors 'none'.
+ */
+const bridge = readFileSync(new URL("../app/embed/[agent]/nativeBridge.ts", import.meta.url), "utf8");
+check("a window we opened can be navigated", /navigate\(url: string\): void;/.test(bridge));
+check("...by replacing, so Back never walks into a logout", /win\.location\.replace\(u\.toString\(\)\)/.test(bridge));
+check("...with the same protocol guard as opening one", /if \(u\.protocol !== "https:" && u\.protocol !== "http:"\) return;/.test(bridge));
+check("...and the native host asked to open the next one", /action: "open-url", kind: opts\.kind \?\? opts\.name, url: next/.test(bridge));
+check("the sign-out reuses the UAE PASS window", /clearPortal\(win\);/.test(exp));
+check("...navigating it rather than opening another", /if \(win\) win\.navigate\(url\);/.test(exp));
+// Still opens one if there was nothing to reuse — UAE PASS off, or blocked.
+check("...and opens one only when there is none to reuse", /else win = openExternal\(url, SIGNOUT_WINDOW\);/.test(exp));
+
 console.log("\nAnd the sign-in after it goes back through the portal");
 /**
  * The detour around the portal worked and cost the account: Emirates Post's
