@@ -126,7 +126,9 @@ console.log("\nThe portal goes first, and is given time to wake up");
  */
 // The portal's reply is what sends the window on, so UAE PASS cannot start
 // until the portal has answered or run out of time.
-check("the portal is the first stop", /const finish = \(\) => \{[\s\S]{0,200}toUaePass\(win\);/.test(exp));
+// The portal's reply is what sends the window on — to the host's own logout
+// where it has one (EPGL's Salesforce session), and to UAE PASS after that.
+check("the portal is the first stop", /const finish = \(\) => \{[\s\S]{0,200}toHostLogout\(win\);/.test(exp));
 check("...with eight seconds to answer", /\}, 8000\);/.test(exp));
 check("...ended early by the reply, not waited out", /answered = true;/.test(exp) && /finish\(\);\s*\n\s*\};\s*\n\s*window\.addEventListener\("message", done\);/.test(exp));
 check("...then the same window goes to UAE PASS", /if \(win\) w\.navigate\(uaePassLogout\);/.test(exp));
@@ -135,7 +137,7 @@ check("a refusal is reported rather than swallowed", /declined: the relay tag th
 check("...and so is silence", /never answered in 8s/.test(exp));
 check("...and a blocked pop-up says so too", /pop-ups are blocked, so the portal's session was NOT cleared/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
-check("UAE PASS alone still works where there is no portal", /if \(!hostOrigin\) \{\s*\n\s*toUaePass\(null\);/.test(exp));
+check("UAE PASS alone still works where there is no portal", /if \(!hostOrigin\) \{\s*\n\s*toHostLogout\(null\);/.test(exp));
 
 console.log("\nAnd the sign-in after it goes back through the portal");
 /**

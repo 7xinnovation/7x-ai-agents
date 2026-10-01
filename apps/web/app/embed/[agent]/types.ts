@@ -61,6 +61,9 @@ export interface PublicAgent {
   // popup and we wait for the host's token rather than running our own UAE PASS
   // flow. See hostLoginUrl in packages/config/src/agent.ts.
   hostLoginUrl?: string;
+  // The host portal's own sign-out endpoint, where it has one — Salesforce's
+  // /secur/logout.jsp for EPGL. See hostLogoutUrl in packages/config/src/agent.ts.
+  hostLogoutUrl?: string;
   /** In-app: still fall through to UAE PASS when the app ignores signin-needed. */
   nativeUaePassFallback?: boolean;
     /** A two-option choice renders stacked and full width (FB-1795). */

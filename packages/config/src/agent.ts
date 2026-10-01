@@ -78,6 +78,26 @@ export const AgentDefinition = z.object({
    */
   hostLoginUrl: z.string().url().optional(),
   /**
+   * The host portal's own SIGN-OUT endpoint, where it has one.
+   *
+   * Signing out of the chat has to end the session that would otherwise sign
+   * the customer straight back in, and a portal keeps that session in one of
+   * two places. Emirates Post keep it in `localStorage`, which the relay on
+   * their pages can clear once the site opts in. EPGL's portal is Salesforce
+   * Experience Cloud and keeps it in an HttpOnly `sid` cookie, which no script
+   * of ours can touch from any origin — only Salesforce's own
+   * `/secur/logout.jsp` ends it.
+   *
+   * So this is a URL the sign-out window is sent to, between clearing the
+   * host's storage and ending the UAE PASS session. Unset where the portal has
+   * no such endpoint, which is the Emirates Post case — there the storage IS
+   * the session.
+   *
+   * It is navigated, never fetched: a logout that matters is a cookie on their
+   * origin, and only a top-level navigation there can clear one.
+   */
+  hostLogoutUrl: z.string().url().optional(),
+  /**
    * DISUSED (28 September). The widget no longer navigates to this, anywhere.
    *
    * It held a custom scheme — `app://login` — to ask a native app for a sign-in
