@@ -1606,9 +1606,24 @@ export function Experience({
      * reply is how this side can tell a sign-out that did nothing from one that
      * worked, instead of us guessing again.
      */
-    const clearPortal = () => {
+    const clearPortal = (reuse?: ExternalWindow | null) => {
       if (!hostOrigin) return;
-      const win = openExternal(`${hostOrigin}/?dlg-signout=1`, SIGNOUT_WINDOW);
+      /**
+       * REUSE THE WINDOW. A SECOND ONE IS BLOCKED.
+       *
+       * "Keeps showing this pop-up as blocked" — with
+       * box.emiratespost.ae/?dlg-signout=1 named in Chrome's list, and the
+       * portal therefore never cleared, and the next Sign in therefore still
+       * signed in. Opening by the same NAME is not reuse: it is a fresh pop-up
+       * request, three seconds after the click, which is exactly what a blocker
+       * exists to stop. A window we already hold can be navigated instead, and
+       * nothing blocks that. Framing them is not available either —
+       * box.emiratespost.ae sends `frame-ancestors 'none'`.
+       */
+      const url = `${hostOrigin}/?dlg-signout=1`;
+      let win: ExternalWindow | null = reuse ?? null;
+      if (win) win.navigate(url);
+      else win = openExternal(url, SIGNOUT_WINDOW);
       if (!win) return;
       const done = (e: MessageEvent) => {
         if (e.origin !== hostOrigin) return;
@@ -1650,7 +1665,7 @@ export function Experience({
        */
       if (win) {
         window.setTimeout(() => {
-          if (hostOrigin) clearPortal();
+          if (hostOrigin) clearPortal(win);
           else try { win.close(); } catch { /* already gone */ }
         }, 3000);
       } else {
