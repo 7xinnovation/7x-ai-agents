@@ -1728,10 +1728,42 @@ export async function POST(req: NextRequest) {
    * leaves exactly one is anything latched: two live licences under one trade
    * licence is a real ambiguity and stays the customer's to resolve.
    */
+  /**
+   * A LICENCE THAT IS NOT "ACTIVE" IS NOT THEREFORE DEAD (2026-10-01).
+   *
+   * Asking for status "Active" and nothing else made this refuse to choose, and
+   * refusing to choose left the renewal on the wrong record. What the registry
+   * actually holds for trade licence 1196781:
+   *
+   *   0015f00000ic9okAAA  TRAHEEL DELIVERY SERVICES L.L.C  postal 377  "Draft"
+   *   001FW00B34EmqMWYEZ  EMRE KARAYALCIN                  no licence
+   *   001NM000009zr3pYAA  Traheel Delivery Services LLC    postal 479  "Inactive"
+   *
+   * Two licensed records and neither says Active, so `active.length === 1`
+   * failed, `licensed.length === 1` failed, and the answer was null — leaving
+   * the application on an account named after the APPLICANT, whose name the
+   * composite then tried to change to the company's. Their duplicate rule
+   * refused that, and it was read as EPGL blocking a renewal for days.
+   *
+   * So the test is inverted: a status that says the licence is FINISHED rules a
+   * record out, and anything else — Active, Draft, Submitted, Under review, or
+   * no status at all — leaves it in. Only when one record survives is it
+   * latched; two live licences under one trade licence is still a real
+   * ambiguity and still nothing is guessed.
+   *
+   * Inverted rather than extended because the list of words that mean "live" is
+   * theirs to grow and ours to be surprised by, while the handful that mean
+   * "over" is small and stable. Being wrong in this direction leaves the
+   * customer where they are; being wrong the other way files their renewal
+   * against a dead licence.
+   */
+  const DEAD_LICENCE = /^(inactive|expired|cancelled|canceled|closed|rejected|terminated|revoked|withdrawn|suspended)\b/i;
   const pickLicensedCompany = <T extends { licenseRecordId?: string; licenseStatus?: string }>(all: T[]): T | null => {
     const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
     const active = licensed.filter((x) => /^active\b/i.test(String(x.licenseStatus ?? "").trim()));
     if (active.length === 1) return active[0]!;
+    const live = licensed.filter((x) => !DEAD_LICENCE.test(String(x.licenseStatus ?? "").trim()));
+    if (live.length === 1) return live[0]!;
     if (licensed.length === 1) return licensed[0]!;
     return null;
   };

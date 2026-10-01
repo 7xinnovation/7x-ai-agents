@@ -38,12 +38,59 @@ check("no early return on having a licence record", !/if \(!c \|\| String\(c\.li
 check("...only on having no company at all", /if \(!c\) return "";/.test(route));
 check("...and still nothing to do without a trade licence", /if \(!licence\) return "";/.test(route));
 
+console.log("\nThe real registry data this failed on");
+{
+  /**
+   * Read from the live lookup, not invented. Two licensed records and NEITHER
+   * says Active, so a rule that only knows that word refused to choose — and
+   * refusing left the renewal on an account named after the applicant.
+   */
+  const DEAD = /^(inactive|expired|cancelled|canceled|closed|rejected|terminated|revoked|withdrawn|suspended)\b/i;
+  const pick = <T extends { licenseRecordId?: string; licenseStatus?: string }>(all: T[]): T | null => {
+    const licensed = all.filter((x) => String(x.licenseRecordId ?? "").trim());
+    const active = licensed.filter((x) => /^active\b/i.test(String(x.licenseStatus ?? "").trim()));
+    if (active.length === 1) return active[0]!;
+    const live = licensed.filter((x) => !DEAD.test(String(x.licenseStatus ?? "").trim()));
+    if (live.length === 1) return live[0]!;
+    if (licensed.length === 1) return licensed[0]!;
+    return null;
+  };
+  const REGISTRY = [
+    { accountId: "0015f00000ic9okAAA", licenseRecordId: "a12FW001yuIav1YYAR", licenseStatus: "Draft" },
+    { accountId: "001FW00B34EmqMWYEZ" },
+    { accountId: "001NM000009zr3pYAA", licenseRecordId: "a12NM000003mE2DYAU", licenseStatus: "Inactive" },
+  ];
+  check("trade licence 1196781 resolves to the 377 holder", pick(REGISTRY)?.accountId === "0015f00000ic9okAAA", pick(REGISTRY));
+  // The account with no licence record at all — the one named EMRE KARAYALCIN —
+  // is never a candidate.
+  check("...never the unlicensed record", pick(REGISTRY)?.accountId !== "001FW00B34EmqMWYEZ");
+  check("Active still wins outright where one says Active", pick([
+    { accountId: "A", licenseRecordId: "1", licenseStatus: "Active" },
+    { accountId: "B", licenseRecordId: "2", licenseStatus: "Draft" },
+  ])?.accountId === "A");
+  check("two live licences stay ambiguous", pick([
+    { accountId: "A", licenseRecordId: "1", licenseStatus: "Draft" },
+    { accountId: "B", licenseRecordId: "2", licenseStatus: "Submitted" },
+  ]) === null);
+  check("...and two ACTIVE ones too", pick([
+    { accountId: "A", licenseRecordId: "1", licenseStatus: "Active" },
+    { accountId: "B", licenseRecordId: "2", licenseStatus: "Active" },
+  ]) === null);
+  check("a lone licensed record is used whatever it says", pick([
+    { accountId: "A", licenseRecordId: "1", licenseStatus: "Inactive" },
+  ])?.accountId === "A");
+  check("no licensed record, no pick", pick([{ accountId: "A" }]) === null);
+}
+
 console.log("\nAnd ACTIVE decides which of them it is");
 const pick = route.slice(route.indexOf("const pickLicensedCompany"), route.indexOf("const latchLicensedCompany"));
 check("active is preferred", /const active = licensed\.filter\(\(x\) => \/\^active\\b\/i\.test/.test(pick));
 // Two LIVE licences under one trade licence is a real ambiguity and stays the
 // customer's to resolve — this never guesses between them.
-check("...exactly one active, or exactly one licensed", /if \(active\.length === 1\) return active\[0\]!;\s*\n\s*if \(licensed\.length === 1\) return licensed\[0\]!;/.test(pick));
+check("...then the one that is not finished", /const live = licensed\.filter\(\(x\) => !DEAD_LICENCE\.test/.test(pick));
+// Inverted rather than extended: the words that mean "live" are theirs to grow
+// and ours to be surprised by; the handful that mean "over" is small and stable.
+check("...ruling out by what is over, not in by what is live", /const DEAD_LICENCE = \/\^\(inactive\|expired\|cancelled/.test(route));
 check("...otherwise nothing is latched", /return null;/.test(pick));
 
 console.log("\nThe move is only ever to a different account");
