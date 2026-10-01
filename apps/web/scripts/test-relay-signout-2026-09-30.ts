@@ -74,6 +74,18 @@ console.log("\nA sign-out can also arrive as a page load, for the un-embedded wi
  */
 check("the relay acts on dlg-signout in the URL", /function signoutRequested\(\)/.test(relay));
 check("...matching it in the query or the hash", /dlg-signout\(=\|&\|\$\)/.test(relay));
+/**
+ * AND IN THE URL THE DOCUMENT WAS OPENED WITH.
+ *
+ * box.emiratespost.ae routes a signed-in visitor off the root as it mounts —
+ * d.push("/dashboard") — dropping the query string. This script is appended by
+ * their _app and loads asynchronously, so it arrived after the marker was
+ * gone: the window sat on a dashboard saying "Welcome EMRE!" and nothing was
+ * cleared. A client-side route change does not touch the navigation entry.
+ */
+check("...read from the navigation entry, not only live location", /performance\.getEntriesByType\("navigation"\)\[0\]/.test(relay));
+check("...and only its query and hash, never its path", /var fromOpened = i === -1 \? "" : opened\.slice\(i\);/.test(relay));
+check("...with the live location still consulted", /MARKER\.test\(fromOpened\) \|\| MARKER\.test\(String\(location\.search\)/.test(relay));
 check("...under the same opt-in, because a URL is not permission", /var cleared = clearHost\(\);/.test(relay));
 check("...and one clearHost serves both routes", /function clearHost\(\)/.test(relay) && /^\s*clearHost\(\);$/m.test(relay));
 check("...telling the opener which happened", /action: "host-signed-out", cleared: cleared/.test(relay));

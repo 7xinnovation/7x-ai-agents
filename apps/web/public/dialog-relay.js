@@ -367,9 +367,42 @@
    *
    * Under the SAME opt-in as everything above. A URL is not permission.
    */
+  var MARKER = /(^|[?&#])dlg-signout(=|&|$)/;
+
+  /**
+   * THE URL THIS DOCUMENT WAS OPENED WITH, not the one it has now.
+   *
+   * box.emiratespost.ae routes a signed-in visitor off the root the moment it
+   * mounts — `d.push("/dashboard")` — which drops the query string. This script
+   * is appended by their _app and loads asynchronously, so by the time it runs
+   * the marker it was sent to find is already gone, and a sign-out did nothing
+   * while the window sat on a dashboard saying "Welcome EMRE!".
+   *
+   * A client-side route change rewrites `location` and does NOT touch the
+   * navigation timing entry, whose `name` is the URL the document was actually
+   * fetched with. So that is read first, and the live location second — a
+   * browser without the entry, or a page that kept its query, still works.
+   */
+  function openedWith() {
+    try {
+      var nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+      if (nav && nav.name) return String(nav.name);
+    } catch (err) {
+      /* no navigation timing here; the location below is the fallback */
+    }
+    return "";
+  }
+
   function signoutRequested() {
     try {
-      return /(^|[?&#])dlg-signout(=|&|$)/.test(String(location.search) + String(location.hash));
+      var opened = openedWith();
+      // Only the query and hash of the opening URL: a path or host that merely
+      // contains the word must never sign anybody out.
+      var q = opened.indexOf("?");
+      var h = opened.indexOf("#");
+      var i = q === -1 ? h : h === -1 ? q : Math.min(q, h);
+      var fromOpened = i === -1 ? "" : opened.slice(i);
+      return MARKER.test(fromOpened) || MARKER.test(String(location.search) + String(location.hash));
     } catch (err) {
       return false;
     }
