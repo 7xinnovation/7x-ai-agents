@@ -100,7 +100,16 @@ console.log("\nThe company name stays on the Account — reverted same day");
 // The guard against it coming back. Nothing in here may remove a company name.
 {
   const src = readFileSync(new URL("../lib/integrations.ts", import.meta.url), "utf8");
-  check("nothing deletes the Account's Name", !/delete b\.Name|delete row\.Name|Name: undefined/.test(src));
+  /**
+   * The ACCOUNT's name. A Contact's `Name` is a different thing entirely — a
+   * compound field Salesforce builds from FirstName and LastName, which cannot
+   * be written and whose presence costs the whole composite a required Last
+   * Name (1 October). That one is moved to LastName and removed, inside a
+   * Contact-scoped loop, and this assertion must not catch it.
+   */
+  const contactBlock = src.slice(src.indexOf("A CONTACT HAS A LAST NAME"), src.indexOf("delete row.Name;") + 20);
+  const elsewhere = src.replace(contactBlock, "");
+  check("nothing deletes the Account's Name", !/delete b\.Name|delete row\.Name|Name: undefined/.test(elsewhere));
   check("...and why is written down where someone would try it again", /REVERTED SAME DAY \(2026-09-29\)/.test(src));
 }
 
@@ -144,7 +153,7 @@ check("the company-name block is named for what it is", /duplicate-name check on
 check("...as EPGL's, not the customer's to fix", /NOT something the customer can fix/.test(integrations));
 check("...and never by changing the company name", /NOT a reason to alter the company name/.test(integrations));
 check("a callback is offered there and not everywhere", /A callback is the right offer HERE, and only here/.test(integrations));
-check("it is an error, so the model cannot read past it", /Rolled back due to allOrNone[\s\S]{0,1400}isError: true/.test(integrations));
+check("it is an error, so the model cannot read past it", /Rolled back due to allOrNone[\s\S]{0,2600}isError: true/.test(integrations));
 check("...appended, never substituted", /result:\s*\n\s*res\.result \+\s*\n\s*`\\n\\nSUBMISSION ROLLED BACK/.test(integrations));
 
 console.log("\nThe company is spelled differently on each object");

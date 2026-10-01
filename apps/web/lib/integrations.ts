@@ -923,14 +923,61 @@ export function withEpglRequestFields(
    * Only the contact marked as the accountant, and only when the case actually
    * holds an accountant address.
    */
+  /**
+   * EVERY OBJECT THAT CARRIES THE FIELD, not only the Contact (2026-10-01).
+   *
+   * This was scoped to /sobjects/Contact, and on 1 October a renewal was rolled
+   * back by the same restricted picklist — from the USER item, which carried
+   * `EPG_Designation__c: "Applicant"` and went through untouched:
+   *
+   *   the "Populating the primary contact information on account contact_2"
+   *   process failed ... INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST: Designation:
+   *   bad value for restricted picklist field: Applicant
+   *
+   * Their flow copies the designation from whatever we send onto a Contact, so
+   * filtering the Contact and not the User filtered the copy and not the
+   * source. The field is the same field wherever it appears; the guard follows
+   * the field.
+   */
   for (const item of items) {
-    if (!/\/sobjects\/Contact$/i.test(String(item?.url ?? ""))) continue;
     for (const row of (Array.isArray(item.body) ? item.body : [item.body]) as Record<string, unknown>[]) {
       if (!row || typeof row !== "object" || row.EPG_Designation__c === undefined) continue;
       const ok = designation(row.EPG_Designation__c);
       if (ok === row.EPG_Designation__c) continue;
       if (ok) row.EPG_Designation__c = ok;
       else delete row.EPG_Designation__c;
+      patched0 = true;
+    }
+  }
+
+  /**
+   * A CONTACT HAS A LAST NAME, NOT A NAME (2026-10-01).
+   *
+   * Same rollback, second error in the same response:
+   *
+   *   A required field value is missing: "Last Name".
+   *
+   * The accountant's contact was sent as `{"Name": "M B C Auditing &
+   * Accounting"}`. On a Salesforce Contact, `Name` is a compound field built
+   * FROM FirstName and LastName and cannot be written at all, while LastName is
+   * required — so the value was both rejected and lost. It is a natural thing
+   * for a model to write, because every other object in this composite does
+   * have a writable Name: Account, Members__c, EPG_Partner__c.
+   *
+   * An accountant is often a FIRM rather than a person, so there is no first
+   * name to split off and inventing one would put a surname on a company. The
+   * whole name becomes the last name, which is what Salesforce itself does when
+   * a single-word contact is created.
+   */
+  for (const item of items) {
+    if (!/\/sobjects\/Contact$/i.test(String(item?.url ?? ""))) continue;
+    for (const row of (Array.isArray(item.body) ? item.body : [item.body]) as Record<string, unknown>[]) {
+      if (!row || typeof row !== "object") continue;
+      const name = String(row.Name ?? "").trim();
+      if (row.Name === undefined) continue;
+      // Never over a LastName the model did supply: that one is the person.
+      if (!String(row.LastName ?? "").trim() && name) row.LastName = name;
+      delete row.Name;
       patched0 = true;
     }
   }
@@ -3939,7 +3986,25 @@ export async function buildApiTools(
        * added is what they mean and what must not be done about them.
        */
       if (/Rolled back due to allOrNone/i.test(res.result)) {
-        const dup = /company with the same name already exists/i.test(res.result);
+        /**
+         * THE DUPLICATE STORY ONLY WHEN IT IS THE WHOLE STORY (2026-10-01).
+         *
+         * Their rollback message concatenates every error with " | ", and on
+         * 1 October it carried three: the duplicate name, a restricted picklist
+         * their own flow tripped on, and a missing Last Name. Two of those were
+         * OURS. The customer was told it was "a known issue on their side" and
+         * offered a callback, because this flag only looked for the duplicate
+         * sentence and then spoke as though nothing else was in the message.
+         *
+         * Telling somebody their supplier is at fault when the response names
+         * our own bugs is worse than saying nothing: it sends them to wait for
+         * a callback that cannot help, and it points the next investigation at
+         * the wrong system. So the duplicate framing now requires the duplicate
+         * to be the ONLY thing the response complains about.
+         */
+        const errorText = res.result;
+        const dupOnly = /company with the same name already exists/i.test(errorText) && !/\s\|\s/.test(errorText);
+        const dup = dupOnly;
         /**
          * A ROLLBACK IS NOT A LOST APPLICATION IF ONE IS ALREADY ON FILE.
          *
