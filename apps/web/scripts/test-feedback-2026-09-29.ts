@@ -284,29 +284,20 @@ check("...and passed through", /buildAuthorizeUrl\(resolveRedirectUri\(origin\),
 // to authenticate again.
 check("a sign-out arms it", /switchAccount\.current = true;/.test(exp));
 /**
- * AND THE HOST PORTAL IS SKIPPED WHEN IT IS ARMED.
+ * AND THE PORTAL IS STILL THE DOOR AFTERWARDS.
  *
- * Emirates Post's agent has a hostLoginUrl, so in a browser signIn returned at
- * that branch and never reached the UAE PASS one — making prompt=login and
- * &switch=1 dead code on the very agent they were written for. Worse, the
- * portal is still signed in, so opening it handed back the identity the
- * customer had just signed out of.
+ * For two days the portal was SKIPPED while this was armed, because the portal
+ * would not re-ask. It cost the account: Emirates Post's boxes come from
+ * Emirates Post's endpoints, which take the session token only the portal
+ * mints, and a customer with 46 boxes was shown none.
+ *
+ * The portal re-asks now — data-signout-clears-host="1" is on the tag on both
+ * box-stg and box, so the sign-out ends its session — so there is nothing left
+ * for the detour to buy. What the switch flag still does is carry `&switch=1`
+ * and `prompt=login` on our own UAE PASS flow, for an agent that has no portal.
  */
-check("...and the portal is skipped while it is",
-  /!\(switchAccount\.current && agent\.uaePassEnabled && agent\.uaePassOwnFlow\)/.test(exp));
-/**
- * But only where OUR UAE PASS callback is one the tenant's client accepts.
- * Emirates Post's production client is registered to their own portal, so
- * skipping it sent the customer to UAE PASS with an unregistered redirect and
- * they got "Sorry! Looks like something went wrong at our end".
- */
-const uaepassLib = readFileSync(new URL("../lib/uaepass.ts", import.meta.url), "utf8");
-check("...and whether our callback is accepted is computed, not assumed",
-  /export function uaePassRedirectsToUs\(origin: string, tenant\?: string\): boolean/.test(uaepassLib));
-check("...from the registered redirect's origin", /new URL\(registered\)\.origin === new URL\(origin\)\.origin/.test(uaepassLib));
-// Nothing registered in config: we have always used our own callback.
-check("...defaulting to ours where nothing is registered", /if \(!registered\) return true;/.test(uaepassLib));
-check("...and reaching the widget", /uaePassOwnFlow: uaePassRedirectsToUs\(origin, d\.tenantSlug\)/.test(readFileSync(new URL("../app/embed/[agent]/page.tsx", import.meta.url), "utf8")));
+check("...and the portal is not skipped for it", /const hostLoginUsable = Boolean\(agent\.hostLoginUrl\) && !isNative\(\);/.test(exp));
+check("...the portal's own session being ended instead", /\$\{hostOrigin\}\/\?dlg-signout=1/.test(exp));
 /**
  * And the flag survives an abandoned attempt. Spending it on the first click
  * meant a second click went back through the portal — which signed them in as

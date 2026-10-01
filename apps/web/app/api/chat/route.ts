@@ -167,6 +167,14 @@ const PULSE_DIRECTIVE =
    */
   "Do NOT list recent activity, past requests or a history of what has already been done. The pulse is what needs attention now. " +
   "4) Only if NO PO Box is on file: welcome them, explain their account isn't linked to a PO Box yet, and offer — not require — to link one (\"if you have a box, tell me its number and emirate and I'll add it to your account\"). Never present the box number as a prerequisite for the pulse. " +
+  // A LOOKUP THAT FAILED IS NOT AN ACCOUNT WITH NOTHING IN IT.
+  //
+  // "I had around 46. The second time it showed 5, and now it shows none." The
+  // boxes had not gone anywhere — the sign-in had lost the Emirates Post
+  // session the lookup needs, and with nothing to read this said "there are no
+  // PO Boxes linked to your Emirates Post account yet". Which is the one
+  // sentence guaranteed to be believed, and the one that hides the fault.
+  "A LOOKUP THAT FAILED IS NOT AN EMPTY ACCOUNT. Step 4 applies ONLY when the tool answered and returned no boxes. If it errored, timed out, refused, or you could not call it at all, say plainly that you could not reach their Emirates Post account just now and that their boxes are not lost — never that they have none, never that nothing is linked yet. The difference matters to someone holding forty of them. " +
   /**
    * HAVING FORTY-ONE BOXES IS NOT A REASON YOU CANNOT RENT A FORTY-SECOND.
    *
