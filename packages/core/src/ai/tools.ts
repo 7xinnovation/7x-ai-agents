@@ -1020,6 +1020,36 @@ export async function dispatchTool(
           isError: true,
         };
       }
+      /**
+       * A METHOD THAT IS SWITCHED OFF IS NOT TAKEN, whatever was said upstream.
+       *
+       * The admin toggle has to be worth something. Telling the model which
+       * methods to offer is the UX; refusing a payment by a method this agent
+       * does not offer is the guarantee, and it is the half that survives a
+       * model that read the list and offered one anyway.
+       *
+       * An empty list is every agent that predates the toggle, and means no
+       * restriction — never "nothing is allowed".
+       */
+      const offered = Array.isArray(agent.paymentMethods) ? agent.paymentMethods : [];
+      const chosenKey = String((state.data as Record<string, unknown>)?.payment_method ?? "").trim().toLowerCase();
+      if (offered.length && chosenKey) {
+        const known = offered.find((m) => String(m.key).trim().toLowerCase() === chosenKey);
+        if (!known || known.enabled === false) {
+          const live = offered.filter((m) => m.enabled !== false).map((m) => m.label?.en || m.key);
+          return {
+            result:
+              `PAYMENT METHOD NOT AVAILABLE: this agent does not currently offer "${chosenKey}". ` +
+              (live.length
+                ? `What it does offer: ${live.join(", ")}. Ask the customer to choose one of those, record it with collect_field, and request payment again. `
+                : "It offers no payment method at all right now, so a payment cannot be taken. ") +
+              "NOTHING has been charged and nothing is wrong with their application — do not tell them a payment failed.",
+            state,
+            events,
+            isError: true,
+          };
+        }
+      }
       if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
       const currency = sub.currency ?? "AED";

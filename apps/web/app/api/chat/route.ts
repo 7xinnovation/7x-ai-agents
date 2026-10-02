@@ -219,6 +219,37 @@ const PULSE_DIRECTIVE =
 const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
 
 /** The customer's PO Boxes, for the panel to list rather than the chat (FB-1792). */
+/**
+ * WHICH WAYS TO PAY THIS AGENT CURRENTLY OFFERS.
+ *
+ * The admin toggle is per agent and therefore per environment — UAEPay live on
+ * EPGL staging while production has card and Virtual IBAN only — so the model
+ * cannot be told this once in a prompt written months ago. It is read from the
+ * definition on every turn.
+ *
+ * This is the UX half. The guarantee is in request_payment, which refuses a
+ * payment by a method that is switched off; a model that offers one anyway
+ * produces a clear refusal rather than a charge.
+ *
+ * An empty list is every agent that predates the toggle and means no
+ * restriction, so nothing is said at all.
+ */
+function withPaymentMethods(context: string | undefined, def: AgentDefinition): string | undefined {
+  const all = Array.isArray(def.paymentMethods) ? def.paymentMethods : [];
+  if (!all.length) return context;
+  const live = all.filter((m) => m.enabled !== false);
+  const off = all.filter((m) => m.enabled === false);
+  const name = (m: { key: string; label?: { en?: string } }) => m.label?.en || m.key;
+  const line = live.length
+    ? `\nWAYS TO PAY THIS AGENT OFFERS RIGHT NOW: ${live.map((m) => `${name(m)}${m.note?.en ? ` — ${m.note.en}` : ""}`).join("; ")}. ` +
+      `Offer ONLY these, and all of them. ` +
+      (off.length
+        ? `${off.map(name).join(" and ")} ${off.length === 1 ? "is" : "are"} switched off for this agent: never offer ${off.length === 1 ? "it" : "them"}, never mention ${off.length === 1 ? "it" : "them"} as coming soon, and if the customer asks for ${off.length === 1 ? "it" : "one"} say it is not available here rather than that it failed.`
+        : "")
+    : "\nNO PAYMENT METHOD IS AVAILABLE on this agent right now. Do not offer to take a payment; if one is due, say it cannot be taken here and offer a callback.";
+  return `${context ?? ""}${line}`.trim();
+}
+
 const ACCOUNT_BOXES_KEY = "__account_boxes";
 
 const EPGL_PULSE_DIRECTIVE =
@@ -3220,7 +3251,7 @@ export async function POST(req: NextRequest) {
           adapters,
           intentPromise,
           businessOpen,
-          customerContext,
+          customerContext: withPaymentMethods(customerContext, agent.definition),
           extraTools,
           registryNonResidents: () => [...registryNonResidents],
           authoritativeAmount,

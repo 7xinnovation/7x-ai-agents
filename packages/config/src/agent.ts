@@ -98,6 +98,38 @@ export const AgentDefinition = z.object({
    */
   hostLogoutUrl: z.string().url().optional(),
   /**
+   * WHICH WAYS TO PAY THIS AGENT OFFERS, and whether each is switched on.
+   *
+   * Per agent and therefore per environment, which is the point: UAEPay can be
+   * live on EPGL staging while production still offers card and Virtual IBAN
+   * only, and switching it on later is a toggle in the admin panel rather than
+   * a deploy.
+   *
+   * `key` is the value the journey records in `payment_method` — "gateway",
+   * "viban", "uaepay" — so this list and the surcharge conditions and the
+   * gateway bindings all speak about the same thing.
+   *
+   * AN EMPTY LIST MEANS NO RESTRICTION. Every agent predates this field, and
+   * their journeys already offer what they offer; a missing list must not
+   * silently switch their payments off. Only a non-empty list is a statement
+   * about what may be offered.
+   *
+   * Separate from the gateway binding on purpose: this says WHETHER a method is
+   * offered, the binding says HOW it is charged. A method can be fully wired up
+   * and switched off, which is exactly the state UAEPay is in today.
+   */
+  paymentMethods: z
+    .array(
+      z.object({
+        key: z.string(),
+        label: LocalizedString,
+        enabled: z.boolean().default(true),
+        /** What the customer is told it costs or how it works, if anything. */
+        note: LocalizedString.optional(),
+      })
+    )
+    .default([]),
+  /**
    * DISUSED (28 September). The widget no longer navigates to this, anywhere.
    *
    * It held a custom scheme — `app://login` — to ask a native app for a sign-in

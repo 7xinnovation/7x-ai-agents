@@ -13,6 +13,31 @@ import { IntegrationsManager } from "./IntegrationsManager";
 import { BlocklistManager } from "./BlocklistManager";
 import { RequestsManager } from "./RequestsManager";
 
+/**
+ * A way to pay, and whether this agent is currently offering it.
+ *
+ * `key` is the value the journey records in `payment_method`, which is also
+ * what the surcharge conditions and the gateway bindings key on — one word,
+ * meaning one thing, in all three places.
+ */
+interface PaymentMethod {
+  key: string;
+  label: { en: string; ar?: string };
+  enabled: boolean;
+  note?: { en: string; ar?: string };
+}
+
+/**
+ * The methods worth offering in one click, because they are the ones that
+ * exist. Adding a key by hand still works; this is so nobody has to remember
+ * that the card option is spelled "gateway".
+ */
+const KNOWN_METHODS: PaymentMethod[] = [
+  { key: "gateway", label: { en: "Card payment (online)", ar: "الدفع بالبطاقة" }, enabled: true },
+  { key: "viban", label: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي" }, enabled: true },
+  { key: "uaepay", label: { en: "UAEPay", ar: "يوإي باي" }, enabled: false },
+];
+
 const TEMPLATE = {
   slug: "", tenantSlug: "", name: "",
   persona: "You are a calm, professional, accurate assistant. Guide users step by step and route to a human when needed.",
@@ -20,10 +45,11 @@ const TEMPLATE = {
   greeting: { en: "Hi, how can I help you today?", ar: "" }, model: "", activeEnvironment: "production",
   theme: { brandName: "", logoUrl: "", colors: { primary: "#1330F0", primaryForeground: "#FFFFFF", surface: "#FFFFFF", surfaceMuted: "#F4F6FB", text: "#0B1020", textMuted: "#5B6478", border: "#E2E6F0", success: "#0F9D58", warning: "#E8A100", danger: "#D23F31" }, radius: "soft", fontFamily: "Inter, system-ui, sans-serif", launcher: { position: "bottom-right", label: "" } },
   intents: [], journeys: [], guardrails: { confidenceThreshold: 0.6, refusalTopics: [], requireGroundedAnswers: true },
+  paymentMethods: [] as PaymentMethod[],
   integrations: { crm: { provider: "mock", settings: {}, secretRefs: [] }, auth: { provider: "mock", settings: {}, secretRefs: [] }, knowledge: { provider: "neon", settings: {}, secretRefs: [] }, storage: { provider: "mock", settings: {}, secretRefs: [] } },
 };
 type Def = typeof TEMPLATE & Record<string, unknown>;
-const TABS = ["Identity", "Branding", "Knowledge", "Integrations", "Requests", "Blocklist", "Configuration", "Embed"] as const;
+const TABS = ["Identity", "Branding", "Knowledge", "Integrations", "Payment methods", "Requests", "Blocklist", "Configuration", "Embed"] as const;
 type Tab = (typeof TABS)[number];
 
 export function Editor({ slug }: { slug: string }) {
@@ -58,6 +84,9 @@ export function Editor({ slug }: { slug: string }) {
 
   const patch = (p: Partial<Def>) => setDef((x) => ({ ...x, ...p }));
   const patchTheme = (p: Record<string, unknown>) => setDef((x) => ({ ...x, theme: { ...x.theme, ...p } }));
+  const methods: PaymentMethod[] = Array.isArray(def.paymentMethods) ? (def.paymentMethods as PaymentMethod[]) : [];
+  const patchMethod = (i: number, p: Partial<PaymentMethod>) =>
+    patch({ paymentMethods: methods.map((m, j) => (j === i ? { ...m, ...p } : m)) });
   const patchColor = (k: string, v: string) => setDef((x) => ({ ...x, theme: { ...x.theme, colors: { ...x.theme.colors, [k]: v } } }));
   const toggleLocale = (l: string) => patch({ locales: def.locales.includes(l) ? def.locales.filter((x) => x !== l) : [...def.locales, l] });
 
@@ -270,6 +299,66 @@ export function Editor({ slug }: { slug: string }) {
       {/* The record of what completed, for both agents: the confirmation the
           customer was shown beside the payload that went to the system of
           record. Read-only, and built entirely from what was already stored. */}
+      {tab === "Payment methods" && (
+        <Card><CardContent className="grid gap-4 pt-5">
+          <p className="text-[12.5px] text-muted">
+            Which ways to pay this agent offers. <strong>Per agent and per environment</strong> &mdash; a method can be
+            switched on here on staging while production still has it off, and switching it on later is a toggle rather
+            than a deploy. The key is the value the journey records in{" "}
+            <code className="rounded bg-surface px-1 py-0.5 font-mono">payment_method</code>, which is also what the
+            surcharge conditions and the gateway bindings use.
+          </p>
+          {methods.length === 0 && (
+            <p className="rounded-xl border border-[var(--color-line)] bg-bg p-3.5 text-[12.5px] text-muted">
+              No list set, so <strong>nothing is restricted</strong>: this agent offers whatever its journeys offer.
+              Add a method below to start deciding here instead &mdash; from that point, only what is switched on is
+              offered, and a payment by anything else is refused.
+            </p>
+          )}
+          {methods.map((m, i) => (
+            <div key={`${m.key}-${i}`} className="grid gap-3 rounded-xl border border-[var(--color-line)] bg-bg p-3.5 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <Field label="Key" hint="The payment_method value."><Input value={m.key} onChange={(e) => patchMethod(i, { key: e.target.value })} placeholder="uaepay" /></Field>
+              <Field label="Label (English)"><Input value={m.label?.en ?? ""} onChange={(e) => patchMethod(i, { label: { ...m.label, en: e.target.value } })} placeholder="UAEPay" /></Field>
+              <div className="flex items-center gap-2 pb-1">
+                <button
+                  type="button"
+                  aria-pressed={m.enabled !== false}
+                  onClick={() => patchMethod(i, { enabled: m.enabled === false })}
+                  className={cn(
+                    "h-10 rounded-xl border px-4 text-[13px] font-bold transition-colors",
+                    m.enabled !== false
+                      ? "border-[var(--color-brand)] bg-[color-mix(in_srgb,var(--color-brand)_8%,white)] text-[var(--color-brand)]"
+                      : "border-[var(--color-line)] bg-surface text-muted"
+                  )}
+                >
+                  {m.enabled !== false ? "On" : "Off"}
+                </button>
+                <Button variant="outline" size="sm" onClick={() => patch({ paymentMethods: methods.filter((_, j) => j !== i) })}>Remove</Button>
+              </div>
+              {def.locales.includes("ar") && (
+                <Field label="Label (Arabic)"><Input dir="rtl" value={m.label?.ar ?? ""} onChange={(e) => patchMethod(i, { label: { ...m.label, ar: e.target.value } })} /></Field>
+              )}
+              <Field label="Note (optional)" hint="What the customer is told about it — a price, or how it works.">
+                <Input value={m.note?.en ?? ""} onChange={(e) => patchMethod(i, { note: { ...(m.note ?? {}), en: e.target.value } })} placeholder="AED 100,000 — no online payment fee" />
+              </Field>
+            </div>
+          ))}
+          <div className="flex flex-wrap items-center gap-2">
+            {KNOWN_METHODS.filter((k) => !methods.some((m) => m.key === k.key)).map((k) => (
+              <Button key={k.key} variant="outline" size="sm" onClick={() => patch({ paymentMethods: [...methods, { ...k }] })}>
+                + {k.label.en}
+              </Button>
+            ))}
+            <Button variant="outline" size="sm" onClick={() => patch({ paymentMethods: [...methods, { key: "", label: { en: "" }, enabled: true }] })}>+ Another</Button>
+          </div>
+          <p className="text-[12.5px] text-muted">
+            Switching one off stops it being offered <em>and</em> refuses a payment made by it, so a model that offers it
+            anyway produces a clear refusal rather than a charge. Nothing here changes <strong>how</strong> a method is
+            charged &mdash; that is the gateway binding under Integrations.
+          </p>
+        </CardContent></Card>
+      )}
+
       {tab === "Requests" && (isNew ? <Card><CardContent className="pt-5 text-sm text-muted">Save the agent first — completed requests appear here once it has taken some.</CardContent></Card> : <RequestsManager slug={def.slug} />)}
 
       {tab === "Blocklist" && (isNew ? <Card><CardContent className="pt-5 text-sm text-muted">Save the agent first, then upload the blocked-company list here.</CardContent></Card> : <BlocklistManager slug={def.slug} />)}
