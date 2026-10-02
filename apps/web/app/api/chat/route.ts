@@ -69,6 +69,7 @@ import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, li
 import { messageLocale, historyLocale } from "@/lib/replyLocale";
 import { narrationGuard } from "@/lib/narrationGuard";
 import { echoGuard } from "@/lib/echoGuard";
+import { identityGuard, identityValues } from "@/lib/identityGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -219,6 +220,37 @@ const PULSE_DIRECTIVE =
 const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
 
 /** The customer's PO Boxes, for the panel to list rather than the chat (FB-1792). */
+/**
+ * WHICH WAYS TO PAY THIS AGENT CURRENTLY OFFERS.
+ *
+ * The admin toggle is per agent and therefore per environment — UAEPay live on
+ * EPGL staging while production has card and Virtual IBAN only — so the model
+ * cannot be told this once in a prompt written months ago. It is read from the
+ * definition on every turn.
+ *
+ * This is the UX half. The guarantee is in request_payment, which refuses a
+ * payment by a method that is switched off; a model that offers one anyway
+ * produces a clear refusal rather than a charge.
+ *
+ * An empty list is every agent that predates the toggle and means no
+ * restriction, so nothing is said at all.
+ */
+function withPaymentMethods(context: string | undefined, def: AgentDefinition): string | undefined {
+  const all = Array.isArray(def.paymentMethods) ? def.paymentMethods : [];
+  if (!all.length) return context;
+  const live = all.filter((m) => m.enabled !== false);
+  const off = all.filter((m) => m.enabled === false);
+  const name = (m: { key: string; label?: { en?: string } }) => m.label?.en || m.key;
+  const line = live.length
+    ? `\nWAYS TO PAY THIS AGENT OFFERS RIGHT NOW: ${live.map((m) => `${name(m)}${m.note?.en ? ` — ${m.note.en}` : ""}`).join("; ")}. ` +
+      `Offer ONLY these, and all of them. ` +
+      (off.length
+        ? `${off.map(name).join(" and ")} ${off.length === 1 ? "is" : "are"} switched off for this agent: never offer ${off.length === 1 ? "it" : "them"}, never mention ${off.length === 1 ? "it" : "them"} as coming soon, and if the customer asks for ${off.length === 1 ? "it" : "one"} say it is not available here rather than that it failed.`
+        : "")
+    : "\nNO PAYMENT METHOD IS AVAILABLE on this agent right now. Do not offer to take a payment; if one is due, say it cannot be taken here and offer a callback.";
+  return `${context ?? ""}${line}`.trim();
+}
+
 const ACCOUNT_BOXES_KEY = "__account_boxes";
 
 const EPGL_PULSE_DIRECTIVE =
@@ -3005,6 +3037,15 @@ export async function POST(req: NextRequest) {
         // Downstream of the narration guard on purpose: a preamble that guard
         // drops must not be remembered as something the customer has read.
         const echo = echoGuard();
+        /**
+         * Identity numbers masked in the chat, not only in the panel.
+         *
+         * Outermost in the pipe below, deliberately: it masks whatever every
+         * other guard produced, including text the pay fence rewrote. Reading
+         * the case lazily matters — a passport number arrives DURING the turn,
+         * when the document is read, and the same reply then mentions it.
+         */
+        const idMask = identityGuard(() => identityValues((liveState ?? session.state)?.data as Record<string, unknown>));
         // An Arabic reply links to the Arabic pages, whatever the model reached for.
         // THE WIDGET'S OWN WORDS FOLLOW THE CONVERSATION.
         //
@@ -3220,7 +3261,7 @@ export async function POST(req: NextRequest) {
           adapters,
           intentPromise,
           businessOpen,
-          customerContext,
+          customerContext: withPaymentMethods(customerContext, agent.definition),
           extraTools,
           registryNonResidents: () => [...registryNonResidents],
           authoritativeAmount,
@@ -3276,13 +3317,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))))));
+            const out = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))))))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
+            const held = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -3291,7 +3332,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            ))))));
+            ))))))) + idMask.flush();
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -3362,6 +3403,11 @@ export async function POST(req: NextRequest) {
                 amount: Math.round(ev.amount),
                 currency: ev.currency,
                 status: "initiated",
+                // Which gateway holds it, so the status probe, the return route
+                // and the reconcile sweep ask that one rather than the agent's
+                // default. Absent means the default, which is what every
+                // payment before 2 October 2026 was.
+                provider: ev.provider ?? null,
               })
               .onConflictDoNothing();
             await emitEvent({ type: "payment.initiated", ...std, referenceId: ev.reference, attributes: { reference: ev.reference, amount: ev.amount } });
@@ -3414,7 +3460,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
+          const rest = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -3422,7 +3468,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush();
+          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 

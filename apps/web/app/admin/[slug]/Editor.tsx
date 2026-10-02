@@ -13,6 +13,31 @@ import { IntegrationsManager } from "./IntegrationsManager";
 import { BlocklistManager } from "./BlocklistManager";
 import { RequestsManager } from "./RequestsManager";
 
+/**
+ * A way to pay, and whether this agent is currently offering it.
+ *
+ * `key` is the value the journey records in `payment_method`, which is also
+ * what the surcharge conditions and the gateway bindings key on — one word,
+ * meaning one thing, in all three places.
+ */
+interface PaymentMethod {
+  key: string;
+  label: { en: string; ar?: string };
+  enabled: boolean;
+  note?: { en: string; ar?: string };
+}
+
+/**
+ * The methods worth offering in one click, because they are the ones that
+ * exist. Adding a key by hand still works; this is so nobody has to remember
+ * that the card option is spelled "gateway".
+ */
+const KNOWN_METHODS: PaymentMethod[] = [
+  { key: "gateway", label: { en: "Card payment (online)", ar: "الدفع بالبطاقة" }, enabled: true },
+  { key: "viban", label: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي" }, enabled: true },
+  { key: "uaepay", label: { en: "UAEPay", ar: "يوإي باي" }, enabled: false },
+];
+
 const TEMPLATE = {
   slug: "", tenantSlug: "", name: "",
   persona: "You are a calm, professional, accurate assistant. Guide users step by step and route to a human when needed.",
@@ -20,10 +45,11 @@ const TEMPLATE = {
   greeting: { en: "Hi, how can I help you today?", ar: "" }, model: "", activeEnvironment: "production",
   theme: { brandName: "", logoUrl: "", colors: { primary: "#1330F0", primaryForeground: "#FFFFFF", surface: "#FFFFFF", surfaceMuted: "#F4F6FB", text: "#0B1020", textMuted: "#5B6478", border: "#E2E6F0", success: "#0F9D58", warning: "#E8A100", danger: "#D23F31" }, radius: "soft", fontFamily: "Inter, system-ui, sans-serif", launcher: { position: "bottom-right", label: "" } },
   intents: [], journeys: [], guardrails: { confidenceThreshold: 0.6, refusalTopics: [], requireGroundedAnswers: true },
+  paymentMethods: [] as PaymentMethod[],
   integrations: { crm: { provider: "mock", settings: {}, secretRefs: [] }, auth: { provider: "mock", settings: {}, secretRefs: [] }, knowledge: { provider: "neon", settings: {}, secretRefs: [] }, storage: { provider: "mock", settings: {}, secretRefs: [] } },
 };
 type Def = typeof TEMPLATE & Record<string, unknown>;
-const TABS = ["Identity", "Branding", "Knowledge", "Integrations", "Requests", "Blocklist", "Configuration", "Embed"] as const;
+const TABS = ["Identity", "Branding", "Knowledge", "Integrations", "Payment methods", "Requests", "Blocklist", "Configuration", "Embed"] as const;
 type Tab = (typeof TABS)[number];
 
 export function Editor({ slug }: { slug: string }) {
@@ -58,6 +84,32 @@ export function Editor({ slug }: { slug: string }) {
 
   const patch = (p: Partial<Def>) => setDef((x) => ({ ...x, ...p }));
   const patchTheme = (p: Record<string, unknown>) => setDef((x) => ({ ...x, theme: { ...x.theme, ...p } }));
+  const methods: PaymentMethod[] = Array.isArray(def.paymentMethods) ? (def.paymentMethods as PaymentMethod[]) : [];
+  /**
+   * The three that exist, plus anything this agent has that they do not cover.
+   *
+   * Shown whether or not the agent has a list yet: with no list nothing is
+   * restricted, so all of them are on, and the switches say so honestly. A key
+   * stored on the agent but unknown here is still listed rather than hidden —
+   * hiding it would mean a switch nobody can see deciding whether a customer
+   * can pay.
+   */
+  const allMethods: PaymentMethod[] = [
+    ...KNOWN_METHODS.map((k) => {
+      const stored = methods.find((m) => m.key === k.key);
+      return { ...k, ...stored, label: stored?.label ?? k.label, enabled: stored ? stored.enabled !== false : methods.length === 0 };
+    }),
+    ...methods.filter((m) => !KNOWN_METHODS.some((k) => k.key === m.key)),
+  ];
+  /**
+   * Flipping one writes the whole list, so a definition that had none gains a
+   * complete one in the state the switches are showing. Writing only the method
+   * that changed would turn a "nothing is restricted" agent into one offering
+   * exactly one method, which is not what the person flipping a single switch
+   * meant to say.
+   */
+  const setMethodEnabled = (key: string, enabled: boolean) =>
+    patch({ paymentMethods: allMethods.map((m) => ({ ...m, enabled: m.key === key ? enabled : m.enabled !== false })) });
   const patchColor = (k: string, v: string) => setDef((x) => ({ ...x, theme: { ...x.theme, colors: { ...x.theme.colors, [k]: v } } }));
   const toggleLocale = (l: string) => patch({ locales: def.locales.includes(l) ? def.locales.filter((x) => x !== l) : [...def.locales, l] });
 
@@ -270,6 +322,44 @@ export function Editor({ slug }: { slug: string }) {
       {/* The record of what completed, for both agents: the confirmation the
           customer was shown beside the payload that went to the system of
           record. Read-only, and built entirely from what was already stored. */}
+      {tab === "Payment methods" && (
+        <Card><CardContent className="grid gap-4 pt-5">
+          <p className="text-[12.5px] text-muted">
+            Which ways to pay this agent offers. <strong>Per agent and per environment</strong> &mdash; a method can be
+            on here on staging while production still has it off, and turning it on later is a switch rather than a
+            deploy. Switching one off stops it being offered <em>and</em> refuses a payment made by it.
+          </p>
+          <div className="grid gap-2">
+            {allMethods.map((m) => {
+              const on = m.enabled !== false;
+              return (
+                <div key={m.key} className="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-line)] bg-bg px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-semibold">{m.label?.en || m.key}</div>
+                    <div className="text-[12px] text-muted">{m.note?.en || m.key}</div>
+                  </div>
+                  {/* A switch, not a button that says what it is: the state is
+                      the position, and the colour says which way it is set. */}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={on}
+                    aria-label={m.label?.en || m.key}
+                    onClick={() => setMethodEnabled(m.key, !on)}
+                    className={cn(
+                      "relative h-7 w-12 shrink-0 rounded-full transition-colors",
+                      on ? "bg-[var(--color-brand)]" : "bg-[var(--color-line)]"
+                    )}
+                  >
+                    <span className={cn("absolute top-1 h-5 w-5 rounded-full bg-white shadow-[var(--shadow-xs)] transition-all", on ? "left-6" : "left-1")} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent></Card>
+      )}
+
       {tab === "Requests" && (isNew ? <Card><CardContent className="pt-5 text-sm text-muted">Save the agent first — completed requests appear here once it has taken some.</CardContent></Card> : <RequestsManager slug={def.slug} />)}
 
       {tab === "Blocklist" && (isNew ? <Card><CardContent className="pt-5 text-sm text-muted">Save the agent first, then upload the blocked-company list here.</CardContent></Card> : <BlocklistManager slug={def.slug} />)}

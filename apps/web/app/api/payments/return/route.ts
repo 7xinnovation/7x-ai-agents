@@ -5,6 +5,7 @@ import { resolveAdapters, adapterContext, setPayment } from "@dialog/core";
 import { getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, saveCase, audit } from "@/lib/conversation";
+import { gatewayForPayment } from "@/lib/paymentGateway";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -42,7 +43,13 @@ const RET_STR = {
 export async function GET(req: NextRequest) {
   // N-Genius appends its own order reference; accept the common spellings.
   const q = req.nextUrl.searchParams;
-  const reference = q.get("ref") ?? q.get("reference") ?? q.get("orderReference") ?? "";
+  /**
+   * Every gateway names this differently, and the customer lands here either
+   * way. UAEPay returns `merchantRequestId` — which is the reference we gave
+   * it, and the one the payment row is keyed by.
+   */
+  const reference =
+    q.get("ref") ?? q.get("reference") ?? q.get("orderReference") ?? q.get("merchantRequestId") ?? "";
   const locale: "en" | "ar" = q.get("lang") === "ar" ? "ar" : "en";
   const t = RET_STR[locale];
 
@@ -50,7 +57,7 @@ export async function GET(req: NextRequest) {
   if (reference) {
     const db = getDb();
     const [pay] = await db
-      .select({ status: payments.status, agentId: payments.agentId, conversationId: payments.conversationId })
+      .select({ status: payments.status, agentId: payments.agentId, conversationId: payments.conversationId, provider: payments.provider })
       .from(payments)
       .where(eq(payments.reference, reference))
       .limit(1);
@@ -61,11 +68,9 @@ export async function GET(req: NextRequest) {
           const agent = await getAgentById(pay.agentId);
           if (agent) {
             ensureAdapters();
-            const adapters = resolveAdapters(agent.definition);
-            if (adapters.payment) {
-              const actx = adapterContext(agent.definition, agent.definition.integrations.payment);
-              ({ status } = await adapters.payment.getStatus(actx, { reference }));
-            }
+            // The gateway that TOOK it, not the agent's default one.
+            const gw = gatewayForPayment(agent.definition, pay.provider);
+            if (gw) ({ status } = await gw.choice.adapter.getStatus(gw.ctx, { reference }));
           }
         } catch (err) {
           log.error("payment_return_probe_failed", err, { reference });
