@@ -61,10 +61,32 @@ const BINDING = {
 /** The option as the customer sees it, in both languages. */
 const OPTION = { value: METHOD, label: { en: "UAEPay", ar: "يوإي باي" } };
 
-const GUIDANCE =
-  " UAEPAY IS THE THIRD WAY TO PAY, and it costs LESS than the card: the licence fee is AED 100,000 and UAEPay adds no online payment fee, so a UAEPay payment is AED 100,000 while a card payment is AED 101,000." +
-  " State all three prices when you present the choice — card AED 101,000, UAEPay AED 100,000, Virtual IBAN AED 100,000 — rather than mentioning the fee only after they have chosen." +
-  " UAEPay is for SIGNED-IN applicants only: it requires the payer's Emirates ID, which comes from their UAE PASS sign-in and is never something to ask them for. If the applicant is not signed in, offer card and Virtual IBAN only and do not mention UAEPay.";
+/**
+ * THE PRICES ARE READ FROM THE JOURNEY, NOT TYPED IN.
+ *
+ * The first version wrote "AED 100,000" into the guidance. That is true on
+ * production and false on staging, whose base is deliberately 1,000 so nobody
+ * is shown a live fee — so the chat offered "UAEPay — AED 100,000" and opened a
+ * checkout for AED 1,000. A model stating a figure the gateway then contradicts
+ * is the exact failure the surcharge plumbing exists to prevent.
+ *
+ * So the three figures are computed from what this environment is configured to
+ * charge: the journey's own amount, plus the online-payment surcharge for the
+ * card route only.
+ */
+const money = (n: number) => `AED ${n.toLocaleString("en-US")}`;
+
+function guidanceFor(base: number, onlineFee: number): string {
+  const card = base + onlineFee;
+  return (
+    ` UAEPAY IS THE THIRD WAY TO PAY, and it costs LESS than the card: the licence fee is ${money(base)} and UAEPay adds no online payment fee, so a UAEPay payment is ${money(base)} while a card payment is ${money(card)}.` +
+    ` State all three prices when you present the choice — card ${money(card)}, UAEPay ${money(base)}, Virtual IBAN ${money(base)} — rather than mentioning the fee only after they have chosen.` +
+    ` UAEPay is for SIGNED-IN applicants only: it requires the payer's Emirates ID, which comes from their UAE PASS sign-in and is never something to ask them for. If the applicant is not signed in, offer card and Virtual IBAN only and do not mention UAEPay.`
+  );
+}
+
+/** Any earlier run's wording, so a re-run replaces rather than stacks. */
+const MARKER = "UAEPAY IS THE THIRD WAY TO PAY";
 
 async function main() {
   const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
@@ -132,11 +154,31 @@ async function main() {
           }
         }
       }
+      /**
+       * What this environment actually charges. `submission.amount` is the
+       * licence fee; the online fee is the surcharge gated on the card route,
+       * which is why UAEPay and Virtual IBAN do not carry it.
+       */
+      const sub = (j.submission ?? {}) as Record<string, any>;
+      const base = Number(sub.amount);
+      const fee = Number(
+        (Array.isArray(sub.surcharges) ? sub.surcharges : []).find((x: any) => x?.key === "online_payment_fee")?.amount ?? 0
+      );
+      if (!Number.isFinite(base) || base <= 0) {
+        throw new Error(`${j.key}: no chargeable amount on the journey — the guidance would state a price nothing charges`);
+      }
+      const wanted = guidanceFor(base, fee);
       const g = String(j.guidance ?? "");
-      if (g && !g.includes("UAEPAY IS THE THIRD WAY TO PAY")) {
-        j.guidance = g + GUIDANCE;
-        console.log(`  ~ ${j.key}: guidance states all three prices`);
+      if (g && !g.includes(wanted)) {
+        // Cut any earlier run's sentence before appending, so re-running with a
+        // changed price corrects it instead of leaving two prices in one prompt.
+        const at = g.indexOf(MARKER);
+        const head = at === -1 ? g : g.slice(0, g.lastIndexOf(" ", at));
+        j.guidance = head + wanted;
+        console.log(`  ~ ${j.key}: guidance states ${money(base + fee)} card / ${money(base)} UAEPay / ${money(base)} VIBAN`);
         changes++;
+      } else if (g) {
+        console.log(`  (already) ${j.key}: guidance`);
       }
     }
     if (!seenField) throw new Error("No payment_method field found on a renewal or new-licence journey — nothing would select UAEPay");
