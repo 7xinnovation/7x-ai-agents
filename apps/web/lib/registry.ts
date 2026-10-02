@@ -1,4 +1,4 @@
-import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery, registerSalesforceAdapter, registerNgeniusAdapter, registerUaePassAdapter, renderHandover } from "@dialog/core";
+import { registerMockAdapters, registerAdapter, embeddingsEnabled, embedQuery, registerSalesforceAdapter, registerNgeniusAdapter, registerUaePayAdapter, registerUaePassAdapter, renderHandover } from "@dialog/core";
 import type { CRMAdapter, KBAdapter, KBResult, StorageAdapter } from "@dialog/core";
 import { getDb, kbChunks, kbDocuments, documentBlobs, cases, conversations } from "@dialog/db";
 import { and, desc, eq, sql, inArray } from "drizzle-orm";
@@ -25,6 +25,7 @@ export function ensureAdapters() {
   // Real vendor adapters (used only when an agent's integration binds to them).
   registerSalesforceAdapter();
   registerNgeniusAdapter();
+  registerUaePayAdapter();
   registerUaePassAdapter();
 
   // Neon-backed KB: keyword retrieval over kb_chunks (pgvector-ready). Until an

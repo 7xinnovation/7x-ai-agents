@@ -6,6 +6,7 @@ import { getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, saveCase, audit } from "@/lib/conversation";
 import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
+import { gatewayForPayment } from "@/lib/paymentGateway";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   const db = getDb();
   const [pay] = await db
-    .select({ status: payments.status, agentId: payments.agentId, amount: payments.amount })
+    .select({ status: payments.status, agentId: payments.agentId, amount: payments.amount, provider: payments.provider })
     .from(payments)
     .where(and(eq(payments.reference, reference), eq(payments.conversationId, conversationId)))
     .limit(1);
@@ -48,11 +49,9 @@ export async function GET(req: NextRequest) {
     const agent = await getAgentById(pay.agentId);
     if (agent) {
       ensureAdapters();
-      const adapters = resolveAdapters(agent.definition);
-      if (adapters.payment) {
-        const actx = adapterContext(agent.definition, agent.definition.integrations.payment);
-        ({ status } = await adapters.payment.getStatus(actx, { reference }));
-      }
+      // The gateway that TOOK it, not the agent's default one.
+      const gw = gatewayForPayment(agent.definition, pay.provider);
+      if (gw) ({ status } = await gw.choice.adapter.getStatus(gw.ctx, { reference }));
     }
   } catch (err) {
     log.error("payment_status_probe_failed", err, { reference, conversationId });

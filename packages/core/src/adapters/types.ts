@@ -116,6 +116,23 @@ export interface NotificationAdapter {
  * it initiates payment (saved method or secure link), then a webhook confirms
  * the outcome. getStatus supports reconciliation/recovery.
  */
+/**
+ * Which gateway a given payment goes to, and the binding that configures it.
+ *
+ * Returned by `paymentFor` on the bundle rather than read off `payment`,
+ * because from October 2026 an agent may have several: EPGL offers card and
+ * UAEPay, and they settle to different places. The binding comes back with the
+ * adapter because every call site needs `adapterContext(agent, binding)` and
+ * passing the agent's single `integrations.payment` alongside a different
+ * adapter is exactly the mismatch this is meant to prevent.
+ */
+export interface PaymentChoice {
+  adapter: PaymentAdapter;
+  binding?: import("@dialog/config").AdapterBinding;
+  /** The `payment_method` this came from, stored on the payment row. */
+  method: string;
+}
+
 export interface PaymentAdapter {
   initiate(
     ctx: AdapterContext,
@@ -134,6 +151,15 @@ export interface PaymentAdapter {
       email?: string;
       /** Session language, so a hosted checkout page can be shown in it (FB-1445). */
       locale?: string;
+      /**
+       * Who is paying, where the gateway insists on knowing.
+       *
+       * N-Genius needs an email and nothing else. UAEPay requires the payer's
+       * Emirates ID outright and refuses the payment without it, which is also
+       * why UAEPay is offered to signed-in customers only — the Emirates ID
+       * comes from their UAE PASS sign-in, not from a question.
+       */
+      customer?: { name?: string; emiratesId?: string; mobile?: string };
     }
   ): Promise<{ reference: string; link?: string; status: "initiated" | "paid" }>;
   getStatus(ctx: AdapterContext, input: { reference: string }): Promise<{ status: "initiated" | "paid" | "failed" }>;
@@ -157,6 +183,14 @@ export interface AdapterBundle {
   storage?: StorageAdapter;
   notifications?: NotificationAdapter;
   payment?: PaymentAdapter;
+  /**
+   * The gateway for a payment made by a particular method, with its binding.
+   *
+   * Falls back to `payment` for any method that has no binding of its own, so
+   * an agent with one gateway behaves exactly as it always has. Undefined only
+   * when the agent has no payment gateway at all.
+   */
+  paymentFor?: (method?: string | null) => PaymentChoice | undefined;
   lookup?: LookupAdapter;
 }
 

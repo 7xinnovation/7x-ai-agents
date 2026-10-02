@@ -3,6 +3,7 @@ export * from "./adapters/registry";
 export * from "./adapters/mock";
 export * from "./adapters/salesforce";
 export * from "./adapters/ngenius";
+export * from "./adapters/uaepay";
 export * from "./adapters/uaepass";
 export * from "./case/engine";
 export * from "./ai/anthropic";

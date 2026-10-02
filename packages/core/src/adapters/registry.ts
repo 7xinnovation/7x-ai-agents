@@ -8,10 +8,18 @@ import type {
   StorageAdapter,
   NotificationAdapter,
   PaymentAdapter,
+  PaymentChoice,
   LookupAdapter,
 } from "./types";
 
-type Capability = keyof AdapterBundle;
+/**
+ * The capabilities that are ADAPTERS, named rather than derived.
+ *
+ * This was `keyof AdapterBundle`, which stopped being true the moment the
+ * bundle gained `paymentFor` — a resolver, not an adapter, with no registry and
+ * no provider name behind it.
+ */
+type Capability = "crm" | "auth" | "knowledge" | "storage" | "notifications" | "payment" | "lookup";
 
 type FactoryMap = {
   crm: () => CRMAdapter;
@@ -63,6 +71,37 @@ export function resolveAdapters(agent: AgentDefinition): AdapterBundle {
   bind("notifications", agent.integrations.notifications);
   bind("payment", agent.integrations.payment);
   bind("lookup", agent.integrations.lookup);
+
+  /**
+   * SEVERAL GATEWAYS, CHOSEN PER PAYMENT.
+   *
+   * Resolved once, here, rather than looked up at each call site: the three
+   * places that ask a gateway for a status — /payments/status, /return and the
+   * reconcile sweep — must ask the SAME gateway that took the money, and the
+   * surest way to guarantee that is for there to be one resolver.
+   *
+   * A method with no binding of its own falls back to the agent's single
+   * `payment`, so every existing agent is unaffected.
+   */
+  const byMethod = new Map<string, PaymentChoice>();
+  for (const [method, binding] of Object.entries(agent.integrations.paymentMethods ?? {})) {
+    const factory = registries.payment.get(binding.provider);
+    if (!factory) {
+      throw new Error(
+        `No "payment" adapter registered for provider "${binding.provider}" (agent ${agent.slug}, method "${method}")`
+      );
+    }
+    byMethod.set(method, { adapter: factory(), binding, method });
+  }
+  if (bundle.payment || byMethod.size) {
+    bundle.paymentFor = (method) => {
+      const key = String(method ?? "").trim().toLowerCase();
+      const chosen = key ? byMethod.get(key) : undefined;
+      if (chosen) return chosen;
+      if (!bundle.payment) return undefined;
+      return { adapter: bundle.payment, binding: agent.integrations.payment, method: key || "default" };
+    };
+  }
   return bundle;
 }
 

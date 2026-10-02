@@ -124,7 +124,7 @@ export type ToolEvent =
   | { type: "citation"; source: string }
   | { type: "escalation"; reference: string }
   | { type: "auth_required"; reason: string }
-  | { type: "payment_initiated"; reference: string; link?: string; amount: number; currency: string }
+  | { type: "payment_initiated"; reference: string; link?: string; amount: number; currency: string; provider?: string; method?: string }
   /**
    * A consent refused or withdrawn, with the action it stopped.
    *
@@ -276,6 +276,31 @@ function customerEmail(state: CaseState): string | undefined {
     if (typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim())) return v.trim();
   }
   return undefined;
+}
+
+/**
+ * Who is paying, for a gateway that will not take money without knowing.
+ *
+ * UAEPay requires the payer's Emirates ID. It is read from the case, where the
+ * verified value from their UAE PASS sign-in is written — never asked for,
+ * which is the whole reason UAEPay is offered to signed-in customers only.
+ */
+function payerDetails(state: CaseState): { name?: string; emiratesId?: string; mobile?: string } {
+  const data = (state.data ?? {}) as Record<string, unknown>;
+  const pick = (keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = data[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    return undefined;
+  };
+  return {
+    // "__verified_emirates_id" is the one written from the sign-in itself; the
+    // others are what a journey may have collected, and are a fallback only.
+    emiratesId: pick(["__verified_emirates_id", "emirates_id", "applicant_emirates_id", "owner_emirates_id"]),
+    name: pick(["contact_name", "applicant_name", "full_name", "name"]),
+    mobile: pick(["contact_phone", "applicant_phone", "mobile", "phone"]),
+  };
 }
 
 /** The add-on fees whose condition currently holds. */
@@ -1020,7 +1045,17 @@ export async function dispatchTool(
           isError: true,
         };
       }
-      if (!adapters.payment) return { result: "No payment gateway configured.", state, events, isError: true };
+      /**
+       * WHICH GATEWAY, chosen by the customer rather than by configuration.
+       *
+       * EPGL offers card and UAEPay and they are different gateways settling to
+       * different places, so the choice the customer already recorded in
+       * `payment_method` picks the binding. An agent with one gateway resolves
+       * to it whatever the method says, which is every other agent.
+       */
+      const chosenMethod = String((state.data as Record<string, unknown>)?.payment_method ?? "").trim().toLowerCase();
+      const pay = adapters.paymentFor?.(chosenMethod) ?? (adapters.payment ? { adapter: adapters.payment, binding: agent.integrations.payment, method: "default" } : undefined);
+      if (!pay) return { result: "No payment gateway configured.", state, events, isError: true };
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
       const currency = sub.currency ?? "AED";
       // A price the backend has quoted wins outright. The definition's figure is
@@ -1061,8 +1096,11 @@ export async function dispatchTool(
       const fee = processingFeeFor(sub, state.data, base);
       const amount = toFils(base + fee.amount);
       const applicable = applicableSurcharges(sub, state.data);
-      const actx = adapterContext(agent, agent.integrations.payment);
-      const res = await adapters.payment.initiate(actx, {
+      // The binding that goes with the chosen adapter, never the agent's
+      // default one: a context from the wrong binding is a payment addressed to
+      // the right gateway with another gateway's settings.
+      const actx = adapterContext(agent, pay.binding);
+      const res = await pay.adapter.initiate(actx, {
         caseId: ctx.caseId,
         amount,
         currency,
@@ -1070,6 +1108,7 @@ export async function dispatchTool(
         userRef: ctx.userRef,
         email: customerEmail(state),
         locale: ctx.locale,
+        customer: payerDetails(state),
       });
       state = setPayment(state, {
         status: res.status,
@@ -1078,8 +1117,13 @@ export async function dispatchTool(
         amount,
         currency,
         baseAmount: base,
+        // Which gateway holds this money. Carried so the three places that ask
+        // for a status later — /payments/status, /return and the reconcile
+        // sweep — ask the one that took it rather than the agent's default.
+        provider: pay.binding?.provider ?? undefined,
+        method: pay.method,
       });
-      events.push({ type: "payment_initiated", reference: res.reference, link: res.link, amount, currency });
+      events.push({ type: "payment_initiated", reference: res.reference, link: res.link, amount, currency, provider: pay.binding?.provider, method: pay.method });
       events.push({ type: "case", state });
       const surchargeTotal = applicable.reduce((sum, s) => sum + s.amount, 0);
       const parts = [

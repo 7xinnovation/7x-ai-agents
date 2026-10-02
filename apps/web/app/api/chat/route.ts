@@ -3362,6 +3362,11 @@ export async function POST(req: NextRequest) {
                 amount: Math.round(ev.amount),
                 currency: ev.currency,
                 status: "initiated",
+                // Which gateway holds it, so the status probe, the return route
+                // and the reconcile sweep ask that one rather than the agent's
+                // default. Absent means the default, which is what every
+                // payment before 2 October 2026 was.
+                provider: ev.provider ?? null,
               })
               .onConflictDoNothing();
             await emitEvent({ type: "payment.initiated", ...std, referenceId: ev.reference, attributes: { reference: ev.reference, amount: ev.amount } });

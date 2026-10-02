@@ -45,8 +45,24 @@ export const CaseState = z.object({
        * chargeableAmount stopped trusting the override.
        */
       baseAmount: z.number().nullable().default(null),
+      /**
+       * WHICH GATEWAY HOLDS THIS MONEY (2026-10-02).
+       *
+       * One agent may now offer more than one — EPGL has card and UAEPay — and
+       * the three places that ask for a status afterwards (/payments/status,
+       * /return, the reconcile sweep) have to ask the gateway that took it.
+       * Without this they ask the agent's default, which for a UAEPay payment
+       * is N-Genius, which has never heard of the reference and says nothing
+       * useful about it.
+       *
+       * Nullable because every payment taken before today has no answer, and
+       * for those the default binding is the right one.
+       */
+      provider: z.string().nullable().default(null),
+      /** The `payment_method` the customer chose, which selected that gateway. */
+      method: z.string().nullable().default(null),
     })
-    .default({ status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null }),
+    .default({ status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null, provider: null, method: null }),
   /**
    * Journeys the customer has already been asked to confirm, once.
    *
@@ -242,7 +258,7 @@ export function emptyCase(): CaseState {
     receiptOfferedAt: null,
     gsbCompanies: [],
     readiness: { complete: false, missing: [] },
-    payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null },
+    payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null, provider: null, method: null },
     reference: null,
     referenceLabel: null,
     status: "draft",

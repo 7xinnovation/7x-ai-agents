@@ -28,6 +28,23 @@ export const Integrations = z.object({
   notifications: AdapterBinding.optional(),
   // Payment gateway for chargeable services (e.g. Network International).
   payment: AdapterBinding.optional(),
+  /**
+   * MORE THAN ONE GATEWAY, CHOSEN BY THE CUSTOMER (2026-10-02).
+   *
+   * `payment` above binds ONE gateway per agent, decided at configuration time.
+   * EPGL now offers three ways to pay — card, Virtual IBAN, and UAEPay — and
+   * two of those are gateways that settle differently and must be asked about
+   * different payments. A binding per agent cannot express that.
+   *
+   * So: keyed by the value the journey records in `payment_method`. A payment
+   * whose method matches a key here goes to that gateway; everything else falls
+   * back to `payment`, which is why existing agents need no change at all.
+   *
+   * The key is the METHOD, not the provider name, because the method is what
+   * the customer chose and what the surcharge conditions already key on. Two
+   * methods may well point at one provider with different settlement settings.
+   */
+  paymentMethods: z.record(AdapterBinding).optional(),
   // Read-only lookups into backend systems (e.g. shipment tracking).
   lookup: AdapterBinding.optional(),
 });

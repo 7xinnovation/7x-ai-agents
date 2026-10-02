@@ -519,3 +519,69 @@ And the two questions to put to UAEPay before committing:
 
 *Read on 30 September 2026 against Dialog Platform at commit `f5032eb`. No code
 was changed.*
+
+---
+
+# Addendum — 2 October 2026: credentials arrived, and what the UAT actually does
+
+Merchant code `MR123093`, developer-portal key and secret, issued to the "7xtest"
+application. Tested the same day.
+
+## They work, on UAT only
+
+```
+POST https://uat-api.uaepay.ae/oauth/token/client-credentials   200  (scope: payouts balances payments refunds)
+POST https://api.uaepay.ae/oauth/token/client-credentials       401  INVALID_CLIENT_CREDENTIALS
+```
+
+Production is a separate onboarding. Nothing in this addendum has been tried
+against it.
+
+## Four things the guide gets wrong or does not say
+
+Each was found by calling the API, and each would have failed every payment.
+
+1. **`emiratesId` must be bare digits.** The guide's own worked example,
+   `"784-1993-1234566"`, is rejected: `INVALID_EMIRATESID`. Only
+   `784199983926421` is accepted. Anything carrying the customer's Emirates ID
+   as they or UAE PASS write it fails.
+2. **`merchantCode` is required on every `transactions[]` line**, not only at
+   the top level — `TRANSACTION_MERCHANT_CODE_REQUIRED`. The sample flow omits
+   it from the narrative.
+3. **Two transaction lines with the same `merchantCode` are refused** —
+   `DUPLICATE_MERCHANT`. The licence-fee / online-fee split therefore needs
+   distinct **child merchant codes**, which we do not have. One line for now,
+   with the breakdown in `transactionRemarks`.
+4. **Business failures come back HTTP 200 with `statusInfo.status: "SUCCESS"`.**
+   The real error is inside `paymentLinksInfo[].error`. Reading the envelope
+   hands the customer a dead link.
+
+## What a working call looks like
+
+```
+POST /v3/payments/token/createLinks
+→ paymentUrl: https://uat-pay.uaepay.ae/en/payment?preAuthToken=…
+  paymentRequestToken, paymentRequestTokenExpiry (about 20 minutes)
+```
+
+`GET /v2/inquiry/merchant/MR123093/txn/{merchantRequestId}` answers with
+`statusInfo.status` ∈ SUCCESS / FAILURE / INITIATED / PENDING.
+
+## Decisions taken
+
+- **UAEPay costs AED 100,000** — no online payment fee (Emre, 2 October). The
+  existing surcharge is conditional on `payment_method == 'gateway'`, so a third
+  value needs no change to it: card stays 101,000, UAEPay and Virtual IBAN are
+  100,000.
+- **EPGL only** for now. Emirates Post is untouched.
+- **Signed-in only**, as decided on 30 September — `emiratesId` is mandatory and
+  comes from the UAE PASS sign-in, never from a question.
+
+## Still outstanding with UAEPay
+
+- **Production onboarding and credentials.**
+- **Child merchant codes**, if Finance want the licence fee and the online fee
+  settled separately. Without them a payment is one line.
+- **Beneficiary accounts** — none issued, so nothing is split today.
+- **How a webhook is authenticated.** Unanswered since 30 September, and until
+  it is, a notification can only be a hint to go and ask the inquiry API.
