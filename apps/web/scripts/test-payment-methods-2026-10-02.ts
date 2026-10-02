@@ -79,7 +79,11 @@ check("...telling the customer what IS offered", /What it does offer: \$\{live\.
 // Nothing was charged, so nothing failed. This is the sentence that stops a
 // refusal being reported as a payment problem.
 check("...and that nothing was charged", /NOTHING has been charged and nothing is wrong with their application/.test(tools));
-check("...while an empty list still allows everything", /if \(offered\.length && chosenKey\)/.test(tools));
+check("...while an empty list still allows everything", /if \(offered\.length && chosenMethod\)/.test(tools));
+// The two questions are asked in order and are not the same question: may we
+// take this method at all, and then through which gateway.
+check("...and the availability check comes before the gateway choice",
+  tools.indexOf("PAYMENT METHOD NOT AVAILABLE") < tools.indexOf("const pay = adapters.paymentFor"));
 
 console.log("\nThe admin tab is a list of switches, and nothing else");
 check("there is a tab", /"Payment methods"/.test(editor) && /tab === "Payment methods"/.test(editor));

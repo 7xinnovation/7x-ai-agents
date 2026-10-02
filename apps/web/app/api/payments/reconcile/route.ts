@@ -7,6 +7,7 @@ import { ensureAdapters } from "@/lib/registry";
 import { getCase, saveCase, audit } from "@/lib/conversation";
 import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
 import { emitEvent } from "@/lib/analytics";
+import { gatewayForPayment } from "@/lib/paymentGateway";
 
 export const runtime = "nodejs";
 
@@ -38,12 +39,12 @@ export async function POST(req: NextRequest) {
     if (!p.agentId) continue;
     const agent = await getAgentById(p.agentId);
     if (!agent) continue;
-    const adapters = resolveAdapters(agent.definition);
-    if (!adapters.payment) continue;
+    // The gateway that TOOK it, not the agent's default one.
+    const gw = gatewayForPayment(agent.definition, p.provider);
+    if (!gw) continue;
     let status: "initiated" | "paid" | "failed" = "initiated";
     try {
-      const actx = adapterContext(agent.definition, agent.definition.integrations.payment);
-      ({ status } = await adapters.payment.getStatus(actx, { reference: p.reference }));
+      ({ status } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference }));
     } catch { /* leave as-is, will retry next sweep */ }
     if (status !== "initiated") {
       await db.update(payments).set({ status, updatedAt: new Date() }).where(eq(payments.id, p.id));

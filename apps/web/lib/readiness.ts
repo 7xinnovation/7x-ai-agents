@@ -434,7 +434,7 @@ export async function runCodeProbe(): Promise<CodeProbe> {
         caseId: "probe",
         locale: "en",
         state: probeCase({
-          payment: { status: "paid", reference: "PROBE-1", amount: 100, currency: "AED", link: null, baseAmount: 100 },
+          payment: { status: "paid", reference: "PROBE-1", amount: 100, currency: "AED", link: null, baseAmount: 100, provider: null, method: null },
         } as Partial<CaseState>),
         adapters: {
           payment: {
@@ -483,7 +483,7 @@ export async function runCodeProbe(): Promise<CodeProbe> {
         state: probeCase({
           data: { terms_accepted: true, terms_accepted_at: "2026-09-16T00:00:00Z", contact_name: "Probe Customer" },
           documents: [{ key: "trade_license", status: "uploaded", fileName: "tl.pdf" }],
-          payment: { status: "paid", reference: "PROBE-1", amount: 100, currency: "AED", link: null, baseAmount: 100 },
+          payment: { status: "paid", reference: "PROBE-1", amount: 100, currency: "AED", link: null, baseAmount: 100, provider: null, method: null },
           reference: "PROBE-REF",
         } as Partial<CaseState>),
         adapters: {

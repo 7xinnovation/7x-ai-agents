@@ -252,6 +252,15 @@ export const payments = pgTable(
     amount: doublePrecision("amount").notNull(),
     currency: text("currency").default("AED").notNull(),
     status: text("status", { enum: ["initiated", "paid", "failed"] }).default("initiated").notNull(),
+    /**
+     * Which gateway took this money (2026-10-02).
+     *
+     * An agent may now offer more than one — EPGL has card and UAEPay — and the
+     * three places that ask for a status afterwards must ask the gateway that
+     * holds it. Null on every payment taken before this existed, and null means
+     * the agent's default binding, which is what those were.
+     */
+    provider: text("provider"),
     gatewayRef: text("gateway_ref"),
     createdAt: ts(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
