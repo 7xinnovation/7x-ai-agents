@@ -85,8 +85,31 @@ export function Editor({ slug }: { slug: string }) {
   const patch = (p: Partial<Def>) => setDef((x) => ({ ...x, ...p }));
   const patchTheme = (p: Record<string, unknown>) => setDef((x) => ({ ...x, theme: { ...x.theme, ...p } }));
   const methods: PaymentMethod[] = Array.isArray(def.paymentMethods) ? (def.paymentMethods as PaymentMethod[]) : [];
-  const patchMethod = (i: number, p: Partial<PaymentMethod>) =>
-    patch({ paymentMethods: methods.map((m, j) => (j === i ? { ...m, ...p } : m)) });
+  /**
+   * The three that exist, plus anything this agent has that they do not cover.
+   *
+   * Shown whether or not the agent has a list yet: with no list nothing is
+   * restricted, so all of them are on, and the switches say so honestly. A key
+   * stored on the agent but unknown here is still listed rather than hidden —
+   * hiding it would mean a switch nobody can see deciding whether a customer
+   * can pay.
+   */
+  const allMethods: PaymentMethod[] = [
+    ...KNOWN_METHODS.map((k) => {
+      const stored = methods.find((m) => m.key === k.key);
+      return { ...k, ...stored, label: stored?.label ?? k.label, enabled: stored ? stored.enabled !== false : methods.length === 0 };
+    }),
+    ...methods.filter((m) => !KNOWN_METHODS.some((k) => k.key === m.key)),
+  ];
+  /**
+   * Flipping one writes the whole list, so a definition that had none gains a
+   * complete one in the state the switches are showing. Writing only the method
+   * that changed would turn a "nothing is restricted" agent into one offering
+   * exactly one method, which is not what the person flipping a single switch
+   * meant to say.
+   */
+  const setMethodEnabled = (key: string, enabled: boolean) =>
+    patch({ paymentMethods: allMethods.map((m) => ({ ...m, enabled: m.key === key ? enabled : m.enabled !== false })) });
   const patchColor = (k: string, v: string) => setDef((x) => ({ ...x, theme: { ...x.theme, colors: { ...x.theme.colors, [k]: v } } }));
   const toggleLocale = (l: string) => patch({ locales: def.locales.includes(l) ? def.locales.filter((x) => x !== l) : [...def.locales, l] });
 
@@ -303,59 +326,37 @@ export function Editor({ slug }: { slug: string }) {
         <Card><CardContent className="grid gap-4 pt-5">
           <p className="text-[12.5px] text-muted">
             Which ways to pay this agent offers. <strong>Per agent and per environment</strong> &mdash; a method can be
-            switched on here on staging while production still has it off, and switching it on later is a toggle rather
-            than a deploy. The key is the value the journey records in{" "}
-            <code className="rounded bg-surface px-1 py-0.5 font-mono">payment_method</code>, which is also what the
-            surcharge conditions and the gateway bindings use.
+            on here on staging while production still has it off, and turning it on later is a switch rather than a
+            deploy. Switching one off stops it being offered <em>and</em> refuses a payment made by it.
           </p>
-          {methods.length === 0 && (
-            <p className="rounded-xl border border-[var(--color-line)] bg-bg p-3.5 text-[12.5px] text-muted">
-              No list set, so <strong>nothing is restricted</strong>: this agent offers whatever its journeys offer.
-              Add a method below to start deciding here instead &mdash; from that point, only what is switched on is
-              offered, and a payment by anything else is refused.
-            </p>
-          )}
-          {methods.map((m, i) => (
-            <div key={`${m.key}-${i}`} className="grid gap-3 rounded-xl border border-[var(--color-line)] bg-bg p-3.5 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-              <Field label="Key" hint="The payment_method value."><Input value={m.key} onChange={(e) => patchMethod(i, { key: e.target.value })} placeholder="uaepay" /></Field>
-              <Field label="Label (English)"><Input value={m.label?.en ?? ""} onChange={(e) => patchMethod(i, { label: { ...m.label, en: e.target.value } })} placeholder="UAEPay" /></Field>
-              <div className="flex items-center gap-2 pb-1">
-                <button
-                  type="button"
-                  aria-pressed={m.enabled !== false}
-                  onClick={() => patchMethod(i, { enabled: m.enabled === false })}
-                  className={cn(
-                    "h-10 rounded-xl border px-4 text-[13px] font-bold transition-colors",
-                    m.enabled !== false
-                      ? "border-[var(--color-brand)] bg-[color-mix(in_srgb,var(--color-brand)_8%,white)] text-[var(--color-brand)]"
-                      : "border-[var(--color-line)] bg-surface text-muted"
-                  )}
-                >
-                  {m.enabled !== false ? "On" : "Off"}
-                </button>
-                <Button variant="outline" size="sm" onClick={() => patch({ paymentMethods: methods.filter((_, j) => j !== i) })}>Remove</Button>
-              </div>
-              {def.locales.includes("ar") && (
-                <Field label="Label (Arabic)"><Input dir="rtl" value={m.label?.ar ?? ""} onChange={(e) => patchMethod(i, { label: { ...m.label, ar: e.target.value } })} /></Field>
-              )}
-              <Field label="Note (optional)" hint="What the customer is told about it — a price, or how it works.">
-                <Input value={m.note?.en ?? ""} onChange={(e) => patchMethod(i, { note: { ...(m.note ?? {}), en: e.target.value } })} placeholder="AED 100,000 — no online payment fee" />
-              </Field>
-            </div>
-          ))}
-          <div className="flex flex-wrap items-center gap-2">
-            {KNOWN_METHODS.filter((k) => !methods.some((m) => m.key === k.key)).map((k) => (
-              <Button key={k.key} variant="outline" size="sm" onClick={() => patch({ paymentMethods: [...methods, { ...k }] })}>
-                + {k.label.en}
-              </Button>
-            ))}
-            <Button variant="outline" size="sm" onClick={() => patch({ paymentMethods: [...methods, { key: "", label: { en: "" }, enabled: true }] })}>+ Another</Button>
+          <div className="grid gap-2">
+            {allMethods.map((m) => {
+              const on = m.enabled !== false;
+              return (
+                <div key={m.key} className="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-line)] bg-bg px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-semibold">{m.label?.en || m.key}</div>
+                    <div className="text-[12px] text-muted">{m.note?.en || m.key}</div>
+                  </div>
+                  {/* A switch, not a button that says what it is: the state is
+                      the position, and the colour says which way it is set. */}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={on}
+                    aria-label={m.label?.en || m.key}
+                    onClick={() => setMethodEnabled(m.key, !on)}
+                    className={cn(
+                      "relative h-7 w-12 shrink-0 rounded-full transition-colors",
+                      on ? "bg-[var(--color-brand)]" : "bg-[var(--color-line)]"
+                    )}
+                  >
+                    <span className={cn("absolute top-1 h-5 w-5 rounded-full bg-white shadow-[var(--shadow-xs)] transition-all", on ? "left-6" : "left-1")} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
-          <p className="text-[12.5px] text-muted">
-            Switching one off stops it being offered <em>and</em> refuses a payment made by it, so a model that offers it
-            anyway produces a clear refusal rather than a charge. Nothing here changes <strong>how</strong> a method is
-            charged &mdash; that is the gateway binding under Integrations.
-          </p>
         </CardContent></Card>
       )}
 

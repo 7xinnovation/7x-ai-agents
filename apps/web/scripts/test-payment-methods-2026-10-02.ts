@@ -81,16 +81,23 @@ check("...telling the customer what IS offered", /What it does offer: \$\{live\.
 check("...and that nothing was charged", /NOTHING has been charged and nothing is wrong with their application/.test(tools));
 check("...while an empty list still allows everything", /if \(offered\.length && chosenKey\)/.test(tools));
 
-console.log("\nThe admin tab");
+console.log("\nThe admin tab is a list of switches, and nothing else");
 check("there is a tab", /"Payment methods"/.test(editor) && /tab === "Payment methods"/.test(editor));
-check("...each method toggles", /aria-pressed=\{m\.enabled !== false\}/.test(editor));
-check("...and can be removed", /paymentMethods: methods\.filter\(\(_, j\) => j !== i\)/.test(editor));
+check("...each method is a switch", /role="switch"/.test(editor) && /aria-checked=\{on\}/.test(editor));
+// No key field, no label field, no note field, no add, no remove: the three
+// that exist, on or off. Anything else is a form pretending to be a setting.
+for (const gone of ["patchMethod", "+ Another", "Remove", "Add a method"]) {
+  check(`  no "${gone}"`, !editor.includes(gone), gone);
+}
 // Nobody should have to remember that the card option is spelled "gateway".
-check("...the three that exist are one click", /const KNOWN_METHODS: PaymentMethod\[\] = \[/.test(editor));
-check("...UAEPay arrives switched off", /key: "uaepay"[\s\S]{0,80}enabled: false/.test(editor));
-check("...and the empty case is explained rather than blank", /No list set, so <strong>nothing is restricted<\/strong>/.test(editor));
-// This says WHETHER a method is offered; the binding says HOW it is charged.
-check("...not confused with the gateway binding", /that is the gateway binding under Integrations/.test(editor));
+check("the three that exist are listed", /const KNOWN_METHODS: PaymentMethod\[\] = \[/.test(editor));
+check("...including one the agent has that we do not know", /methods\.filter\(\(m\) => !KNOWN_METHODS\.some\(\(k\) => k\.key === m\.key\)\)/.test(editor));
+// With no list nothing is restricted, so every switch is on and says so.
+check("...all on where no list is set", /enabled: stored \? stored\.enabled !== false : methods\.length === 0/.test(editor));
+// Writing only the one that moved would turn an unrestricted agent into one
+// offering a single method, which is not what flipping one switch means.
+check("...and flipping one writes them all", /paymentMethods: allMethods\.map\(\(m\) => \(\{ \.\.\.m, enabled: m\.key === key \? enabled : m\.enabled !== false \}\)\)/.test(editor));
+check("UAEPay arrives switched off", /key: "uaepay"[\s\S]{0,80}enabled: false/.test(editor));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
