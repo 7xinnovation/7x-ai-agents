@@ -69,6 +69,7 @@ import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, li
 import { messageLocale, historyLocale } from "@/lib/replyLocale";
 import { narrationGuard } from "@/lib/narrationGuard";
 import { echoGuard } from "@/lib/echoGuard";
+import { identityGuard, identityValues } from "@/lib/identityGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -3036,6 +3037,15 @@ export async function POST(req: NextRequest) {
         // Downstream of the narration guard on purpose: a preamble that guard
         // drops must not be remembered as something the customer has read.
         const echo = echoGuard();
+        /**
+         * Identity numbers masked in the chat, not only in the panel.
+         *
+         * Outermost in the pipe below, deliberately: it masks whatever every
+         * other guard produced, including text the pay fence rewrote. Reading
+         * the case lazily matters — a passport number arrives DURING the turn,
+         * when the document is read, and the same reply then mentions it.
+         */
+        const idMask = identityGuard(() => identityValues((liveState ?? session.state)?.data as Record<string, unknown>));
         // An Arabic reply links to the Arabic pages, whatever the model reached for.
         // THE WIDGET'S OWN WORDS FOLLOW THE CONVERSATION.
         //
@@ -3307,13 +3317,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))))));
+            const out = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))))))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
+            const held = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -3322,7 +3332,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            ))))));
+            ))))))) + idMask.flush();
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -3450,7 +3460,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
+          const rest = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -3458,7 +3468,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush();
+          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
 
