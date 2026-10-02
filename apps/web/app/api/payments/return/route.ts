@@ -43,7 +43,13 @@ const RET_STR = {
 export async function GET(req: NextRequest) {
   // N-Genius appends its own order reference; accept the common spellings.
   const q = req.nextUrl.searchParams;
-  const reference = q.get("ref") ?? q.get("reference") ?? q.get("orderReference") ?? "";
+  /**
+   * Every gateway names this differently, and the customer lands here either
+   * way. UAEPay returns `merchantRequestId` — which is the reference we gave
+   * it, and the one the payment row is keyed by.
+   */
+  const reference =
+    q.get("ref") ?? q.get("reference") ?? q.get("orderReference") ?? q.get("merchantRequestId") ?? "";
   const locale: "en" | "ar" = q.get("lang") === "ar" ? "ar" : "en";
   const t = RET_STR[locale];
 

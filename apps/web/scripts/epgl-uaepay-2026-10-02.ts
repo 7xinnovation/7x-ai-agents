@@ -21,7 +21,7 @@
  *
  * NOT RUN ON STAGING OR PRODUCTION. This lives on the `uae-pay` branch with the
  * rest of it. When it is time:
- *   npx tsx scripts/epgl-uaepay-2026-10-02.ts --env <file> [--dry-run]
+ *   npx tsx scripts/epgl-uaepay-2026-10-02.ts --env <file> --host https://… [--dry-run]
  *
  * It needs UAEPAY_CLIENT_ID and UAEPAY_CLIENT_SECRET in the app settings of
  * whichever environment it is run against. The UAT credentials work only
@@ -43,6 +43,12 @@ if (!ENV) throw new Error("--env <envfile> is required");
 const DRY = process.argv.includes("--dry-run");
 const BASE_URL = arg("--base-url") ?? "https://uat-api.uaepay.ae";
 const MERCHANT = arg("--merchant") ?? "MR123093";
+/**
+ * Where UAEPay sends the customer back to. Given rather than guessed: staging
+ * returning a customer to production is the kind of mistake that is invisible
+ * until somebody's payment lands in the wrong environment.
+ */
+const HOST = (arg("--host") ?? "").replace(/\/$/, "");
 const SLUG = "epgl-dialog";
 const METHOD = "uaepay";
 
@@ -78,13 +84,26 @@ async function main() {
      * public host rather than typed, so staging never returns a customer to
      * production: the two environments' returns must not cross.
      */
-    const host = String(def.publicHost ?? process.env.PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+    const host = HOST || String(def.publicHost ?? process.env.PUBLIC_APP_URL ?? "").replace(/\/$/, "");
     binding.settings.returnUrl = host ? `${host}/api/payments/return` : "";
     if (!binding.settings.returnUrl) {
-      throw new Error("No public host on the agent and no PUBLIC_APP_URL — a payment with no return URL strands the customer on UAEPay's page");
+      throw new Error("Pass --host https://… — a payment with no return URL strands the customer on UAEPay's page");
     }
-    const before = JSON.stringify(def.integrations.paymentGateways[METHOD] ?? null);
-    if (before !== JSON.stringify(binding)) {
+    /**
+     * FIELD BY FIELD, because jsonb does not keep your key order.
+     *
+     * Postgres stores jsonb with its own ordering, so the binding comes back as
+     * {provider, secretRefs, settings} however it went in, and comparing the
+     * two as strings reports a change on every run for ever. The 23 September
+     * fee script learned this and this one repeated it: the second run wrote
+     * the identical binding again.
+     */
+    const had = (def.integrations.paymentGateways[METHOD] ?? {}) as Record<string, any>;
+    const same =
+      had.provider === binding.provider &&
+      JSON.stringify([...(had.secretRefs ?? [])].sort()) === JSON.stringify([...binding.secretRefs].sort()) &&
+      (["baseUrl", "merchantCode", "returnUrl"] as const).every((k) => (had.settings ?? {})[k] === binding.settings[k]);
+    if (!same) {
       console.log(`  ${def.integrations.paymentGateways[METHOD] ? "~" : "+"} integrations.paymentGateways.${METHOD} -> ${binding.provider} (${MERCHANT} at ${BASE_URL})`);
       def.integrations.paymentGateways[METHOD] = binding;
       changes++;
