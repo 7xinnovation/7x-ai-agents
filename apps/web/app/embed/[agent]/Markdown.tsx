@@ -318,8 +318,13 @@ function ChatButtons({ labels, onSelect, stacked }: { labels: string[]; onSelect
  * A new gateway goes here. Refusing to open an unknown host is the failure we
  * want — a payment page that does not open is recoverable, a customer sent to
  * someone else's is not.
+ *
+ * UAEPay (noqodi) added 2026-10-07: its hosted page is `uat-pay.uaepay.ae` on
+ * UAT and `pay-stg02.noqodi.com` / `pay.noqodi.com` behind it. Listed now so a
+ * backend that starts returning a UAEPay link — Emirates Post's, one day — is
+ * not silently refused by this lock.
  */
-const PAY_HOSTS = ["ngenius-payments.com", "network.ae"];
+const PAY_HOSTS = ["ngenius-payments.com", "network.ae", "uaepay.ae", "noqodi.com"];
 
 export function isPaymentUrl(raw: string): boolean {
   try {
