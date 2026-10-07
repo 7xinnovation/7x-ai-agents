@@ -53,7 +53,21 @@ For a **signed-in** customer (UAE PASS):
   `isAutoRenewEnabled` and the authorised agents. The guest variant masks the
   holder's name; the authenticated one does not.
 - **Their card.** `nxn_saved_cards` reads what Emirates Post holds; sending it on
-  the save pre-selects it on their payment page (`scripts/nxn-saved-card-2026-09-02.ts`).
+  a save pre-selects it on their payment page (`scripts/nxn-saved-card-2026-09-02.ts`).
+  Today it is sent **only on rental saves** — the renewal save forces
+  `saveCreditCard` and `isAutomaticSubscriptionEnabled` to false
+  (`integrations.ts:2779`) and the save-card and auto-renew switches were removed
+  from both renewal journeys when they became guest-shaped. Wiring the card onto
+  the renewal save is part of the work below.
+- **Who is renewing.** Already answered without asking: when the box is on the
+  signed-in customer's own list, `GetRenewedByOptions` is resolved to the owner
+  key and the model is told not to ask (`integrations.ts:3497`). A box they hold
+  as an authorised agent (`isOwner: false`) cannot be renewed on their account and
+  is excluded from the fast path.
+- **A foothold in the prompt.** The global rule for "renew as is" already says:
+  take the bundle and branch from the record, use the standard period, price it,
+  and go straight to summary and payment (`prompt.ts:241`). The fast path is that
+  rule made the default for a signed-in customer, with the term still chosen.
 - **Their session.** `backendSessionToken` — rentals already call the
   session-bound endpoints with it; the authenticated `Renewal/*` family is the
   same.
@@ -119,13 +133,18 @@ Two taps, one card page, two Emirates Post reads, one save, one confirm.
 
 | | Where | Size |
 |---|---|---|
-| A signed-in fast-path in the renewal guidance: authenticated Details and Pricing when a session exists, subscriber fields recorded from Details, summary and preferences in one block, guest path untouched | journey config script (DB), like the other dated scripts | 2 days incl. tests |
+| A signed-in fast-path in the renewal guidance: subscriber fields recorded from Details, summary and preferences in one block, guest path untouched | journey config script (DB), like the other dated scripts | 2 days incl. tests |
+| Re-enable the authenticated `Renewal/Details`, `Renewal/Pricing` and `Renewal/Save` for sessions only — they were disabled deliberately (`trim-nxn-tools.ts`, `docs/NXN-API-ENDPOINTS.md:296`) because the model picked them first for guests; the choice must be made server-side from the session, not by the model | `integrations.ts`, tool trimming | 1 day |
+| Send the saved card on the renewal save as the rental save does, and stop forcing `saveCreditCard` / `isAutomaticSubscriptionEnabled` off for a signed-in renewal | `integrations.ts:2037-2240, 2779` | half a day |
+| Map the emirate NAME stored in `__account_boxes` to the three-letter code the renewal calls need (`nxn_boxes_for_customer` returns it verbatim) | chat route | small |
 | Journey entry from outside the chat: `?journey=&box=&emirate=` on the embed URL and a `{action:"start", journey, data}` host message; a "Renew" action on panel boxes | `Experience.tsx`, `packages/embed`, chat route | 1–2 days |
 | Pulse line for expiring boxes offering the renewal as one button | guidance; the pulse already names them | half a day |
 | Mobile app: open the chat with the deep link from the box list | Emirates Post app team, per the WebView contract | theirs |
 | Tests: fixture journey, fast path only when signed in, no pre-selection, terms still gate | scripts | included |
 
-Roughly a week of our time, nothing new from Emirates Post.
+Roughly a week of our time, nothing new from Emirates Post. Two code facts to
+respect on the way: `ConfirmPayment` has a 75-second "too early" guard after the
+save, and a renewal is only reported done when that call returns success.
 
 ## What to ask Emirates Post, in order of value
 
@@ -139,15 +158,31 @@ Roughly a week of our time, nothing new from Emirates Post.
 3. **Confirm the authenticated `Renewal/Details` returns the unmasked subscriber**
    (the guest one masks the name), so the subscriber step can be prefilled
    rather than confirmed.
+4. **Confirm the auto-renew engine actually runs.** Their API names an
+   `AutoRenewJobEngine` request source and their portal describes auto-renewal as
+   charging the saved card on a schedule, but we have never observed a renewal it
+   performed. The zero-tap option below rests on it.
 
 ## The zero-tap option already exists
 
 Auto-renewal: the chat can switch it on today (`nxn_set_auto_renew` →
-`UpdateAutoRenewConfig`), Emirates Post's engine renews the box and charges the
-saved card without anyone tapping anything. For a customer who keeps a box for
+`UpdateAutoRenewConfig`), and on Emirates Post's description their engine renews
+the box and charges the saved card without anyone tapping anything — subject to
+ask 4 above, since we have not yet seen it run. For a customer who keeps a box for
 years that is the better answer than a fast manual flow, and the two-tap
 completion line should offer it once ("Renew automatically next year?") — which
 the preferences block already does when they are signed in.
+
+## Regulatory frame, in one paragraph
+
+The readiness checklist the agents are scored against says consent is
+per-action, never standing; every approval names the action, the data and the
+cost; and fees are shown clearly before explicit approval. The two-tap flow meets
+it as drawn — the price is on the card the customer taps and on the button they
+confirm — and so does one tap with a defaulted term, as long as the button names
+the amount. A silent charge with no named amount would not, which is one more
+reason the zero-tap answer is auto-renewal the customer switched on, not a
+payment the chat took by itself.
 
 ## What this does not cover
 
