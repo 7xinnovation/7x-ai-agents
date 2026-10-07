@@ -45,18 +45,19 @@ Needed from Noqodi / UAE Pay first: a **production** client id and secret, the
 and child merchant codes. Ask at the same time how a **webhook is authenticated** —
 the guide never says, so we confirm every result through the inquiry API instead.
 
-1. **Code to production — done 7 Oct 2026.** `main` was fast-forwarded to
-   `staging` (136 commits, the first production build since 16 September) and the
-   GitHub Action deployed `app-7xil-agents-prod`. The UAEPay code is therefore on
-   production now, dormant: no switch list, no binding, no credentials. For any
-   later change, repeat:
+1. **Code to production — done 7 Oct 2026.** `main` is merged from `staging`
+   routinely ("Merge branch 'staging'", most recently on 2 October), so production
+   already carried the 2 October UAEPay code; on 7 October `staging` was merged
+   again with the day's hardenings and the GitHub Action deployed
+   `app-7xil-agents-prod`. Dormant on production: no switch list, no binding, no
+   credentials. For any later change, repeat:
    ```sh
-   git checkout main && git merge --ff-only origin/staging && git push origin main
+   git checkout main && git pull --ff-only && git merge origin/staging && git push origin main
    ```
    Migrations do **not** run on deploy; `payments.provider` already exists on
    production (verified 7 Oct), so none was needed. Pre-deploy checks run on
-   7 Oct: no other schema change since main's build, deploy workflow unchanged,
-   and every app setting the new code requires is present on production.
+   7 Oct: no other schema change since production's build, deploy workflow
+   unchanged, and every app setting the code requires is present on production.
 2. **Credentials on the production App Service** (restarts the app):
    ```sh
    az webapp config appsettings set --subscription sub-7xil-prod \
