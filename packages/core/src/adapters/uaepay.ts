@@ -28,6 +28,14 @@ import type { AdapterContext, PaymentAdapter } from "./types";
  *      do, with the breakdown in `transactionRemarks`.
  *   4. The token lives 299 seconds. It is minted per call and never cached:
  *      a cached token is a payment that fails five minutes into a conversation.
+ *
+ * And one thing the guide gets RIGHT that the first version did not do
+ * (2026-10-07): `enableSecureRedirect` defaults to false, which puts the whole
+ * payment result — card scheme, masked card, amounts — in the query string of
+ * the redirect back to us. A redirect is a URL the customer's browser keeps and
+ * our server logs. The guide's own recommendation is "Always set to true", and
+ * the return route already asks the inquiry API for the outcome, so nothing is
+ * lost by sending only `merchantRequestId` and `status` back.
  */
 
 interface UpConfig {
@@ -132,6 +140,8 @@ export const uaePayPayment: PaymentAdapter = {
           emiratesId,
           mobileNumber: uaePayMobile(input.customer?.mobile),
           email: input.email,
+          // The hosted page in the conversation's language (guide v1.3+).
+          language: input.locale === "ar" ? "ar" : "en",
         },
         paymentLinksInfo: [
           {
@@ -140,6 +150,11 @@ export const uaePayPayment: PaymentAdapter = {
             merchantOrderId: input.caseId,
             amount,
             paymentRemarks: input.description.slice(0, 120),
+            // Only merchantRequestId + status come back on the redirect; the
+            // return route asks the inquiry API for the rest. See the note above.
+            enableSecureRedirect: true,
+            // What the customer sees as the service in the UAEPay app and email.
+            metaData: { serviceName: input.description.slice(0, 80) },
             // ONE line, with its own merchantCode. See notes 2 and 3 above.
             transactions: [
               {

@@ -33,9 +33,11 @@ interface PaymentMethod {
  * that the card option is spelled "gateway".
  */
 const KNOWN_METHODS: PaymentMethod[] = [
-  { key: "gateway", label: { en: "Card payment (online)", ar: "الدفع بالبطاقة" }, enabled: true },
-  { key: "viban", label: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي" }, enabled: true },
-  { key: "uaepay", label: { en: "UAEPay", ar: "يوإي باي" }, enabled: false },
+  { key: "gateway", label: { en: "Pay with Card", ar: "الدفع بالبطاقة" }, enabled: true },
+  { key: "viban", label: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي (آيبان افتراضي)" }, enabled: true },
+  // Named for the customer, not the API: the platform is noqodi and the federal
+  // brand on the hosted page is UAE Pay, so both appear (2026-10-07).
+  { key: "uaepay", enabled: false, label: { en: "Pay with Noqodi (UAE Pay)", ar: "الدفع عبر نقودي (UAE Pay)" } },
 ];
 
 const TEMPLATE = {

@@ -113,3 +113,16 @@ ${status === "paid" ? `<script>setTimeout(function(){window.close();},1600);</sc
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
   });
 }
+
+/**
+ * The same page when the gateway redirects with a POST.
+ *
+ * UAEPay's guide describes the redirect as "the result in the query string" and
+ * leaves the method to the reader; a 307/308 keeps the method of the form that
+ * triggered it. Whichever way the customer arrives, the query string names the
+ * payment and the gateway is asked for the truth — so a POST is answered
+ * exactly as a GET rather than with a 405 over a payment that succeeded.
+ */
+export async function POST(req: NextRequest) {
+  return GET(req);
+}
