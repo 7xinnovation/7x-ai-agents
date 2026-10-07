@@ -32,7 +32,7 @@ Tests: `test-uaepay-2026-10-02.ts` (34), `test-payment-methods-2026-10-02.ts` (2
 | | EPGL | NXN (Emirates Post) |
 |---|---|---|
 | **Staging** | **ON.** Three choices: Pay with Card (fee + AED 1,000 online fee), Pay with Noqodi (UAE Pay) (fee), Bank transfer (Virtual IBAN) (fee). UAT merchant MR123093. | **Prepared, OFF.** Switch present and off, UAT binding written. No choice in chat — see §4. |
-| **Production** | Card + Virtual IBAN only. No switch list, no binding, no credentials. | Card only. Untouched. |
+| **Production** | "Pay with Card" + Virtual IBAN; Noqodi switch present and **off**, no binding, no credentials (code deployed 7 Oct, dormant). | "Pay with Card" only; Noqodi switch present and **off**. |
 
 Staging credentials live in the staging App Service as `UAEPAY_CLIENT_ID` /
 `UAEPAY_CLIENT_SECRET` (developer-portal application "7xtest"). They are UAT only:
@@ -45,13 +45,18 @@ Needed from Noqodi / UAE Pay first: a **production** client id and secret, the
 and child merchant codes. Ask at the same time how a **webhook is authenticated** —
 the guide never says, so we confirm every result through the inquiry API instead.
 
-1. **Code to production.** `staging` carries the whole implementation and `main`
-   has nothing staging lacks (checked 7 Oct: 135 commits behind).
+1. **Code to production — done 7 Oct 2026.** `main` was fast-forwarded to
+   `staging` (136 commits, the first production build since 16 September) and the
+   GitHub Action deployed `app-7xil-agents-prod`. The UAEPay code is therefore on
+   production now, dormant: no switch list, no binding, no credentials. For any
+   later change, repeat:
    ```sh
    git checkout main && git merge --ff-only origin/staging && git push origin main
    ```
-   The GitHub Action deploys `app-7xil-agents-prod`. Migrations do **not** run on
-   deploy; `payments.provider` already exists on production, so none is needed.
+   Migrations do **not** run on deploy; `payments.provider` already exists on
+   production (verified 7 Oct), so none was needed. Pre-deploy checks run on
+   7 Oct: no other schema change since main's build, deploy workflow unchanged,
+   and every app setting the new code requires is present on production.
 2. **Credentials on the production App Service** (restarts the app):
    ```sh
    az webapp config appsettings set --subscription sub-7xil-prod \
