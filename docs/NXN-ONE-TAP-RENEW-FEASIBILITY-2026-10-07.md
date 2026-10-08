@@ -7,8 +7,15 @@ feedback rules Emirates Post has given us. Verdict first, then the reasoning.*
 
 ## Built on 8 October 2026 — on staging
 
-The two-tap shape below is implemented and switched on for `nxn-dialog` on
-**staging**: `scripts/nxn-one-tap-renew-2026-10-08.ts` (journey config: consent
+Built as ONE tap, by the team's decision on 8 October: the Renew entry states
+"one more year, same bundle and options" in the customer's own message, so the
+term is collected rather than pre-selected, and the reply is the summary, the
+Before-payment switches and "Pay AED x" at once; a longer term or a different
+bundle is one sentence away. (The two-tap shape below was the assessment's
+recommendation under FB-1428; the one-tap entry keeps the rule's letter because
+the customer's message names the term, and the ordinary flow with unselected
+cards remains for anyone who asks for something else.) Switched on for
+`nxn-dialog` on **staging**: `scripts/nxn-one-tap-renew-2026-10-08.ts` (journey config: consent
 switches back, guest-only sentences made conditional, the fast path on the
 personal renewal), the saved card attached to a signed-in renewal save
 (`lib/integrations.ts`), a Renew action on each box in the panel, a start intent

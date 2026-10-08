@@ -558,14 +558,22 @@ const EMIRATE_CODES: Record<string, string> = {
   fujairah: "FUJ", "الفجيرة": "FUJ", fuj: "FUJ",
 };
 
-/** The opening message a start intent becomes, in the conversation's language. */
+/**
+ * The opening message a start intent becomes, in the conversation's language.
+ *
+ * It states the term and "same bundle and options" (2026-10-08, the team's
+ * decision for One Tap): a customer who tapped Renew wants what they have for
+ * another year, and a detail the customer STATED is collected, not a proposal
+ * we pre-selected for them. Anyone who wants longer, or a different bundle,
+ * says so in the next message and the ordinary flow takes over.
+ */
 export function renewalOpener(i: StartIntent, locale: Locale): string {
   const raw = (i.emirate ?? "").trim();
   const code = raw ? EMIRATE_CODES[raw.toLowerCase()] ?? (/^[A-Za-z]{3}$/.test(raw) ? raw.toUpperCase() : "") : "";
   const where = raw ? (code && code !== raw.toUpperCase() ? `${raw} (${code})` : code || raw) : "";
   const box = (i.box ?? "").trim();
-  if (locale === "ar") return box ? `أرغب في تجديد صندوق البريد ${box}${where ? ` في ${where}` : ""}.` : "أرغب في تجديد صندوق البريد الخاص بي.";
-  return box ? `Renew my PO Box ${box}${where ? ` in ${where}` : ""}.` : "I want to renew my PO Box.";
+  if (locale === "ar") return box ? `جدّد صندوق البريد ${box}${where ? ` في ${where}` : ""} لسنة إضافية، بنفس الباقة والخيارات.` : "أرغب في تجديد صندوق البريد الخاص بي لسنة إضافية، بنفس الباقة والخيارات.";
+  return box ? `Renew my PO Box ${box}${where ? ` in ${where}` : ""} for one more year, same bundle and options.` : "Renew my PO Box for one more year, same bundle and options.";
 }
 
 export function Experience({

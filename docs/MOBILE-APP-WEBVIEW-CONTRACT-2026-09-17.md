@@ -179,8 +179,9 @@ Sent by dispatching a `dialog-native` CustomEvent on `window` from
 ## 5. Opening straight into a renewal (added 8 October 2026)
 
 "Renew" pressed beside a box in the app can open the chat already on that
-renewal, so the customer's first message is the request and the only question
-left is the term. Two ways, same effect:
+renewal, so the customer's first message is the request — one more year, same
+bundle and options — and nothing is asked before the pay button. Two ways, same
+effect:
 
 - **On the embed URL**, when opening the WebView:
   `/embed/nxn-dialog?journey=personal_po_box_renewal&box=450293&emirate=DXB`
@@ -189,6 +190,8 @@ left is the term. Two ways, same effect:
   or a `postMessage` to the iframe `{ source: "dialog-host", action: "start", journey, box, emirate }`
   (accepted from the configured allowed origins).
 
-The chat answers with the box's details and priced term cards; the customer
-picks a term, confirms on the summary with the terms checkbox, and pays on your
-page as today. A guest who is not signed in gets the ordinary renewal instead.
+The chat answers with the renewal summary for one more year on the current
+bundle, the Before-payment switches and a "Pay AED x" button; the customer ticks
+the terms, taps pay, and pays on your page as today. A longer term or another
+bundle is one sentence away. A guest who is not signed in gets the ordinary
+renewal instead.

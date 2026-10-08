@@ -161,7 +161,7 @@ const PULSE_DIRECTIVE =
    * this kind of message — so the first box that needs renewing gets a single
    * button, not a list of them and not a question.
    */
-  "For the FIRST box that is expired or expiring soon, offer its renewal as ONE ```buttons choice — \"Renew PO Box <number>\" — and nothing else about it; tapping it starts the renewal of that box directly. One button, not one per box. " +
+  "For the FIRST box that is expired or expiring soon, offer its renewal as ONE ```buttons choice — \"Renew PO Box <number> for another year\" — and nothing else about it; tapping it renews that box for one more year on the same bundle, straight to the payment step. One button, not one per box. " +
   "If NOTHING needs attention, say so plainly — \"all of them are active, nothing needs doing right now\" — rather than listing boxes to prove it. " +
   "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
   "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. " +
