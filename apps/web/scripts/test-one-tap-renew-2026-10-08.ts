@@ -65,7 +65,7 @@ check("...and a way to a longer term or another bundle, one sentence, no questio
 check("renewal_period is recorded as one year", /Record renewal_period as 1_YEAR/.test(FAST_PATH));
 check("the terms checkbox is still in the block", /checkboxes: terms_accepted/.test(FAST_PATH));
 check("auto-renew is switched on only through the tool, and honestly", /call nxn_set_auto_renew[\s\S]*if that call fails, say it could not be switched on, never that it is/.test(FAST_PATH));
-check("a guest is excluded in so many words", /A GUEST \(not signed in\) is NOT on this path/.test(FAST_PATH));
+check("a guest keeps the ordinary collection but the same-as-now opener still suppresses the upsell", /A GUEST \(not signed in\) is NOT on the signed-in shortcuts/.test(FAST_PATH) && /SAME-AS-NOW OPENER RULE applies to everyone[\s\S]*do NOT show upgrade cards, bundle choices or duration cards, whatever the upgrade rule earlier in this guidance says; it is overridden here/.test(FAST_PATH));
 check("an opening message that names the box skips the greeting, the list, the term and the upsell", /Do not greet at length, do not read their account out, do not list their boxes, do not ask which box, do not ask how long, and do not offer upgrades/.test(FAST_PATH));
 
 console.log("\nThe code beside it");
