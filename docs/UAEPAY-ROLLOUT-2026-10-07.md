@@ -77,9 +77,15 @@ the guide never says, so we confirm every result through the inquiry API instead
    ```
    Add `--dry-run` first to see the plan. The script refuses the UAT gateway on a
    production agent, so the merchant must be the production one.
-5. **Check** on agent.7x.ae: the payment question offers three buttons; a Noqodi
-   payment opens `pay.uaepay.ae`; the admin switch shows Noqodi on.
-6. **Rollback is a switch, not a deploy:** the same command without `--enable`
+5. **The knowledge base names Noqodi too** — a cold "how much is each way to
+   pay?" is answered from it, not from the journey (found on staging, 8 Oct):
+   ```sh
+   npx tsx scripts/epgl-kb-noqodi-2026-10-08.ts --env <prod env file>
+   ```
+6. **Check** on agent.7x.ae: the payment question offers three buttons; a Noqodi
+   payment opens `pay.uaepay.ae`; the admin switch shows Noqodi on; and "which
+   ways can I pay?" names all three with prices.
+7. **Rollback is a switch, not a deploy:** the same command without `--enable`
    turns it off, removes the option and cuts the guidance. Nothing else changes.
 
 A local run against production needs this Mac on the database firewall
