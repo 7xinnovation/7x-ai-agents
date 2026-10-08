@@ -599,7 +599,36 @@ function boot() {
   document.body.appendChild(launcher);
   // Now that the frame exists, the page can be asked what it actually looks like.
   const dlg = (window as unknown as { Dialog?: Record<string, unknown> }).Dialog;
-  if (dlg) dlg.diagnose = diagnose;
+  if (dlg) {
+    dlg.diagnose = diagnose;
+    /**
+     * Open the assistant straight into renewing a box (2026-10-08):
+     *
+     *   window.Dialog.start({ journey: "personal_po_box_renewal", box: "450293", emirate: "DXB" })
+     *
+     * The panel opens and the request becomes the customer's first message. If
+     * the panel has never been opened, the intent rides on the iframe URL — the
+     * page inside has no listener yet, and a message sent before it mounts is
+     * lost; once it has been opened, the message is the whole answer, because
+     * rewriting src would discard the conversation inside.
+     */
+    dlg.start = (intent: { journey?: string; box?: string; emirate?: string }) => {
+      const params = Object.entries(intent ?? {})
+        .filter(([, v]) => typeof v === "string" && v)
+        .map(([k, v]) => `&${k}=${encodeURIComponent(String(v))}`)
+        .join("");
+      if (mode === "closed" && !opened) {
+        frame.src = frame.src.replace(/&(journey|box|emirate)=[^&]*/g, "") + params;
+      } else {
+        try {
+          frame.contentWindow?.postMessage({ source: "dialog-host", action: "start", ...intent }, new URL(cfg.host).origin);
+        } catch {
+          /* not loaded; the src above would have carried it */
+        }
+      }
+      setMode("widget");
+    };
+  }
 }
 
 if (document.readyState === "loading") {

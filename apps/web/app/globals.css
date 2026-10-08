@@ -341,6 +341,29 @@ body {
 .dlg-boxes-list li.is-expired {
   background: color-mix(in srgb, var(--c-danger) 6%, transparent);
 }
+/* One tap to renew (2026-10-08): the action sits on the row, reads as a pill, and
+   turns the row's own colour when the box has lapsed. */
+.dlg-box-renew {
+  flex: none;
+  margin-inline-start: auto;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--c-primary) 10%, transparent);
+  color: var(--c-primary);
+  cursor: pointer;
+}
+.dlg-box-renew:hover { background: color-mix(in srgb, var(--c-primary) 18%, transparent); }
+.dlg-box-renew:disabled { opacity: 0.5; cursor: default; }
+.dlg-boxes-list li.is-expired .dlg-box-renew {
+  border-color: color-mix(in srgb, var(--c-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--c-danger) 10%, transparent);
+  color: var(--c-danger);
+}
 
 /* THE PROFILE MENU (FB-1802, and the UAE PASS session report).
    "Click on the profile icon and sign out, in case they want to sign in with

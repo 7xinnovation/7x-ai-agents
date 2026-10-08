@@ -5,6 +5,19 @@ one or two steps, so a customer jumps straight to renewing. Assessed against the
 live staging journey, Emirates Post's PO Box API (spec read 7 Oct), and the
 feedback rules Emirates Post has given us. Verdict first, then the reasoning.*
 
+## Built on 8 October 2026 — on staging
+
+The two-tap shape below is implemented and switched on for `nxn-dialog` on
+**staging**: `scripts/nxn-one-tap-renew-2026-10-08.ts` (journey config: consent
+switches back, guest-only sentences made conditional, the fast path on the
+personal renewal), the saved card attached to a signed-in renewal save
+(`lib/integrations.ts`), a Renew action on each box in the panel, a start intent
+on the embed URL (`?journey=personal_po_box_renewal&box=450293&emirate=DXB`) and
+`window.Dialog.start({...})` in the loader, and the sign-in pulse offering the
+expiring box's renewal as one button. Tests:
+`scripts/test-one-tap-renew-2026-10-08.ts`. Production: not applied — the code
+deploys with the next merge to `main`, the config is one script run.
+
 ## Verdict
 
 **Two taps in the chat is feasible for a signed-in customer, on our side alone,

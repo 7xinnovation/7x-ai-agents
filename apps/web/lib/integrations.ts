@@ -2776,11 +2776,37 @@ export async function buildApiTools(
         pay.paymentReturnUrl = opts.paymentReturnUrl;
         patched = true;
       }
-      // A guest has no account to save a card to and nothing to auto-renew from.
-      if (pay.saveCreditCard === true || pay.isAutomaticSubscriptionEnabled === true) {
-        pay.saveCreditCard = false;
-        pay.isAutomaticSubscriptionEnabled = false;
-        patched = true;
+      if (!opts.authenticated) {
+        // A guest has no account to save a card to and nothing to auto-renew from.
+        if (pay.saveCreditCard === true || pay.isAutomaticSubscriptionEnabled === true) {
+          pay.saveCreditCard = false;
+          pay.isAutomaticSubscriptionEnabled = false;
+          patched = true;
+        }
+      } else if (opts.savedCard && !pay.savedCard) {
+        /**
+         * THE SIGNED-IN RENEWAL GETS THE CARD THE RENTAL ALREADY GETS (2026-10-08).
+         *
+         * The renewal became guest-shaped on 2 September and lost the saved card
+         * with it, so a signed-in customer renewing a box they have paid for
+         * before was sent to the payment page to type the number again. Same
+         * source as the rental's — the saved-cards lookup, never the model — and
+         * the same effect: it pre-selects the card on Emirates Post's page and
+         * charges nothing by itself. If their gateway refuses it, the retry
+         * below drops it and the page opens blank, exactly as for a rental.
+         * The consent flags are left as the customer's toggles set them.
+         */
+        const card = await opts.savedCard().catch(() => null);
+        if (card?.cardToken) {
+          pay.savedCard = {
+            cardToken: card.cardToken,
+            maskedPan: card.maskedPan ?? "",
+            expiry: card.expiry ?? "",
+            scheme: card.scheme ?? "",
+            cardholderName: card.cardholderName ?? "",
+          };
+          patched = true;
+        }
       }
       if (patched) {
         body.paymentProperties = pay;
@@ -3130,7 +3156,7 @@ export async function buildApiTools(
      */
     if (
       res.isError &&
-      /rental_save$/i.test(toolName) &&
+      /(rental_save|guest_renewal_save)$/i.test(toolName) &&
       /error from payment gateway/i.test(res.result ?? "") &&
       (((input?.body as Record<string, unknown>)?.paymentProperties as Record<string, unknown>)?.savedCard)
     ) {

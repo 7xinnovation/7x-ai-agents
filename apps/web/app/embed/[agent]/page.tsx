@@ -12,10 +12,10 @@ export default async function EmbedPage({
   searchParams,
 }: {
   params: Promise<{ agent: string }>;
-  searchParams: Promise<{ locale?: string; embedded?: string; cid?: string; upt?: string }>;
+  searchParams: Promise<{ locale?: string; embedded?: string; cid?: string; upt?: string; journey?: string; box?: string; emirate?: string }>;
 }) {
   const { agent: slug } = await params;
-  const { locale, cid, upt, embedded } = await searchParams;
+  const { locale, cid, upt, embedded, journey, box, emirate } = await searchParams;
   const agent = await getAgentBySlug(slug);
   if (!agent) notFound();
 
@@ -58,5 +58,8 @@ export default async function EmbedPage({
   };
 
   const initialLocale = (locale === "ar" || locale === "en" ? locale : d.locales[0]) ?? "en";
-  return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} uaePassToken={upt} embedded={embedded === "1"} />;
+  // Open straight into a journey — "Renew" pressed beside a box on the host's
+  // page or in the app (2026-10-08): ?journey=personal_po_box_renewal&box=450293&emirate=DXB
+  const initialStart = journey || box ? { journey, box, emirate } : undefined;
+  return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} uaePassToken={upt} embedded={embedded === "1"} initialStart={initialStart} />;
 }

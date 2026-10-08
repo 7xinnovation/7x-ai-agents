@@ -153,6 +153,15 @@ const PULSE_DIRECTIVE =
    */
   "3) Show a concise section titled \"Account Pulse\". Say HOW MANY boxes are on the account — the number, in one sentence — and then ONLY the boxes that need something: expired, expiring soon (with the fee from pricing), or with a payment pending. " +
   "Do NOT list every box, and do NOT draw a table of them. The full list is shown to the customer in the panel beside the conversation, so repeating it here buries your reply under it; say \"the full list is in the panel beside us\" once, and leave it at that. " +
+  /**
+   * ONE BUTTON TO RENEW THE BOX THAT NEEDS IT (2026-10-08).
+   *
+   * The pulse already names the expired and expiring boxes. A customer reading
+   * that line wants to act on it, and the two-tap renewal starts from exactly
+   * this kind of message — so the first box that needs renewing gets a single
+   * button, not a list of them and not a question.
+   */
+  "For the FIRST box that is expired or expiring soon, offer its renewal as ONE ```buttons choice — \"Renew PO Box <number>\" — and nothing else about it; tapping it starts the renewal of that box directly. One button, not one per box. " +
   "If NOTHING needs attention, say so plainly — \"all of them are active, nothing needs doing right now\" — rather than listing boxes to prove it. " +
   "EVERY box means every box the account tool returns — an EXPIRED one included, and first. A box past its expiry date is the single thing on that account most worth telling them about, and Emirates Post has no status that says \"expired\", so a box can look ordinary in the data and be lapsed. Never leave one out because its status is unfamiliar, and never call an expired box active. " +
   "If a box the customer believes they hold is not in what the tool returned, say honestly that it is not showing on their Emirates Post account rather than implying it does not exist, and offer to look it up by number and emirate. " +

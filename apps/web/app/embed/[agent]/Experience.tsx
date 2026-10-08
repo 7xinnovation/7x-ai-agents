@@ -119,6 +119,7 @@ export const STR = {
     signedIn: "Signed in",
     account: "Account",
     yourBoxes: "Your PO Boxes",
+    renewBox: "Renew",
     signOut: "Sign out",
     signOutHint: "to use a different Emirates ID",
     signedOut: "You are signed out.",
@@ -193,6 +194,7 @@ export const STR = {
     signedIn: "تم الدخول",
     account: "الحساب",
     yourBoxes: "صناديق البريد الخاصة بك",
+    renewBox: "تجديد",
     signOut: "تسجيل الخروج",
     signOutHint: "لاستخدام هوية إماراتية أخرى",
     signedOut: "تم تسجيل خروجك.",
@@ -532,12 +534,47 @@ function fingerprint(token: string): string {
   return `${token.length.toString(36)}.${(h >>> 0).toString(36)}`;
 }
 
+/**
+ * Where a conversation should START, named from outside it (2026-10-08).
+ *
+ * "One tap to renew": the app's box list, the page's Renew link or the panel
+ * beside the chat names the box, and the conversation opens on renewing it —
+ * no greeting, no "which box?", no list. It arrives as query parameters on the
+ * embed URL, as a `start` message from the host page, or from the Renew action
+ * on a box in the panel. It becomes the customer's FIRST MESSAGE, in their
+ * language, so everything downstream — the journey, the gates, the audit —
+ * sees a request the customer made rather than a shortcut the widget took.
+ */
+export type StartIntent = { journey?: string; box?: string; emirate?: string; force?: boolean };
+
+/** Emirates Post names emirates in full on the account list; their API wants the code. */
+const EMIRATE_CODES: Record<string, string> = {
+  "abu dhabi": "AUH", "أبوظبي": "AUH", "أبو ظبي": "AUH", auh: "AUH",
+  dubai: "DXB", "دبي": "DXB", dxb: "DXB",
+  sharjah: "SHJ", "الشارقة": "SHJ", shj: "SHJ",
+  ajman: "AJM", "عجمان": "AJM", ajm: "AJM",
+  "umm al quwain": "UAQ", "أم القيوين": "UAQ", uaq: "UAQ",
+  "ras al khaimah": "RAK", "رأس الخيمة": "RAK", rak: "RAK",
+  fujairah: "FUJ", "الفجيرة": "FUJ", fuj: "FUJ",
+};
+
+/** The opening message a start intent becomes, in the conversation's language. */
+export function renewalOpener(i: StartIntent, locale: Locale): string {
+  const raw = (i.emirate ?? "").trim();
+  const code = raw ? EMIRATE_CODES[raw.toLowerCase()] ?? (/^[A-Za-z]{3}$/.test(raw) ? raw.toUpperCase() : "") : "";
+  const where = raw ? (code && code !== raw.toUpperCase() ? `${raw} (${code})` : code || raw) : "";
+  const box = (i.box ?? "").trim();
+  if (locale === "ar") return box ? `أرغب في تجديد صندوق البريد ${box}${where ? ` في ${where}` : ""}.` : "أرغب في تجديد صندوق البريد الخاص بي.";
+  return box ? `Renew my PO Box ${box}${where ? ` in ${where}` : ""}.` : "I want to renew my PO Box.";
+}
+
 export function Experience({
   agent,
   initialLocale,
   initialConversationId,
   uaePassToken,
   embedded,
+  initialStart,
 }: {
   agent: PublicAgent;
   initialLocale: Locale;
@@ -545,6 +582,8 @@ export function Experience({
   uaePassToken?: string;
   /** Rendered inside the launcher iframe, so the host can be asked to expand. */
   embedded?: boolean;
+  /** Open straight into a journey — the renewal of a named box — see StartIntent. */
+  initialStart?: StartIntent;
 }) {
   const uaePass = useRef<string | undefined>(uaePassToken);
   const [locale, setLocale] = useState<Locale>(initialLocale);
@@ -1181,8 +1220,20 @@ export function Experience({
         .filter(Boolean)
     );
     const onMsg = (e: MessageEvent) => {
-      const m = e.data as { source?: string; uaePassToken?: string; action?: string; locale?: string };
+      const m = e.data as { source?: string; uaePassToken?: string; action?: string; locale?: string; journey?: string; box?: string; emirate?: string };
       if (m?.source !== "dialog-host") return;
+
+      /**
+       * The host page asks for a journey to start — "Renew" pressed beside a box
+       * on Emirates Post's own page or in their app (2026-10-08). Gated like the
+       * token when origins are configured: it makes the assistant act, so it is
+       * not taken from any frame that cares to send it.
+       */
+      if (m.action === "start") {
+        if (permitted.size && !permitted.has(e.origin)) return;
+        setStartIntent({ journey: m.journey, box: m.box, emirate: m.emirate, force: true });
+        return;
+      }
 
       /**
        * The page changed language while we were open.
@@ -2545,6 +2596,41 @@ export function Experience({
     }
   }, [signedInPulse, resumed, authenticated, streaming, send]);
 
+  /**
+   * A conversation that was told where to start, starts there (2026-10-08).
+   *
+   * Once the session has resumed and nothing is streaming, the start intent
+   * becomes the customer's message — on a fresh conversation their first, and
+   * on a restored one the next, because "Renew" tapped in the app is a request
+   * whether or not this browser remembers an earlier chat. The first version
+   * dropped it on a restored conversation, which is the one every returning
+   * customer has. For a customer who is ALREADY signed in it also replaces the
+   * sign-in pulse: somebody who tapped "Renew PO Box 450293" does not need
+   * their account read out first. One who signs in later still gets the pulse —
+   * the first version suppressed it for the whole page, so a deep-linked guest
+   * who then signed in never saw their boxes.
+   *
+   * A URL survives a reload, so an intent that arrived on the URL is sent once
+   * per tab, latched in sessionStorage; a `start` message from the host is an
+   * explicit press each time and is never latched.
+   */
+  const [startIntent, setStartIntent] = useState<StartIntent | undefined>(initialStart);
+  useEffect(() => {
+    if (!startIntent || !resumed || streaming) return;
+    setStartIntent(undefined);
+    if (!startIntent.force) {
+      const key = `dlg-start:${agent.slug}:${startIntent.journey ?? ""}:${startIntent.box ?? ""}:${startIntent.emirate ?? ""}`;
+      try {
+        if (window.sessionStorage.getItem(key)) return;
+        window.sessionStorage.setItem(key, new Date().toISOString());
+      } catch {
+        /* no storage: send once anyway rather than never */
+      }
+    }
+    if (authenticated) pulsed.current = true;
+    void send(renewalOpener(startIntent, locale));
+  }, [startIntent, resumed, streaming, send, locale, agent.slug, authenticated]);
+
   // The payment card saw the gateway settle the payment → as soon as no turn is
   // streaming, have the assistant confirm and finish the journey (no user bubble).
   useEffect(() => {
@@ -3002,6 +3088,21 @@ export function Experience({
                         {b.expiry ? <span className="dlg-box-expiry">{b.expiry}</span> : null}
                         {b.status ? <span className="dlg-box-status">{b.status}</span> : null}
                       </span>
+                      {/* ONE TAP TO RENEW (2026-10-08): the box is named, so the
+                          conversation opens on renewing it — the term is the
+                          only question left. The message is the customer's own,
+                          in their language, not a shortcut the panel took. */}
+                      <button
+                        type="button"
+                        className="dlg-box-renew"
+                        disabled={streaming}
+                        onClick={() => {
+                          setMobileCaseOpen(false);
+                          void send(renewalOpener({ box: b.box, emirate: b.emirate }, locale));
+                        }}
+                      >
+                        {t.renewBox}
+                      </button>
                     </li>
                   ))}
                 </ul>
