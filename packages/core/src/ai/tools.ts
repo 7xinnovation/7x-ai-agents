@@ -1098,6 +1098,26 @@ export async function dispatchTool(
        */
       const pay = adapters.paymentFor?.(chosenMethod) ?? (adapters.payment ? { adapter: adapters.payment, binding: agent.integrations.payment, method: "default" } : undefined);
       if (!pay) return { result: "No payment gateway configured.", state, events, isError: true };
+      /**
+       * NOQODI (UAE PAY) IS FOR SIGNED-IN CUSTOMERS, ENFORCED HERE (2026-10-11).
+       *
+       * UAE Pay refuses a payment without the payer's Emirates ID, and the only
+       * Emirates ID we will send is the verified one a sign-in leaves on the
+       * case. A guest offered the Noqodi button — the model did it once, against
+       * its guidance — would otherwise reach the gateway, be refused, and be told
+       * the payment page could not be opened. The refusal belongs before the
+       * gateway, in words that name the way forward.
+       */
+      if (pay.binding?.provider === "uaepay" && !payerDetails(state).emiratesId) {
+        return {
+          result:
+            "NOQODI (UAE PAY) NEEDS A SIGN-IN: it requires the customer's verified Emirates ID, which only a UAE PASS sign-in provides, and this session has none. " +
+            "NOTHING has been charged. Offer them two ways forward — sign in with UAE PASS and then pay with Noqodi, or pay with the card now — and record whichever they choose with collect_field(payment_method, ...). Never say a payment failed; none was attempted.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
       const currency = sub.currency ?? "AED";
       // A price the backend has quoted wins outright. The definition's figure is

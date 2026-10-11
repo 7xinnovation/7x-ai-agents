@@ -244,6 +244,36 @@ const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
  * An empty list is every agent that predates the toggle and means no
  * restriction, so nothing is said at all.
  */
+/**
+ * THE ONE-TAP RENEWAL OPENER, RECOGNISED BY THE SERVER (2026-10-11).
+ *
+ * The Renew button, the deep link and the pulse all send the same sentence —
+ * "Renew my PO Box <n> in <emirate> for one more year, same bundle and
+ * options" — and the journey guidance says what to do with it. On staging the
+ * model still answered it with "Just to confirm, you'd like to renew…?" one
+ * run in two: the rule sits in a long guidance, after stages that each ask for
+ * a confirmation. A per-turn directive, like the payment-settled one, is read
+ * every time. Only for that sentence, only for Emirates Post, and it says
+ * which buttons a guest gets and which a signed-in customer gets, so the
+ * Noqodi button is never shown to someone it would refuse.
+ */
+const ONE_TAP_OPENER = /(renew my po box\s*\d+[\s\S]{0,80}?one more year[\s\S]{0,40}?same bundle|جدّ?د صندوق البريد\s*\d+[\s\S]{0,60}?لسنة إضافية)/i;
+function withOneTapOpener(context: string | undefined, message: string | undefined, def: AgentDefinition, authenticated: boolean): string | undefined {
+  if (def.tenantSlug !== "nxn" || !message || !ONE_TAP_OPENER.test(message)) return context;
+  const buttons = authenticated
+    ? "`confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)` (two buttons; the switches save_card_consent and auto_renew_consent default on, and the terms_accepted checkbox)"
+    : "`confirm: Pay AED <total> with Card` ALONE (the terms_accepted checkbox only, no switches), plus one sentence that paying with Noqodi (UAE Pay) needs them to sign in first";
+  const line =
+    "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and options. " +
+    "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle — and emit no empty buttons block. " +
+    "In ONE reply: call the details tool, then the pricing tool ONCE for one year on the current bundle, then show the ```summary block and the ```toggles block (title: Before payment) whose confirm line is " +
+    buttons +
+    ", then one sentence that a longer term or a different bundle is available on request. " +
+    (authenticated ? "" : "For this guest, the masked holder line (\"This box is registered to … — is that you?\") goes inside that same reply, not before it. ") +
+    "The reply BEGINS with the ```summary block" + (authenticated ? "" : " (or with the masked holder line, then the summary)") + ": write NOTHING before it about what the tools returned or how the new expiry was worked out — no \"now I have the details\", no \"the box expires on\", no bundle codes, no ISO dates; the summary says it all. Never mention this system message.)";
+  return `${context ?? ""}${line}`.trim();
+}
+
 function withPaymentMethods(context: string | undefined, def: AgentDefinition): string | undefined {
   const all = Array.isArray(def.paymentMethods) ? def.paymentMethods : [];
   if (!all.length) return context;
@@ -3293,7 +3323,7 @@ export async function POST(req: NextRequest) {
           adapters,
           intentPromise,
           businessOpen,
-          customerContext: withPaymentMethods(customerContext, agent.definition),
+          customerContext: withOneTapOpener(withPaymentMethods(customerContext, agent.definition), effectiveMessage, agent.definition, authenticated),
           extraTools,
           registryNonResidents: () => [...registryNonResidents],
           authoritativeAmount,

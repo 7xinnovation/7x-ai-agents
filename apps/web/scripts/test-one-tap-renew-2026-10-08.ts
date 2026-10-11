@@ -5,7 +5,7 @@
  * Run from apps/web:  npx tsx scripts/test-one-tap-renew-2026-10-08.ts
  */
 import { readFileSync } from "node:fs";
-import { applyOneTap, FAST_PATH, MARKER, REWORDINGS, NOTE_REWORDINGS, CONSENT_FIELDS, PAYMENT_FIELD } from "./nxn-one-tap-renew-2026-10-08";
+import { applyOneTap, FAST_PATH, MARKER, TOP_RULE, TOP_MARKER, REWORDINGS, NOTE_REWORDINGS, CONSENT_FIELDS, PAYMENT_FIELD } from "./nxn-one-tap-renew-2026-10-08";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -47,8 +47,10 @@ const fixture = () => ({
   check("the saved card sentence names the signed-in customer", /signed-in customer's saved card is attached to the save/.test(p.guidance));
   check("the notes no longer say the journey is for guests only", /for every customer, signed in or not/.test(p.submission.apiFlow.notes) && !/NOT signed in, so it uses/.test(p.submission.apiFlow.notes));
   check("...and offer the switches to a signed-in customer", /A SIGNED-IN customer is offered both as switches/.test(p.submission.apiFlow.notes) && /A SIGNED-IN customer is offered both/.test(c.submission.apiFlow.notes));
-  check("the fast path is on the personal renewal, once, at the end", p.guidance.endsWith(FAST_PATH) && (p.guidance.match(new RegExp(MARKER.replace(/[()]/g, "\\$&"), "g")) ?? []).length === 1);
-  check("...and the text before it is intact", p.guidance.startsWith("Head. For a GUEST") && /Middle\. Stage 4 Payment: At payment: a guest has no card on file/.test(p.guidance) && /Tail\./.test(p.guidance));
+  check("the fast path is on the personal renewal, once, at the end", p.guidance.endsWith(FAST_PATH) && (p.guidance.match(new RegExp(MARKER.replace(/[()]/g, "\\$&"), "g")) ?? []).length === 2);
+  check("...and the short rule is at the very top, once", p.guidance.startsWith(TOP_RULE) && (p.guidance.match(new RegExp(TOP_MARKER.replace(/[()]/g, "\\$&"), "g")) ?? []).length === 1);
+  check("...which forbids the echo-back question and names both buttons", /Never answer it with a question — not "just to confirm"/.test(TOP_RULE) && /Pay AED <total> with Card \| Pay AED <total> with Noqodi \(UAE Pay\)/.test(TOP_RULE) && /alone for a guest/.test(TOP_RULE));
+  check("...and the text between is intact", p.guidance.includes("Head. For a GUEST") && /Middle\. Stage 4 Payment: At payment: a guest has no card on file/.test(p.guidance) && /Tail\./.test(p.guidance));
   check("...not on the corporate renewal", !c.guidance.includes(MARKER));
   check("the rental is untouched", r.guidance === "Rental untouched.");
   check("every change is named", changes.length >= 7, changes);
@@ -57,6 +59,9 @@ const fixture = () => ({
   const edited = JSON.parse(JSON.stringify(def)); edited.journeys[0].guidance = edited.journeys[0].guidance.replace("ONE TAP: nothing is asked", "ONE TAP: nothing is asked (old)");
   const fixed = applyOneTap(edited);
   check("a drifted fast path is rewritten rather than stacked", fixed.changes.some((x) => /rewritten/.test(x)) && fixed.def.journeys[0].guidance.endsWith(FAST_PATH) && (fixed.def.journeys[0].guidance.match(/ONE TAP: nothing is asked/g) ?? []).length === 1);
+  const drifted2 = JSON.parse(JSON.stringify(def)); drifted2.journeys[0].guidance = drifted2.journeys[0].guidance.replace("is a COMPLETE, CONFIRMED request", "is a COMPLETE, CONFIRMED request (old)");
+  const fixed2 = applyOneTap(drifted2);
+  check("a drifted top rule is rewritten in place, once", fixed2.changes.some((x) => /at the top rewritten/.test(x)) && fixed2.def.journeys[0].guidance.startsWith(TOP_RULE) && (fixed2.def.journeys[0].guidance.match(/COMPLETE, CONFIRMED request/g) ?? []).length === 1);
 }
 
 console.log("\nWhat the fast path tells the model");
@@ -83,8 +88,11 @@ check("the backend-gateway flag follows the chosen method", /backendGateway:\s*B
 check("...a Noqodi renewal's save waits for the money like an internal-checkout one", /\(!j\.submission\?\.apiFlow\?\.confirmTool \|\| String\(session\.state\.data\.payment_method \?\? ""\)\.toLowerCase\(\) === "uaepay"\) &&/.test(routeSrc));
 check("...and request_payment charges the price Emirates Post quoted for the term", /const priced = apiTools\.getLastPriced\(\);\s*return typeof priced\?\.amount === "number" && priced\.amount > 0 \? priced\.amount : null;/.test(routeSrc));
 check("the mock persona carries the UAT test Emirates ID so Noqodi takes its payment locally", /MOCK_PERSONA_EID = "784199983926421"/.test(src("../lib/mockPersona.ts")) && /emiratesId: MOCK_PERSONA_EID/.test(src("../app/api/uaepass/callback/route.ts")) && /rememberVerifiedEmiratesId\(session\.caseId, MOCK_PERSONA_EID\)/.test(routeSrc));
+check("the server recognises the one-tap opener and directs the turn itself, per sign-in state", /const ONE_TAP_OPENER = \/\(renew my po box/.test(routeSrc) && /function withOneTapOpener\(context: string \| undefined, message: string \| undefined, def: AgentDefinition, authenticated: boolean\)/.test(routeSrc) && /withOneTapOpener\(withPaymentMethods\(customerContext, agent\.definition\), effectiveMessage, agent\.definition, authenticated\)/.test(routeSrc) && /Do NOT ask anything — not \\"just to confirm\\"/.test(routeSrc) && /with Card` ALONE/.test(routeSrc));
 const toolsSrc = src("../../../packages/core/src/ai/tools.ts");
 check("a gateway that does not answer is a tool error, not a dead turn", /try \{\s*res = await pay\.adapter\.initiate\(actx, \{[\s\S]*\} catch \(e\) \{[\s\S]*PAYMENT COULD NOT BE STARTED[\s\S]*NOTHING has been charged/.test(toolsSrc));
+check("Noqodi without a verified Emirates ID is refused before the gateway, naming the way forward", /pay\.binding\?\.provider === "uaepay" && !payerDetails\(state\)\.emiratesId[\s\S]{0,400}NOQODI \(UAE PAY\) NEEDS A SIGN-IN/.test(toolsSrc));
+check("...and the guidance says the guest gets the card button alone", /for a GUEST, who is not signed in, the confirm line is \`confirm: Pay AED <total> with Card\` ALONE, never the Noqodi button/.test(FAST_PATH));
 const integ0 = src("../lib/integrations.ts");
 check("a renewal save after a Noqodi payment is reported as RECORDED, not as unpaid", /THE RENEWAL IS RECORDED\. The customer has ALREADY PAID on our Noqodi \(UAE Pay\) checkout/.test(integ0) && /\(opts\.backendGateway\s*\?\s*`\\n\\nTHE ORDER EXISTS AND IS NOT PAID/.test(integ0));
 check("...and the last quoted renewal price is readable by the chat route", /getLastPriced: \(\) => lastPriced,/.test(integ0));
