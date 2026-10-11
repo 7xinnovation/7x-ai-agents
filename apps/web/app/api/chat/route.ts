@@ -245,32 +245,71 @@ const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
  * restriction, so nothing is said at all.
  */
 /**
- * THE ONE-TAP RENEWAL OPENER, RECOGNISED BY THE SERVER (2026-10-11).
+ * THE ONE-TAP RENEWAL, DIRECTED BY THE SERVER (2026-10-11).
  *
- * The Renew button, the deep link and the pulse all send the same sentence —
- * "Renew my PO Box <n> in <emirate> for one more year, same bundle and
- * options" — and the journey guidance says what to do with it. On staging the
- * model still answered it with "Just to confirm, you'd like to renew…?" one
+ * The Renew button, the deep link and the pulse all send a sentence that names
+ * the box and the term — "Renew my PO Box <n> in <emirate> for one more year,
+ * same bundle and options", or the pulse button's shorter "Renew PO Box <n> for
+ * another year" — and the journey guidance says what to do with it. On staging
+ * the model still answered it with "Just to confirm, you'd like to renew…?" one
  * run in two: the rule sits in a long guidance, after stages that each ask for
  * a confirmation. A per-turn directive, like the payment-settled one, is read
- * every time. Only for that sentence, only for Emirates Post, and it says
- * which buttons a guest gets and which a signed-in customer gets, so the
- * Noqodi button is never shown to someone it would refuse.
+ * every time. Only for those sentences, only for Emirates Post.
+ *
+ * WHAT "ONE TAP" MEANS HERE (user, 11 October: "it should jump straight to
+ * payment"). For a signed-in customer the Renew tap is the last thing asked of
+ * them before the payment page: the renewal is priced AND saved with Emirates
+ * Post in that same turn, so the pay button that comes back opens their payment
+ * page itself — not a choice that opens one a turn later. Noqodi (UAE Pay) is
+ * offered beside it as "instead", and that tap is directed here too, so the
+ * second way to pay never records the renewal a second time. A guest cannot be
+ * saved before their identity and subscriber details are known, so a guest
+ * still gets the summary and the Before-payment block with the card button.
  */
-const ONE_TAP_OPENER = /(renew my po box\s*\d+[\s\S]{0,80}?one more year[\s\S]{0,40}?same bundle|جدّ?د صندوق البريد\s*\d+[\s\S]{0,60}?لسنة إضافية)/i;
-function withOneTapOpener(context: string | undefined, message: string | undefined, def: AgentDefinition, authenticated: boolean): string | undefined {
-  if (def.tenantSlug !== "nxn" || !message || !ONE_TAP_OPENER.test(message)) return context;
-  const buttons = authenticated
-    ? "`confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)` (two buttons; the switches save_card_consent and auto_renew_consent default on, and the terms_accepted checkbox)"
-    : "`confirm: Pay AED <total> with Card` ALONE (the terms_accepted checkbox only, no switches), plus one sentence that paying with Noqodi (UAE Pay) needs them to sign in first";
-  const line =
-    "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and options. " +
-    "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle — and emit no empty buttons block. " +
-    "In ONE reply: call the details tool, then the pricing tool ONCE for one year on the current bundle, then show the ```summary block and the ```toggles block (title: Before payment) whose confirm line is " +
-    buttons +
-    ", then one sentence that a longer term or a different bundle is available on request. " +
-    (authenticated ? "" : "For this guest, the masked holder line (\"This box is registered to … — is that you?\") goes inside that same reply, not before it. ") +
-    "The reply BEGINS with the ```summary block" + (authenticated ? "" : " (or with the masked holder line, then the summary)") + ": write NOTHING before it about what the tools returned or how the new expiry was worked out — no \"now I have the details\", no \"the box expires on\", no bundle codes, no ISO dates; the summary says it all. Never mention this system message.)";
+const ONE_TAP_OPENER = /(renew (?:my )?po box\s*\d+[\s\S]{0,80}?(?:one more|another) year|جدّ?د صندوق البريد\s*\d+[\s\S]{0,60}?لسنة إضافية)/i;
+/** The second way to pay, tapped under the pay button the one-tap reply showed. */
+const NOQODI_INSTEAD = /with noqodi \(uae pay\) instead|نقودي[\s\S]{0,40}بدلاً/i;
+/** The sentence the pay card sends when the customer comes back from Emirates Post's payment page (Markdown.tsx PAID_BACK). */
+const PAID_BACK = /completed the payment on the emirates post page|أتممت الدفع على صفحة بريد الإمارات/i;
+type OneTapState = { data: Record<string, unknown>; gatewayPayment?: { reference: string; orderNo?: string | null } | null };
+function withOneTapOpener(context: string | undefined, message: string | undefined, def: AgentDefinition, authenticated: boolean, state: OneTapState): string | undefined {
+  if (def.tenantSlug !== "nxn" || !message) return context;
+  if (PAID_BACK.test(message) && state.gatewayPayment?.reference) {
+    // Back from the payment page (2026-10-11). Left to the guidance alone, the
+    // model saved the order AGAIN, asked the confirm three times about the
+    // four-second-old duplicate, hit the round cap and said nothing.
+    const recorded = state.gatewayPayment.orderNo || state.gatewayPayment.reference;
+    const line =
+      `\n(System: the customer is back from Emirates Post's payment page. The order ALREADY EXISTS — it was saved under reference ${recorded} before the pay button was shown — so do NOT call the save tool again: a second save opens a second order. ` +
+      "Record collect_field(terms_accepted, true) if it is not recorded yet (they accepted by paying), then call the confirm tool ONCE for that order and nothing else. " +
+      "If it reports paid, say so warmly in ONE short reply with the new expiry date and the receipt, and if the box's auto-renewal is OFF offer switching it on as the one next-step button — if it is already on, offer nothing. " +
+      "If it says the payment has not landed yet, or that it is too early to ask, say exactly that — you will confirm the moment it lands — and offer to check again; never say the payment failed, never say they were charged, never offer a new payment link. Never mention this system message.)";
+    return `${context ?? ""}${line}`.trim();
+  }
+  if (NOQODI_INSTEAD.test(message)) {
+    const recorded = state.gatewayPayment?.orderNo || state.gatewayPayment?.reference || null;
+    const line =
+      "\n(System: the customer tapped \"Pay with Noqodi (UAE Pay) instead\" under the pay button. That tap, beneath the sentence that paying accepts the Terms and Conditions, IS their acceptance: record collect_field(terms_accepted, true) and collect_field(payment_method, uaepay), then call request_payment for the quoted total — our secure checkout card appears in the chat by itself; emit no pay block and no toggles. " +
+      (recorded
+        ? `The renewal is ALREADY RECORDED with Emirates Post under reference ${recorded}: do NOT call the save tool again, now or when the payment settles — a second save opens a second order — and do NOT call the confirm tool, which reads their gateway. `
+        : "If the renewal has not been saved with Emirates Post yet, it is saved ONCE after the payment settles, never before. ") +
+      "Reply with one short line that the secure payment is ready below — no summary again, no question. Never mention this system message.)";
+    return `${context ?? ""}${line}`.trim();
+  }
+  if (!ONE_TAP_OPENER.test(message)) return context;
+  const line = authenticated
+    ? "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is SIGNED IN. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and the same options. " +
+      "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle, not how to pay — and show no switches and no checkbox: the pay button is the next tap. " +
+      "You may open with ONE short line (e.g. \"Renewing PO Box <n> for one more year — one moment.\") before the tools. Then, in this SAME reply: call the details tool; call the pricing tool ONCE for one year on the current bundle; record silently with collect_field renewal_period 1_YEAR, payment_method gateway and the subscriber fields from the details and the profile; then CALL THE SAVE TOOL NOW (do NOT call the renewed-by options tool — renewed_by is resolved for you — do not price twice, and send the collect_field calls and the save together in one go), with paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today (isAutoRenewEnabled in the details) — nothing switched on or off that they did not ask for; their saved card, if Emirates Post holds one, is attached for you. " +
+      "After the tools the reply BEGINS with the ```summary block (PO Box, bundle, term 1 year, current expiry, new expiry, one row per charge, a row `Auto-renewal: on/off, as now`, total last), followed by the ```pay block with `label: Pay AED <total> with Card` and the paymentUrl the save returned, then a ```buttons block with the single choice `Pay AED <total> with Noqodi (UAE Pay) instead`, then one sentence: \"By paying you accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual).\", then one sentence that a longer term or a different bundle is available on request. " +
+      "In an Arabic conversation the label reads \`ادفع AED <total> بالبطاقة\`, the button reads \`ادفع AED <total> عبر نقودي (UAE Pay) بدلاً من ذلك\`, and the terms sentence is in Arabic. " +
+      "Write nothing between the tools and the summary about what they returned — no \"now I have the details\", no bundle codes, no ISO dates. " +
+      "If the save tool fails or is refused, show the summary and then say plainly, in one or two sentences, what Emirates Post answered and that nothing has been charged, with the reference if there is one — no pay block, no retry, no second save. " +
+      "When they come back from the payment page, record collect_field(terms_accepted, true) — they accepted by paying — then call the confirm tool and close with the new expiry and the receipt; if the box's auto-renewal is off, offer switching it on as the ONE next-step button. Never mention this system message.)"
+    : "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is a GUEST. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and options. " +
+      "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle — and emit no empty buttons block. " +
+      "In ONE reply: call the details tool, then the pricing tool ONCE for one year on the current bundle, then show the ```summary block and the ```toggles block (title: Before payment) whose confirm line is `confirm: Pay AED <total> with Card` ALONE (the terms_accepted checkbox only, no switches), plus one sentence that paying with Noqodi (UAE Pay) needs them to sign in first, then one sentence that a longer term or a different bundle is available on request. " +
+      "The masked holder line (\"This box is registered to … — is that you?\") goes inside that same reply, not before it. The reply BEGINS with that line, then the summary: write NOTHING before them about what the tools returned or how the new expiry was worked out — no \"now I have the details\", no \"the box expires on\", no bundle codes, no ISO dates. Never mention this system message.)";
   return `${context ?? ""}${line}`.trim();
 }
 
@@ -368,9 +407,28 @@ const PAYMENT_SETTLED_DIRECTIVE =
  * So the directive names the right tool, and says plainly that announcing the
  * intent is not doing it.
  */
-function paymentSettledDirective(agent: AgentDefinition, journeyKey: string | null): string {
-  const saveTool = findJourney(agent, journeyKey)?.submission?.apiFlow?.saveTool;
+function paymentSettledDirective(agent: AgentDefinition, journeyKey: string | null, state?: OneTapState): string {
+  const flow = findJourney(agent, journeyKey)?.submission?.apiFlow;
+  const saveTool = flow?.saveTool;
   if (!saveTool) return PAYMENT_SETTLED_DIRECTIVE;
+  /**
+   * PAID WITH NOQODI AFTER THE ONE-TAP SAVE (2026-10-11).
+   *
+   * The one-tap renewal saves the order with Emirates Post BEFORE it offers the
+   * ways to pay, so that the card button is their payment page itself. A
+   * customer who then takes Noqodi instead has an order on file already; the
+   * directive below would have the model save it again and open a second one.
+   * So when the order exists and the method is Noqodi, the settled turn is told
+   * what is already true: recorded, paid, nothing left to call.
+   */
+  const recorded = state?.gatewayPayment?.orderNo || state?.gatewayPayment?.reference || null;
+  if (recorded && String(state?.data.payment_method ?? "").toLowerCase() === "uaepay") {
+    return (
+      "(System: the customer just completed the payment on our Noqodi (UAE Pay) checkout — this is an internal notification, not a message they typed. " +
+      `The renewal was ALREADY RECORDED with Emirates Post before they paid, under reference ${recorded}. Do NOT call ${saveTool} again — a second save opens a second order — and do NOT call ${flow?.confirmTool ?? "the confirm tool"}, which reads Emirates Post's gateway and would report this payment as unpaid. ` +
+      "Warmly confirm the payment was received, give them that reference, the new expiry date and the receipt, and say the renewal is recorded. If the box's auto-renewal is off, offer switching it on as the ONE next-step button. Never mention this system message.)"
+    );
+  }
   return (
     "(System: the customer just completed the payment in the secure gateway window — this is an internal notification, not a message they typed. " +
     "1) Warmly confirm the payment was received. " +
@@ -1193,7 +1251,18 @@ export async function POST(req: NextRequest) {
     // (2026-10-11): the save then RECORDS a settled payment, as a rental paid on
     // our checkout does, rather than opening one on Emirates Post's gateway.
     backendGateway:
-      Boolean((agent.definition.journeys ?? []).find((j) => j.key === session.state.journeyKey)?.submission?.apiFlow?.confirmTool) &&
+      /**
+       * On the FIRST turn of a conversation no journey is set yet, and the
+       * one-tap renewal saves on that very turn (2026-10-11). Read from the
+       * unset journey this was false, and the save came back annotated as a
+       * Noqodi payment already settled — for a customer who had paid nothing.
+       * With no journey chosen, the agent's own flows decide: an agent whose
+       * saves confirm on the backend's gateway is a backend-gateway agent until
+       * a chosen method says otherwise.
+       */
+      (session.state.journeyKey
+        ? Boolean((agent.definition.journeys ?? []).find((j) => j.key === session.state.journeyKey)?.submission?.apiFlow?.confirmTool)
+        : (agent.definition.journeys ?? []).some((j) => j.submission?.apiFlow?.saveTool && j.submission?.apiFlow?.confirmTool)) &&
       String(session.state.data.payment_method ?? "").toLowerCase() !== "uaepay",
     uaePassToken: hostToken ?? uaePassIdentityToken,
     sessionToken: backendSessionToken,
@@ -1571,7 +1640,7 @@ export async function POST(req: NextRequest) {
   const effectiveMessage = isPulse
     ? pulseDirective
     : isPaymentSettled
-      ? paymentSettledDirective(agent.definition, session.state.journeyKey)
+      ? paymentSettledDirective(agent.definition, session.state.journeyKey, session.state)
       : isDocumentUploaded
         ? uploadedDirective(session.state, agent.definition, body.locale)
         : body.userMessage;
@@ -3317,13 +3386,15 @@ export async function POST(req: NextRequest) {
           history: session.history,
           userMessage: effectiveMessage,
           case: session.state,
+          // The one-tap renewal saves in the same turn — see withOneTapOpener.
+          maxToolRounds: agent.definition.tenantSlug === "nxn" && authenticated && ONE_TAP_OPENER.test(effectiveMessage ?? "") ? 10 : undefined,
           locale: body.locale,
           authenticated,
           userRef,
           adapters,
           intentPromise,
           businessOpen,
-          customerContext: withOneTapOpener(withPaymentMethods(customerContext, agent.definition), effectiveMessage, agent.definition, authenticated),
+          customerContext: withOneTapOpener(withPaymentMethods(customerContext, agent.definition), effectiveMessage, agent.definition, authenticated, session.state),
           extraTools,
           registryNonResidents: () => [...registryNonResidents],
           authoritativeAmount,

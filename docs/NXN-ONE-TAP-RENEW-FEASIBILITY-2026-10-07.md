@@ -57,15 +57,90 @@ alone produced a "just to confirm" echo one run in two on staging).
 Verified locally with the mock persona on 11 October: opener → summary and the
 two buttons; "Pay AED 695.00 with Noqodi (UAE Pay)" → a UAE Pay payment for the
 quoted AED 695 on `uat-pay.uaepay.ae`; settled → the save was called, their
-confirm was not, no pay block. Emirates Post's staging refused the save itself
-for the test box, as it does for guest renewal saves there (a known limit of
-their test environment, not of this flow), and the customer was told plainly:
-payment confirmed, renewal not yet recorded, reference and enquiry link given. Code: method-aware `backendGateway` and save gate in
+confirm was not, no pay block. The save did not go through in that
+run; the customer was told plainly: payment confirmed, renewal not yet recorded,
+reference and enquiry link given. *(Corrected later the same day: the save tool
+was not refused by Emirates Post — it was switched OFF in the local database's
+copy of the integration, so the model's call came back "unknown tool". Staging
+and production have it on. The local copy now mirrors staging's operation
+flags.)* Code: method-aware `backendGateway` and save gate in
 `chat/route.ts`, the "RECORDED, paid on our side" wording for a Noqodi-paid
 save and `getLastPriced` in `lib/integrations.ts` (so `request_payment` charges
 the term's quoted price), the Noqodi branch in `prompt.ts` backend-gateway
 mode, `confirm: A | B` in the toggles block, the `payment_method` field on the
 personal renewal, and a test Emirates ID for the local mock persona.
+
+## Straight to payment — 11 October 2026, evening
+
+The user's reading of the flow above: "still showing unnecessary steps — it
+should jump straight to payment." The step they meant was the one between the
+Renew tap and the payment page: a Before-payment block with switches and two
+buttons, whose tap started a second model turn that saved the order and only
+then produced a pay card to tap again. Three taps and two waits to reach a
+payment page.
+
+**Now, for a signed-in customer, the Renew tap is the last thing asked before
+the payment page.** The one reply prices the renewal, records the fields, SAVES
+the order with Emirates Post, and shows:
+
+- the renewal summary (bundle, term, current and new expiry, fee, and a row
+  `Auto-renewal: on/off, as now`);
+- the pay card — **"Pay AED x with Card"** — whose button *is* Emirates Post's
+  payment page for that order;
+- one button beneath it, **"Pay AED x with Noqodi (UAE Pay) instead"**;
+- the sentence "By paying you accept the Terms and Conditions" (linked), and
+  one sentence that a longer term or a different bundle is available on request.
+
+No switches, no checkbox. Consents are "same as now": the card is not saved
+unasked and auto-renewal is left exactly as the box has it (`isAutoRenewEnabled`
+from the details); after a successful payment the one next-step button offers
+to switch auto-renewal on if it is off. The terms are accepted by paying, as the
+sentence under the button says, and recorded as such when the customer comes
+back from the payment page (or taps the Noqodi button). This replaces the
+ticked checkbox NXN's round-two feedback asked for on the ordinary flow — the
+ordinary flow (a different term or bundle) still shows it; the one-tap path
+states acceptance beside the button instead. Flagged to the team as a product
+decision to confirm with Emirates Post.
+
+**Noqodi instead** starts our UAE Pay checkout for the quoted total. The order
+already exists at Emirates Post from the save, so when the payment settles
+nothing is saved again and their confirm tool is not called; the customer gets
+the order reference, the new expiry and the receipt. The same caveat as above
+applies: Emirates Post's gateway sees that order unpaid until they take a UAE
+Pay link or an external reference.
+
+**Guests are unchanged**: identity line, summary, terms checkbox, card button,
+and a sentence that Noqodi needs a sign-in — a guest cannot be saved before
+their details are known.
+
+**How it is enforced** (`apps/web/app/api/chat/route.ts`): the server
+recognises three sentences for Emirates Post and directs each turn itself —
+the opener (the Renew pill's sentence *and* the pulse button's shorter "Renew PO
+Box n for another year", English or Arabic), the "with Noqodi (UAE Pay)
+instead" tap, and the pay card's return sentence — so the model never has to
+find the rule in a long guidance. The opener turn is allowed ten tool rounds
+instead of six (`maxToolRounds` on `runTurn`), because details, pricing, the
+field recordings and the save do not fit in six when the model prices twice.
+The backend-gateway flag is decided from the agent's flows when no journey is
+set yet (the first turn of a conversation), so the save on that turn is
+annotated correctly. The payment-settled directive knows an order that already
+exists and says so. `scripts/nxn-one-tap-renew-2026-10-08.ts` carries the same
+rules into the journey guidance (re-run on each environment); Arabic
+conversations get Arabic labels. The save-before-pay gate's refusal is now
+audited (`save_blocked_unpaid`), and `DIALOG_DEBUG_TOOLS=1` logs every
+integration tool result on the server, which is how the "unknown tool" above was
+found.
+
+**Seen locally** (mock persona, 11 October evening), in English and Arabic:
+Renew → one reply with summary, pay card (Emirates Post payment URL), Noqodi
+button, terms sentence; back from the payment page → one confirm call → "renewed
+through 03-02-2027", receipt, auto-renew offer; Noqodi instead → UAE Pay
+payment for the quoted amount → settled → no save, no confirm, reference given.
+The mock persona's save and confirm are simulated (`lib/mockPersona.ts`) so
+this can be seen on a laptop: the card opens N-Genius's UAT page with a code it
+will not know, and the confirm answers paid. UAE Pay's UAT gateway was
+unreachable for stretches of the evening; the turn reports "could not be
+opened, nothing charged" and offers card or retry.
 
 ## Verdict
 

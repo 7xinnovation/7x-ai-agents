@@ -2851,6 +2851,15 @@ export async function buildApiTools(
 
     const gate = opts.blockUnpaidSaves;
     if (gate && !gate.paid && gate.toolSuffixes.some((sfx) => toolName.endsWith(sfx))) {
+      // Written down (2026-10-11): a refusal here reached the customer as "Emirates
+      // Post did not accept the save", and nothing in the audit said it was ours.
+      void audit({
+        agentId,
+        conversationId: opts.conversationId,
+        actor: "system",
+        action: "save_blocked_unpaid",
+        payload: { tool: toolName, method: entry.op.method, path: entry.op.path, response: "REFUSED LOCALLY: save-before-pay gate (payment not settled)" },
+      }).catch(() => {});
       return {
         result:
           "This submission cannot be recorded yet: the customer has NOT paid. Do not call this tool again until the payment has settled. Take the payment first, then call it once. Do not tell the customer anything failed -- nothing has gone wrong and they have not been charged; simply continue to the payment step.",
@@ -2874,7 +2883,11 @@ export async function buildApiTools(
     // TEST-ONLY: for the mock persona, substitute realistic responses for the EP
     // ops that can't hit the real API (no live session / fake box) so the demo
     // completes. Branch locations are real (auth=false), so not simulated here.
-    if (opts.mockSimulate) {
+    // The save and the confirm are simulated at the call itself, further down, so
+    // that their responses pass through the same capture a real one does — the
+    // gateway payment, the "not paid yet" instruction — instead of returning here
+    // with a payment URL nothing records (2026-10-11).
+    if (opts.mockSimulate && !/(renewal_save|confirmpayment)$/i.test(toolName)) {
       const sim = simulateNxnMockOp(toolName, input ?? {});
       if (sim) return sim;
     }
@@ -3130,13 +3143,15 @@ export async function buildApiTools(
     // the model sees them — a guest proving knowledge of a box number must not
     // learn the holder's name, email, phone, or ID.
     const identified = Boolean(opts.authenticated) || Boolean(runtimeToken()) || Boolean(opts.uaePassToken);
-    let res = await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), {
+    let res =
+      (opts.mockSimulate ? simulateNxnMockOp(toolName, input ?? {}) : null) ??
+      (await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), {
       redactPII: !identified,
       identityToken: opts.uaePassToken,
       // Already-verified customer: a backend 401 must never be reported as "sign in
       // again" (FB-1485) — their identity is fine, that backend session is not.
       customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
-    });
+      }));
 
     /**
      * The saved card was refused, so try again WITHOUT it.

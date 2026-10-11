@@ -121,13 +121,16 @@ export function stagingTestBoxNumbers(
 }
 
 /** Simulate a mock EP response for the ops that can't hit the real API; null = not simulated. */
+/** The last simulated renewal order, so the simulated confirm can answer for it. */
+let lastSimulatedOrder: { ref: string; amount: number } | null = null;
+
 export function simulateNxnMockOp(
   toolName: string,
   input: Record<string, unknown>
-): { result: string; isError?: boolean } | null {
+): { result: string; isError?: boolean; raw?: string } | null {
   const t = toolName.toLowerCase();
   const inp = (input ?? {}) as Record<string, any>;
-  const ok = (body: unknown) => ({ result: `HTTP 200 OK\n${JSON.stringify(body)}`, isError: false });
+  const ok = (body: unknown) => ({ result: `HTTP 200 OK\n${JSON.stringify(body)}`, isError: false, raw: JSON.stringify(body) });
 
   if (t.includes("rental_freeboxes")) {
     const bundleId = String(inp.BundleId ?? inp.bundleId ?? "");
@@ -180,6 +183,44 @@ export function simulateNxnMockOp(
       success: true, simulated: true, currency: "AED",
       numberOfYears: years, annualPrice: rate,
       totalPrice: total, price: total, amount: total, expiryDate,
+    });
+  }
+
+  /**
+   * THE SAVE AND THE CONFIRM, SIMULATED (2026-10-11), so the one-tap renewal can
+   * be seen end to end on a laptop. Emirates Post's staging refuses
+   * Guest/Renewal/Save for the mock boxes, and without a save there is no
+   * payment page to put behind the pay button. The simulated order points at
+   * N-Genius's UAT page with a code that page will not know: the card renders
+   * and opens, the payment itself cannot be made here. The confirm then answers
+   * paid, as a demo needs. Both are marked simulated and reach the mock persona
+   * only, like everything else in this function.
+   */
+  if (t.includes("guest_renewal_save")) {
+    let body: any = inp.body ?? inp;
+    if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
+    body = body || {};
+    const total = Number(body.totalAmount ?? body.amount ?? 0) || rateForBundleId(String(body.newBundleId ?? body.NewBundleId ?? ""));
+    const ref = `sim-${Date.now().toString(36)}`;
+    lastSimulatedOrder = { ref, amount: total };
+    return ok({
+      isSuccess: true, simulated: true,
+      payload: {
+        orderNo: `SIM${Date.now().toString().slice(-8)}`,
+        totalAmount: total,
+        paymentGateWayResponse: {
+          referenceNumber: ref,
+          paymentUrl: `https://paypage-uat.ngenius-payments.com/?code=${ref}`,
+          niOrderResult: { _id: `urn:order:${ref}`, reference: ref, amount: { value: Math.round(total * 100), currencyCode: "AED" } },
+        },
+      },
+    });
+  }
+  if (t.includes("guest_renewal_confirmpayment")) {
+    const order = lastSimulatedOrder;
+    return ok({
+      isSuccess: true, simulated: true,
+      payload: { isPaymentSuccess: true, amountPaid: order?.amount ?? 0, referenceNumber: order?.ref ?? "", paymentDetails: { simulated: true } },
     });
   }
 

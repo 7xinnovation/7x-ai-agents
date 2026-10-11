@@ -153,6 +153,17 @@ export interface RunTurnInput {
   // Server-verified facts about the signed-in customer (e.g. PO Boxes on file),
   // surfaced in the system prompt so the agent never re-asks for them.
   customerContext?: string;
+  /**
+   * How many tool rounds this turn may take, when the default is too few.
+   *
+   * The one-tap renewal (2026-10-11) prices, records and SAVES in a single turn
+   * so that the pay button is the payment page itself: details, pricing, the
+   * field recordings, the save — and a model that prices twice or looks up the
+   * renewed-by options on the way is at six rounds with the save still to come.
+   * The turn then ended on a tool call, with no text and no save. The default
+   * stays where it is for every other turn.
+   */
+  maxToolRounds?: number;
   // Dynamic tools from the agent's API integrations (imported from OpenAPI).
   extraTools?: Anthropic.Tool[];
   /**
@@ -306,7 +317,8 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
   let submittedThisTurn = false;
 
   try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const maxRounds = input.maxToolRounds && input.maxToolRounds > MAX_TOOL_ROUNDS ? input.maxToolRounds : MAX_TOOL_ROUNDS;
+    for (let round = 0; round < maxRounds; round++) {
       // For the round's cost line below.
       const roundStartedAt = Date.now();
       let firstWordAt: number | null = null;
@@ -509,6 +521,8 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
         if (!builtin.has(tu.name) && input.runExtraTool) {
           yield { type: "integration", tool: tu.name };
           const r = await input.runExtraTool(tu.name, tu.input as Record<string, unknown>, state);
+          // What the model was told, when the audit does not say (DIALOG_DEBUG_TOOLS=1).
+          if (process.env.DIALOG_DEBUG_TOOLS === "1") console.log(`[tool] ${tu.name} ${r.isError ? "ERROR" : "ok"} ${String(r.result).slice(0, 700).replace(/\s+/g, " ")}`);
           toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: r.result, is_error: r.isError });
           // apiFlow journeys complete through a backend saveTool (e.g. Salesforce
           // submitLicenseRequest), not the internal submit_case. When the active
