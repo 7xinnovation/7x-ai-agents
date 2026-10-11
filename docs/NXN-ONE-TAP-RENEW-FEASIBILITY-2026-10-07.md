@@ -47,9 +47,20 @@ August (paid on our checkout, then saved), and it is why the ask in
 UAE Pay link, or they accept an external payment reference. Until one of those
 lands, a Noqodi renewal needs their back office to reconcile our settlement.
 
-Guests see the card button alone and one sentence that Noqodi needs a sign-in.
-A gateway that does not answer is now a tool error with a plain message rather
-than a failed turn. Code: method-aware `backendGateway` and save gate in
+Guests see the card button alone and one sentence that Noqodi needs a sign-in,
+and `request_payment` refuses Noqodi without a verified Emirates ID before the
+gateway is reached. A gateway that does not answer is now a tool error with a
+plain message rather than a failed turn. The opener sentence is recognised by
+the chat route itself, which directs that turn per sign-in state (the prompt
+alone produced a "just to confirm" echo one run in two on staging).
+
+Verified locally with the mock persona on 11 October: opener → summary and the
+two buttons; "Pay AED 695.00 with Noqodi (UAE Pay)" → a UAE Pay payment for the
+quoted AED 695 on `uat-pay.uaepay.ae`; settled → the save was called, their
+confirm was not, no pay block. Emirates Post's staging refused the save itself
+for the test box, as it does for guest renewal saves there (a known limit of
+their test environment, not of this flow), and the customer was told plainly:
+payment confirmed, renewal not yet recorded, reference and enquiry link given. Code: method-aware `backendGateway` and save gate in
 `chat/route.ts`, the "RECORDED, paid on our side" wording for a Noqodi-paid
 save and `getLastPriced` in `lib/integrations.ts` (so `request_payment` charges
 the term's quoted price), the Noqodi branch in `prompt.ts` backend-gateway
