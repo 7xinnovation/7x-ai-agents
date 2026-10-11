@@ -3,7 +3,7 @@ import { uaePassConfigured, uaePassMockAllowed, exchangeCode, resolveRedirectUri
 import { saveSessionToken, markAuthenticated, getOrCreateSession, rememberVerifiedEmiratesId, mutateCase } from "@/lib/conversation";
 import { contactSeed } from "@/lib/knownContact";
 import { getAgentBySlug } from "@/lib/agents";
-import { MOCK_PERSONA_SUB, MOCK_PERSONA_NAME } from "@/lib/mockPersona";
+import { MOCK_PERSONA_SUB, MOCK_PERSONA_NAME, MOCK_PERSONA_EID } from "@/lib/mockPersona";
 import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     // Mock mode: synthesize a verified identity instead of calling UAE PASS, so the
     // sign-in → session → authenticated flow is testable without registration.
     const id = isMock
-      ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: MOCK_PERSONA_SUB, name: MOCK_PERSONA_NAME }
+      ? { accessToken: `mock-uaepass-${crypto.randomUUID()}`, sub: MOCK_PERSONA_SUB, name: MOCK_PERSONA_NAME, emiratesId: MOCK_PERSONA_EID }
       : await exchangeCode(code, resolveRedirectUri(requestOrigin(req)), flowTenant);
     // Signed in before the first message → no conversation exists yet. Create it
     // here so the verified identity has somewhere to live; the redirect's ?cid=

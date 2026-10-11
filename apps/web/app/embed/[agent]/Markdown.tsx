@@ -730,11 +730,16 @@ function ChatSelect({
 }
 
 function ChatToggles({
-  items, title, confirmLabel, variant, defaultOn, onSelect,
+  items, title, confirmLabels, variant, defaultOn, onSelect,
 }: {
   items: { key: string; label: string; variant?: "switch" | "checkbox" }[];
   title?: string;
-  confirmLabel: string;
+  /**
+   * One button, or several: `confirm: Pay with Card | Pay with Noqodi (UAE Pay)`
+   * (2026-10-11). The tap that confirms the switches is also the choice of how
+   * to pay, so the customer is not asked twice. Each sends its own label.
+   */
+  confirmLabels: string[];
   variant?: "switch" | "checkbox";
   defaultOn?: boolean;
   onSelect: (text: string) => void;
@@ -766,12 +771,12 @@ function ChatToggles({
   // the customer taps it and nothing happens. Where there is nothing to
   // acknowledge, the button is simply there.
   const showConfirm = required.length === 0 || allOn;
-  const submit = () => {
+  const submit = (label: string) => {
     // Strip markdown links from labels (e.g. the T&C link) so the sent reply
     // reads clean.
     const plain = (s: string) => s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
     const summary = items.map((it) => `${plain(it.label)}: ${on[it.key] ? "Yes" : "No"}`).join(". ");
-    onSelect(`${summary}. ${confirmLabel}.`);
+    onSelect(`${summary}. ${label}.`);
   };
   return (
     <div className={`dlg-toggles${checkbox ? " is-checkbox" : ""}`}>
@@ -810,7 +815,11 @@ function ChatToggles({
         </button>
       ))}
       {showConfirm ? (
-        <button type="button" className="dlg-toggles-confirm" onClick={submit}>{confirmLabel}</button>
+        <div className="dlg-toggles-confirms">
+          {confirmLabels.map((label) => (
+            <button key={label} type="button" className="dlg-toggles-confirm" onClick={() => submit(label)}>{label}</button>
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -1238,7 +1247,7 @@ export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { 
         // `title:` / `confirm:` / `style:` lines, and `- key: label` lines for
         // each switch. `style: checkbox` renders acknowledgment checkboxes.
         let tTitle: string | undefined;
-        let tConfirm = "Confirm";
+        let tConfirms: string[] = ["Confirm"];
         let tVariant: "switch" | "checkbox" = "switch";
         let tDefaultOn = false;
         const tItems: { key: string; label: string; variant?: "switch" | "checkbox" }[] = [];
@@ -1252,11 +1261,11 @@ export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { 
             else if (/^style$/i.test(meta[1]!)) tVariant = /checkbox/i.test(meta[2]!) ? "checkbox" : "switch";
             else if (/^default$/i.test(meta[1]!)) tDefaultOn = /^(on|yes|true)$/i.test(meta[2]!.trim());
             else if (/^checkboxes$/i.test(meta[1]!)) tCheckKeys = new Set(meta[2]!.split(",").map((x) => x.trim()).filter(Boolean));
-            else tConfirm = meta[2]!.trim();
+            else tConfirms = meta[2]!.split("|").map((x) => x.trim()).filter(Boolean);
           }
         }
         for (const it of tItems) if (tCheckKeys.has(it.key)) it.variant = "checkbox";
-        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabel={tConfirm} variant={tVariant} defaultOn={tDefaultOn} onSelect={onSelect} />);
+        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabels={tConfirms.length ? tConfirms : ["Confirm"]} variant={tVariant} defaultOn={tDefaultOn} onSelect={onSelect} />);
         continue;
       }
       if (isSummary) {

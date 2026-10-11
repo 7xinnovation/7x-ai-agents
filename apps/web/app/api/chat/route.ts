@@ -25,7 +25,7 @@ import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verif
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
 import { notifyOpsForSubmission, notifyVibanRequest } from "@/lib/opsNotify";
 import { completionEmail, completionRecipient, plainLinks } from "@/lib/completionEmail";
-import { MOCK_PERSONA_SUB, mockPersonaContext } from "@/lib/mockPersona";
+import { MOCK_PERSONA_SUB, MOCK_PERSONA_EID, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
@@ -884,7 +884,10 @@ export async function POST(req: NextRequest) {
           (j) =>
             j.submission?.requiresPayment &&
             j.submission?.apiFlow?.saveTool &&
-            !j.submission?.apiFlow?.confirmTool &&
+            // Paying with Noqodi turns a backend-gateway journey into an
+            // internal-checkout one for this customer (2026-10-11): the save
+            // must wait for the money, or Emirates Post opens a second payment.
+            (!j.submission?.apiFlow?.confirmTool || String(session.state.data.payment_method ?? "").toLowerCase() === "uaepay") &&
             !j.submission?.apiFlow?.submitBeforePayment
         )
         .map((j) => j.submission!.apiFlow!.saveTool as string);
@@ -983,6 +986,16 @@ export async function POST(req: NextRequest) {
     return rows ? rows.map((b) => String(b.boxNumber ?? "")).filter(Boolean) : null;
   };
 
+  /**
+   * TEST-ONLY: the mock persona signs in without an Emirates ID (a real UAE
+   * PASS sign-in carries one). Noqodi refuses a payment without it, so the
+   * persona is given the UAT-accepted test number — written onto the case once,
+   * exactly where a real sign-in would have put it (2026-10-11).
+   */
+  if (uaePassMockAllowed() && session.userRef === MOCK_PERSONA_SUB && session.caseId && !session.state.data[VERIFIED_EID_KEY]) {
+    await rememberVerifiedEmiratesId(session.caseId, MOCK_PERSONA_EID);
+    session.state = { ...session.state, data: { ...session.state.data, [VERIFIED_EID_KEY]: MOCK_PERSONA_EID } };
+  }
   const apiTools = await buildApiTools(agent.id, agent.definition.activeEnvironment ?? "production", {
     ownedBoxes,
     // A renewal calls the box po_box_number; a rental calls it box_number. Both
@@ -1145,10 +1158,13 @@ export async function POST(req: NextRequest) {
     paymentReturnUrl: (agent.definition.journeys ?? [])
       .map((j) => j.submission?.apiFlow?.paymentReturnUrl)
       .find(Boolean),
-    // Whose gateway this journey pays on, decided the same way the prompt decides it.
-    backendGateway: Boolean(
-      (agent.definition.journeys ?? []).find((j) => j.key === session.state.journeyKey)?.submission?.apiFlow?.confirmTool
-    ),
+    // Whose gateway this journey pays on, decided the same way the prompt decides
+    // it — except that a customer who chose Noqodi (UAE Pay) pays on OUR checkout
+    // (2026-10-11): the save then RECORDS a settled payment, as a rental paid on
+    // our checkout does, rather than opening one on Emirates Post's gateway.
+    backendGateway:
+      Boolean((agent.definition.journeys ?? []).find((j) => j.key === session.state.journeyKey)?.submission?.apiFlow?.confirmTool) &&
+      String(session.state.data.payment_method ?? "").toLowerCase() !== "uaepay",
     uaePassToken: hostToken ?? uaePassIdentityToken,
     sessionToken: backendSessionToken,
     // Guest sessions get PII-redacted tool results (server-authoritative flag).
@@ -1212,7 +1228,14 @@ export async function POST(req: NextRequest) {
   let courierSeen = false;
   const authoritativeAmount = (extras?: { keyDelivery?: boolean }) => {
     const hold = apiTools.getLastHold();
-    if (!hold || typeof hold.amount !== "number") return null;
+    // A renewal has no hold; its authoritative figure is the last price Emirates
+    // Post quoted for the chosen term and bundle (2026-10-11), so a Noqodi
+    // payment on our checkout charges what the summary said, not the journey's
+    // advertised rate and not a figure the model typed.
+    if (!hold || typeof hold.amount !== "number") {
+      const priced = apiTools.getLastPriced();
+      return typeof priced?.amount === "number" && priced.amount > 0 ? priced.amount : null;
+    }
     const data = liveState.data as Record<string, unknown>;
     const keyDelivery =
       extras?.keyDelivery ?? (wantsKeyDelivery(data.key_delivery ?? data.key_delivery_option) || courierSeen);

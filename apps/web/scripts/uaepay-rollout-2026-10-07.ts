@@ -67,10 +67,17 @@ export const LABELS: Record<string, { en: string; ar: string }> = {
  */
 export const PROFILES: Record<string, { methods: string[]; offerInChat: boolean; why?: string }> = {
   "epgl-dialog": { methods: ["gateway", "viban", "uaepay"], offerInChat: true },
+  /**
+   * NXN's wording lives in scripts/nxn-one-tap-renew-2026-10-08.ts (2026-10-11):
+   * the pay step offers both ways on the Before-payment block, and a Noqodi
+   * payment is taken on our checkout and then RECORDED with Emirates Post —
+   * their own gateway is not asked to confirm it. This script only writes the
+   * switch and the binding for NXN; it must not append EPGL's price sentence.
+   */
   "nxn-dialog": {
     methods: ["gateway", "uaepay"],
     offerInChat: false,
-    why: "Emirates Post's Save opens the payment on THEIR gateway and their confirm step checks it; a Noqodi payment we took cannot be confirmed to them yet",
+    why: "its pay step and wording are written by scripts/nxn-one-tap-renew-2026-10-08.ts; this script writes the switch and the binding only",
   },
 };
 const DEFAULT_PROFILE: { methods: string[]; offerInChat: boolean; why?: string } = { methods: ["gateway", "uaepay"], offerInChat: true };
@@ -122,9 +129,6 @@ export function applyRollout(input: Def, opts: RolloutOptions): { def: Def; chan
   const profile = PROFILES[slug] ?? DEFAULT_PROFILE;
   const offer = opts.enable && profile.offerInChat;
 
-  if (opts.enable && !profile.offerInChat) {
-    throw new Error(`${slug}: Noqodi cannot be switched on here yet — ${profile.why}. Run without --enable to prepare the switch and the binding.`);
-  }
 
   // 1. The switches: exactly this agent's methods, named for the customer.
   const had: any[] = Array.isArray(def.paymentMethods) ? def.paymentMethods : [];
@@ -219,7 +223,7 @@ export function applyRollout(input: Def, opts: RolloutOptions): { def: Def; chan
       changes.push(offer ? `${j.key}: guidance offers three ways — card ${money(base + fee)}, Noqodi ${money(base)}, Virtual IBAN ${money(base)}` : `${j.key}: guidance names two ways, Noqodi not mentioned`);
     }
   }
-  if (!profile.offerInChat) changes.push(`(${slug}: no field or guidance written — ${profile.why})`);
+  if (!profile.offerInChat) changes.push(`(${slug}: no field or guidance written here — ${profile.why})`);
 
   return { def, changes };
 }

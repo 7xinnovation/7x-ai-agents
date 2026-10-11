@@ -1142,16 +1142,41 @@ export async function dispatchTool(
       // default one: a context from the wrong binding is a payment addressed to
       // the right gateway with another gateway's settings.
       const actx = adapterContext(agent, pay.binding);
-      const res = await pay.adapter.initiate(actx, {
-        caseId: ctx.caseId,
-        amount,
-        currency,
-        description: String(input.description ?? journey?.key ?? "service"),
-        userRef: ctx.userRef,
-        email: customerEmail(state),
-        locale: ctx.locale,
-        customer: payerDetails(state),
-      });
+      /**
+       * A GATEWAY THAT DOES NOT ANSWER IS A TOOL ERROR, NOT A DEAD TURN (2026-10-11).
+       *
+       * UAE Pay's UAT timed out and the adapter's `fetch failed` escaped this
+       * function, so the whole turn failed and the customer saw "Something went
+       * wrong on our side" over a payment that had never started. Nothing had
+       * been charged, and the model had no way to say so, offer the other way to
+       * pay, or try again. Now it is told, in the same words every other refused
+       * payment uses.
+       */
+      let res: Awaited<ReturnType<typeof pay.adapter.initiate>>;
+      try {
+        res = await pay.adapter.initiate(actx, {
+          caseId: ctx.caseId,
+          amount,
+          currency,
+          description: String(input.description ?? journey?.key ?? "service"),
+          userRef: ctx.userRef,
+          email: customerEmail(state),
+          locale: ctx.locale,
+          customer: payerDetails(state),
+        });
+      } catch (e) {
+        const why = e instanceof Error ? e.message : String(e);
+        return {
+          result:
+            `PAYMENT COULD NOT BE STARTED: the ${pay.binding?.provider ?? "payment"} gateway did not answer (${why.slice(0, 160)}). ` +
+            "NOTHING has been charged and nothing is wrong with their application. Tell the customer plainly that the payment page could not be opened right now, " +
+            (pay.method !== "default" ? `offer the other way to pay (record it with collect_field(payment_method, ...)) or to try ${pay.method} again in a moment, ` : "offer to try again in a moment, ") +
+            "and never say a payment failed — none was attempted.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       state = setPayment(state, {
         status: res.status,
         reference: res.reference,

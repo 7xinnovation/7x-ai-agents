@@ -10,6 +10,8 @@
  */
 export const MOCK_PERSONA_SUB = "uaepass-mock-001";
 export const MOCK_PERSONA_NAME = "Ahmed Al Mansoori";
+/** The Emirates ID UAE Pay's UAT accepts in its own examples — a test number, never a person's. */
+export const MOCK_PERSONA_EID = "784199983926421";
 // Contact details on the customer profile (Round-2 feedback FB-1374/FB-1395:
 // with UAE PASS sign-in, mobile + email come from the profile — never re-asked).
 export const MOCK_PERSONA_CONTACT = { mobile: "+971 50 555 0142", email: "ahmed.almansoori@example.ae" };

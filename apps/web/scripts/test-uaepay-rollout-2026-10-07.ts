@@ -131,11 +131,10 @@ console.log("\nNXN: prepared, not offered");
   check("Noqodi stays off", def.paymentMethods[1].enabled === false);
   check("the binding is prepared", def.integrations.paymentGateways?.uaepay?.settings?.merchantCode === "MR123093");
   check("no field is added and the guidance is untouched", def.journeys[0].guidance === "Rental guidance." && !def.journeys[0].steps[0].fields.some((f: any) => f.key === "payment_method"));
-  check("...and the reason is stated", changes.some((c) => /Emirates Post/.test(c)), changes);
-  let err = "";
-  try { applyRollout(nxn, { enable: true, host: "https://7xagents.7x-lab.com" }); } catch (e) { err = String((e as Error).message); }
-  check("switching it on is refused with the reason", /cannot be switched on here yet/.test(err) && /Emirates Post/.test(err), err);
-  check("the profile says why", PROFILES["nxn-dialog"]!.offerInChat === false && /confirm/.test(PROFILES["nxn-dialog"]!.why ?? ""));
+  check("...and the reason is stated", changes.some((c) => /nxn-one-tap-renew/.test(c)), changes);
+  const on = applyRollout(nxn, { enable: true, host: "https://7xagents.7x-lab.com" });
+  check("switching it on flips the switch and keeps the binding, and writes no EPGL wording", on.def.paymentMethods[1].enabled === true && on.def.integrations.paymentGateways?.uaepay?.provider === "uaepay" && on.def.journeys[0].guidance === "Rental guidance." && !on.def.journeys[0].steps[0].fields.some((f: any) => f.key === "payment_method"), on.changes);
+  check("the profile says who owns NXN's wording", PROFILES["nxn-dialog"]!.offerInChat === false && /nxn-one-tap-renew/.test(PROFILES["nxn-dialog"]!.why ?? ""));
   check("the labels are the ones in the admin editor", LABELS.gateway!.en === "Pay with Card" && LABELS.uaepay!.en === "Pay with Noqodi (UAE Pay)");
 }
 

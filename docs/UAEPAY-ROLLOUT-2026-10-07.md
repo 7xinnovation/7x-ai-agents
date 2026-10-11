@@ -31,7 +31,7 @@ Tests: `test-uaepay-2026-10-02.ts` (34), `test-payment-methods-2026-10-02.ts` (2
 
 | | EPGL | NXN (Emirates Post) |
 |---|---|---|
-| **Staging** | **ON.** Three choices: Pay with Card (fee + AED 1,000 online fee), Pay with Noqodi (UAE Pay) (fee), Bank transfer (Virtual IBAN) (fee). UAT merchant MR123093. | **Prepared, OFF.** Switch present and off, UAT binding written. No choice in chat — see §4. |
+| **Staging** | **ON.** Three choices: Pay with Card (fee + AED 1,000 online fee), Pay with Noqodi (UAE Pay) (fee), Bank transfer (Virtual IBAN) (fee). UAT merchant MR123093. | **ON for the personal renewal (11 Oct).** The Before-payment block offers "Pay with Card" (Emirates Post's page) and "Pay with Noqodi (UAE Pay)" (our checkout, then the save records it); see the caveat in `docs/NXN-ONE-TAP-RENEW-FEASIBILITY-2026-10-07.md`. |
 | **Production** | "Pay with Card" + Virtual IBAN; Noqodi switch present and **off**, no binding, no credentials (code deployed 7 Oct, dormant). | "Pay with Card" only; Noqodi switch present and **off**. |
 
 Staging credentials live in the staging App Service as `UAEPAY_CLIENT_ID` /
@@ -92,7 +92,19 @@ A local run against production needs this Mac on the database firewall
 (`atoum-mac-<date>` rule on `psql-7xil-external-prod`) — added 7 Oct for this IP;
 re-add if the address changes.
 
-## 4. NXN — why the chat cannot offer Noqodi yet, and what would unblock it
+## 4. NXN — Noqodi on the renewal, and what Emirates Post still owes
+
+Since 11 October the personal renewal offers both ways to pay. A Noqodi
+payment settles on our checkout; the renewal is then recorded with Emirates
+Post, whose own system sees that order's payment as unpaid because their gateway
+did not take it. Production for NXN therefore needs, besides the production
+credentials: `uaepay-rollout --agent nxn-dialog --enable` with the production
+merchant, and `nxn-one-tap-renew-2026-10-08.ts` against the production database.
+The original blocker below remains the reason Emirates Post should answer the
+ask: until they do, their back office reconciles Noqodi renewals against our
+settlement.
+
+### The original position (7 October)
 
 Emirates Post's rentals and renewals pay on **Emirates Post's own** gateway:
 `Rental/Save` and `Guest/Renewal/Save` create the order and open the payment on

@@ -10,8 +10,11 @@
  *
  *   one tap  "Renew" names the box AND the term — one more year, same bundle
  *            and options (the team's decision, 8 Oct) — so the reply is the
- *            summary, the Before-payment switches and "Pay AED x" at once;
- *            longer terms and other bundles are one sentence away.
+ *            summary, the Before-payment switches and TWO pay buttons at once
+ *            (11 Oct): "Pay AED x with Card" on Emirates Post's page, or
+ *            "Pay AED x with Noqodi (UAE Pay)" on our checkout, after which
+ *            the save RECORDS the renewal; longer terms and other bundles
+ *            are one sentence away.
  *   then     Emirates Post's payment page (their Save opens it; a saved card is
  *            pre-selected there, never charged by us), their confirm, one line.
  *
@@ -49,6 +52,21 @@ export const CONSENT_FIELDS = [
   { key: "auto_renew_consent", type: "boolean", label: { en: "Renew my box automatically", ar: "تجديد صندوقي تلقائيًا" } },
 ];
 
+/**
+ * How they pay (2026-10-11): the card on Emirates Post's page, as today, or
+ * Noqodi (UAE Pay) on our checkout. The tap on the Before-payment block IS the
+ * choice, so the field is recorded from that tap and never asked separately.
+ */
+export const PAYMENT_FIELD = {
+  key: "payment_method",
+  type: "enum",
+  label: { en: "How to pay", ar: "طريقة الدفع" },
+  options: [
+    { value: "gateway", label: { en: "Pay with Card", ar: "الدفع بالبطاقة" } },
+    { value: "uaepay", label: { en: "Pay with Noqodi (UAE Pay)", ar: "الدفع عبر نقودي (UAE Pay)" } },
+  ],
+};
+
 /** Guest-only sentences, and what they say now that a signed-in customer shares the journey. */
 export const REWORDINGS: [string, string][] = [
   [
@@ -74,11 +92,11 @@ export const NOTE_REWORDINGS: [string, string][] = [
 /** The fast path, as the model reads it. Appended once; replaced on re-run. */
 export const FAST_PATH =
   ` ${MARKER}. When the customer is SIGNED IN and the box to renew is on their own account (their account list, the box they named in their first message, or the one they tapped Renew on in the panel), the renewal is ONE TAP: nothing is asked of them before the pay button.` +
-  ` ENTRY: a first message that names a box to renew for another year ("Renew my PO Box 450293 in Dubai (DXB) for one more year, same bundle and options") IS the whole request, and the term and the bundle in it are COLLECTED — one year, the bundle the box is on now, no add-on added or removed. Do not greet at length, do not read their account out, do not list their boxes, do not ask which box, do not ask how long, and do not offer upgrades. Take the emirate code from the message or from the account tool. If the box is NOT on their account, say so in one line and continue with the ordinary renewal below instead.` +
-  ` THE ONE REPLY: call the details tool for the box, then the pricing tool ONCE for one year on the current bundle (isBundleChanged false, newBundleId the current bundle, the expiry rules above; for an expired box the grace rule, which may run to the next future anniversary), and reply ONCE with: the \`\`\`summary block (PO Box, bundle, term 1 year, current expiry, NEW expiry, one row per charge, total: last) followed immediately by the \`\`\`toggles block (title: Before payment; default: on; checkboxes: terms_accepted; the lines save_card_consent, auto_renew_consent and terms_accepted; and the confirm line MUST read \`confirm: Pay AED <total>\` with the real total, NOT \`Proceed to payment\`), then ONE short sentence: to renew for longer or move to a different bundle, they only have to say so. Nothing else, and no question. Record renewal_period as 1_YEAR and the subscriber fields (subscriber_first_name, subscriber_last_name, subscriber_mobile, subscriber_email, billing_area, billing_street) SILENTLY with collect_field from the details response (poBoxAddressDetails and poBoxCustomerDetails) and the signed-in profile, never by asking; renewed_by is resolved for you. A value masked or missing in the details comes from the profile; ask only for a value that exists in neither, and for all such values in ONE message.` +
+  ` ENTRY: a first message that names a box to renew for another year ("Renew my PO Box 450293 in Dubai (DXB) for one more year, same bundle and options") IS the whole request, and the term and the bundle in it are COLLECTED — one year, the bundle the box is on now, no add-on added or removed. Do not greet at length, do not read their account out, do not list their boxes, do not ask which box, do not ask how long, and do not offer upgrades. NEVER answer this message with a confirmation question ("Just to confirm, you'd like to renew…?"): the message IS the confirmation, and the pricing call plus the summary and the pay buttons are the only correct reply. Take the emirate code from the message or from the account tool. If the box is NOT on their account, say so in one line and continue with the ordinary renewal below instead.` +
+  ` THE ONE REPLY: call the details tool for the box, then the pricing tool ONCE for one year on the current bundle (isBundleChanged false, newBundleId the current bundle, the expiry rules above; for an expired box the grace rule, which may run to the next future anniversary), and reply ONCE with: the \`\`\`summary block (PO Box, bundle, term 1 year, current expiry, NEW expiry, one row per charge, total: last) followed immediately by the \`\`\`toggles block (title: Before payment; default: on; checkboxes: terms_accepted; the lines save_card_consent, auto_renew_consent and terms_accepted; and the confirm line MUST read \`confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)\` with the real total — TWO buttons, NOT \`Proceed to payment\`), then ONE short sentence: to renew for longer or move to a different bundle, they only have to say so. Nothing else, and no question. Record renewal_period as 1_YEAR and the subscriber fields (subscriber_first_name, subscriber_last_name, subscriber_mobile, subscriber_email, billing_area, billing_street) SILENTLY with collect_field from the details response (poBoxAddressDetails and poBoxCustomerDetails) and the signed-in profile, never by asking; renewed_by is resolved for you. A value masked or missing in the details comes from the profile; ask only for a value that exists in neither, and for all such values in ONE message.` +
   ` IF THEY ASK FOR A DIFFERENT TERM OR BUNDLE after that reply, price exactly what they asked for and show the summary and the switches again; that is the ordinary flow and it costs them one more tap, not a restart.` +
-  ` THEN, WITHOUT ASKING AGAIN: on confirm call the save tool (their saved card is attached for you and pre-selected on the payment page, so do not ask which card), emit the pay block, confirm with the confirm tool when they return, and close with ONE line giving the new expiry date and the receipt. If auto_renew_consent is true, call nxn_set_auto_renew for the box and say auto-renewal is on; if that call fails, say it could not be switched on, never that it is.` +
-  ` A GUEST (not signed in) is NOT on the signed-in shortcuts above — their subscriber details are still collected and only the Terms checkbox is shown — but the SAME-AS-NOW OPENER RULE applies to everyone, guest or signed in: when the first message says "same bundle and options", the customer has chosen their bundle and term, so do NOT show upgrade cards, bundle choices or duration cards, whatever the upgrade rule earlier in this guidance says; it is overridden here. One sentence that a longer term or a different bundle is available on request is all, in the same reply as the summary and the Before-payment block.`;
+  ` THE TAP IS THE CHOICE OF HOW TO PAY, so never ask it as a question. "with Card": record collect_field(payment_method, gateway), call the save tool (their saved card is attached for you and pre-selected on Emirates Post's payment page, so do not ask which card), emit the pay block, and confirm with the confirm tool when they return. "with Noqodi (UAE Pay)": record collect_field(payment_method, uaepay), then call request_payment — our secure checkout card appears in the chat by itself, never a pay block; when it reports paid, call the save tool ONCE to record the renewal, IGNORE the payment URL that save returns, and do NOT call the confirm tool (it reads Emirates Post's gateway, which did not take this payment). Either way close with ONE line giving the new expiry date and the receipt. If auto_renew_consent is true, call nxn_set_auto_renew for the box and say auto-renewal is on; if that call fails, say it could not be switched on, never that it is.` +
+  ` A GUEST (not signed in) is NOT on the signed-in shortcuts above — their subscriber details are still collected, only the Terms checkbox is shown, and the confirm line is \`confirm: Pay AED <total> with Card\` alone, with one sentence that paying with Noqodi (UAE Pay) needs them to sign in, because it needs the Emirates ID their sign-in carries — but the SAME-AS-NOW OPENER RULE applies to everyone, guest or signed in: when the first message says "same bundle and options", the customer has chosen their bundle and term, so do NOT show upgrade cards, bundle choices or duration cards, whatever the upgrade rule earlier in this guidance says; it is overridden here. One sentence that a longer term or a different bundle is available on request is all, in the same reply as the summary and the Before-payment block.`;
 
 type Def = Record<string, any>;
 
@@ -97,6 +115,10 @@ export function applyOneTap(input: Def): { def: Def; changes: string[] } {
         if (step.fields.some((x: any) => x?.key === f.key)) continue;
         step.fields.push({ key: f.key, type: f.type, label: f.label, validation: { required: false } });
         changes.push(`${j.key}: field += ${f.key}`);
+      }
+      if (!step.fields.some((x: any) => x?.key === PAYMENT_FIELD.key)) {
+        step.fields.push({ ...PAYMENT_FIELD, validation: { required: false } });
+        changes.push(`${j.key}: field += ${PAYMENT_FIELD.key}`);
       }
     }
 

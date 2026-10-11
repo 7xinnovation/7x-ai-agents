@@ -1369,6 +1369,8 @@ export async function buildApiTools(
    * rather than have one worked out for it.
    */
   getDurationPrices: () => { bundle: string; terms: { years: number; rent: number | null; fee: number | null; total: number | null }[] } | null;
+  /** The last renewal price Emirates Post quoted — bundle, expiry date and total — if any. */
+  getLastPriced: () => { bundleId: string; expiryDate: string; amount: number | null } | null;
   /** The Emirates Post hold from the last successful Rental/Select, if any. */
   getLastHold: () => { reference: string; amount: number | null; expiresAt: string | null; uniqueBoxId?: string | null; bundleId?: string | null; expiryDate?: string | null; services?: string[]; agentExtraPrice?: number | null; agentIncludedPrice?: number | null; keyDeliveryPrice?: number | null; orderNo?: string | null; paymentRef?: string | null; paymentUrl?: string | null; paidAt?: string | null } | null;
   /** uniqueBoxIds from the most recent availability lookup. */
@@ -3942,7 +3944,17 @@ export async function buildApiTools(
         ...res,
         result:
           res.result +
-          `\n\nTHE ORDER EXISTS AND IS NOT PAID. Emirates Post has opened a payment for it on their own gateway. Present the payment URL from this response as a PAY BLOCK — three backticks, then pay, then \`url: <the paymentUrl>\`, then \`amount: AED <total>\`, then three backticks — and say the renewal completes once they pay. Do NOT call it renewed, confirmed or complete on the strength of an order number. When they say they have paid, confirm it with the confirm tool and only then tell them the renewal is done.`,
+          (opts.backendGateway
+            ? `\n\nTHE ORDER EXISTS AND IS NOT PAID. Emirates Post has opened a payment for it on their own gateway. Present the payment URL from this response as a PAY BLOCK — three backticks, then pay, then \`url: <the paymentUrl>\`, then \`amount: AED <total>\`, then three backticks — and say the renewal completes once they pay. Do NOT call it renewed, confirmed or complete on the strength of an order number. When they say they have paid, confirm it with the confirm tool and only then tell them the renewal is done.`
+            : /**
+               * PAID WITH NOQODI (UAE PAY) ON OUR CHECKOUT (2026-10-11). The money has
+               * settled on our side before this save was made, exactly as a rental
+               * paid on our checkout. Emirates Post still opens a payment of their
+               * own on their gateway and hands back its URL; that URL is not for
+               * this customer, and their confirm tool, which reads that gateway,
+               * would call this renewal unpaid.
+               */
+              `\n\nTHE RENEWAL IS RECORDED. The customer has ALREADY PAID on our Noqodi (UAE Pay) checkout, which has settled. This response also carries a paymentUrl Emirates Post opened on THEIR gateway: IGNORE it — do NOT show a pay block, do NOT ask them to pay again, and do NOT call the confirm tool, which reads their gateway and would report this payment as unpaid. Give the customer the order reference from this response, the new expiry date and the receipt, and say the renewal is recorded.`),
       };
     }
     /**
@@ -4608,6 +4620,7 @@ export async function buildApiTools(
       return vals.length && vals.every((v) => v === vals[0]) ? vals[0]! : null;
     },
     getDurationPrices: () => durationPrices,
+    getLastPriced: () => lastPriced,
     getLastHold: () => lastHold,
     getOfferedBoxIds: () => offeredBoxIds,
     getOfferedBoxAt: () => offeredBoxAt,

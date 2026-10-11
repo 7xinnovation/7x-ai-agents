@@ -5,7 +5,7 @@
  * Run from apps/web:  npx tsx scripts/test-one-tap-renew-2026-10-08.ts
  */
 import { readFileSync } from "node:fs";
-import { applyOneTap, FAST_PATH, MARKER, REWORDINGS, NOTE_REWORDINGS, CONSENT_FIELDS } from "./nxn-one-tap-renew-2026-10-08";
+import { applyOneTap, FAST_PATH, MARKER, REWORDINGS, NOTE_REWORDINGS, CONSENT_FIELDS, PAYMENT_FIELD } from "./nxn-one-tap-renew-2026-10-08";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -39,6 +39,9 @@ const fixture = () => ({
   const keys = p.steps[0].fields.map((f: any) => f.key);
   check("save-card and auto-renew switches are back on the personal step", keys.includes("save_card_consent") && keys.includes("auto_renew_consent"), keys);
   check("...not required, so a guest is never blocked by them", p.steps[0].fields.filter((f: any) => CONSENT_FIELDS.some((c) => c.key === f.key)).every((f: any) => f.validation.required === false));
+  const pm = p.steps[0].fields.find((f: any) => f.key === "payment_method");
+  check("the way to pay is a field, recorded from the tap, with both ways", pm && pm.validation.required === false && JSON.stringify(pm.options.map((o: any) => o.value)) === JSON.stringify(["gateway", "uaepay"]) && pm.options[1].label.en === "Pay with Noqodi (UAE Pay)", pm);
+  check("...and PAYMENT_FIELD names the card the same way as everywhere else", PAYMENT_FIELD.options[0]!.label.en === "Pay with Card");
   check("...and not added to the corporate renewal", !c.steps[0].fields.some((f: any) => f.key === "save_card_consent"));
   check("'without sign-in' became 'for a GUEST' on both renewals", /For a GUEST \(not signed in\), do NOT offer/.test(p.guidance) && /For a GUEST \(not signed in\), do NOT offer/.test(c.guidance) && !/runs WITHOUT sign-in/.test(p.guidance + c.guidance));
   check("the saved card sentence names the signed-in customer", /signed-in customer's saved card is attached to the save/.test(p.guidance));
@@ -60,7 +63,9 @@ console.log("\nWhat the fast path tells the model");
 check("one year on the current bundle, priced once, no term question", /pricing tool ONCE for one year on the current bundle \(isBundleChanged false/.test(FAST_PATH) && /do not ask how long, and do not offer upgrades/.test(FAST_PATH) && !/one card per term/.test(FAST_PATH));
 check("...because the customer's own message states it", /the term and the bundle in it are COLLECTED — one year, the bundle the box is on now, no add-on added or removed/.test(FAST_PATH));
 check("the subscriber is recorded from Details, not asked", /SILENTLY with collect_field from the details response/.test(FAST_PATH));
-check("the one reply is summary + switches + a button that names the amount", /reply ONCE with: the \`\`\`summary block[\s\S]*\`\`\`toggles block[\s\S]*confirm: Pay AED <total>/.test(FAST_PATH));
+check("the one reply is summary + switches + TWO buttons that name the amount and the way", /reply ONCE with: the \`\`\`summary block[\s\S]*\`\`\`toggles block[\s\S]*confirm: Pay AED <total> with Card \| Pay AED <total> with Noqodi \(UAE Pay\)[\s\S]*TWO buttons/.test(FAST_PATH));
+check("the tap IS the choice: card goes to Emirates Post's page, Noqodi to our checkout then the save records", /THE TAP IS THE CHOICE OF HOW TO PAY[\s\S]*"with Card": record collect_field\(payment_method, gateway\)[\s\S]*"with Noqodi \(UAE Pay\)": record collect_field\(payment_method, uaepay\), then call request_payment[\s\S]*call the save tool ONCE to record the renewal, IGNORE the payment URL[\s\S]*do NOT call the confirm tool/.test(FAST_PATH));
+check("a guest gets the card button alone and is told Noqodi needs the sign-in", /confirm line is \`confirm: Pay AED <total> with Card\` alone, with one sentence that paying with Noqodi \(UAE Pay\) needs them to sign in/.test(FAST_PATH));
 check("...and a way to a longer term or another bundle, one sentence, no question", /to renew for longer or move to a different bundle, they only have to say so\. Nothing else, and no question/.test(FAST_PATH) && /IF THEY ASK FOR A DIFFERENT TERM OR BUNDLE/.test(FAST_PATH));
 check("renewal_period is recorded as one year", /Record renewal_period as 1_YEAR/.test(FAST_PATH));
 check("the terms checkbox is still in the block", /checkboxes: terms_accepted/.test(FAST_PATH));
@@ -69,6 +74,20 @@ check("a guest keeps the ordinary collection but the same-as-now opener still su
 check("an opening message that names the box skips the greeting, the list, the term and the upsell", /Do not greet at length, do not read their account out, do not list their boxes, do not ask which box, do not ask how long, and do not offer upgrades/.test(FAST_PATH));
 
 console.log("\nThe code beside it");
+const md = src("../app/embed/[agent]/Markdown.tsx");
+check("a toggles block can carry several confirm buttons, split on |", /confirmLabels: string\[\];/.test(md) && /tConfirms = meta\[2\]!\.split\("\|"\)/.test(md) && /confirmLabels\.map\(\(label\) => \(/.test(md) && /onSelect\(`\$\{summary\}\. \$\{label\}\.`\)/.test(md));
+const prompt = src("../../../packages/core/src/ai/prompt.ts");
+check("the backend-gateway prompt knows the Noqodi order: pay on our checkout, then save, never their confirm", /PAYING WITH NOQODI \(UAE PAY\) INSTEAD: if the customer's recorded payment_method is "uaepay"[\s\S]*Call request_payment FIRST[\s\S]*to RECORD the order[\s\S]*do NOT call \$\{f\.confirmTool\}/.test(prompt));
+const routeSrc = src("../app/api/chat/route.ts");
+check("the backend-gateway flag follows the chosen method", /backendGateway:\s*Boolean\([\s\S]{0,200}confirmTool\) &&\s*String\(session\.state\.data\.payment_method \?\? ""\)\.toLowerCase\(\) !== "uaepay",/.test(routeSrc));
+check("...a Noqodi renewal's save waits for the money like an internal-checkout one", /\(!j\.submission\?\.apiFlow\?\.confirmTool \|\| String\(session\.state\.data\.payment_method \?\? ""\)\.toLowerCase\(\) === "uaepay"\) &&/.test(routeSrc));
+check("...and request_payment charges the price Emirates Post quoted for the term", /const priced = apiTools\.getLastPriced\(\);\s*return typeof priced\?\.amount === "number" && priced\.amount > 0 \? priced\.amount : null;/.test(routeSrc));
+check("the mock persona carries the UAT test Emirates ID so Noqodi takes its payment locally", /MOCK_PERSONA_EID = "784199983926421"/.test(src("../lib/mockPersona.ts")) && /emiratesId: MOCK_PERSONA_EID/.test(src("../app/api/uaepass/callback/route.ts")) && /rememberVerifiedEmiratesId\(session\.caseId, MOCK_PERSONA_EID\)/.test(routeSrc));
+const toolsSrc = src("../../../packages/core/src/ai/tools.ts");
+check("a gateway that does not answer is a tool error, not a dead turn", /try \{\s*res = await pay\.adapter\.initiate\(actx, \{[\s\S]*\} catch \(e\) \{[\s\S]*PAYMENT COULD NOT BE STARTED[\s\S]*NOTHING has been charged/.test(toolsSrc));
+const integ0 = src("../lib/integrations.ts");
+check("a renewal save after a Noqodi payment is reported as RECORDED, not as unpaid", /THE RENEWAL IS RECORDED\. The customer has ALREADY PAID on our Noqodi \(UAE Pay\) checkout/.test(integ0) && /\(opts\.backendGateway\s*\?\s*`\\n\\nTHE ORDER EXISTS AND IS NOT PAID/.test(integ0));
+check("...and the last quoted renewal price is readable by the chat route", /getLastPriced: \(\) => lastPriced,/.test(integ0));
 const integ = src("../lib/integrations.ts");
 check("a signed-in renewal save carries the saved card", /if \(!opts\.authenticated\) \{[\s\S]{0,400}\} else if \(opts\.savedCard && !pay\.savedCard\) \{/.test(integ));
 check("...the five fields the spec defines, from the lookup", /pay\.savedCard = \{\s*cardToken: card\.cardToken,\s*maskedPan: card\.maskedPan \?\? "",\s*expiry: card\.expiry \?\? "",\s*scheme: card\.scheme \?\? "",\s*cardholderName: card\.cardholderName \?\? "",\s*\};\s*patched = true;\s*\}\s*\}\s*if \(patched\) \{\s*body\.paymentProperties = pay;/.test(integ));

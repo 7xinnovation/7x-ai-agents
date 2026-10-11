@@ -93,6 +93,10 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
   );
   if (f.confirmTool)
     lines.push(`  4. ONLY if ${f.saveTool} succeeded and returned a real reference number: after the customer says they have paid, call ${f.confirmTool} with that reference to verify, and confirm success only if the tool reports the payment succeeded. Never call ${f.confirmTool} with a reference that did not come from a successful ${f.saveTool}.`);
+  if (f.confirmTool)
+    lines.push(
+      `  PAYING WITH NOQODI (UAE PAY) INSTEAD: if the customer's recorded payment_method is "uaepay", the order of steps changes. Call request_payment FIRST — our secure checkout opens in the chat by itself; never a pay block — and only once it reports paid call ${f.saveTool} to RECORD the order. Ignore the paymentUrl that save returns, show no pay block for it, and do NOT call ${f.confirmTool}: it reads Emirates Post's gateway, which did not take this payment. A card payment ("gateway") keeps steps 3 and 4 above.`
+    );
   if (f.fallbackToInternalPayment)
     lines.push(
       `  If ${f.saveTool} returns an error or a null/empty payload, switch to the internal checkout and stay on it (do NOT call ${f.confirmTool ?? "the confirm tool"}): call request_payment with amount = the exact figure from ${f.pricingTool ?? "the pricing step"}, share that link, and once payment is "paid" call submit_case to finalise.`

@@ -25,6 +25,37 @@ expiring box's renewal as one button. Tests:
 `scripts/test-one-tap-renew-2026-10-08.ts`. Production: not applied — the code
 deploys with the next merge to `main`, the config is one script run.
 
+## Two ways to pay on the one tap — 11 October 2026
+
+The Before-payment block now ends in two buttons: **"Pay AED x with Card"**
+and **"Pay AED x with Noqodi (UAE Pay)"**. The tap is the choice; nothing is
+asked separately.
+
+- **Card** is today's path: Emirates Post's `Save` opens the payment on their
+  gateway, the customer pays there, their confirm call verifies it.
+- **Noqodi (UAE Pay)** is taken on our checkout first (signed-in customers
+  only, because UAE Pay requires the Emirates ID the sign-in carries). Once it
+  settles, the same `Save` is called to **record** the renewal, the payment URL
+  Emirates Post returns is ignored, and their confirm call is not made.
+
+**The caveat, stated plainly:** Emirates Post's own system still opens a
+payment for that order on their gateway and sees it unpaid, because their
+gateway did not take the money. The renewal is recorded on their side and paid
+on ours. That is the same position production rentals have been in since
+August (paid on our checkout, then saved), and it is why the ask in
+`docs/NXN-UAEPAY-ASK-2026-10-07.md` still stands: either their `Save` returns a
+UAE Pay link, or they accept an external payment reference. Until one of those
+lands, a Noqodi renewal needs their back office to reconcile our settlement.
+
+Guests see the card button alone and one sentence that Noqodi needs a sign-in.
+A gateway that does not answer is now a tool error with a plain message rather
+than a failed turn. Code: method-aware `backendGateway` and save gate in
+`chat/route.ts`, the "RECORDED, paid on our side" wording for a Noqodi-paid
+save and `getLastPriced` in `lib/integrations.ts` (so `request_payment` charges
+the term's quoted price), the Noqodi branch in `prompt.ts` backend-gateway
+mode, `confirm: A | B` in the toggles block, the `payment_method` field on the
+personal renewal, and a test Emirates ID for the local mock persona.
+
 ## Verdict
 
 **Two taps in the chat is feasible for a signed-in customer, on our side alone,
