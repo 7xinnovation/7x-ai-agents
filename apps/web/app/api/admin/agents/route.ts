@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentScope, withinScope, denyAgent } from "@/lib/scope";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { AgentDefinition } from "@dialog/config";
 import { getDb, agents, tenants } from "@dialog/db";
 import { eq } from "drizzle-orm";

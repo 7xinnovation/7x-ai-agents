@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { Locale } from "@dialog/config";
 import { classifyIntent } from "@dialog/core";
 import { getAgentBySlug } from "@/lib/agents";

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Per-agent visual identity. Drives both the floating launcher and the

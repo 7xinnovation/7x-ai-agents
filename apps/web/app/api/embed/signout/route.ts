@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { getDb, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import { signOutConversation, audit } from "@/lib/conversation";

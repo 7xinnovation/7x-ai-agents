@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { LocalizedString } from "./primitives";
 import { FieldDef } from "./fields";
 import { DocumentRequirement } from "./documents";

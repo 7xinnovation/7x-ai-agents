@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { denyAgent } from "@/lib/scope";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { transcribeDocumentToText, KB_IMPORT_EXTENSIONS } from "@dialog/core";
 import { getAgentBySlug } from "@/lib/agents";
 import { createKbDocument, listKbDocuments, deleteKbDocument, setKbStatus } from "@/lib/kb";

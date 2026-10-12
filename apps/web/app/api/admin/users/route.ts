@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { cookies } from "next/headers";
 import { listUsers, createUser, updateUser, getUserByEmail, scopeApplies, inviteUser, INVITE_TTL_MS } from "@/lib/users";
 import { verifySession } from "@/lib/session";

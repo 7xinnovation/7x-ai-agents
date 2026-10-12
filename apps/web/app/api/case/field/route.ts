@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { setField, findJourney } from "@dialog/core";
 import { getAgentBySlug } from "@/lib/agents";
 import { getCase, saveCase, audit } from "@/lib/conversation";

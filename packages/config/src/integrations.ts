@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * Integration bindings. Each capability is satisfied by a named adapter

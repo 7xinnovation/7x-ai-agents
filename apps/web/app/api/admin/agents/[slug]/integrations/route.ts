@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { denyAgent } from "@/lib/scope";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { getAgentBySlug } from "@/lib/agents";
 import { parseSpec } from "@/lib/openapi";
 import { verifySession } from "@/lib/session";

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { z } from "zod";
+import { z } from "zod/v3";
 import type Anthropic from "@anthropic-ai/sdk";
 import { Locale, tr, type AgentDefinition, type CaseState } from "@dialog/config";
 import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, adapterContext } from "@dialog/core";

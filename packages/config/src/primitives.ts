@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 
 /**
  * A bilingual string. The platform is Arabic + English first-class (PRD: parity

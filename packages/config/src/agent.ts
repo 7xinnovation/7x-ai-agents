@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v3";
 import { LocalizedString, Locale } from "./primitives";
 import { Theme } from "./theme";
 import { Journey } from "./journey";
