@@ -1,5 +1,5 @@
 import { readFileSync, statSync, realpathSync } from "node:fs";
-import { resolve, sep, basename, dirname } from "node:path";
+import { resolve, sep, basename, dirname, relative, join, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -51,14 +51,20 @@ export function confineEnvFile(file: string): string {
   } catch {
     throw new Error(`No such env file: ${requested}`);
   }
-  const roots = envFileRoots();
-  const inside = roots.some((root) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep));
-  if (!inside) throw new Error(`Refusing to read ${requested}: an env file must live under this repository, your home directory or a temp directory (or a root named in DIALOG_ENV_FILE_ROOTS)`);
-  if (!ENV_NAME.test(basename(path))) throw new Error(`Refusing to read ${requested}: not named like an env file (.env, .env.local, stg.env, …)`);
-  const stat = statSync(path);
+  // The root it lives under, from the fixed list — or none, and it is refused.
+  const root = envFileRoots().find((r) => path === r || path.startsWith(r.endsWith(sep) ? r : r + sep));
+  if (!root) throw new Error(`Refusing to read ${requested}: an env file must live under this repository, your home directory or a temp directory (or a root named in DIALOG_ENV_FILE_ROOTS)`);
+  // Rebuilt from that root and the part below it, and checked again the way a
+  // traversal check reads: the result must still begin with the root.
+  const within = relative(root, path);
+  if (within.startsWith("..") || isAbsolute(within)) throw new Error(`Refusing to read ${requested}: outside ${root}`);
+  const confined = join(root, within);
+  if (!confined.startsWith(root + sep) && confined !== root) throw new Error(`Refusing to read ${requested}: outside ${root}`);
+  if (!ENV_NAME.test(basename(confined))) throw new Error(`Refusing to read ${requested}: not named like an env file (.env, .env.local, stg.env, …)`);
+  const stat = statSync(confined);
   if (!stat.isFile()) throw new Error(`Not a file: ${requested}`);
   if (stat.size > 256 * 1024) throw new Error(`Too large to be an env file: ${requested}`);
-  return path;
+  return confined;
 }
 
 export function databaseUrlFrom(file: string): string {
