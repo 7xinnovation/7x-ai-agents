@@ -13,7 +13,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renameText, renameDefinition } from "./rename-aisha-to-mira-2026-10-12";
 import { applyFeedback, rewriteChunk, GREETING, READY_PROMPTS, ENQUIRY_MARKER, JOURNEY_NEW, JOURNEY_OLD } from "./nxn-post-live-feedback-2026-10-12";
-import { EN, AR } from "./add-nxn-pobox-faq-kb-2026-10-12";
+import { EN, AR, faqFor } from "./add-nxn-pobox-faq-kb-2026-10-12";
 import { enquiriesStayInChat, linkGuard } from "../lib/locateGuard";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -76,6 +76,7 @@ const enParas = EN.split(/\n\s*\n/).filter(Boolean), arParas = AR.split(/\n\s*\n
 check("eleven topics, in both languages, each one retrieval-sized", enParas.length === 11 && arParas.length === 11 && [...enParas, ...arParas].every((p) => p.length <= 1200), [enParas.length, arParas.length, Math.max(...[...enParas, ...arParas].map((p) => p.length))]);
 check("the figures agree with the live system: key delivery AED 30, the phone line, Noqodi named", /AED 30/.test(EN) && /30 درهماً/.test(AR) && /600 599 999/.test(EN) && /600 599 999/.test(AR) && /Noqodi \(UAE Pay\)/.test(EN) && /نقودي \(UAE Pay\)/.test(AR) && !/AED 25/.test(EN));
 check("no answer sends the customer to a website to raise an enquiry", !/raise-an-enquiry|contact-us/.test(EN + AR) && /never sent to another website/.test(EN) && /لن تُحال أبداً إلى موقع آخر/.test(AR));
+check("where Noqodi is switched off the FAQ names the card alone, eleven topics still", !/Noqodi|نقودي/.test(faqFor(false).en + faqFor(false).ar) && faqFor(false).en.split(/\n\s*\n/).length === 11 && faqFor(false).ar.split(/\n\s*\n/).length === 11 && /Renew button/.test(faqFor(false).en) && faqFor(true).en === EN);
 check("the FAQ's menu wording is gone; the chat's own steps are described", !/Select:/.test(EN) && /Renew button/.test(EN) && /appears automatically — there is no separate linking step/.test(EN));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

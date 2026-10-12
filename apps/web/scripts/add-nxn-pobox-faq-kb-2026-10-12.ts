@@ -35,7 +35,7 @@ config({
       : resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"),
 });
 
-import { getDb, agents } from "@dialog/db";
+import { getDb, agents, kbChunks } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import { createKbDocument, listKbDocuments } from "../lib/kb";
 
@@ -87,21 +87,55 @@ export const AR = `ما الذي يمكن لهذه المساعدة فعله ل�
 
 الأسئلة التي لا تجيب عنها هذه الصفحة، والشكاوى، وطلبات الاتصال. إذا لم يكن الأمر مذكوراً هنا — طرق الدفع في كاونتر الفرع، نقل صندوق بين الفروع، مشكلة في بريدك — أخبر المساعدة: ترفع لك استفساراً داخل المحادثة وتعطيك رقماً مرجعياً يتابعه الفريق. ويمكنك أيضاً الاتصال ببريد الإمارات على 600 599 999. لن تُحال أبداً إلى موقع آخر أو نموذج لرفعه.`;
 
+/**
+ * The FAQ for an agent where Noqodi (UAE Pay) is switched off (2026-10-12):
+ * the card is the one way to pay a renewal there, and a FAQ that names a
+ * second way the chat then refuses would be worse than one that omits it.
+ * Production is such an agent until Noqodi's production credentials land.
+ */
+export function faqFor(noqodi: boolean): { en: string; ar: string } {
+  if (noqodi) return { en: EN, ar: AR };
+  const en = EN.replace(" — pay with your card on Emirates Post's page, or with Noqodi (UAE Pay) here in the chat.", " — pay with your card on Emirates Post's page.");
+  const ar = AR.replace(" — ادفع ببطاقتك على صفحة بريد الإمارات، أو عبر نقودي (UAE Pay) هنا في المحادثة.", " — ادفع ببطاقتك على صفحة بريد الإمارات.");
+  if (/Noqodi|نقودي/.test(en + ar)) throw new Error("faqFor(false) still names Noqodi — the anchors drifted");
+  return { en, ar };
+}
+
+/** Which way the agent is switched: the same test the one-tap script uses. */
+function noqodiEnabled(def: Record<string, any>): boolean {
+  const all = Array.isArray(def?.paymentMethods) ? def.paymentMethods : [];
+  return all.some((m: any) => m?.key === "uaepay" && m?.enabled !== false);
+}
+
 async function main() {
   const [agent] = await getDb().select().from(agents).where(eq(agents.slug, "nxn-dialog"));
   if (!agent) throw new Error("nxn-dialog not found in this database");
+  const noqodi = noqodiEnabled(agent.definition as Record<string, any>);
+  const text = faqFor(noqodi);
+  console.log(`  Noqodi (UAE Pay) is ${noqodi ? "ON" : "OFF"} for this agent — the FAQ ${noqodi ? "names it beside the card" : "names the card alone"}.`);
   const existing = await listKbDocuments(agent.id);
-  const have = new Set(existing.map((d) => d.title));
   for (const [title, content, locale] of [
-    [EN_TITLE, EN, "en"],
-    [AR_TITLE, AR, "ar"],
+    [EN_TITLE, text.en, "en"],
+    [AR_TITLE, text.ar, "ar"],
   ] as const) {
-    if (have.has(title)) {
-      console.log(`  (skip) already present — ${title}`);
+    const doc = existing.find((d) => d.title === title);
+    if (!doc) {
+      const made = await createKbDocument({ agentId: agent.id, title, content, source: SOURCE, locale, status: "published" });
+      console.log(`  + ${title} — ${made.chunks} chunk(s), embedded: ${made.embedded}`);
       continue;
     }
-    const doc = await createKbDocument({ agentId: agent.id, title, content, source: SOURCE, locale, status: "published" });
-    console.log(`  + ${title} — ${doc.chunks} chunk(s), embedded: ${doc.embedded}`);
+    // Already there: bring any paragraph that moved (a Noqodi switch, a fix)
+    // up to date, matched on its opening words. The rest is left as it is.
+    const rows = await getDb().select({ id: kbChunks.id, content: kbChunks.content }).from(kbChunks).where(eq(kbChunks.documentId, doc.id));
+    let updated = 0;
+    for (const para of content.split(/\n\s*\n/).filter(Boolean)) {
+      const head = para.slice(0, 40);
+      const row = rows.find((r) => r.content.startsWith(head));
+      if (!row || row.content === para) continue;
+      await getDb().update(kbChunks).set({ content: para }).where(eq(kbChunks.id, row.id));
+      updated++;
+    }
+    console.log(updated ? `  ~ ${title} — ${updated} paragraph(s) updated` : `  (already) ${title}`);
   }
 }
 

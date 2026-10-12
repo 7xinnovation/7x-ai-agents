@@ -5,7 +5,7 @@
  * Run from apps/web:  npx tsx scripts/test-one-tap-renew-2026-10-08.ts
  */
 import { readFileSync } from "node:fs";
-import { applyOneTap, FAST_PATH, MARKER, TOP_RULE, TOP_MARKER, REWORDINGS, NOTE_REWORDINGS, CONSENT_FIELDS, PAYMENT_FIELD } from "./nxn-one-tap-renew-2026-10-08";
+import { applyOneTap, FAST_PATH, MARKER, TOP_RULE, TOP_MARKER, REWORDINGS, NOTE_REWORDINGS, CONSENT_FIELDS, PAYMENT_FIELD, noqodiEnabled, withoutNoqodi, fastPathFor, paymentFieldFor } from "./nxn-one-tap-renew-2026-10-08";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -15,8 +15,9 @@ const check = (n: string, ok: boolean, got?: unknown) => {
 const src = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 console.log("\nThe journey config: fields back, sentences conditional, fast path once");
-const fixture = () => ({
+const fixture = (noqodi = true) => ({
   slug: "nxn-dialog",
+  paymentMethods: [{ key: "gateway", enabled: true }, { key: "uaepay", enabled: noqodi }],
   journeys: [
     {
       key: "personal_po_box_renewal",
@@ -74,7 +75,7 @@ check("a Noqodi-instead tap never records the renewal twice", /"PAY WITH NOQODI 
 check("a refused save ends in a plain sentence, not a retry", /If the save tool fails or is refused, show the summary and say plainly[\s\S]*no pay block, no retry, no second save/.test(FAST_PATH));
 check("the ordinary block (different term) still offers TWO buttons", /\`\`\`toggles block \(title: Before payment; default: on; checkboxes: terms_accepted[\s\S]*confirm: Pay AED <total> with Card \| Pay AED <total> with Noqodi \(UAE Pay\)[\s\S]*TWO buttons for a SIGNED-IN customer/.test(FAST_PATH));
 check("the tap IS the choice: card goes to Emirates Post's page, Noqodi to our checkout then the save records", /THE TAP IS THE CHOICE OF HOW TO PAY[\s\S]*"with Card": record collect_field\(payment_method, gateway\)[\s\S]*"with Noqodi \(UAE Pay\)": record collect_field\(payment_method, uaepay\), then call request_payment[\s\S]*call the save tool ONCE to record the renewal — unless it was already saved in this conversation — IGNORE the payment URL[\s\S]*do NOT call the confirm tool/.test(FAST_PATH));
-check("a guest gets the card button alone and is told Noqodi needs the sign-in", /confirm line is \`confirm: Pay AED <total> with Card\` alone, with one sentence that paying with Noqodi \(UAE Pay\) needs them to sign in/.test(FAST_PATH));
+check("a guest gets the card button alone and is told Noqodi needs the sign-in", /confirm line is \`confirm: Pay AED <total> with Card\` alone \(in an Arabic conversation [^)]+\), with one sentence that paying with Noqodi \(UAE Pay\) needs them to sign in/.test(FAST_PATH));
 check("...and a way to a longer term or another bundle, one sentence, no question", /to renew for longer or move to a different bundle, they only have to say so\. No switches, no checkbox, no question/.test(FAST_PATH) && /IF THEY ASK FOR A DIFFERENT TERM OR BUNDLE/.test(FAST_PATH));
 check("renewal_period is recorded as one year, and the way to pay as card for the save", /renewal_period 1_YEAR, payment_method gateway/.test(FAST_PATH));
 check("the terms are accepted by paying on the one tap, and ticked in the ordinary block", /By paying you accept the \[Terms and Conditions\]/.test(FAST_PATH) && /collect_field\(terms_accepted, true\) — they accepted the terms by paying/.test(FAST_PATH) && /checkboxes: terms_accepted/.test(FAST_PATH));
@@ -141,6 +142,7 @@ check("the pulse offers the expiring box's renewal as one button, for another ye
 check("coming back from the payment page is directed: no second save, one confirm", /const PAID_BACK = \/completed the payment on the emirates post page/.test(routeSrc) && /PAID_BACK\.test\(message\) && state\.gatewayPayment\?\.reference/.test(routeSrc) && /do NOT call the save tool again: a second save opens a second order\. ` \+/.test(routeSrc) && /call the confirm tool ONCE for that order and nothing else/.test(routeSrc));
 check("...and the guidance says the same", /AFTER THE PAY BUTTON: [\s\S]*do NOT call the save tool again[\s\S]*call the confirm tool ONCE/.test(FAST_PATH));
 check("an Arabic conversation gets Arabic pay labels, which the Noqodi-instead regex still catches", /ادفع AED <total> بالبطاقة/.test(routeSrc) && /ادفع AED <total> بالبطاقة/.test(FAST_PATH) && /نقودي\[\\s\\S\]\{0,40\}بدلاً/.test(routeSrc) && new RegExp((/const NOQODI_INSTEAD = \/(.*)\/i;/.exec(routeSrc) ?? [])[1] ?? "$^", "i").test("ادفع AED 695.00 عبر نقودي (UAE Pay) بدلاً من ذلك"));
+check("a guest's confirm button is Arabic in an Arabic conversation, in the directive and the guidance", /in an Arabic conversation the confirm line reads `confirm: ادفع AED <total> بالبطاقة`/.test(routeSrc) && /alone \(in an Arabic conversation `confirm: ادفع AED <total> بالبطاقة`\), with one sentence/.test(FAST_PATH) && /\(in an Arabic conversation `confirm: ادفع AED <total> بالبطاقة`\)/.test(withoutNoqodi(FAST_PATH)));
 check("the backend-gateway flag is decided by the agent's flows when no journey is set yet", /session\.state\.journeyKey\s*\? Boolean\([\s\S]{0,200}confirmTool\)\s*: \(agent\.definition\.journeys \?\? \[\]\)\.some\(\(j\) => j\.submission\?\.apiFlow\?\.saveTool && j\.submission\?\.apiFlow\?\.confirmTool\)\)/.test(routeSrc));
 
 // 12 October: the rough edges the live runs showed.
@@ -152,6 +154,26 @@ check("the mock persona's auto-renewal tap is simulated and audited, so it can b
 
 check("a save that arrives without the subscriber is completed from the conversation, and what is still missing is named", /opts\.renewalSubscriber\(\)/.test(integ) && /action: "renewal_kyc_filled"/.test(integ) && /missing the \$\{missing\.join\(", "\)\}/.test(integ) && /let patched = kycFilled\.length > 0;/.test(integ) && /renewalSubscriber:\s*agent\.definition\.tenantSlug === "nxn"/.test(routeSrc) && /s\("subscriber_first_name"\)/.test(routeSrc));
 check("...and the directive and the guidance both name the save body", /with customerKYC \{ firstName, lastName, email, mobileNumber \} carrying the same subscriber values, paymentProperties\.saveCreditCard false/.test(routeSrc) && /with customerKYC \{ firstName, lastName, email, mobileNumber \} carrying those same subscriber values, paymentProperties\.saveCreditCard false/.test(FAST_PATH));
+
+
+console.log("\nWhere Noqodi is switched off (production until its credentials land)");
+{
+  check("the switch is read from the agent's payment methods", noqodiEnabled(fixture(true)) && !noqodiEnabled(fixture(false)) && !noqodiEnabled({ journeys: [] }));
+  const off = withoutNoqodi(FAST_PATH);
+  check("the guidance without Noqodi keeps its shape and loses every clause", off.includes(MARKER) && /NOQODI \(UAE PAY\) IS NOT OFFERED on this agent/.test(off) && !/Noqodi|نقودي|uaepay/.test(off) && /confirm: Pay AED <total> with Card\` with the real total, NOT/.test(off) && / Close with ONE line giving the new expiry date and the receipt\./.test(off) && !/Either way close/.test(off), off.slice(off.indexOf("IF THEY ASK"), off.indexOf("IF THEY ASK") + 400));
+  check("...and so does the short rule at the top", !/Noqodi|نقودي/.test(withoutNoqodi(TOP_RULE)) && withoutNoqodi(TOP_RULE).includes(TOP_MARKER));
+  check("the payment field offers the card alone", JSON.stringify(paymentFieldFor(false).options.map((o) => o.value)) === JSON.stringify(["gateway"]) && paymentFieldFor(true).options.length === 2);
+  const { def, changes } = applyOneTap(fixture(false));
+  const p = def.journeys[0];
+  const pm = p.steps[0].fields.find((f: any) => f.key === "payment_method");
+  check("applied to such an agent: card-only field, Noqodi-free guidance, same markers", JSON.stringify(pm.options.map((o: any) => o.value)) === JSON.stringify(["gateway"]) && !/Noqodi|نقودي|uaepay/.test(p.guidance) && p.guidance.includes(TOP_MARKER) && p.guidance.includes(MARKER) && p.guidance.endsWith(fastPathFor(false)), changes);
+  check("...idempotent", applyOneTap(def).changes.length === 0, applyOneTap(def).changes);
+  const on = applyOneTap({ ...def, paymentMethods: [{ key: "gateway", enabled: true }, { key: "uaepay", enabled: true }] });
+  const pm2 = on.def.journeys[0].steps[0].fields.find((f: any) => f.key === "payment_method");
+  check("switching Noqodi on later and re-running brings the button, the clauses and the option back", JSON.stringify(pm2.options.map((o: any) => o.value)) === JSON.stringify(["gateway", "uaepay"]) && on.def.journeys[0].guidance.endsWith(FAST_PATH) && on.changes.some((c) => /options follow/.test(c)) && on.changes.some((c) => /fast path rewritten/.test(c)), on.changes);
+  const route = src("../app/api/chat/route.ts");
+  check("the per-turn directive follows the same switch: no Noqodi button, no sign-in sentence, and a Noqodi tap answered as not offered", /const noqodi = Array\.isArray\(def\.paymentMethods\) && def\.paymentMethods\.some\(\(m\) => m\.key === "uaepay" && m\.enabled !== false\);/.test(route) && /\(noqodi \? ", then a ```buttons block with the single choice `Pay AED <total> with Noqodi \(UAE Pay\) instead`" : ""\)/.test(route) && /\(noqodi \? ", plus one sentence that paying with Noqodi \(UAE Pay\) needs them to sign in first" : ""\)/.test(route) && /which is NOT offered on this agent\. Say so in one short line/.test(route));
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

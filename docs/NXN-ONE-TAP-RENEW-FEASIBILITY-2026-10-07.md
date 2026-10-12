@@ -192,6 +192,16 @@ Noqodi rollout dry-run on staging reports EPGL and NXN already on. The staging
 env file had to be recreated from the app's settings (subscription of
 rg-7xil-external-stg).
 
+## Production without Noqodi — 12 October 2026
+
+Production carries Noqodi (UAE Pay) switched off until its credentials land, so
+the one tap there offers the card alone: `applyOneTap` reads the agent's
+`paymentMethods` and writes the guidance and the payment field without the
+Noqodi clauses (`withoutNoqodi`, every anchor checked), and the per-turn
+directive in the route follows the same switch. When Noqodi is switched on,
+re-running the config script brings the second button back. Verified in the
+one-tap suite on a fixture with the method off, on and off again.
+
 ## Verdict
 
 **Two taps in the chat is feasible for a signed-in customer, on our side alone,

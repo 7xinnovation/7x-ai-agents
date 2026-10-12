@@ -109,13 +109,68 @@ export const FAST_PATH =
   ` AFTER THE PAY BUTTON: when they come back from Emirates Post's payment page, the order ALREADY EXISTS — do NOT call the save tool again (a second save opens a second order). Record collect_field(terms_accepted, true) — they accepted the terms by paying, as the sentence under the button said — then call the confirm tool ONCE and close with ONE line giving the new expiry date and the receipt; if the box's auto-renewal is OFF, offer switching it on as the ONE next-step \`\`\`buttons choice (do NOT call nxn_set_auto_renew before they tap it — the box keeps its auto-renewal as it is), and on a yes call nxn_set_auto_renew for the box and say auto-renewal is on; if that call fails, say it could not be switched on, never that it is. The receipt download link is added under your reply for you: do not write one, and do not say it is above.` +
   ` "PAY WITH NOQODI (UAE PAY) INSTEAD" tapped: that tap, under the terms sentence, is the acceptance — record collect_field(terms_accepted, true) and collect_field(payment_method, uaepay), then call request_payment for the quoted total: our secure checkout card appears in the chat by itself, never a pay block. The renewal is ALREADY RECORDED by the save above, so when the payment reports paid do NOT call the save tool again (a second save opens a second order) and do NOT call the confirm tool (it reads Emirates Post's gateway, which did not take this payment): give the order reference from the save, the new expiry and the receipt, and say the renewal is recorded; if the box's auto-renewal is OFF, offer switching it on the same way, without calling nxn_set_auto_renew until they tap.` +
   ` IF THEY ASK FOR A DIFFERENT TERM OR BUNDLE after that reply, price exactly what they asked for and show the summary and the Before-payment \`\`\`toggles block (title: Before payment; default: on; checkboxes: terms_accepted; the lines save_card_consent, auto_renew_consent and terms_accepted; and the confirm line MUST read \`confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)\` with the real total — TWO buttons for a SIGNED-IN customer, NOT \`Proceed to payment\`); that is the ordinary flow and it costs them one more tap, not a restart. THE TAP IS THE CHOICE OF HOW TO PAY there, so never ask it as a question. "with Card": record collect_field(payment_method, gateway), call the save tool (their saved card is attached for you and pre-selected on Emirates Post's payment page, so do not ask which card), emit the pay block, and confirm with the confirm tool when they return. "with Noqodi (UAE Pay)": record collect_field(payment_method, uaepay), then call request_payment — our secure checkout card appears in the chat by itself, never a pay block; when it reports paid, call the save tool ONCE to record the renewal — unless it was already saved in this conversation — IGNORE the payment URL that save returns, and do NOT call the confirm tool (it reads Emirates Post's gateway, which did not take this payment). Either way close with ONE line giving the new expiry date and the receipt. If auto_renew_consent is true, call nxn_set_auto_renew for the box and say auto-renewal is on; if that call fails, say it could not be switched on, never that it is.` +
-  ` A GUEST (not signed in) is NOT on the signed-in shortcuts above — their subscriber details are still collected, only the Terms checkbox is shown, and the confirm line is \`confirm: Pay AED <total> with Card\` alone, with one sentence that paying with Noqodi (UAE Pay) needs them to sign in, because it needs the Emirates ID their sign-in carries — but the SAME-AS-NOW OPENER RULE applies to everyone, guest or signed in: when the first message says "same bundle and options", the customer has chosen their bundle and term, so do NOT show upgrade cards, bundle choices or duration cards, whatever the upgrade rule earlier in this guidance says; it is overridden here. One sentence that a longer term or a different bundle is available on request is all, in the same reply as the summary and the Before-payment block.`;
+  ` A GUEST (not signed in) is NOT on the signed-in shortcuts above — their subscriber details are still collected, only the Terms checkbox is shown, and the confirm line is \`confirm: Pay AED <total> with Card\` alone (in an Arabic conversation \`confirm: ادفع AED <total> بالبطاقة\`), with one sentence that paying with Noqodi (UAE Pay) needs them to sign in, because it needs the Emirates ID their sign-in carries — but the SAME-AS-NOW OPENER RULE applies to everyone, guest or signed in: when the first message says "same bundle and options", the customer has chosen their bundle and term, so do NOT show upgrade cards, bundle choices or duration cards, whatever the upgrade rule earlier in this guidance says; it is overridden here. One sentence that a longer term or a different bundle is available on request is all, in the same reply as the summary and the Before-payment block.`;
 
 type Def = Record<string, any>;
+
+/** Is Noqodi (UAE Pay) switched on for this agent? It decides which wording and which field are written. */
+export function noqodiEnabled(def: Def): boolean {
+  const all = Array.isArray(def.paymentMethods) ? def.paymentMethods : [];
+  return all.some((m: any) => m?.key === "uaepay" && m?.enabled !== false);
+}
+
+/**
+ * THE SAME GUIDANCE WITHOUT NOQODI (2026-10-12).
+ *
+ * Production has no Noqodi credentials yet, so its agents carry the method
+ * switched off — and a fast path that promises a "Pay with Noqodi instead"
+ * button there would put a button that cannot open a checkout in front of a
+ * paying customer. Every Noqodi clause is taken out of the text for such an
+ * agent; each anchor below must exist in the text it is applied to, so drift
+ * between the two is caught by the tests rather than found in production.
+ */
+export function withoutNoqodi(text: string): string {
+  const cut = (from: string, to: string, replacement: string) => {
+    const a = out.indexOf(from);
+    if (a === -1) return false;
+    const b = out.indexOf(to, a);
+    if (b === -1) throw new Error(`withoutNoqodi: no end for ${from.slice(0, 40)}`);
+    out = out.slice(0, a) + replacement + out.slice(b);
+    return true;
+  };
+  let out = text;
+  const rules: [string, string][] = [
+    [", a buttons block with the single choice \`Pay AED <total> with Noqodi (UAE Pay) instead\`", ""],
+    [", plus one sentence that Noqodi (UAE Pay) needs a sign-in", ""],
+    [", then a \`\`\`buttons block with the single choice \`Pay AED <total> with Noqodi (UAE Pay) instead\`", ""],
+    [", the button reads \`ادفع AED <total> عبر نقودي (UAE Pay) بدلاً من ذلك\`, and the terms sentence is in Arabic.", ", and the terms sentence is in Arabic."],
+    ["\`confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)\` with the real total — TWO buttons for a SIGNED-IN customer, NOT \`Proceed to payment\`", "\`confirm: Pay AED <total> with Card\` with the real total, NOT \`Proceed to payment\`"],
+    [", with one sentence that paying with Noqodi (UAE Pay) needs them to sign in, because it needs the Emirates ID their sign-in carries", ""],
+  ];
+  for (const [from, to] of rules) out = out.split(from).join(to);
+  cut(" \"PAY WITH NOQODI (UAE PAY) INSTEAD\" tapped:", " IF THEY ASK FOR A DIFFERENT TERM", " NOQODI (UAE PAY) IS NOT OFFERED on this agent: no button for it and no sentence about it; if the customer asks for it, say it is not available here — not that it failed — and point back to the pay button.");
+  cut(" \"with Noqodi (UAE Pay)\": record collect_field(payment_method, uaepay)", "Either way close with ONE line", " ");
+  out = out.split(" Either way close with ONE line").join(" Close with ONE line").split("  Close with ONE line").join(" Close with ONE line");
+  if (/Noqodi|نقودي|uaepay/.test(out)) throw new Error("withoutNoqodi left a Noqodi clause behind: " + /.{0,80}(Noqodi|نقودي|uaepay).{0,80}/.exec(out)?.[0]);
+  return out;
+}
+
+export const topRuleFor = (noqodi: boolean) => (noqodi ? TOP_RULE : withoutNoqodi(TOP_RULE));
+export const fastPathFor = (noqodi: boolean) => (noqodi ? FAST_PATH : withoutNoqodi(FAST_PATH));
+export const paymentFieldFor = (noqodi: boolean) => (noqodi ? PAYMENT_FIELD : { ...PAYMENT_FIELD, options: PAYMENT_FIELD.options.filter((o) => o.value !== "uaepay") });
+
+/** JSON with object keys sorted, so a value read back from jsonb compares equal to the one written. */
+function stable(v: unknown): string {
+  return JSON.stringify(v, (_k, val) => (val && typeof val === "object" && !Array.isArray(val) ? Object.fromEntries(Object.keys(val).sort().map((k) => [k, (val as Record<string, unknown>)[k]])) : val));
+}
 
 export function applyOneTap(input: Def): { def: Def; changes: string[] } {
   const def = JSON.parse(JSON.stringify(input)) as Def;
   const changes: string[] = [];
+  const noqodi = noqodiEnabled(def);
+  const topRule = topRuleFor(noqodi);
+  const fastPath = fastPathFor(noqodi);
+  const paymentField = paymentFieldFor(noqodi);
   for (const j of def.journeys ?? []) {
     if (!RENEWAL_JOURNEYS.includes(String(j.key))) continue;
 
@@ -129,9 +184,13 @@ export function applyOneTap(input: Def): { def: Def; changes: string[] } {
         step.fields.push({ key: f.key, type: f.type, label: f.label, validation: { required: false } });
         changes.push(`${j.key}: field += ${f.key}`);
       }
-      if (!step.fields.some((x: any) => x?.key === PAYMENT_FIELD.key)) {
-        step.fields.push({ ...PAYMENT_FIELD, validation: { required: false } });
+      const pf = step.fields.find((x: any) => x?.key === PAYMENT_FIELD.key);
+      if (!pf) {
+        step.fields.push({ ...paymentField, validation: { required: false } });
         changes.push(`${j.key}: field += ${PAYMENT_FIELD.key}`);
+      } else if (stable(pf.options) !== stable(paymentField.options)) {
+        pf.options = paymentField.options;
+        changes.push(`${j.key}: payment_method options follow the methods switched on`);
       }
     }
 
@@ -154,21 +213,21 @@ export function applyOneTap(input: Def): { def: Def; changes: string[] } {
       // 3a. The short rule first, where the model reads first.
       const topAt = g.indexOf(TOP_MARKER);
       if (topAt === -1) {
-        g = TOP_RULE + g;
+        g = topRule + g;
         changes.push(`${j.key}: one-tap rule placed at the top of the guidance`);
       } else {
         const end = g.indexOf(`under "${MARKER}". `, topAt);
         const current = end === -1 ? null : g.slice(topAt, end + `under "${MARKER}". `.length);
-        if (current !== TOP_RULE) {
-          g = (current ? g.replace(current, TOP_RULE) : TOP_RULE + g);
+        if (current !== topRule) {
+          g = (current ? g.replace(current, topRule) : topRule + g);
           changes.push(`${j.key}: one-tap rule at the top rewritten`);
         }
       }
       const at = g.indexOf(` ${MARKER}`);
       const head = at === -1 ? g : g.slice(0, at);
-      if (head + FAST_PATH !== g) {
+      if (head + fastPath !== g) {
         changes.push(at === -1 ? `${j.key}: fast path appended` : `${j.key}: fast path rewritten`);
-        g = head + FAST_PATH;
+        g = head + fastPath;
       }
     }
     if (g !== String(j.guidance ?? "")) j.guidance = g;

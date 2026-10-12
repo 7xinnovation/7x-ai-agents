@@ -129,3 +129,11 @@ npx tsx scripts/add-nxn-pobox-faq-kb-2026-10-12.ts --env <file>
 
 All three are idempotent. The knowledge base is full-text searched in every
 environment (no `VOYAGE_API_KEY` anywhere), so no embeddings are needed.
+
+**Where Noqodi (UAE Pay) is switched off** — production, until its credentials
+land — the FAQ names the card alone, the one-tap config script writes the
+guidance and the payment field without the Noqodi clauses, and the per-turn
+directive offers no Noqodi button (a Noqodi tap is answered "not offered here").
+All of it follows the agent's `paymentMethods` switch, so the day Noqodi is
+switched on there, re-running the three scripts brings the second way to pay
+back without a code change.
