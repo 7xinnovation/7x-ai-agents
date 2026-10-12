@@ -128,6 +128,56 @@ languages, and a marked test complaint that got reference ENQ-2D08F62E with no
 link. One stall seen there — the model asked a second time for an email — is
 removed by the persona wording (email only if offered, never held for).
 
+## Browser pass — 12 October 2026
+
+Walked in Chrome (the Claude extension): production as a guest, local as the
+signed-in mock persona, after the deploy of a0dba27.
+
+What held: the Mira greeting with its four buttons and the ready prompt in both
+languages; tapping the prompt fills the composer with `[number]` selected
+(`[الرقم]` in Arabic, right-to-left); the filled prompt from a guest produced
+the identity line, the summary, the Terms checkbox and the card button in one
+reply, and the save with Emirates Post went through to a real order (261212724
+on their staging) with a payment card; a FAQ question was answered in both
+languages; a test complaint got ENQ-B9BA81CE and no link. Signed in (local,
+Noqodi on): the one-tap reply with the pay card and the Noqodi button, the
+Noqodi tap answered with one sentence and the secure payment card, the settled
+turn with the confirmation, the receipt and the single auto-renewal button, and
+that button switching auto-renewal on.
+
+Four things were wrong and are fixed here:
+
+1. **The wordmark's Arabic name was off the canvas.** The interim SVG anchored
+   `ميره` with `direction="rtl"` *and* `text-anchor="end"`, which Chrome
+   lays out from the anchor rightwards — out of the frame, leaving a stray
+   fragment beside "Mira" at header size. Both files are redrawn on one line,
+   "Mira | ميره" (1400×400), legible at the header's 26px. Same file names;
+   the designer's asset still replaces them.
+2. **The pulse's own pill missed the one-tap recogniser.** The signed-in
+   account pulse offered "Renew PO Box 50500 (Dubai)" among its next steps;
+   that text says nothing about the term, so the server did not direct the
+   turn and the model asked "Just to confirm…?" — the step the one-tap had
+   removed. The route now also treats a bare pill that only names a box (with
+   or without the emirate, in brackets or after "in") as the one-tap request
+   when the customer is signed in, or when it carries the emirate; the
+   one-tap guidance's top rule names it too (`nxn-one-tap-renew-2026-10-08.ts`
+   rewrites the rule in place).
+3. **"The knowledge base" in the customer's face.** The FAQ answer opened
+   "Here is what the knowledge base covers" and closed "the knowledge base does
+   not contain…". A persona paragraph (FB-1710, added by
+   `nxn-post-live-feedback-2026-10-12.ts`) has Mira answer as Emirates Post's
+   assistant, say "I don't have that detail" in one line, and offer the
+   enquiry or the phone line.
+4. **Source chips read as internal references.** Under a FAQ answer the chips
+   said "NXN PO Box Services — AI Chatbot FAQ Knowledge Base (June 2026),
+   rewritten for the chat" and "NXN Services Guide §7". The FAQ's source label
+   is now "Emirates Post PO Box FAQ", and the FAQ script relabels the older
+   "NXN Services Guide" documents (and their chunks' metadata) as
+   "Emirates Post services guide", idempotently.
+
+Re-running the one-tap, feedback and FAQ scripts applies 2–4 to an environment;
+1 and the recogniser ship with the code.
+
 ## Applying to an environment
 
 From `apps/web`, against the environment's env file:
@@ -138,7 +188,8 @@ npx tsx scripts/nxn-post-live-feedback-2026-10-12.ts --env <file>
 npx tsx scripts/add-nxn-pobox-faq-kb-2026-10-12.ts --env <file>
 ```
 
-All three are idempotent. The knowledge base is full-text searched in every
+All three are idempotent; the FAQ script also relabels the knowledge-base
+sources the customer sees under a reply. The knowledge base is full-text searched in every
 environment (no `VOYAGE_API_KEY` anywhere), so no embeddings are needed.
 
 **Where Noqodi (UAE Pay) is switched off** — production, until its credentials

@@ -35,13 +35,31 @@ config({
       : resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"),
 });
 
-import { getDb, agents, kbChunks } from "@dialog/db";
+import { getDb, agents, kbChunks, kbDocuments } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import { createKbDocument, listKbDocuments } from "../lib/kb";
 
 export const EN_TITLE = "PO Box services FAQ: renting, renewing, agents, key delivery, auto-renewal";
 export const AR_TITLE = "الأسئلة الشائعة عن خدمات صندوق البريد: الاستئجار والتجديد والوكلاء وتوصيل المفتاح والتجديد التلقائي";
-const SOURCE = "NXN PO Box Services — AI Chatbot FAQ Knowledge Base (June 2026), rewritten for the chat";
+/**
+ * The source label is what the customer sees under a reply, in the "Sources"
+ * chips — so it is named the way a customer would say it. The internal
+ * "NXN … Knowledge Base (June 2026), rewritten for the chat" wording was
+ * showing up in the chat verbatim (seen on production, 12 October 2026).
+ */
+export const SOURCE = "Emirates Post PO Box FAQ";
+/** Older documents whose labels leak the project code into the same chips. */
+export const SOURCE_RENAMES: Record<string, string> = {
+  "NXN PO Box Services — AI Chatbot FAQ Knowledge Base (June 2026), rewritten for the chat": SOURCE,
+  "NXN Services Guide — common questions": "Emirates Post services guide — common questions",
+  "NXN Services Guide": "Emirates Post services guide",
+};
+/** The customer-facing label for a stored source label (unchanged when it is already one). */
+export function customerSource(label: string): string {
+  if (SOURCE_RENAMES[label]) return SOURCE_RENAMES[label]!;
+  for (const [from, to] of Object.entries(SOURCE_RENAMES)) if (label.startsWith(from + " ")) return to + label.slice(from.length);
+  return label;
+}
 
 export const EN = `What this assistant can do for your PO Box. Rent a new personal PO Box (MyBox, MyHome or MyHome Instant) or a corporate PO Box; renew a personal or corporate box, and upgrade the bundle while renewing; add an authorised agent; request PO Box key delivery; switch auto-renewal on or off; manage a box you already hold, including linking an additional trade licence to a corporate box; and track a shipment. Everything, including the payment and the confirmation, happens here in the chat — there is no need to visit a branch to rent or renew a PO Box.
 
@@ -137,6 +155,18 @@ async function main() {
     }
     console.log(updated ? `  ~ ${title} — ${updated} paragraph(s) updated` : `  (already) ${title}`);
   }
+  // The labels under the replies read as Emirates Post's, not the project's.
+  let relabelled = 0;
+  for (const d of await listKbDocuments(agent.id)) {
+    const to = customerSource(String(d.source ?? ""));
+    if (to === d.source) continue;
+    await getDb().update(kbDocuments).set({ source: to }).where(eq(kbDocuments.id, d.id));
+    const rows = await getDb().select({ id: kbChunks.id, metadata: kbChunks.metadata }).from(kbChunks).where(eq(kbChunks.documentId, d.id));
+    for (const r of rows) await getDb().update(kbChunks).set({ metadata: { ...((r.metadata as Record<string, unknown>) ?? {}), source: to } }).where(eq(kbChunks.id, r.id));
+    console.log(`  ~ source "${d.source}" → "${to}" (${rows.length} chunk(s))`);
+    relabelled++;
+  }
+  if (!relabelled) console.log("  (sources already read as Emirates Post's)");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

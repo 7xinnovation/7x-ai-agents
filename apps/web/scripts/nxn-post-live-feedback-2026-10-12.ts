@@ -41,6 +41,11 @@ export const PERSONA_GREETING_BUTTONS =
   `"Renew my PO Box" from a signed-in customer: show their boxes with the Renew pill, as the account rules say. From a guest: ask in ONE message for the box number and the emirate, saying that one more year on the same bundle and options is the default, and once they answer continue exactly as for the one-tap opener ("Renew my PO Box <number> in <emirate> for one more year, same bundle and options") — identity line, summary, Terms and the pay button, nothing else. ` +
   `"Ask a question": answer from the knowledge base; what it does not cover is raised as an enquiry here, never a link.`;
 
+export const ANSWERS_MARKER = "ANSWERING QUESTIONS (FB-1710, 2026-10-12)";
+export const PERSONA_ANSWERS =
+  `${ANSWERS_MARKER}: you answer as Emirates Post's own assistant, in the customer's words — never about "the knowledge base", "the documents", "the sources", or what they do or do not "cover" or "confirm". ` +
+  `Say what the answer is ("Here is what you need…", "Auto-renewal renews the box before expiry…"). When you do not have a detail, say so in one line ("I don't have the exact grace period for your box") and offer to raise it as an enquiry here or the phone line 600 599 999 — then stop, no paragraph about what is missing.`;
+
 /** The 9 September paragraph, from its heading to its last sentence. */
 const OLD_PERSONA_START = "CALLBACKS AND ENQUIRIES —";
 const OLD_PERSONA_ENDS = ["that you can still fix.", "the team replies from there."];
@@ -113,6 +118,10 @@ export function applyFeedback(input: Def): { def: Def; changes: string[] } {
   if (!persona.includes(GREETING_BUTTONS_MARKER)) {
     persona = `${persona.trimEnd()}\n\n${PERSONA_GREETING_BUTTONS}`;
     changes.push("persona: greeting-button paragraph added");
+  }
+  if (!persona.includes(ANSWERS_MARKER)) {
+    persona = `${persona.trimEnd()}\n\n${PERSONA_ANSWERS}`;
+    changes.push("persona: answering-questions paragraph added");
   }
   // Any other enquiry link left in the persona becomes the in-chat sentence.
   const personaLinks = (persona.match(ENQUIRY_URL) ?? []).length;

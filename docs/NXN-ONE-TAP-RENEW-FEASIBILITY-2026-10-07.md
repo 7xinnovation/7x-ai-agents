@@ -202,6 +202,20 @@ directive in the route follows the same switch. When Noqodi is switched on,
 re-running the config script brings the second button back. Verified in the
 one-tap suite on a fixture with the method off, on and off again.
 
+## Browser pass — 12 October 2026
+
+Walked in Chrome as the signed-in mock persona (local, Noqodi on) and as a guest
+on production. The tap from the boxes list, the Noqodi "instead" tap, the
+settled turn and the auto-renewal button behaved as the hardening pass says.
+One gap: the account pulse writes its own next-step pills, and
+"Renew PO Box 50500 (Dubai)" — no term in it — was not recognised as the
+one-tap opener, so the model asked "Just to confirm…?" before the single reply.
+`ONE_TAP_PILL` in `chat/route.ts` now recognises a bare pill that only names
+a box (optionally with its emirate) as the same request when the customer is
+signed in, or when the emirate is on it; anything longer still takes the
+ordinary path. The guidance's top rule names the pill as well. Covered by
+`test-one-tap-renew-2026-10-08.ts` (94 checks).
+
 ## Verdict
 
 **Two taps in the chat is feasible for a signed-in customer, on our side alone,

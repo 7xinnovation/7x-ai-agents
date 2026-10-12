@@ -13,7 +13,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renameText, renameDefinition } from "./rename-aisha-to-mira-2026-10-12";
 import { applyFeedback, rewriteChunk, GREETING, READY_PROMPTS, ENQUIRY_MARKER, JOURNEY_NEW, JOURNEY_OLD } from "./nxn-post-live-feedback-2026-10-12";
-import { EN, AR, faqFor } from "./add-nxn-pobox-faq-kb-2026-10-12";
+import { EN, AR, faqFor, SOURCE, customerSource } from "./add-nxn-pobox-faq-kb-2026-10-12";
 import { enquiriesStayInChat, linkGuard } from "../lib/locateGuard";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -42,12 +42,13 @@ console.log("\nFB-1803 — enquiries stay in the chat");
   const { def, changes } = applyFeedback({ persona, greeting: { en: "Welcome", ar: "مرحباً" }, journeys: [{ key: "personal_po_box_renewal", guidance: `Before. ${JOURNEY_OLD} Never link to www-stg.` }] });
   check("the persona's enquiry paragraph is replaced whole, intro and outro kept", def.persona.startsWith("Intro.") && def.persona.includes("Outro.") && def.persona.includes(ENQUIRY_MARKER) && !/emiratespost\.ae\/(?:ar\/)?contact-us/.test(def.persona) && !/CALLBACKS AND ENQUIRIES —/.test(def.persona), def.persona.slice(0, 300));
   check("...and the greeting-button paragraph is added once", (def.persona.match(/THE GREETING BUTTONS \(FB-1831/g) ?? []).length === 1);
+  check("...and the answering paragraph, which keeps 'the knowledge base' out of replies", (def.persona.match(/ANSWERING QUESTIONS \(FB-1710/g) ?? []).length === 1 && /never about "the knowledge base"/.test(def.persona));
   check("the journey sentence is rewritten and nothing else moves", def.journeys[0].guidance === `Before. ${JOURNEY_NEW} Never link to www-stg.`, def.journeys[0].guidance);
   check("the greeting introduces Mira with the four service buttons, in both languages", def.greeting.en === GREETING.en && def.greeting.ar === GREETING.ar && /```buttons\n- Rent a new PO Box\n- Renew my PO Box\n- Manage my PO Box\n- Ask a question\n```/.test(GREETING.en) && /أنا ميره/.test(GREETING.ar));
   check("the ready prompt is set", JSON.stringify(def.readyPrompts) === JSON.stringify(READY_PROMPTS));
   const again = applyFeedback(def);
   check("idempotent: a second pass changes nothing", again.changes.length === 0, again.changes);
-  check("the first pass reports every change", changes.length === 6, changes);
+  check("the first pass reports every change", changes.length === 7, changes);
   const reworded = applyFeedback({ ...def, persona: def.persona.replace("an email address only if they offer one", "an email address") });
   check("a reworded enquiry paragraph is re-applied in place, once", reworded.changes.length === 1 && reworded.changes[0] === "persona: enquiry paragraph reworded" && reworded.def.persona.includes("an email address only if they offer one, never asked for a second time") && (reworded.def.persona.match(/ENQUIRIES, COMPLAINTS AND CALLBACKS ARE TAKEN HERE/g) ?? []).length === 1, reworded.changes);
 }
@@ -79,6 +80,7 @@ check("eleven topics, in both languages, each one retrieval-sized", enParas.leng
 check("the figures agree with the live system: key delivery AED 30, the phone line, Noqodi named", /AED 30/.test(EN) && /30 درهماً/.test(AR) && /600 599 999/.test(EN) && /600 599 999/.test(AR) && /Noqodi \(UAE Pay\)/.test(EN) && /نقودي \(UAE Pay\)/.test(AR) && !/AED 25/.test(EN));
 check("no answer sends the customer to a website to raise an enquiry", !/raise-an-enquiry|contact-us/.test(EN + AR) && /never sent to another website/.test(EN) && /لن تُحال أبداً إلى موقع آخر/.test(AR));
 check("where Noqodi is switched off the FAQ names the card alone, eleven topics still", !/Noqodi|نقودي/.test(faqFor(false).en + faqFor(false).ar) && faqFor(false).en.split(/\n\s*\n/).length === 11 && faqFor(false).ar.split(/\n\s*\n/).length === 11 && /Renew button/.test(faqFor(false).en) && faqFor(true).en === EN);
+check("the source chips read as Emirates Post's, never the project code", SOURCE === "Emirates Post PO Box FAQ" && customerSource("NXN PO Box Services — AI Chatbot FAQ Knowledge Base (June 2026), rewritten for the chat") === SOURCE && customerSource("NXN Services Guide §7") === "Emirates Post services guide §7" && customerSource("NXN Services Guide — common questions") === "Emirates Post services guide — common questions" && customerSource("Emirates Post PO Box FAQ") === "Emirates Post PO Box FAQ");
 check("the FAQ's menu wording is gone; the chat's own steps are described", !/Select:/.test(EN) && /Renew button/.test(EN) && /appears automatically — there is no separate linking step/.test(EN));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

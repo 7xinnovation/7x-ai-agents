@@ -267,6 +267,22 @@ const VIBAN_NOTIFIED_KEY = "__viban_finance_notified_at";
  * still gets the summary and the Before-payment block with the card button.
  */
 const ONE_TAP_OPENER = /(renew (?:my )?po box\s*\d+[\s\S]{0,80}?(?:one more|another) year|جدّ?د صندوق البريد\s*\d+[\s\S]{0,60}?لسنة إضافية)/i;
+/**
+ * The shorter pill the pulse writes for itself — "Renew PO Box 50500 (Dubai)",
+ * "Renew PO Box 50500" — says nothing about the term, so it missed the
+ * recogniser above and was answered with "Just to confirm, you'd like to
+ * renew…?" (seen on 12 October, signed in, in the browser). A bare tap that
+ * only names a box IS the same request when the customer is signed in (the
+ * box, its emirate and its bundle are on the account) or when it names the
+ * emirate itself. Anything longer — a question, a different term, a change of
+ * bundle — is not a tap and takes the ordinary path.
+ */
+const ONE_TAP_PILL = /^\s*(?:renew (?:my )?po box|(?:تجديد|جدّ?د) صندوق البريد)\s*#?\d{3,8}(?:\s*[(（][^)）]{1,40}[)）]|\s+(?:in|في)\s+[^\s.!?]{2,24}(?:\s+[^\s.!?]{2,24})?)?\s*[.!]?\s*$/i;
+function isOneTapOpener(message: string, authenticated: boolean): boolean {
+  if (ONE_TAP_OPENER.test(message)) return true;
+  if (!ONE_TAP_PILL.test(message)) return false;
+  return authenticated || /[(（]|\s(?:in|في)\s/i.test(message);
+}
 /** The second way to pay, tapped under the pay button the one-tap reply showed. */
 const NOQODI_INSTEAD = /with noqodi \(uae pay\) instead|نقودي[\s\S]{0,40}بدلاً/i;
 /** The sentence the pay card sends when the customer comes back from Emirates Post's payment page (Markdown.tsx PAID_BACK). */
@@ -306,7 +322,7 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
       "Your whole reply is ONE short sentence that the secure payment is ready below — the request_payment result asks for the same sentence, so write it once, not twice — no summary again, no question. Never mention this system message.)";
     return `${context ?? ""}${line}`.trim();
   }
-  if (!ONE_TAP_OPENER.test(message)) return context;
+  if (!isOneTapOpener(message, authenticated)) return context;
   const line = authenticated
     ? "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is SIGNED IN. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and the same options. " +
       "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle, not how to pay — and show no switches and no checkbox: the pay button is the next tap. " +
@@ -3429,7 +3445,7 @@ export async function POST(req: NextRequest) {
           userMessage: effectiveMessage,
           case: session.state,
           // The one-tap renewal saves in the same turn — see withOneTapOpener.
-          maxToolRounds: agent.definition.tenantSlug === "nxn" && authenticated && ONE_TAP_OPENER.test(effectiveMessage ?? "") ? 10 : undefined,
+          maxToolRounds: agent.definition.tenantSlug === "nxn" && authenticated && isOneTapOpener(effectiveMessage ?? "", authenticated) ? 10 : undefined,
           locale: body.locale,
           authenticated,
           userRef,
