@@ -17,6 +17,23 @@ export const runtime = "nodejs";
  * translated, and numbers, dates, references, box/licence numbers, emails, URLs
  * and masked values (with asterisks) are left exactly as they are.
  */
+const arabicLetters = (s: string) => (s.match(/[\u0600-\u06FF]/g) ?? []).length;
+const latinLetters = (s: string) => (s.match(/[A-Za-z]/g) ?? []).length;
+/**
+ * A translation that came back in the wrong script is dropped and the original
+ * shown instead. Seen once on 12 October 2026, in the browser: an Arabic reply
+ * carrying a few Latin brand names (UAE PASS, MyHome) was sent here "to Arabic"
+ * and came back entirely in English, which the Arabic customer then read. The
+ * model does this rarely and the prompt already forbids it; this makes it
+ * impossible to show. Into Arabic the result must keep at least half the
+ * source's Arabic letters; into English, at least half its Latin letters and no
+ * more Arabic than it started with.
+ */
+function rightScript(src: string, out: string, to: string): boolean {
+  if (to === "ar") return arabicLetters(out) >= arabicLetters(src) / 2;
+  return latinLetters(out) >= latinLetters(src) / 2 && arabicLetters(out) <= arabicLetters(src);
+}
+
 export async function POST(req: NextRequest) {
   let texts: string[] = [];
   let to = "en";
@@ -43,7 +60,8 @@ export async function POST(req: NextRequest) {
     "- Keep markdown intact (**, ###, -, >, tables, links).\n" +
     "- DO NOT translate or alter these values: numbers, prices, dates, reference numbers, box numbers, licence numbers, emails, phone numbers, URLs, product/bundle names (e.g. MyHome, MyBox), and masked values containing asterisks (leave the stars and spacing exactly as-is).\n" +
     "- If a message is already fully in " + target + ", return it unchanged.\n" +
-    "- Never add, remove, summarise, or comment — translate 1:1.";
+    "- Never add, remove, summarise, or comment — translate 1:1. Add no heading, bullet or other markdown the source does not have.\n" +
+    "- The assistant's name is Mira, in Arabic ميره (never ميرا or ميرة).";
 
   try {
     const client = getAnthropic();
@@ -58,7 +76,7 @@ export async function POST(req: NextRequest) {
     if (start < 0 || end < start) return NextResponse.json({ texts });
     const parsed = JSON.parse(raw.slice(start, end + 1)) as unknown;
     if (!Array.isArray(parsed) || parsed.length !== texts.length) return NextResponse.json({ texts });
-    const out = parsed.map((v, i) => (typeof v === "string" && v.trim() ? v : texts[i]));
+    const out = parsed.map((v, i) => (typeof v === "string" && v.trim() && rightScript(texts[i]!, v, to) ? v : texts[i]));
     return NextResponse.json({ texts: out });
   } catch (e) {
     log.warn?.("translate_failed", { to, count: texts.length, reason: e instanceof Error ? e.message : String(e) });

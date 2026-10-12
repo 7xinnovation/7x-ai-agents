@@ -33,6 +33,7 @@ check("whole-word rename, both scripts and the Arabic", renameText("Hello, I'm A
 const exp = src("../app/embed/[agent]/Experience.tsx");
 check("the header shows the Mira wordmark", /src="\/mira-onlight\.svg" alt="Mira"/.test(exp) && !/aisha-onlight/.test(exp) && /const MIRA_BLUE/.test(exp));
 check("both wordmarks exist and carry the Arabic name", existsSync(resolve(here, "../public/mira-onlight.svg")) && existsSync(resolve(here, "../public/mira-ondark.svg")) && /ميره/.test(src("../public/mira-onlight.svg")));
+check("the display translation spells Mira ميره and never shows a reply in the wrong script", /in Arabic ميره \(never ميرا or ميرة\)/.test(src("../app/api/translate/route.ts")) && /function rightScript\(src: string, out: string, to: string\): boolean/.test(src("../app/api/translate/route.ts")) && /rightScript\(texts\[i\]!, v, to\) \? v : texts\[i\]/.test(src("../app/api/translate/route.ts")));
 check("the voice is Mira too", /You are Mira, the spoken voice/.test(src("../app/api/nxn/voice/speak/route.ts")));
 check("the 30 September seed script seeds the current name", /const NEW_NAME = \{ en: "Mira", ar: "ميره" \}/.test(src("./epgl-aisha-and-renewal-docs-2026-09-30.ts")));
 

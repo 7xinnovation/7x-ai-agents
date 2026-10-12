@@ -175,8 +175,17 @@ Four things were wrong and are fixed here:
    "NXN Services Guide" documents (and their chunks' metadata) as
    "Emirates Post services guide", idempotently.
 
+5. **One Arabic reply shown in English.** The transcript's display translation
+   (`/api/translate`, used when a message carries words of the other language)
+   returned an Arabic FAQ answer — which named UAE PASS and MyHome — entirely
+   in English once, and the Arabic customer would have read that. The endpoint
+   now drops a result that comes back in the wrong script (into Arabic it must
+   keep at least half the source's Arabic letters; into English, half its Latin
+   letters and no more Arabic) and shows the original instead. Its prompt also
+   spells Mira ميره, which the translator had been writing ميرا.
+
 Re-running the one-tap, feedback and FAQ scripts applies 2–4 to an environment;
-1 and the recogniser ship with the code.
+1, 5 and the recogniser ship with the code.
 
 ## Applying to an environment
 
