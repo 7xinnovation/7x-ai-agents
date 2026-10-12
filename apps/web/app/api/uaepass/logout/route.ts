@@ -1,23 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildLogoutUrl, requestOrigin } from "@/lib/uaepass";
+import { buildLogoutUrl, requestOrigin, RELOGIN_COOKIE } from "@/lib/uaepass";
 import { getAgentBySlug } from "@/lib/agents";
 
 export const runtime = "nodejs";
-
-/**
- * THE BELT UNDER THE LOGOUT: the next sign-in from this browser asks UAE PASS
- * to authenticate again (`prompt=login`), whether or not the logout window
- * above was opened, finished, or closed early. Set here and by
- * /api/embed/signout; the login route reads it; a completed sign-in clears it.
- * A day is longer than any sign-out-then-sign-in and shorter than forever.
- */
-export const RELOGIN_COOKIE = {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-  maxAge: 60 * 60 * 24,
-};
 
 /**
  * END THE UAE PASS SESSION ITSELF, not just ours.

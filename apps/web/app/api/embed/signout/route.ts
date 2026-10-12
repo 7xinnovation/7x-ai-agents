@@ -4,7 +4,7 @@ import { getDb, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import { signOutConversation, audit } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
-import { RELOGIN_COOKIE } from "@/app/api/uaepass/logout/route";
+import { RELOGIN_COOKIE } from "@/lib/uaepass";
 
 export const runtime = "nodejs";
 

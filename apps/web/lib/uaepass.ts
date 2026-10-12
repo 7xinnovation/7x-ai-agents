@@ -227,6 +227,22 @@ export function buildAuthorizeUrl(
  * Null when UAE PASS is not configured for this tenant, so a caller cannot send
  * somebody to a half-built URL.
  */
+/**
+ * THE BELT UNDER THE LOGOUT: the next sign-in from this browser asks UAE PASS
+ * to authenticate again (`prompt=login`), whether or not the logout window was
+ * opened, finished, or closed early. Set by /api/uaepass/logout and by
+ * /api/embed/signout; the login route reads it; a completed sign-in clears it.
+ * A day is longer than any sign-out-then-sign-in and shorter than forever.
+ * (Here and not in the route file: a Next.js route may only export route fields.)
+ */
+export const RELOGIN_COOKIE = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  path: "/",
+  maxAge: 60 * 60 * 24,
+};
+
 export function buildLogoutUrl(redirectTo: string, tenant?: string): string | null {
   if (!uaePassConfigured(tenant)) return null;
   const c = cfg(tenant);

@@ -57,7 +57,7 @@ check("a tab of its own goes to UAE PASS's logout itself and remembers the way b
 check("a frame says so plainly and relies on the server's prompt=login", /the sign-out window was blocked, so the UAE PASS session was NOT ended from here/.test(fn));
 
 console.log("\nThe server's belt: the next sign-in asks again");
-check("the logout route sets uaepass_relogin for a day, HttpOnly", /res\.cookies\.set\("uaepass_relogin", "1", RELOGIN_COOKIE\);/.test(logout) && /httpOnly: true,[\s\S]{0,120}maxAge: 60 \* 60 \* 24,/.test(logout));
+check("the logout route sets uaepass_relogin for a day, HttpOnly — the constant lives in the library, as a route may only export route fields", /res\.cookies\.set\("uaepass_relogin", "1", RELOGIN_COOKIE\);/.test(logout) && /export const RELOGIN_COOKIE = \{\s*httpOnly: true,[\s\S]{0,120}maxAge: 60 \* 60 \* 24,/.test(uaepass) && !/export const RELOGIN_COOKIE/.test(logout) && /import \{ RELOGIN_COOKIE \} from "@\/lib\/uaepass";/.test(signout));
 check("so does our own sign-out route — the app's path opens no window", /res\.cookies\.set\("uaepass_relogin", "1", RELOGIN_COOKIE\);/.test(signout));
 check("the login route forces a fresh UAE PASS login on it", /const forceLogin = req\.nextUrl\.searchParams\.get\("switch"\) === "1" \|\| req\.cookies\.get\("uaepass_relogin"\)\?\.value === "1";/.test(login) && /if \(opts\.forceLogin\) u\.searchParams\.set\("prompt", "login"\);/.test(uaepass));
 check("a completed sign-in spends it, on both return paths", (callback.match(/if \(\(params\.uaepass \?\? "ok"\) === "ok"\) res\.cookies\.delete\("uaepass_relogin"\);/g) ?? []).length === 2);
