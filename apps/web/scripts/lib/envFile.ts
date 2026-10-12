@@ -1,5 +1,7 @@
-import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, statSync, realpathSync } from "node:fs";
+import { resolve, sep, basename, dirname } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 /**
  * Read a DATABASE_URL out of an env file named on the command line.
@@ -7,23 +9,60 @@ import { resolve } from "node:path";
  * These are operator tools: the person passing the path is the person running
  * the script, so a traversal here is someone traversing their own filesystem.
  * The audit flags every readFileSync whose argument came from outside the module
- * anyway, and it is right to — the check is cheap, and the day one of these
- * grows a trigger that is not a person at a terminal is the day the argument
- * stops being the operator's.
+ * anyway (Aikido, CWE-23, 7 September 2026), and it is right to — the check is
+ * cheap, and the day one of these grows a trigger that is not a person at a
+ * terminal is the day the argument stops being the operator's.
  *
- * So: the path is resolved, it must be a regular file of a sane size, and only
- * the DATABASE_URL is taken out of it. Nothing else about the file is returned.
+ * So the path is confined before it is read, in the shape a traversal check
+ * takes: resolved, then its real path (symlinks followed) must sit inside one
+ * of a short list of roots — this repository, the operator's home directory,
+ * the temp directories, or roots named in DIALOG_ENV_FILE_ROOTS — and it must
+ * be named like an env file, be a regular file of a sane size, and only the
+ * DATABASE_URL is taken out of it. Nothing else about the file is returned.
  */
-export function databaseUrlFrom(file: string): string {
-  const path = resolve(file);
-  let stat;
-  try {
-    stat = statSync(path);
-  } catch {
-    throw new Error(`No such env file: ${path}`);
+
+/** The repository this module is checked into: apps/web/scripts/lib → ../../../.. */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+
+/** Where an env file may live. Each root is a real, absolute directory path. */
+export function envFileRoots(): string[] {
+  const named = (process.env.DIALOG_ENV_FILE_ROOTS ?? "").split(":").map((s) => s.trim()).filter(Boolean);
+  const roots = [REPO_ROOT, homedir(), tmpdir(), "/tmp", "/private/tmp", ...named];
+  const real = new Set<string>();
+  for (const r of roots) {
+    try { real.add(realpathSync(resolve(r))); } catch { /* a root that does not exist here confines nothing */ }
   }
-  if (!stat.isFile()) throw new Error(`Not a file: ${path}`);
-  if (stat.size > 256 * 1024) throw new Error(`Too large to be an env file: ${path}`);
+  return [...real];
+}
+
+/** `.env`, `.env.local`, `stg.env`, `prod.env` — not `package.json`, not `id_rsa`. */
+const ENV_NAME = /(^|\.)env(\.[\w.-]+)?$/i;
+
+/**
+ * The confined, real path of an env file the operator named — or an error that
+ * says which rule it broke. Exported so the rule can be tested without a read.
+ */
+export function confineEnvFile(file: string): string {
+  if (!file || file.includes("\0")) throw new Error("--env needs a file path");
+  const requested = resolve(file);
+  let path: string;
+  try {
+    path = realpathSync(requested);
+  } catch {
+    throw new Error(`No such env file: ${requested}`);
+  }
+  const roots = envFileRoots();
+  const inside = roots.some((root) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep));
+  if (!inside) throw new Error(`Refusing to read ${requested}: an env file must live under this repository, your home directory or a temp directory (or a root named in DIALOG_ENV_FILE_ROOTS)`);
+  if (!ENV_NAME.test(basename(path))) throw new Error(`Refusing to read ${requested}: not named like an env file (.env, .env.local, stg.env, …)`);
+  const stat = statSync(path);
+  if (!stat.isFile()) throw new Error(`Not a file: ${requested}`);
+  if (stat.size > 256 * 1024) throw new Error(`Too large to be an env file: ${requested}`);
+  return path;
+}
+
+export function databaseUrlFrom(file: string): string {
+  const path = confineEnvFile(file);
   const m = /^DATABASE_URL\s*=\s*"?([^"\n]+)"?/m.exec(readFileSync(path, "utf8"));
   if (!m) throw new Error(`No DATABASE_URL in ${path}`);
   return m[1]!;
