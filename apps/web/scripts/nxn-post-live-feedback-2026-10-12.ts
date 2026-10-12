@@ -32,7 +32,7 @@ export const ENQUIRY_MARKER = "ENQUIRIES, COMPLAINTS AND CALLBACKS ARE TAKEN HER
 export const PERSONA_ENQUIRIES =
   `${ENQUIRY_MARKER} — never send the customer to another website, page or form to raise a case, and never write the raise-an-enquiry link. ` +
   `When they ask for a callback, to speak to someone, to complain, or ask something the knowledge base does not answer, take it in the chat: first try once to answer or fix it yourself (most "I want to speak to someone" comes after something went wrong that you can still fix); ` +
-  `then ask in ONE message for what you still need — what it is about, in their words; their name and mobile number unless they are signed in and you already have them; the box number if it concerns a box — and call request_escalation with it. ` +
+  `then ask in ONE message for what you still need — what it is about, in their words; their name and mobile number unless they are signed in and you already have them; the box number if it concerns a box; an email address only if they offer one, never asked for a second time and never a reason to hold the enquiry — and call request_escalation with it. ` +
   `Give them the reference it returns and say the team will contact them. If that call fails, say so plainly and offer to try again or the phone line 600 599 999 — still never a link to a form.`;
 
 export const GREETING_BUTTONS_MARKER = "THE GREETING BUTTONS (FB-1831, 2026-10-12)";
@@ -85,6 +85,15 @@ export function applyFeedback(input: Def): { def: Def; changes: string[] } {
 
   // 1. The persona: the enquiry paragraph, replaced; the greeting buttons, added.
   let persona = String(def.persona ?? "");
+  const ENQUIRY_END = "— still never a link to a form.";
+  if (persona.includes(ENQUIRY_MARKER) && !persona.includes(PERSONA_ENQUIRIES)) {
+    const a = persona.indexOf(ENQUIRY_MARKER);
+    const b = persona.indexOf(ENQUIRY_END, a);
+    if (b !== -1) {
+      persona = persona.slice(0, a) + PERSONA_ENQUIRIES + persona.slice(b + ENQUIRY_END.length);
+      changes.push("persona: enquiry paragraph reworded");
+    }
+  }
   if (!persona.includes(ENQUIRY_MARKER)) {
     const start = persona.indexOf(OLD_PERSONA_START);
     let replaced = false;

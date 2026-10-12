@@ -48,6 +48,8 @@ console.log("\nFB-1803 — enquiries stay in the chat");
   const again = applyFeedback(def);
   check("idempotent: a second pass changes nothing", again.changes.length === 0, again.changes);
   check("the first pass reports every change", changes.length === 6, changes);
+  const reworded = applyFeedback({ ...def, persona: def.persona.replace("an email address only if they offer one", "an email address") });
+  check("a reworded enquiry paragraph is re-applied in place, once", reworded.changes.length === 1 && reworded.changes[0] === "persona: enquiry paragraph reworded" && reworded.def.persona.includes("an email address only if they offer one, never asked for a second time") && (reworded.def.persona.match(/ENQUIRIES, COMPLAINTS AND CALLBACKS ARE TAKEN HERE/g) ?? []).length === 1, reworded.changes);
 }
 check("knowledge-base sentences that quoted the page now point at the chat", !/raise-an-enquiry/.test(rewriteChunk("For that, raise an enquiry at https://www.emiratespost.ae/contact-us/raise-an-enquiry or call 600 599 999.", "en")) && !/raise-an-enquiry/.test(rewriteChunk("يُرجى رفع استفسار عبر https://www.emiratespost.ae/ar/contact-us/raise-an-enquiry أو الاتصال على 600 599 999.", "ar")) && /here in the chat/.test(rewriteChunk("raise an enquiry at https://www.emiratespost.ae/contact-us/raise-an-enquiry", "en")));
 check("the corporate chunk's AED 25 becomes the confirmed AED 30, in both languages", /AED 30 \(the figure/.test(rewriteChunk("Optional key delivery by courier costs AED 25, disclosed before the customer chooses.", "en")) && /30 درهماً/.test(rewriteChunk("توصيل المفتاح الاختياري بالمندوب رسومه 25 درهماً، وتُعرض قبل اختيار العميل.", "ar")));

@@ -117,6 +117,17 @@ exposed, which is the open ask to them.
   FAQ questions answered directly; greeting and ready prompt served by
   `/api/agents/nxn-dialog`; EPGL greets as Mira.
 
+## Applied
+
+12 October 2026: staging (b5c73ed and after) and production (main fast-forwarded
+to staging at 5f4c327, prod deploy green, the three scripts plus the one-tap
+config applied; Noqodi off there, so the card-only wording was written).
+Verified on production: Mira greeting with buttons and the ready prompt, the
+wordmark, the guest one-tap opener with no Noqodi mention, FAQ answers in both
+languages, and a marked test complaint that got reference ENQ-2D08F62E with no
+link. One stall seen there — the model asked a second time for an email — is
+removed by the persona wording (email only if offered, never held for).
+
 ## Applying to an environment
 
 From `apps/web`, against the environment's env file:
