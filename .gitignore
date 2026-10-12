@@ -14,3 +14,6 @@ packages/eval/report.json
 
 # Production DB dumps — contain encrypted integration secrets; never commit.
 backups/
+
+# Rendered demo videos and frames (reproducible with `npm run render` in remotion-demo)
+remotion-demo/out/
