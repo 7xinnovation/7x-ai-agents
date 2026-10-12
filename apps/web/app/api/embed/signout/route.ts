@@ -4,6 +4,7 @@ import { getDb, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import { signOutConversation, audit } from "@/lib/conversation";
 import { getAgentBySlug } from "@/lib/agents";
+import { RELOGIN_COOKIE } from "@/app/api/uaepass/logout/route";
 
 export const runtime = "nodejs";
 
@@ -47,5 +48,8 @@ export async function POST(req: NextRequest) {
     payload: { response: "The customer signed out; the session token, the authenticated flag and the verified Emirates ID were cleared." },
   }).catch(() => undefined);
 
-  return NextResponse.json({ ok: true, authenticated: false });
+  const res = NextResponse.json({ ok: true, authenticated: false });
+  // Whoever signs in next from this browser is asked by UAE PASS again.
+  res.cookies.set("uaepass_relogin", "1", RELOGIN_COOKIE);
+  return res;
 }

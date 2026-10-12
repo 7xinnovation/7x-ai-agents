@@ -133,13 +133,13 @@ console.log("\nThe portal goes first, and is given time to wake up");
 check("the portal is the first stop", /const finish = \(\) => \{[\s\S]{0,200}toHostLogout\(win\);/.test(exp));
 check("...with eight seconds to answer", /\}, 8000\);/.test(exp));
 check("...ended early by the reply, not waited out", /answered = true;/.test(exp) && /finish\(\);\s*\n\s*\};\s*\n\s*window\.addEventListener\("message", done\);/.test(exp));
-check("...then the same window goes to UAE PASS", /if \(win\) w\.navigate\(uaePassLogout\);/.test(exp));
-check("...and is closed from this side", /try \{ w\.close\(\); \} catch \{[^}]*\} \}, 3500\);/.test(exp));
+check("...UAE PASS goes FIRST since 12 October, in the window the click itself opened", /opened = openExternal\(uaePassLogout, SIGNOUT_WINDOW\);/.test(exp) && /if \(!onPortalAlready\) win\.navigate\(url\);/.test(exp));
+check("...and is closed from this side — on the done page's report since 12 October, not a 3.5s timer", /const closeWindow = \(win: ExternalWindow \| null\) => \{ try \{ win\?\.close\(\); \}/.test(exp) && !/\}, 3500\);/.test(exp));
 check("a refusal is reported rather than swallowed", /declined: the relay tag there needs data-signout-clears-host/.test(exp));
 check("...and so is silence", /never answered in 8s/.test(exp));
 check("...and a blocked pop-up says so too", /pop-ups are blocked, so the portal's session was NOT cleared/.test(exp));
 check("...and only that origin is believed", /if \(e\.origin !== hostOrigin\) return;/.test(exp));
-check("UAE PASS alone still works where there is no portal", /if \(!hostOrigin\) \{\s*\n\s*toHostLogout\(null\);/.test(exp));
+check("UAE PASS alone still works where there is no portal", /if \(!hostOrigin \|\| !win\) \{ toHostLogout\(win\); return; \}/.test(exp));
 
 console.log("\nAnd the sign-in after it goes back through the portal");
 /**

@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
    * person. Set by the widget only on the sign-in that FOLLOWS a sign-out —
    * a first sign-in still gets the benefit of an existing session.
    */
-  const forceLogin = req.nextUrl.searchParams.get("switch") === "1";
+  const forceLogin = req.nextUrl.searchParams.get("switch") === "1" || req.cookies.get("uaepass_relogin")?.value === "1";
   const state = crypto.randomUUID();
   // Mock this request when the whole deployment is mocked (dev), OR when the caller
   // opted in with ?mock=1 and the deployment permits it (UAEPASS_MOCK_ALLOWED) — so

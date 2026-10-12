@@ -53,6 +53,8 @@ export async function GET(req: NextRequest) {
 </body></html>`;
       const res = new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
       res.cookies.delete("uaepass_flow");
+      // Signed in for real: the sign-out's "ask again" is spent.
+      if ((params.uaepass ?? "ok") === "ok") res.cookies.delete("uaepass_relogin");
       return res;
     }
     const url = new URL(returnTo);
@@ -60,6 +62,7 @@ export async function GET(req: NextRequest) {
     if (cid) url.searchParams.set("cid", cid);
     const res = NextResponse.redirect(url.toString());
     res.cookies.delete("uaepass_flow");
+    if ((params.uaepass ?? "ok") === "ok") res.cookies.delete("uaepass_relogin");
     return res;
   };
 

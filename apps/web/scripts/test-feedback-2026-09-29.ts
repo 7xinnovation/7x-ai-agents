@@ -277,7 +277,7 @@ console.log("\nSigning out of us is not signing out of UAE PASS");
 const uaepass = readFileSync(new URL("../lib/uaepass.ts", import.meta.url), "utf8");
 const loginRoute = readFileSync(new URL("../app/api/uaepass/login/route.ts", import.meta.url), "utf8");
 check("the authorize call can force a fresh login", /if \(opts\.forceLogin\) u\.searchParams\.set\("prompt", "login"\);/.test(uaepass));
-check("...driven by an explicit switch, not by default", /const forceLogin = req\.nextUrl\.searchParams\.get\("switch"\) === "1";/.test(loginRoute));
+check("...driven by an explicit switch or the sign-out's cookie, not by default", /const forceLogin = req\.nextUrl\.searchParams\.get\("switch"\) === "1" \|\| req\.cookies\.get\("uaepass_relogin"\)\?\.value === "1";/.test(loginRoute));
 check("...and passed through", /buildAuthorizeUrl\(resolveRedirectUri\(origin\), state, tenant, \{ forceLogin \}\)/.test(loginRoute));
 // A first sign-in still gets the benefit of an existing session — that is what
 // single sign-on is for. Only the person who asked to change accounts is asked
@@ -329,7 +329,7 @@ const logoutRoute = readFileSync(new URL("../app/api/uaepass/logout/route.ts", i
 // The URL is built once and the window is sent to it — see
 // test-relay-signout-2026-09-30 for why the portal is visited before this.
 check("signing out opens UAE PASS's own logout", /const uaePassLogout = `\/api\/uaepass\/logout\?agent=\$\{encodeURIComponent\(agent\.slug\)\}`;/.test(exp));
-check("...only where UAE PASS is the way in", /if \(!agent\.uaePassEnabled\) \{ try \{ win\?\.close\(\); \}/.test(exp));
+check("...only where UAE PASS is the way in", /if \(agent\.uaePassEnabled\) \{\s*opened = openExternal\(uaePassLogout, SIGNOUT_WINDOW\);/.test(exp) && /if \(!agent\.uaePassEnabled\) \{\s*if \(!opened && hostOrigin\)/.test(exp));
 check("...redirecting to their endpoint, not ours", /buildLogoutUrl\(`\$\{origin\}\/uaepass\/done`/.test(logoutRoute));
 check("...and coming back to a page that closes itself", /window\.close\(\)/.test(readFileSync(new URL("../app/uaepass/done/page.tsx", import.meta.url), "utf8")));
 // An unconfigured tenant must still get its window closed rather than an error.
@@ -342,8 +342,8 @@ check("nothing to log out of still closes the window", /NextResponse\.redirect\(
 // the portal is the door it is navigated on to end that session too — but the
 // point this pins is unchanged: WE decide when it goes, not the page it landed
 // on. See test-relay-signout-2026-09-30 for the sequence.
-check("the window is closed by us, not by where it landed",
-  /window\.setTimeout\(\(\) => \{ try \{ w\.close\(\); \}[\s\S]{0,60}\}, 3500\);/.test(exp));
+check("the window is closed by us, not by where it landed — on the done page's report, a closed window, or eight seconds",
+  /if \(uaePassDone \|\| opened!\.closed \|\| Date\.now\(\) - started > 8000\) \{ resolve\(\); return; \}/.test(exp) && /window\.setTimeout\(\(\) => closeWindow\(win\), 2000\);/.test(exp));
 check("...and that is written down where the next person will wonder", /WHERE UAE PASS SENDS THE BROWSER IS NOT OURS TO DECIDE/.test(logoutRoute));
 check("prompt=login stays as the belt to that braces", /switchAccount\.current = true;/.test(exp));
 

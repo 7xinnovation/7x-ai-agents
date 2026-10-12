@@ -5,6 +5,21 @@ import { getAgentBySlug } from "@/lib/agents";
 export const runtime = "nodejs";
 
 /**
+ * THE BELT UNDER THE LOGOUT: the next sign-in from this browser asks UAE PASS
+ * to authenticate again (`prompt=login`), whether or not the logout window
+ * above was opened, finished, or closed early. Set here and by
+ * /api/embed/signout; the login route reads it; a completed sign-in clears it.
+ * A day is longer than any sign-out-then-sign-in and shorter than forever.
+ */
+export const RELOGIN_COOKIE = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  path: "/",
+  maxAge: 60 * 60 * 24,
+};
+
+/**
  * END THE UAE PASS SESSION ITSELF, not just ours.
  *
  * "I literally clicked sign out and when I clicked sign in, it signed me in
@@ -40,13 +55,22 @@ export async function GET(req: NextRequest) {
    * still happens; only the landing does not.
    *
    * Two consequences, both handled elsewhere rather than here: the widget
-   * closes the window on a timer regardless of where it ended up, and the next
-   * sign-in carries `prompt=login`. Registering our post-logout URI with UAE
-   * PASS would make the landing ours as well — it is a request to Emirates
-   * Post, not a change we can make.
+   * waits for /uaepass/done to report and otherwise moves the window on after
+   * eight seconds, and the next sign-in carries `prompt=login` — from the
+   * cookie set below, so a reload cannot forget it. Registering our post-logout
+   * URI with UAE PASS would make the landing ours every time — a request to
+   * Emirates Post, not a change we can make.
+   *
+   * 12 October 2026: followed with curl against both environments, the chain
+   * id.uaepass.ae → ids.uaepass.ae/commonauth → trustedx-authserver/…/logout
+   * DID carry our redirect_uri through and land on /uaepass/done (200), with
+   * no session. So the done page's report is the usual case now, and the
+   * timer is the fallback for a live session that is bounced elsewhere.
    */
   const target = buildLogoutUrl(`${origin}/uaepass/done`, known?.definition.tenantSlug);
   // Nothing to log out of: send them to the page that closes itself, so the
   // widget's window still goes away rather than sitting on an error.
-  return NextResponse.redirect(target ?? `${origin}/uaepass/done`);
+  const res = NextResponse.redirect(target ?? `${origin}/uaepass/done`);
+  res.cookies.set("uaepass_relogin", "1", RELOGIN_COOKIE);
+  return res;
 }

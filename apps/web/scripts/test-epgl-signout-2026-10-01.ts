@@ -43,10 +43,10 @@ check("...navigated, not fetched", /win\.navigate\(agent\.hostLogoutUrl\);/.test
 // The portal's reply is what moves the window on, so the storage is cleared
 // before the logout page is ever visited.
 check("...after the host's storage is cleared", /window\.clearTimeout\(timer\);\s*\n\s*toHostLogout\(win\);/.test(exp));
-check("...and before UAE PASS", /window\.setTimeout\(\(\) => toUaePass\(win\), 2000\);/.test(exp));
+check("...and then the window closes — UAE PASS goes first since 12 October", /window\.setTimeout\(\(\) => closeWindow\(win\), 2000\);/.test(exp));
 // Emirates Post has no such endpoint — there the storage IS the session — so an
 // agent without one must go straight on rather than stall.
-check("skipped where the portal has none", /if \(!agent\.hostLogoutUrl \|\| !win\) \{ toUaePass\(win\); return; \}/.test(exp));
+check("skipped where the portal has none", /if \(!agent\.hostLogoutUrl \|\| !win\) \{ closeWindow\(win\); return; \}/.test(exp));
 
 console.log("\nAnd the sign-out is carried to the PARENT of the sign-in page");
 /**
