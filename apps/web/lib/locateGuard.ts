@@ -143,6 +143,28 @@ export function arabicLinks(text: string, locale?: string): string {
     .replace(TERMS_EN, (_m, which) => `https://www.emiratespost.ae/ar/terms-${which}`);
 }
 
+/**
+ * THE ENQUIRY IS RAISED HERE, NOT ON A WEBSITE (FB-1803, 2026-10-12).
+ *
+ * The guidance no longer names the enquiry page, and request_escalation takes
+ * the enquiry in the chat. The model wrote that link from guidance for a month,
+ * though, and a habit outlives its instruction — so a link to the enquiry page,
+ * as Markdown or bare, becomes the sentence that keeps the customer here.
+ * Applied to the finished text and to the stream, in both languages.
+ */
+const ENQUIRY_ANY = /https:\/\/www\.emiratespost\.ae\/(?:ar\/)?contact-us\/raise-an-enquiry\/?/g;
+const ENQUIRY_MD = /\[[^\]\n]{1,80}\]\(\s*https:\/\/www\.emiratespost\.ae\/(?:ar\/)?contact-us\/raise-an-enquiry\/?\s*\)/g;
+
+export function enquiriesStayInChat(text: string, locale?: string): string {
+  const phrase = locale === "ar" ? "اطلب مني هنا وسأرفع الاستفسار لك في المحادثة" : "ask me here and I will raise the enquiry for you in the chat";
+  return text.replace(ENQUIRY_MD, phrase).replace(ENQUIRY_ANY, phrase);
+}
+
+/** Everything the finished reply gets: the Arabic pages, and no enquiry link. */
+export function replyLinks(text: string, locale?: string): string {
+  return enquiriesStayInChat(arabicLinks(text, locale), locale);
+}
+
 
 /**
  * The same rewrite, applied while the reply streams.
@@ -155,19 +177,17 @@ const HOLD = 72;
 
 export function linkGuard(locale?: string) {
   let buf = "";
-  const on = locale === "ar";
+  // Every language now: the enquiry link is rewritten in English too (FB-1803).
   return {
     push(delta: string): string {
-      if (!on) return delta;
       buf += delta;
       if (buf.length <= HOLD) return "";
-      const out = arabicLinks(buf.slice(0, buf.length - HOLD), locale);
+      const out = replyLinks(buf.slice(0, buf.length - HOLD), locale);
       buf = buf.slice(buf.length - HOLD);
       return out;
     },
     flush(): string {
-      if (!on) return "";
-      const out = arabicLinks(buf, locale);
+      const out = replyLinks(buf, locale);
       buf = "";
       return out;
     },

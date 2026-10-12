@@ -165,6 +165,14 @@ export const AgentDefinition = z.object({
    */
   nativeUaePassFallback: z.boolean().optional(),
   greeting: LocalizedString,
+  /**
+   * Ready-to-send prompts shown under the greeting (FB-1831, 2026-10-12).
+   *
+   * Tapping one puts the prompt in the composer rather than sending it: the
+   * customer fills the blanks ([number], [emirate]) and the one message carries
+   * every detail the journey needs, so submit-and-pay is two steps.
+   */
+  readyPrompts: z.array(z.object({ label: LocalizedString, prompt: LocalizedString })).optional(),
   theme: Theme,
   // Shown above the document upload slots in the case panel and on the mobile
   // upload page (feedback: state up-front that documents are team-verified and

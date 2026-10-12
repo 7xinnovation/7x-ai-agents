@@ -96,7 +96,8 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
   },
   {
     name: "request_escalation",
-    description: "File a human callback request in the system of record.",
+    description:
+      "Raise the customer's enquiry, complaint or callback request with the team FROM INSIDE THIS CONVERSATION — never send them to a website, page or form to do it themselves (FB-1803). Pass reason in their own words (what it is about; for a complaint, what happened and the box or reference it concerns), plus name, phone and email when you have them. Returns the reference the customer quotes.",
     input_schema: {
       type: "object",
       properties: {
@@ -900,7 +901,11 @@ export async function dispatchTool(
       state = { ...state, status: "escalated" };
       events.push({ type: "escalation", reference });
       events.push({ type: "case", state });
-      return { result: `Callback created with reference ${reference}.`, state, events };
+      return {
+        result: `Enquiry recorded with reference ${reference} — the team receives it from here. Give the customer the reference and say the team will contact them; do not send them anywhere else to raise it again.`,
+        state,
+        events,
+      };
     }
 
     case "lookup": {

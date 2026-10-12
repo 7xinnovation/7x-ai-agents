@@ -39,6 +39,8 @@ export interface PublicAgent {
   name: string;
   locales: Locale[];
   greeting: LocalizedString;
+  // Ready-to-send prompts under the greeting; tapped, they fill the composer (FB-1831).
+  readyPrompts?: { label: LocalizedString; prompt: LocalizedString }[];
   theme: Theme;
   // Disclaimer shown above the document upload slots (team-verified notice).
   documentsDisclaimer?: LocalizedString;

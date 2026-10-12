@@ -56,6 +56,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ agen
     locales: d.locales,
     allowedOrigins: d.allowedOrigins,
     greeting: d.greeting,
+    readyPrompts: d.readyPrompts,
     theme: d.theme,
     documentsDisclaimer: d.documentsDisclaimer,
     documentsInChat: d.documentsInChat,

@@ -9,6 +9,7 @@ import { createEpglCallback } from "./epglCallback";
 import { getAgentBySlug } from "./agents";
 import type { EnvKey } from "./integrations";
 import { log } from "./logger";
+import { audit } from "./conversation";
 
 let initialised = false;
 
@@ -256,23 +257,46 @@ export function ensureAdapters() {
       if (epCase.ok) return { reference: epCase.caseNumber };
 
       // Their endpoint is CAPTCHA-gated and a server cannot mint the token, so
-      // this is the expected path today. Losing the callback would be worse than
-      // routing it the old way, so it still goes to the ops mailbox -- with the
-      // reason recorded, because "the callback went somewhere else" should not be
-      // something anyone has to guess at later.
+      // this is the expected path today.
+      //
+      // THE ENQUIRY STAYS IN THE EXPERIENCE (FB-1803, 2026-10-12). Until 12
+      // October this threw when no ops mailbox was configured, the tool told
+      // the model nobody had received it, and the guidance then sent the
+      // customer to Emirates Post's enquiry page — the one thing the feedback
+      // asks us never to do. Neither staging nor production has the mailbox
+      // set, so that was the path every customer took. The enquiry is now
+      // RECORDED first — an audit row the console shows, and the case marked
+      // escalated — and emailed to the mailbox when there is one; the
+      // reference is handed out only after the record exists. A mailbox is
+      // still the right destination, and its absence is logged loudly.
       log.warn("ep_case_fallback_to_email", { reason: epCase.reason, detail: epCase.detail });
-      const reference = `CB-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const reference = `ENQ-${randomUUID().slice(0, 8).toUpperCase()}`;
       const to = process.env.NXN_BRANCH_OPS_EMAIL?.trim();
-      if (!to) throw new Error("No ops mailbox configured (NXN_BRANCH_OPS_EMAIL) — cannot arrange a callback");
-      const res = await sendEmail({
-        to,
-        subject: `[${reference}] Callback requested via the assistant`,
-        text:
-          `Reference: ${reference}\nName: ${input.name}\nPhone: ${input.phone}\nEmail: ${input.email ?? "-"}\n` +
-          `Customer: ${input.userRef ?? "guest"}\n\nReason:\n${input.reason}\n${context}\n\n` +
-          `(Not raised on emiratespost.ae: ${epCase.reason} — ${epCase.detail})`,
+      const text =
+        `Reference: ${reference}\nName: ${input.name}\nPhone: ${input.phone}\nEmail: ${input.email ?? "-"}\n` +
+        `Customer: ${input.userRef ?? "guest"}\nJourney: ${input.journeyKey ?? "-"}\n\nEnquiry:\n${input.reason}\n${context}\n\n` +
+        `(Not raised on emiratespost.ae: ${epCase.reason} — ${epCase.detail})`;
+      await audit({
+        agentId: agent?.id,
+        actor: "system",
+        action: "enquiry_recorded",
+        payload: {
+          reference,
+          name: input.name,
+          phone: input.phone,
+          email: input.email ?? null,
+          userRef: input.userRef ?? null,
+          journeyKey: input.journeyKey ?? null,
+          reason: input.reason,
+          mailbox: to ? "configured" : "NOT CONFIGURED (NXN_BRANCH_OPS_EMAIL)",
+        },
       });
-      if (!res.ok) throw new Error(`Could not pass the callback to the team (${res.reason})`);
+      if (!to) {
+        log.warn("enquiry_no_mailbox", { reference, hint: "set NXN_BRANCH_OPS_EMAIL so the team is emailed; the enquiry is on the console" });
+        return { reference };
+      }
+      const res = await sendEmail({ to, subject: `[${reference}] Enquiry raised in the assistant`, text });
+      if (!res.ok) log.warn("enquiry_mail_failed", { reference, reason: res.reason });
       return { reference };
     },
 

@@ -161,8 +161,9 @@ body {
   object-fit: contain;
   flex-shrink: 0;
   display: block;
-  /* The Aisha wordmark ships on a white ground; multiply drops that ground
-     against the near-white header while keeping the navy ink. */
+  /* The wordmark (Mira; Aisha before 12 October 2026) may ship on a white
+     ground; multiply drops that ground against the near-white header while
+     keeping the navy ink. */
   mix-blend-mode: multiply;
 }
 .dlg-brand-text {
@@ -616,8 +617,8 @@ body {
 /* AI avatar — a clean, calm brand disc. A soft top-light radial gradient gives a
    quiet sense of dimension; a fine inner ring + tinted shadow seat it on the
    surface. No glossy specular, rotating sheen, or pulse. */
-/* Aisha presence — a small sphere built from layered gradients that resolve
-   through the agent's brand token (now Aisha's azure). Idle breath; a thinking
+/* Mira presence — a small sphere built from layered gradients that resolve
+   through the agent's brand token (now Mira's azure). Idle breath; a thinking
    orbit ring and speaking pulse are available via data-state. Transform/opacity
    only. Replaces the old flat disc. */
 .dlg-orb {
@@ -2120,6 +2121,11 @@ body {
   gap: 8px;
   max-width: 360px;
 }
+/* A ready prompt (FB-1831): the label, then the sentence it will put in the
+   composer, blanks and all. */
+.dlg-starter.is-ready span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dlg-starter.is-ready strong { font-weight: 620; }
+.dlg-starter.is-ready em { font-style: normal; font-weight: 450; font-size: 12.5px; color: var(--c-text-muted); }
 .dlg-starter {
   display: flex;
   align-items: center;
@@ -2205,7 +2211,7 @@ body {
   gap: 11px;
   min-width: 0;
 }
-/* Soft tinted tile — the reference's "titled card" cue, in Aisha's accent. */
+/* Soft tinted tile — the reference's "titled card" cue, in Mira's accent. */
 .dlg-case-head-icon {
   width: 34px;
   height: 34px;

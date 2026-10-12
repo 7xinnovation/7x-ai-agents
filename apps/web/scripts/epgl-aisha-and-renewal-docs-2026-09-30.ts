@@ -31,7 +31,10 @@ const SLUG = "epgl-dialog";
 
 /** The name the assistant introduces itself with, in the customer's language. */
 const OLD_NAMES = ["EPGL Dialog", "EPG Dialog"];
-const NEW_NAME = { en: "Aisha", ar: "عائشة" };
+// Renamed again on 12 October 2026 (FB-1889): the assistant is Mira. Kept
+// current here so a fresh environment seeds the name in use; the rename of an
+// environment that already says Aisha is scripts/rename-aisha-to-mira-2026-10-12.ts.
+const NEW_NAME = { en: "Mira", ar: "ميره" };
 
 /**
  * Both mandatory, on the documents step of the renewal.

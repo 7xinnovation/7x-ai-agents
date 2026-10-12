@@ -25,6 +25,7 @@ export default async function EmbedPage({
     name: d.name,
     locales: d.locales,
     greeting: d.greeting,
+    readyPrompts: d.readyPrompts,
     theme: d.theme,
     allowedOrigins: d.allowedOrigins,
     documentsDisclaimer: d.documentsDisclaimer,

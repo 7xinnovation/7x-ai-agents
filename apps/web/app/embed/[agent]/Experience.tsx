@@ -43,11 +43,12 @@ import { showSurvey } from "./customerPulse";
 import { maskForDisplay } from "@/lib/maskIdentity";
 import { openExternal, isNative, postNative, nativeToken, nativeHandoff, onNativeEvent, type ExternalWindow } from "./nativeBridge";
 
-/** Aisha's brand azure (from the AISHA wordmark) — the single accent, applied
- *  across every tenant so the assistant reads as Aisha, not the host brand. */
-const AISHA_BLUE = "#2b90ee";
+/** Mira's brand azure (from the wordmark) — the single accent, applied across
+ *  every tenant so the assistant reads as Mira, not the host brand. (The
+ *  assistant was Aisha until FB-1889, 12 October 2026.) */
+const MIRA_BLUE = "#2b90ee";
 
-/** The Aisha presence: a small layered sphere (styled by .dlg-orb in globals). */
+/** The Mira presence: a small layered sphere (styled by .dlg-orb in globals). */
 function Orb({ size = 25, state = "idle" }: { size?: number; state?: "idle" | "thinking" | "speaking" }) {
   return (
     <span className="dlg-orb" style={{ ["--orb-size" as string]: `${size}px` }} data-state={state} aria-hidden="true">
@@ -156,6 +157,7 @@ export const STR = {
     upTo: "up to",
     suggestions: "Suggested",
     askAnything: "Ask anything, or start with",
+    readyPrompt: "Ready to send — just fill in the blanks",
     enterToSend: "Enter to send",
     poweredBy: "AI assistant",
     securePayment: "Secure payment",
@@ -228,6 +230,7 @@ export const STR = {
     upTo: "حتى",
     suggestions: "مقترحات",
     askAnything: "اسأل أي شيء، أو ابدأ بـ",
+    readyPrompt: "جاهزة للإرسال — أكمل الفراغات فقط",
     enterToSend: "اضغط Enter للإرسال",
     poweredBy: "مساعد ذكي",
     securePayment: "دفع آمن",
@@ -620,6 +623,27 @@ export function Experience({
     postNative({ action: "completed", reference, journey: caseState?.journeyKey ?? null });
   }, [caseState?.reference, caseState?.status, caseState?.journeyKey]);
   const [input, setInput] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  /**
+   * A READY PROMPT IS FILLED IN, NOT SENT (FB-1831, 2026-10-12).
+   *
+   * NXN asked for a prompt that already carries every detail, so the customer
+   * can submit and pay in two steps. Tapping one puts it in the composer with
+   * the first blank selected — [number], then [emirate] — and the one message
+   * they send is the renewal opener the server already recognises.
+   */
+  const prefillComposer = useCallback((text: string) => {
+    setInput(text);
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (!el) return;
+      el.focus();
+      const open = text.indexOf("[");
+      const close = open === -1 ? -1 : text.indexOf("]", open + 1);
+      if (open !== -1 && close !== -1) el.setSelectionRange(open, close + 1);
+      else el.setSelectionRange(text.length, text.length);
+    });
+  }, []);
   const [streaming, setStreaming] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   /** Host sign-in popup, so a window closed without a token can be reported. */
@@ -2653,9 +2677,9 @@ export function Experience({
 
   const fallbackFont = "'SF Pro Display', -apple-system, 'Segoe UI', system-ui, sans-serif";
   const rootStyle = {
-    // Aisha's azure overrides the tenant primary so the orb, buttons, links,
-    // progress and selected states all read as Aisha.
-    ["--c-primary" as string]: AISHA_BLUE,
+    // Mira's azure overrides the tenant primary so the orb, buttons, links,
+    // progress and selected states all read as Mira.
+    ["--c-primary" as string]: MIRA_BLUE,
     ["--c-primary-fg" as string]: "#ffffff",
     ["--c-surface" as string]: c.surface,
     ["--c-surface-muted" as string]: c.surfaceMuted,
@@ -2686,9 +2710,9 @@ export function Experience({
     <div className={`dlg-root ${full ? "is-full" : ""} ${mobileCaseOpen ? "is-mobile-case" : ""}`} dir={dir} style={rootStyle}>
       <header className="dlg-header">
         <div className="dlg-brand">
-          {/* Aisha wordmark — the assistant's identity across every tenant. */}
+          {/* Mira wordmark — the assistant's identity across every tenant (FB-1889). */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="dlg-header-logo" src="/aisha-onlight.jpg" alt="Aisha" />
+          <img className="dlg-header-logo" src="/mira-onlight.svg" alt="Mira" />
         </div>
         <div className="dlg-actions">
           {agent.locales.length > 1 ? (
@@ -2906,6 +2930,29 @@ export function Experience({
                   tappable (feedback FB-1434: structured options, not prose). */}
               <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} locale={locale} stackChoices={agent.stackedChoices} /></div>
             </div>
+            {messages.length === 0 && (agent.readyPrompts?.length ?? 0) > 0 ? (
+              <div className="dlg-starters dlg-ready">
+                <span className="dlg-starters-label">{t.readyPrompt}</span>
+                <div className="dlg-starters-grid">
+                  {(agent.readyPrompts ?? []).map((p, pi) => (
+                    <button
+                      key={pi}
+                      type="button"
+                      className="dlg-starter is-ready"
+                      style={{ ["--i" as string]: pi }}
+                      onClick={() => prefillComposer(tr(p.prompt, locale))}
+                      disabled={streaming}
+                    >
+                      <span>
+                        <strong>{tr(p.label, locale)}</strong>
+                        <em>{tr(p.prompt, locale)}</em>
+                      </span>
+                      <PencilSimple size={14} weight="bold" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {messages.length === 0 && starters.length > 0 && !greetingHasButtons ? (
               <div className="dlg-starters">
                 <span className="dlg-starters-label">{t.askAnything}</span>
@@ -3027,6 +3074,7 @@ export function Experience({
             ) : null}
             <div className="dlg-input">
               <textarea
+                ref={composerRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
