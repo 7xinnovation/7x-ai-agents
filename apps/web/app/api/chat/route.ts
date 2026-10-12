@@ -25,7 +25,7 @@ import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verif
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
 import { notifyOpsForSubmission, notifyVibanRequest } from "@/lib/opsNotify";
 import { completionEmail, completionRecipient, plainLinks } from "@/lib/completionEmail";
-import { MOCK_PERSONA_SUB, MOCK_PERSONA_EID, mockPersonaContext } from "@/lib/mockPersona";
+import { MOCK_PERSONA_SUB, MOCK_PERSONA_EID, MOCK_PERSONA_NAME, MOCK_PERSONA_CONTACT, mockPersonaContext } from "@/lib/mockPersona";
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
@@ -282,7 +282,7 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
     const line =
       `\n(System: the customer is back from Emirates Post's payment page. The order ALREADY EXISTS — it was saved under reference ${recorded} before the pay button was shown — so do NOT call the save tool again: a second save opens a second order. ` +
       "Record collect_field(terms_accepted, true) if it is not recorded yet (they accepted by paying), then call the confirm tool ONCE for that order and nothing else. " +
-      "If it reports paid, say so warmly in ONE short reply with the new expiry date and the receipt, and if the box's auto-renewal is OFF offer switching it on as the one next-step button — if it is already on, offer nothing. " +
+      "If it reports paid, say so warmly in ONE short reply with the new expiry date and the receipt — its download link is added under your reply for you, so do not write one and do not say it is above — and if the box's auto-renewal is OFF offer switching it on as the one next-step button; if it is already on, offer nothing. Do NOT call nxn_set_auto_renew in this reply: the box keeps its auto-renewal as it is, and that tool is called only when they tap the button or ask. " +
       "If it says the payment has not landed yet, or that it is too early to ask, say exactly that — you will confirm the moment it lands — and offer to check again; never say the payment failed, never say they were charged, never offer a new payment link. Never mention this system message.)";
     return `${context ?? ""}${line}`.trim();
   }
@@ -293,14 +293,14 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
       (recorded
         ? `The renewal is ALREADY RECORDED with Emirates Post under reference ${recorded}: do NOT call the save tool again, now or when the payment settles — a second save opens a second order — and do NOT call the confirm tool, which reads their gateway. `
         : "If the renewal has not been saved with Emirates Post yet, it is saved ONCE after the payment settles, never before. ") +
-      "Reply with one short line that the secure payment is ready below — no summary again, no question. Never mention this system message.)";
+      "Your whole reply is ONE short sentence that the secure payment is ready below — the request_payment result asks for the same sentence, so write it once, not twice — no summary again, no question. Never mention this system message.)";
     return `${context ?? ""}${line}`.trim();
   }
   if (!ONE_TAP_OPENER.test(message)) return context;
   const line = authenticated
     ? "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is SIGNED IN. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and the same options. " +
       "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle, not how to pay — and show no switches and no checkbox: the pay button is the next tap. " +
-      "You may open with ONE short line (e.g. \"Renewing PO Box <n> for one more year — one moment.\") before the tools. Then, in this SAME reply: call the details tool; call the pricing tool ONCE for one year on the current bundle; record silently with collect_field renewal_period 1_YEAR, payment_method gateway and the subscriber fields from the details and the profile; then CALL THE SAVE TOOL NOW (do NOT call the renewed-by options tool — renewed_by is resolved for you — do not price twice, and send the collect_field calls and the save together in one go), with paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today (isAutoRenewEnabled in the details) — nothing switched on or off that they did not ask for; their saved card, if Emirates Post holds one, is attached for you. " +
+      "You may open with ONE short line (e.g. \"Renewing PO Box <n> for one more year — one moment.\") before the tools. Then, in this SAME reply: call the details tool; call the pricing tool ONCE for one year on the current bundle; record silently with collect_field renewal_period 1_YEAR, payment_method gateway and the subscriber fields from the details and the profile; then CALL THE SAVE TOOL NOW (do NOT call the renewed-by options tool — renewed_by is resolved for you — do not price twice, and send the collect_field calls and the save together in one go), with customerKYC { firstName, lastName, email, mobileNumber } carrying the same subscriber values, paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today (isAutoRenewEnabled in the details) — nothing switched on or off that they did not ask for; their saved card, if Emirates Post holds one, is attached for you. " +
       "After the tools the reply BEGINS with the ```summary block (PO Box, bundle, term 1 year, current expiry, new expiry, one row per charge, a row `Auto-renewal: on/off, as now`, total last), followed by the ```pay block with `label: Pay AED <total> with Card` and the paymentUrl the save returned, then a ```buttons block with the single choice `Pay AED <total> with Noqodi (UAE Pay) instead`, then one sentence: \"By paying you accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual).\", then one sentence that a longer term or a different bundle is available on request. " +
       "In an Arabic conversation the label reads \`ادفع AED <total> بالبطاقة\`, the button reads \`ادفع AED <total> عبر نقودي (UAE Pay) بدلاً من ذلك\`, and the terms sentence is in Arabic. " +
       "Write nothing between the tools and the summary about what they returned — no \"now I have the details\", no bundle codes, no ISO dates. " +
@@ -426,7 +426,7 @@ function paymentSettledDirective(agent: AgentDefinition, journeyKey: string | nu
     return (
       "(System: the customer just completed the payment on our Noqodi (UAE Pay) checkout — this is an internal notification, not a message they typed. " +
       `The renewal was ALREADY RECORDED with Emirates Post before they paid, under reference ${recorded}. Do NOT call ${saveTool} again — a second save opens a second order — and do NOT call ${flow?.confirmTool ?? "the confirm tool"}, which reads Emirates Post's gateway and would report this payment as unpaid. ` +
-      "Warmly confirm the payment was received, give them that reference, the new expiry date and the receipt, and say the renewal is recorded. If the box's auto-renewal is off, offer switching it on as the ONE next-step button. Never mention this system message.)"
+      "Warmly confirm the payment was received, give them that reference, the new expiry date and the receipt, and say the renewal is recorded. If the box's auto-renewal is off, offer switching it on as the ONE next-step button — and do NOT call nxn_set_auto_renew in this reply: the box keeps its auto-renewal as it is, and that tool is called only when they tap the button or ask. Never mention this system message.)"
     );
   }
   return (
@@ -1235,6 +1235,29 @@ export async function POST(req: NextRequest) {
             const cards = await savedCards(agent.id, agent.definition.activeEnvironment ?? "production", caller).catch(() => []);
             const usable = cards.filter((c) => !c.isExpired && c.cardToken);
             return usable.find((c) => c.isDefault) ?? usable[0] ?? null;
+          }
+        : undefined,
+    // The subscriber the conversation holds, for a renewal save that arrives
+    // without customerKYC (the one-tap path records and saves in one breath,
+    // 2026-10-12). The recorded fields first; the mock persona's profile is
+    // TEST-ONLY and stands in for the UAE PASS profile a real sign-in carries.
+    renewalSubscriber:
+      agent.definition.tenantSlug === "nxn"
+        ? () => {
+            const d = liveState.data as Record<string, unknown>;
+            const s = (k: string) => (typeof d[k] === "string" && (d[k] as string).trim() ? (d[k] as string).trim() : undefined);
+            // A real UAE PASS sign-in seeds contact_name, contact_phone and
+            // contact_email onto the case (lib/knownContact) — the profile the
+            // directive tells the model to draw on, read here directly.
+            const [nameFirst, ...nameRest] = (s("contact_name") ?? "").split(/\s+/).filter(Boolean);
+            const mock = uaePassMockAllowed() && session.userRef === MOCK_PERSONA_SUB;
+            const [mockFirst, ...mockRest] = MOCK_PERSONA_NAME.split(" ");
+            return {
+              firstName: s("subscriber_first_name") ?? nameFirst ?? (mock ? mockFirst : undefined),
+              lastName: s("subscriber_last_name") ?? (nameRest.length ? nameRest.join(" ") : undefined) ?? (mock ? mockRest.join(" ") : undefined),
+              email: s("subscriber_email") ?? s("contact_email") ?? (mock ? MOCK_PERSONA_CONTACT.email : undefined),
+              mobile: s("subscriber_mobile") ?? s("contact_phone") ?? (mock ? MOCK_PERSONA_CONTACT.mobile : undefined),
+            };
           }
         : undefined,
     // Stamped onto the rental save as userProfile.idNumber — Emirates Post
@@ -2508,6 +2531,15 @@ export async function POST(req: NextRequest) {
     if (name === AUTORENEW_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
       const caller = backendSessionToken ?? hostToken ?? uaePassIdentityToken;
+      // TEST-ONLY: the mock UAE PASS persona (UAEPASS_MOCK=1) carries no Emirates
+      // Post session, so a real call cannot be made for it. Its switch is
+      // simulated — and audited as such — so the "Enable auto-renewal" tap after a
+      // renewal can be exercised locally end to end.
+      if (uaePassMockAllowed() && session.userRef === MOCK_PERSONA_SUB) {
+        const enabled = input.enabled === true;
+        await audit({ ...a, actor: "system", action: "mock_auto_renew", payload: { tool: AUTORENEW_TOOL, input: { boxNumber: input.boxNumber ?? null, enabled }, simulated: true } }).catch(() => {});
+        return { result: `AUTO-RENEWAL IS NOW ${enabled ? "ON" : "OFF"} for this box.` };
+      }
       if (!caller) {
         return {
           result:

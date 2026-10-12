@@ -142,6 +142,56 @@ will not know, and the confirm answers paid. UAE Pay's UAT gateway was
 unreachable for stretches of the evening; the turn reports "could not be
 opened, nothing charged" and offers card or retry.
 
+## Hardening pass — 12 October 2026
+
+The user asked for everything to be checked once more, both ways to pay and the
+one tap, before the push. The static suites were already green (typecheck, 77
+one-tap checks, 42 end-to-end). Driving the live flows against the local server
+with the mock persona, in English and Arabic, turned up five rough edges, all
+now fixed and covered by checks (one-tap suite 84):
+
+- **A stray auto-renewal call.** On an Arabic settled turn the model called
+  `nxn_set_auto_renew` unasked, before offering the button. It was refused
+  (the mock has no Emirates Post session), but a real session would have had a
+  box's auto-renewal flipped without consent. The return directive, the
+  Noqodi-settled directive and the fast-path guidance now say the tool is called
+  only when the customer taps the button or asks.
+- **Two sentences for one tap.** "Pay with Noqodi instead" produced "Your secure
+  payment is ready below" twice over, because the per-turn directive and the
+  request_payment result each asked for that line. The directive now says it is
+  the same single sentence.
+- **"Your receipt is ready above"** when the download link is appended under the
+  reply. Directive, confirm annotation and guidance now say where it lands.
+- **A save that arrived without customerKYC.** One run sent the save with no
+  subscriber at all; our local gate refused it, the refusal mentioned the
+  renewed-by options, the model fetched them and saved again — one order, but
+  ten seconds and two rounds later. The gate now fills customerKYC from the
+  subscriber fields the conversation holds (and, for a real sign-in, the
+  contact_name/phone/email a UAE PASS login seeds; for the mock persona, its
+  profile) before refusing, names exactly what is still missing, and no longer
+  points at the renewed-by options when renewedBy is already on the request.
+  The directive and the guidance name the save body explicitly. In the three
+  runs after the change the model sent the subscriber itself; the fill is the
+  net under it.
+- **The mock persona's "Enable auto-renewal" tap** went to "cannot be set
+  without a signed-in session". It is now simulated for the mock persona only,
+  audited as `mock_auto_renew`, so the tap can be exercised locally.
+
+Verified after the fixes, each as one conversation on the local server:
+
+| Run | Result |
+| --- | --- |
+| Noqodi: Renew → Noqodi instead → webhook → settled → Enable auto-renewal | 11 checks, 0 failed |
+| Card: pulse sentence → back from the payment page → Enable auto-renewal | 9 checks, 0 failed |
+| Arabic card: opener → Arabic return sentence | 8 checks, 0 failed |
+| Arabic Noqodi tap | one sentence, payment for the quoted total, no second save |
+| Guest opener | unchanged: identity line, summary, Terms checkbox, card button, sign-in sentence |
+
+The config script was re-applied to local and staging (one change each). The
+Noqodi rollout dry-run on staging reports EPGL and NXN already on. The staging
+env file had to be recreated from the app's settings (subscription of
+rg-7xil-external-stg).
+
 ## Verdict
 
 **Two taps in the chat is feasible for a signed-in customer, on our side alone,

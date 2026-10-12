@@ -1314,6 +1314,18 @@ export async function buildApiTools(
      */
     savedCard?: () => Promise<{ cardToken?: string; maskedPan?: string; expiry?: string; scheme?: string; cardholderName?: string } | null>;
     /**
+     * The subscriber the conversation already holds, for a renewal save that
+     * arrives without one (2026-10-12).
+     *
+     * The one-tap renewal records the subscriber fields and saves in the same
+     * breath, and on 12 October one save came in with no customerKYC at all: it
+     * was refused, the model went round again, and the customer waited ten
+     * seconds longer for an order we could have opened at once. Filled in from
+     * here before the save is refused; what is still missing is then named
+     * exactly.
+     */
+    renewalSubscriber?: () => { firstName?: string; lastName?: string; email?: string; mobile?: string };
+    /**
      * The signed-in customer's Emirates ID, as Emirates Post themselves gave it.
      *
      * A rental save carries it as userProfile.idNumber and their backend answers
@@ -2737,22 +2749,54 @@ export async function buildApiTools(
     // filled where they can be and the call is refused where they cannot.
     if (/guest_renewal_save$/i.test(toolName)) {
       const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
-      const kyc = (body.customerKYC ?? {}) as Record<string, unknown>;
+      const kyc = { ...((body.customerKYC ?? {}) as Record<string, unknown>) };
+      // What the conversation already holds fills the gaps before anything is
+      // refused — see renewalSubscriber on the options.
+      let kycFilled: string[] = [];
+      if (opts.renewalSubscriber && (!asStr(kyc.firstName) || !asStr(kyc.lastName) || !asStr(kyc.email) || !asStr(kyc.mobileNumber))) {
+        const known = opts.renewalSubscriber();
+        const fill = (k: string, v: string | undefined) => {
+          if (!asStr(kyc[k]) && v && v.trim()) {
+            kyc[k] = v.trim();
+            kycFilled.push(k);
+          }
+        };
+        fill("firstName", known.firstName);
+        fill("lastName", known.lastName);
+        fill("email", known.email);
+        fill("mobileNumber", known.mobile);
+        if (kycFilled.length) {
+          body.customerKYC = kyc;
+          void audit({
+            agentId,
+            conversationId: opts.conversationId,
+            actor: "system",
+            action: "renewal_kyc_filled",
+            payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: { filled: kycFilled }, response: "customerKYC completed from the subscriber fields the conversation holds." },
+          }).catch(() => {});
+        }
+      }
       const first = asStr(kyc.firstName);
       const last = asStr(kyc.lastName);
       const email = asStr(kyc.email);
       const mobile = asStr(kyc.mobileNumber);
       if (!first || !last || !email || !mobile) {
+        const missing = [!first && "first name", !last && "last name", !mobile && "mobile number", !email && "email address"].filter(Boolean) as string[];
+        const needsCapacity = !asStr(body.renewedBy) && !asStr(kyc.renewalUserCapacity);
         void audit({
           agentId,
           conversationId: opts.conversationId,
           actor: "system",
           action: "integration_call_failed",
-          payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: auditableInput(input), response: "REFUSED LOCALLY: customerKYC incomplete" },
+          payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: auditableInput(input), response: `REFUSED LOCALLY: customerKYC incomplete (${missing.join(", ")})` },
         }).catch(() => {});
         return {
           result:
-            "This renewal cannot be saved yet: Emirates Post needs the subscriber's details before it will take a payment, and the request is missing some. Ask the customer for whichever of these you do not already have — first name, last name, mobile number, email address — and who is renewing the box (owner, family member, authorised agent, company employee or other, from the renewed-by options). Then send them as customerKYC { firstName, lastName, email, mobileNumber, renewalUserCapacity }. Do NOT retry this call until you have all four. Nothing has gone wrong and the customer has not been charged.",
+            `This renewal cannot be saved yet: Emirates Post needs the subscriber's details before it will take a payment, and the request is missing the ${missing.join(", ")}. Take ${missing.length > 1 ? "them" : "it"} from the details response or the signed-in profile when you have them there, otherwise ask the customer, then send the save again with customerKYC { firstName, lastName, email, mobileNumber${needsCapacity ? ", renewalUserCapacity" : ""} } complete` +
+            (needsCapacity
+              ? " — renewalUserCapacity is who is renewing the box (owner, family member, authorised agent, company employee or other, from the renewed-by options)."
+              : "; renewedBy is already on the request, so do NOT call the renewed-by options tool.") +
+            " Nothing has gone wrong and the customer has not been charged.",
           isError: true,
         };
       }
@@ -2769,7 +2813,7 @@ export async function buildApiTools(
         cityName: asStr(given.cityName) || em || "United Arab Emirates",
         countryName: asStr(given.countryName) || "United Arab Emirates",
       };
-      let patched = false;
+      let patched = kycFilled.length > 0;
       if (JSON.stringify(given) !== JSON.stringify(filled)) {
         pay.billingDetail = filled;
         patched = true;
@@ -4176,7 +4220,7 @@ export async function buildApiTools(
               ...res,
               result:
                 `${res.result.slice(0, res.result.indexOf("\n") + 1)}${JSON.stringify(b)}` +
-                "\n\nDO NOT LINK AN INVOICE FROM THIS RESPONSE. Emirates Post's own invoice endpoint answers 500 for these references, so a customer who has just paid would click it and land on an error. The receipt link is added to your reply for you — do not write one of your own, and do not describe an invoice as available anywhere else.",
+                "\n\nDO NOT LINK AN INVOICE FROM THIS RESPONSE. Emirates Post's own invoice endpoint answers 500 for these references, so a customer who has just paid would click it and land on an error. The receipt link is added under your reply for you — do not write one of your own, do not say it is above, and do not describe an invoice as available anywhere else.",
               raw: JSON.stringify(b),
             };
           }
