@@ -42,6 +42,7 @@ import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
 import { maskForDisplay } from "@/lib/maskIdentity";
 import { openExternal, isNative, postNative, nativeToken, nativeHandoff, onNativeEvent, type ExternalWindow } from "./nativeBridge";
+import { humanizeKey, humanizeValue } from "./humanize";
 
 /** Mira's brand azure (from the wordmark) — the single accent, applied across
  *  every tenant so the assistant reads as Mira, not the host brand. (The
@@ -827,6 +828,22 @@ export function Experience({
       }
     return m;
   }, [agent, locale]);
+  // Field key -> (option value -> localized option label), so a recorded
+  // "gateway" or "1_YEAR" reads as "Pay with Card" or "1 year" in the panel.
+  const optionLabels = useMemo(() => {
+    const m = new Map<string, Map<string, string>>();
+    for (const j of agent.journeys)
+      for (const s of j.steps)
+        for (const f of s.fields)
+          if (f.options?.length) m.set(f.key, new Map(f.options.map((o) => [o.value, tr(o.label, locale)])));
+    return m;
+  }, [agent, locale]);
+  /** What a collected field is called and what its value reads as, for the panel. */
+  const fieldLabel = useCallback((k: string) => labelMap.get(k) ?? humanizeKey(k), [labelMap]);
+  const fieldValue = useCallback((k: string, v: unknown) => {
+    const raw = displayValue(v);
+    return optionLabels.get(k)?.get(raw) ?? humanizeValue(raw, locale);
+  }, [optionLabels, locale]);
 
   // Conversation starters — surfaced from the agent's own journeys so the empty
   // state guides the user toward what this assistant can actually do.
@@ -3256,7 +3273,7 @@ export function Experience({
                     </h3>
                     {dataEntries.map(([k, v]) => (
                       <div className="dlg-field" key={k}>
-                        <span className="dlg-field-label">{labelMap.get(k) ?? k}</span>
+                        <span className="dlg-field-label">{fieldLabel(k)}</span>
                         {editKey === k ? (
                           <span className="dlg-field-edit">
                             <input
@@ -3284,7 +3301,7 @@ export function Experience({
                           // an Arabic session. Each value is now laid out by its own
                           // script.
                           <span className="dlg-field-value" dir="auto">
-                            {maskForDisplay(k, displayValue(v))}
+                            {maskForDisplay(k, fieldValue(k, v))}
                             {editableKeys.has(k) ? (
                               // Pencil correction for extracted values (FB-1325).
                               <button
@@ -3293,7 +3310,7 @@ export function Experience({
                                 // The unmasked value: a customer who retyped
                                 // what the panel showed them would save the mask.
                                 onClick={() => { setEditKey(k); setEditVal(displayValue(v)); }}
-                                aria-label={`Edit ${labelMap.get(k) ?? k}`}
+                                aria-label={`Edit ${fieldLabel(k)}`}
                                 title={locale === "ar" ? "تعديل" : "Edit"}
                               >
                                 <PencilSimple size={13} weight="bold" />
@@ -3359,7 +3376,7 @@ export function Experience({
                       {checklist.map((m) => (
                         <li className={m.done ? "done" : "todo"} key={`${m.kind}:${m.key}`}>
                           {m.done ? <CheckCircle size={14} weight="fill" /> : <Circle size={14} weight={iconWeight} />}
-                          <span>{labelMap.get(m.key) ?? m.key}</span>
+                          <span>{fieldLabel(m.key)}</span>
                         </li>
                       ))}
                     </ul>

@@ -3,6 +3,8 @@ import type { LocalizedString, Theme, Locale } from "@dialog/config";
 export interface PublicField {
   key: string;
   label: LocalizedString;
+  /** The choices a select-like field offers: the panel shows a chosen value by its label, never by its key. */
+  options?: { value: string; label: LocalizedString }[];
   required: boolean;
   type?: string;
   // Required only while this holds — the trade licence number is not asked of a

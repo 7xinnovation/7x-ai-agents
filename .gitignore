@@ -17,3 +17,4 @@ backups/
 
 # Rendered demo videos and frames (reproducible with `npm run render` in remotion-demo)
 remotion-demo/out/
+apps/web/public/_phone-preview.html

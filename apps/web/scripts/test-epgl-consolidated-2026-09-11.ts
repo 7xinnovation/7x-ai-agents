@@ -41,7 +41,7 @@ console.log("\nIdentity numbers are shown without being displayed in full");
   check("key matching is by name, not by value shape", isIdentityKey("partner_1_emirates_id") && !isIdentityKey("license_expiry_date"));
 
   const exp = readFileSync(new URL("../app/embed/[agent]/Experience.tsx", import.meta.url), "utf8");
-  check("the panel masks what it renders", /maskForDisplay\(k, displayValue\(v\)\)/.test(exp));
+  check("the panel masks what it renders — the value now read through the field's option labels first (12 October)", /maskForDisplay\(k, fieldValue\(k, v\)\)/.test(exp) && /const raw = displayValue\(v\);/.test(exp));
   check("...and the pencil still edits the real value", /setEditVal\(displayValue\(v\)\)/.test(exp));
 }
 

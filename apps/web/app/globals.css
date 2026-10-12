@@ -511,6 +511,34 @@ body {
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.01em;
+  /* "Sign in" wrapped to two lines inside its pill at phone width (12 October). A chip label is one line or the chip is too small. */
+  white-space: nowrap;
+}
+
+/* ---- Everything tappable, the same way (12 October 2026) ----
+   One focus ring, in the agent's colour, for keyboard and switch users; one
+   small press for a finger. Written with :where() so a control that styles
+   its own focus or press keeps it, and only the ones that had neither gain
+   this. */
+.dlg-root :where(button, a, [role="button"], input, textarea, select, summary):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--c-primary) 75%, transparent);
+  outline-offset: 2px;
+}
+.dlg-root :where(button:not(:disabled), [role="button"]):active {
+  transform: translateY(1px);
+}
+/* Reduced motion means still. Three animations honoured it and eleven did not;
+   now every animation and transition under the widget collapses to its end
+   state, and nothing waits on an animation to finish. */
+@media (prefers-reduced-motion: reduce) {
+  .dlg-root *,
+  .dlg-root *::before,
+  .dlg-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ---- Split ---- */
@@ -3166,6 +3194,38 @@ body {
    the 600px dock breakpoint so tablets/laptops keep the docked right-side panel.
    ========================================================================= */
 @media (max-width: 599px) {
+  /* THE HEADER AT PHONE WIDTH (12 October 2026). Seen at 390px: the wordmark
+     ran under the language chip, "Sign in" broke onto two lines, and six
+     controls fought for one row. The brand gives way first (it is a mark, not
+     a control), the chips tighten, the language toggle drops its globe and
+     keeps its word, and nothing is allowed to overlap. */
+  .dlg-header {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .dlg-brand {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .dlg-header-logo {
+    height: 22px;
+    max-width: min(96px, 100%);
+  }
+  .dlg-actions {
+    flex-shrink: 0;
+    gap: 0;
+  }
+  .dlg-chip {
+    height: 40px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .dlg-chip.icon-only {
+    width: 40px;
+  }
+  .dlg-chip.lang > svg {
+    display: none;
+  }
   .dlg-split {
     position: relative;
   }
