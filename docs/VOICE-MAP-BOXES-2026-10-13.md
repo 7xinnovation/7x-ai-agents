@@ -53,6 +53,50 @@ Locally there is no tracking row, which is why it worked here.
 failing that the row carrying the branch operation. Verified: staging and production
 return the real branch list after deploy (see the verification below).
 
+### 3b. "Map is not pointing to the right place" (FB-1797, re-checked once the map loaded again)
+
+With the map loading again, the 23 September report could be looked at properly:
+staging, signed in, a customer in Dubai (Business Bay), Abu Dhabi chosen, *Browse
+nearby branches* tapped. The map opened on the **whole country**, headed "Nearest
+branches to you", with **Al Musafah Post Office 1.9 km** at the top and Al Wagn at
+10.6 km — Musaffah and Al Wagan are 120 and 200 km from Business Bay.
+
+**Cause.** Emirates Post's `Rental/BoxLocations` gives a third of the Abu Dhabi
+branches the coordinates of Dubai: 7 of staging's 20 (Al Falah, Al Musafah, Bani
+Yas, Dalma, Al Wagn, Mohammed Bin Zayed City, Al Hayer) and **16 of production's
+41**; three of Ajman's four and one of Ras Al Khaimah's are misplaced the same way
+(`scratchpad` audit, 13 October). Dubai, Sharjah, Umm Al Quwain and Fujairah are
+clean. The 29 September change — frame the branches, not the customer — could not
+help while the branches themselves were in the wrong emirate: the "nearest" ones
+*were* near, the pins *did* span Dubai to Abu Dhabi.
+
+**Fix.** `lib/branchPlaces.ts`: every branch is checked against a box drawn around
+its emirate (exclaves in — Hatta, Masfout, Manama, Kalba, Dibba). One inside keeps
+Emirates Post's coordinates. One outside is looked up **by name** with Mapbox's
+geocoder, and the answer is taken only when it is a *place* (not a street, not a
+region), inside the box, and called what the branch is called — "Musaffah" for
+Al Musafah, "Al Wagan" for Al Wagn, "Manama" for Al Manama, "Dalma Island" for
+Dalma — never a similar name eighty kilometres off ("Butais" for Al Butain) nor the
+capital the geocoder offers for a name it does not know ("Abu Dhabi" for Masdar
+City). A branch nobody can place keeps its name and **loses its coordinates**: the
+map lists it last, without a pin and without a distance. Answers are cached for a
+day; a geocoder outage leaves a branch unpinned, not the map unloaded. The map
+component treats coordinates as optional: distance, pins, the frame and the
+"nearest to you" heading come from the placed branches only.
+
+Locally (Emirates Post staging data): Abu Dhabi 13 kept, 6 placed by name, 1
+unplaced (Dalma, before its alias); Ajman 1 placed, 1 unplaced (Al Manama, before
+its alias); Ras Al Khaimah 8 kept, 1 unplaced (Al Minae); Dubai all 18 kept. The
+unplaceable ones on production data are Al Dhannah, Al Zahiyah, Al Butain,
+AlDhafra, Al Aamrah, Masdar City and Al Manaei — Emirates Post could fix those at
+source in a minute each.
+
+**Verified on staging after the deploy (8ea32bd), same scenario, in Chrome:** the
+proxy answers Abu Dhabi with 13 kept and 7 placed by name, none outside the
+emirate; Ajman 2 placed; Ras Al Khaimah 8 kept and 1 without a pin. The map opens
+framed on Abu Dhabi (city to Al Ain), headed **"Branches in Abu Dhabi"**, and the
+nearest row to the Dubai position is Al Samha at 76.9 km — which is where it is.
+
 ## 4. "The agent is unable to show any PO Box in all emirates"
 
 **Cause.** Emirates Post's `Rental/FreeBoxes` publishes availability only to Emirates
@@ -80,4 +124,7 @@ with a UAE PASS sign-in stops at the box step outside Emirates Post's own surfac
 - `curl -X POST -H 'Content-Type: application/json' -d '{"text":"Hello"}' <site>/api/nxn/voice/speak`
   must return 200 with audio bytes (0 bytes or 502 means the voice is down).
 - `<site>/api/nxn/branches?agentSlug=nxn-dialog&emirate=DXB&bundle=IN` must list branches.
+- `…&emirate=AUH&bundle=IN`: every branch carries `placed` — `emirates_post`, `geocoded`
+  or `unknown` — and no branch with coordinates lies outside Abu Dhabi
+  (`apps/web/scripts/test-branch-places-2026-10-13.ts`, 36 checks, covers the logic).
 - `/api/nxn/voice/transcribe` was checked with a spoken clip on local and staging: correct text.

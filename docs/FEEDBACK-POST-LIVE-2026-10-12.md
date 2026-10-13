@@ -216,3 +216,25 @@ directive offers no Noqodi button (a Noqodi tap is answered "not offered here").
 All of it follows the agent's `paymentMethods` switch, so the day Noqodi is
 switched on there, re-running the three scripts brings the second way to pay
 back without a code change.
+
+## 13 October 2026 — the eight open items, re-checked one by one
+
+Source: `feedback-unresolved-structured-2026-10-13.json` (8 unresolved of 77).
+Two are new since the 12 October pass: FB-1797 (the map) and FB-1899 (the logo).
+Each was checked against the code on `main`, the two live sites and, where it
+needed a signed-in customer, on staging in Chrome as the mock persona (the
+`?mock=1` sign-in staging permits).
+
+| Ref | Item | Checked | Result |
+| --- | --- | --- | --- |
+| FB-1710 | General PO Box inquiries | Asked both sites cold, EN and AR (key delivery + branch visit; stopping auto-renewal) | Answered directly from the FAQ, no link out, no "knowledge base" wording, AED 30 named |
+| FB-1797 | Map not pointing to the right place | Staging, signed in, customer in Dubai, Abu Dhabi chosen, Browse tapped | **Was still wrong**: whole-country frame, "Nearest branches to you", Al Musafah 1.9 km — Emirates Post's data puts a third of Abu Dhabi's branches in Dubai. Fixed in 8ea32bd (`docs/VOICE-MAP-BOXES-2026-10-13.md` §3b); verified on staging after deploy: frame on Abu Dhabi, "Branches in Abu Dhabi", nearest 76.9 km |
+| FB-1803 | Enquiry inside the experience | Code unchanged since the 12 October production check (ENQ-2D08F62E); app settings read | Done in the chat. **`NXN_BRANCH_OPS_EMAIL` is still unset on staging and production**, so enquiries are recorded and referenced but no one is emailed |
+| FB-1812 | UAE Pay gateway | App settings and the one-tap reply on staging | Live on staging for EPGL and NXN (Noqodi button shown). **Production has no Noqodi credentials**; it is card-only until they land (runbook `docs/UAEPAY-ROLLOUT-2026-10-07.md`) |
+| FB-1831 | Ready prompt, two steps | Both sites' agent config and the rendered page; staging signed in | Greeting with four buttons + "Renew in two steps" prompt on both sites. Signed in on staging, the Renew tap gave one reply: summary, pay card, Noqodi button, order SIM18663856 |
+| FB-1832 | Renew Now with saved card | Same staging run | One tap saves the order and opens the payment page with the saved card attached. A silent charge still needs Emirates Post's tokenised-charge API (ask open since 7 October) |
+| FB-1889 | Mira ميره | Both sites' NXN and EPGL greetings (EN/AR), header alt, voice instruction, code | Mira everywhere; no "Aisha" left in any live config or in the app code |
+| FB-1899 | Use the attached logo | Both sites' header markup and the PNGs | The designer's mark is served (`/mira-onlight.png`, 257×112) on both sites since 4979956 |
+
+Not re-run today: a fresh test complaint on production (the 12 October one is
+on the audit log, and the code it goes through has not changed since).
