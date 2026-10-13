@@ -2735,9 +2735,13 @@ export function Experience({
     <div className={`dlg-root ${full ? "is-full" : ""} ${mobileCaseOpen ? "is-mobile-case" : ""}`} dir={dir} style={rootStyle}>
       <header className="dlg-header">
         <div className="dlg-brand">
-          {/* Mira wordmark — the assistant's identity across every tenant (FB-1889). */}
+          {/* Mira wordmark — the assistant's identity across every tenant (FB-1889).
+              The designer's mark since 13 October 2026: the Latin line of their
+              lockup, sparkles included, cut from the delivered PNG. The full
+              bilingual lockup is /mira-lockup.png for anywhere with the room to
+              show the Arabic name legibly; at a 26px header it would be 5px. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="dlg-header-logo" src="/mira-onlight.svg" alt="Mira" />
+          <img className="dlg-header-logo" src="/mira-onlight.png" alt="Mira" width={257} height={112} decoding="async" />
         </div>
         <div className="dlg-actions">
           {agent.locales.length > 1 ? (

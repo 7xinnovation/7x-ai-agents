@@ -155,16 +155,15 @@ body {
 }
 /* Brand wordmark/emblem shown in the header in place of the avatar tile. */
 .dlg-header-logo {
+  /* The designer's Mira wordmark (13 October 2026) is cut tight on its ink,
+     sparkles to baseline, on a transparent ground: 26px here is the letters'
+     own height, no blend mode needed. */
   height: 26px;
   width: auto;
   max-width: 150px;
   object-fit: contain;
   flex-shrink: 0;
   display: block;
-  /* The wordmark (Mira; Aisha before 12 October 2026) may ship on a white
-     ground; multiply drops that ground against the near-white header while
-     keeping the navy ink. */
-  mix-blend-mode: multiply;
 }
 .dlg-brand-text {
   display: flex;

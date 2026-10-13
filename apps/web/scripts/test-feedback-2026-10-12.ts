@@ -31,8 +31,19 @@ check("whole-word rename, both scripts and the Arabic", renameText("Hello, I'm A
   check("the greeting, persona and guidance are renamed; the deployment name is not", def.greeting.en === "Hello, I'm Mira." && def.greeting.ar === "مرحباً، أنا ميره." && def.persona === "You are Mira." && def.journeys[0].guidance === "Mira says" && def.name === "EPGL Dialog" && changes.length === 4, changes);
 }
 const exp = src("../app/embed/[agent]/Experience.tsx");
-check("the header shows the Mira wordmark", /src="\/mira-onlight\.svg" alt="Mira"/.test(exp) && !/aisha-onlight/.test(exp) && /const MIRA_BLUE/.test(exp));
-check("both wordmarks exist and carry the Arabic name", existsSync(resolve(here, "../public/mira-onlight.svg")) && existsSync(resolve(here, "../public/mira-ondark.svg")) && /ميره/.test(src("../public/mira-onlight.svg")));
+check("the header shows the designer's Mira wordmark", /src="\/mira-onlight\.png" alt="Mira"/.test(exp) && !/aisha-onlight|mira-onlight\.svg/.test(exp) && /const MIRA_BLUE/.test(exp));
+{
+  // The interim SVGs are gone; the designer's PNGs (13 October 2026) are in.
+  // A PNG's IHDR carries its size at bytes 16-23: the header mark is the Latin
+  // line (wide, 257×112), the lockup the bilingual stack (720×450).
+  const pngSize = (rel: string) => { const b = readFileSync(resolve(here, rel)); return b.readUInt32BE(16) + "x" + b.readUInt32BE(20); };
+  const have = (rel: string) => existsSync(resolve(here, rel));
+  check("the wordmark ships on light and on dark, plus the full lockup, and the interim SVGs are gone",
+    have("../public/mira-onlight.png") && have("../public/mira-ondark.png") && have("../public/mira-lockup.png") && have("../public/mira-lockup-ondark.png") &&
+    !have("../public/mira-onlight.svg") && !have("../public/mira-ondark.svg") &&
+    pngSize("../public/mira-onlight.png") === "257x112" && pngSize("../public/mira-ondark.png") === "257x112" && pngSize("../public/mira-lockup.png") === "720x450",
+    [pngSize("../public/mira-onlight.png"), pngSize("../public/mira-lockup.png")]);
+}
 check("the display translation spells Mira ميره and never shows a reply in the wrong script", /in Arabic ميره \(never ميرا or ميرة\)/.test(src("../app/api/translate/route.ts")) && /function rightScript\(src: string, out: string, to: string\): boolean/.test(src("../app/api/translate/route.ts")) && /rightScript\(texts\[i\]!, v, to\) \? v : texts\[i\]/.test(src("../app/api/translate/route.ts")));
 check("the voice is Mira too", /You are Mira, the spoken voice/.test(src("../app/api/nxn/voice/speak/route.ts")));
 check("the 30 September seed script seeds the current name", /const NEW_NAME = \{ en: "Mira", ar: "ميره" \}/.test(src("./epgl-aisha-and-renewal-docs-2026-09-30.ts")));

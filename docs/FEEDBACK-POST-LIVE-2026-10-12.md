@@ -11,7 +11,7 @@ so each was worked from its comment. Status after this pass:
 | FB-1812 | UAE Pay payment gateway | **Done earlier** (7–11 October) — Noqodi (UAE Pay) live on staging for EPGL and NXN; production awaits credentials |
 | FB-1831 | Ready prompt, submit and pay in two steps | **Done** — greeting buttons + a ready prompt that fills the composer; one message → summary + pay |
 | FB-1832 | Renew Now with saved card, like Amazon Pay | **Done as far as Emirates Post allows** — one tap saves the order with the saved card attached and opens their payment page; a silent charge needs their tokenised-charge API (ask open since 7 October) |
-| FB-1889 | Name the voice and the brand Mira ميره | **Done** — wordmark, greetings, voice instruction, code; interim wordmark pending the designer's asset |
+| FB-1889 | Name the voice and the brand Mira ميره | **Done** — wordmark (the designer's asset since 13 October), greetings, voice instruction, code |
 
 ## FB-1710 — the PO Box FAQ
 
@@ -86,10 +86,18 @@ recorded and referenced, and visible on the admin console only.
 
 ## FB-1889 — Mira
 
-- `public/mira-onlight.svg` and `mira-ondark.svg`: an interim wordmark in the
-  same language as the AISHA mark (gradient opening letters, navy, sparkle,
-  Arabic beneath). **Replace with the designer's final asset; keep the file
-  names.** The header uses `mira-onlight.svg`, alt "Mira".
+- The designer's mark landed on 13 October (`MiRA_logo.png`, a 5000×5000 RGBA
+  lockup: "Mira" with the azure gradient on the M and i, navy r and a, two
+  sparkles over the i, and `ميره` beneath on the right with a hairline rule).
+  It is cut, not redrawn, into four transparent PNGs in `public/`:
+  `mira-onlight.png` (257×112) is the Latin line with its sparkles, tight on
+  the ink, which the header shows at 26px (22px on a phone), alt "Mira";
+  `mira-ondark.png` is the same with the navy turned white;
+  `mira-lockup.png` (720×450) and `mira-lockup-ondark.png` are the complete
+  bilingual lockup for any surface with room for it. The header cannot show
+  the lockup: at 26px the Arabic name would be five pixels tall. A horizontal
+  bilingual arrangement, and an SVG, are the two things still to ask the
+  designer for. The interim SVGs of 12 October are deleted.
 - `scripts/rename-aisha-to-mira-2026-10-12.ts` renames in every agent's
   greeting, persona, guidance, titles and intents (whole words, EN/AR) and in any
   knowledge-base chunk; the deployment's internal `name` stays. On local it
@@ -151,8 +159,8 @@ Four things were wrong and are fixed here:
    `ميره` with `direction="rtl"` *and* `text-anchor="end"`, which Chrome
    lays out from the anchor rightwards — out of the frame, leaving a stray
    fragment beside "Mira" at header size. Both files are redrawn on one line,
-   "Mira | ميره" (1400×400), legible at the header's 26px. Same file names;
-   the designer's asset still replaces them.
+   "Mira | ميره" (1400×400), legible at the header's 26px. Superseded the next
+   day by the designer's asset (see FB-1889 above).
 2. **The pulse's own pill missed the one-tap recogniser.** The signed-in
    account pulse offered "Renew PO Box 50500 (Dubai)" among its next steps;
    that text says nothing about the term, so the server did not direct the
