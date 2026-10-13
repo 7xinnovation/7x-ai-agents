@@ -371,7 +371,8 @@ console.log("\nFB-1797 — the map frames the branches, not the customer");
 const map = readFileSync(new URL("../app/embed/[agent]/ChatMap.tsx", import.meta.url), "utf8");
 // Choose Abu Dhabi from Dubai and fitBounds zoomed out to cover both, opening
 // on a stretch of desert between them.
-check("the view centres on a branch", /const center = \{ lat: branches\[0\]!\.lat, lng: branches\[0\]!\.lng \};/.test(map));
+// 13 October: "a branch" became "a branch with a pin in its emirate" — see test-branch-places-2026-10-13.ts.
+check("the view centres on a branch", /const center = \{ lat: pins\[0\]!\.lat, lng: pins\[0\]!\.lng \};/.test(map));
 check("...and the customer's pin only joins the bounds if they are near", /if \(nearby\) bounds\.extend\(\[userLoc\.lng, userLoc\.lat\]\);/.test(map));
 check("...with 'near' defined, not assumed", /const NEAR_KM = 60;/.test(map));
 check("their pin is still drawn either way", /setText\(t\.youAreHere\)/.test(map));

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAgentBySlug } from "@/lib/agents";
 import { listIntegrations } from "@/lib/integrations";
 import { decryptSecret, isEncrypted } from "@/lib/crypto";
+import { placeBranches } from "@/lib/branchPlaces";
 
 export const runtime = "nodejs";
 
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
       signal: ctrl.signal,
     }).finally(() => clearTimeout(timer));
     const json = (await r.json().catch(() => ({}))) as { payload?: Record<string, unknown>[] };
-    const branches = (json.payload ?? [])
+    const raw = (json.payload ?? [])
       .map((o) => ({
         id: String(o.officeId ?? ""),
         name: String(o.nameEn ?? "").trim(),
@@ -71,7 +72,17 @@ export async function GET(req: NextRequest) {
         hours: String(o.workingTime ?? "").trim(),
         days: String(o.workingDays ?? "").trim(),
       }))
-      .filter((b) => b.name && Number.isFinite(b.lat) && Number.isFinite(b.lng));
+      .filter((b) => b.name);
+    /**
+     * WHERE THE BRANCH IS, NOT WHERE EMIRATES POST SAYS (FB-1797).
+     *
+     * A third of their Abu Dhabi branches, and most of Ajman's, carry Dubai's
+     * coordinates, so the Abu Dhabi map opened on the whole country with
+     * "Al Musafah Post Office, 1.9 km" at the top for a customer in Business
+     * Bay. A branch outside its emirate is placed by name instead, or shown
+     * without a pin — see lib/branchPlaces.ts.
+     */
+    const branches = await placeBranches(raw, emirate, process.env.MAPBOX_TOKEN);
     return NextResponse.json({ branches, mapboxToken: process.env.MAPBOX_TOKEN || "" });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "lookup failed" }, { status: 502 });

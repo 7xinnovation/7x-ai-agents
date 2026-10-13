@@ -21,12 +21,21 @@ interface Branch {
   id: string;
   name: string;
   nameAr?: string;
-  lat: number;
-  lng: number;
+  /**
+   * Absent when nobody knows (FB-1797): Emirates Post gave the branch another
+   * emirate's coordinates and the geocoder does not know the place by name. It
+   * is still a branch the customer can pick — listed, with no pin and no
+   * distance, rather than pinned in the wrong city.
+   */
+  lat?: number;
+  lng?: number;
   hours?: string;
   days?: string;
   dist?: number;
 }
+
+type Pinned = Branch & { lat: number; lng: number };
+const hasPin = (b: Branch): b is Pinned => typeof b.lat === "number" && typeof b.lng === "number";
 
 function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371;
@@ -188,7 +197,9 @@ export function ChatMap({
       return;
     }
     let list: Branch[] = data.branches;
-    if (loc) list = list.map((b) => ({ ...b, dist: haversineKm(loc, b) })).sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+    if (loc) list = list.map((b) => (hasPin(b) ? { ...b, dist: haversineKm(loc, b) } : b)).sort((a, b) => (a.dist ?? Infinity) - (b.dist ?? Infinity));
+    // The branches nobody could place come last, whatever the sort.
+    list = [...list.filter(hasPin), ...list.filter((b) => !hasPin(b))];
     setBranches(list);
     setUserLoc(loc);
     if (data.mapboxToken) {
@@ -205,7 +216,9 @@ export function ChatMap({
 
   // Initialise the map once the container is in the DOM (phase === "ready").
   React.useEffect(() => {
-    if (phase !== "ready" || !mapEl.current || !mapboxRef.current || mapObj.current || !branches.length) return;
+    // Only the branches with a pin shape the map; the rest are in the list.
+    const pins = branches.filter(hasPin);
+    if (phase !== "ready" || !mapEl.current || !mapboxRef.current || mapObj.current || !pins.length) return;
     const mapboxgl = mapboxRef.current;
     /**
      * THE BRANCHES DECIDE THE VIEW (FB-1797).
@@ -221,8 +234,12 @@ export function ChatMap({
      * So the frame is the branches. Their pin still goes on the map when they
      * are near enough for it to mean anything — it just no longer drags the
      * view across an emirate to include itself.
+     *
+     * And the branches are the ones with coordinates IN the emirate: Emirates
+     * Post's data put a third of Abu Dhabi's in Dubai, which stretched the
+     * frame across the country whatever this did (lib/branchPlaces.ts).
      */
-    const center = { lat: branches[0]!.lat, lng: branches[0]!.lng };
+    const center = { lat: pins[0]!.lat, lng: pins[0]!.lng };
     let map: any;
     try {
       map = new mapboxgl.Map({
@@ -248,7 +265,7 @@ export function ChatMap({
       // these are that emirate's branches, and they are not there.
       if (nearby) bounds.extend([userLoc.lng, userLoc.lat]);
     }
-    branches.slice(0, 15).forEach((b) => {
+    pins.slice(0, 15).forEach((b) => {
       const el = document.createElement("div");
       el.className = "dlg-map-pin";
       el.setAttribute("role", "button");
@@ -319,7 +336,7 @@ export function ChatMap({
   const emirateName = EMIRATE_NAME[emirate.toUpperCase()]?.[locale === "ar" ? "ar" : "en"];
   return (
     <div className="dlg-map is-ready">
-      {mapboxRef.current ? <div ref={mapEl} className="dlg-map-canvas" /> : null}
+      {mapboxRef.current && branches.some(hasPin) ? <div ref={mapEl} className="dlg-map-canvas" /> : null}
       <div className="dlg-map-head">
         {/* WHICH branches these are, not how they happen to be sorted. "Nearest
             branches to you" described the sort order and was read as the
