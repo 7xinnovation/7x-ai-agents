@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import WebSocket from "ws";
 import { log } from "@/lib/logger";
+import { realtimeUrl, sessionUpdate } from "@/lib/realtimeVoice";
 
 export const runtime = "nodejs";
 
@@ -16,14 +17,37 @@ export const runtime = "nodejs";
  * ephemeral key at the generic realtimertc endpoint (401), but the WebSocket
  * transport authenticates fine with the resource api-key — verified end to end.
  *
+ * THE GA PROTOCOL (13 October 2026). Reported: "it replies with 2 words and then
+ * disconnects and goes back to listening." The voice had not said two words; it
+ * had said none. Azure retired the Realtime PREVIEW protocol (deprecated 30 April
+ * 2026) and every session here was being answered with
+ *
+ *   realtime_beta_access_required: The Realtime preview API is no longer
+ *   available for this request. Please migrate from the preview API to the v1 API.
+ *
+ * — after which this route closed an EMPTY 200 stream, the client took the
+ * silence as "played nothing" and fell back to the device's own voice, and the
+ * barge-in detector, hearing that voice through the microphone, cut it off a
+ * third of a second in. Hence two words. The GA differences are small and all
+ * here: `/openai/v1/realtime?model=<deployment>` with NO api-version, a
+ * `session.update` that carries `type: "realtime"` with the voice and format
+ * under `audio.output`, and audio arriving as `response.output_audio.delta`.
+ *
+ * The response is also honest now: the socket is opened and the FIRST audio
+ * chunk awaited before any status is sent, so a failure is a 502 the client and
+ * a curl can both see, never a 200 with nothing in it.
+ *
  * If the realtime deployment isn't configured, we return 501 and the client
  * falls back to on-device SpeechSynthesis so voice still works.
  */
 const ENDPOINT = process.env.AZURE_REALTIME_ENDPOINT;
 const KEY = process.env.AZURE_REALTIME_KEY;
 const DEPLOY = process.env.AZURE_REALTIME_DEPLOYMENT || "gpt-realtime-1.5";
-const API_VERSION = process.env.AZURE_REALTIME_API_VERSION || "2025-04-01-preview";
 const VOICE = process.env.AZURE_REALTIME_VOICE || "marin";
+/** How long the first audio may take to arrive before the request is a 502. */
+const FIRST_AUDIO_MS = 15000;
+/** How long a whole utterance may take. */
+const TOTAL_MS = 45000;
 /**
  * "EXACTLY as written" was doing more work than intended.
  *
@@ -52,71 +76,101 @@ export async function POST(req: NextRequest) {
   if (!text) return new Response(JSON.stringify({ error: "empty" }), { status: 400 });
   if (text.length > 4000) text = text.slice(0, 4000);
 
-  const host = ENDPOINT.replace(/^https?:\/\//, "").replace(/\/$/, "");
-  const url = `wss://${host}/openai/realtime?api-version=${API_VERSION}&deployment=${DEPLOY}`;
+  const ws = new WebSocket(realtimeUrl(ENDPOINT, DEPLOY), { headers: { "api-key": KEY } });
+  /** Audio that arrived before the response stream existed to carry it. */
+  const pending: Uint8Array[] = [];
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let closed = false;
+  let failure: string | null = null;
+  let bytes = 0;
+  let settleFirst: (ok: boolean) => void = () => {};
+  const first = new Promise<boolean>((r) => { settleFirst = r; });
 
-  let ws: WebSocket | null = null;
-  let finish: (err?: string) => void = () => {};
+  const send = (o: unknown) => {
+    try { ws.send(JSON.stringify(o)); } catch { /* socket gone */ }
+  };
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const finish = (err?: string) => {
+    if (closed) return;
+    closed = true;
+    if (timeout) clearTimeout(timeout);
+    if (err) {
+      failure = err;
+      log.error("voice_speak_failed", new Error(err), { deployment: DEPLOY, bytes });
+    }
+    try { ws.close(); } catch { /* ignore */ }
+    try { controller?.close(); } catch { /* already closed */ }
+    settleFirst(bytes > 0);
+  };
+  const push = (chunk: Uint8Array) => {
+    if (closed || !chunk.length) return;
+    bytes += chunk.length;
+    if (controller) {
+      try { controller.enqueue(chunk); } catch { /* stream closed by client */ }
+    } else {
+      pending.push(chunk);
+    }
+    settleFirst(true);
+  };
+
+  timeout = setTimeout(() => finish("timeout"), TOTAL_MS);
+  ws.on("message", (raw: Buffer) => {
+    let m: { type?: string; delta?: string; error?: unknown; response?: { status?: string; status_details?: unknown } };
+    try { m = JSON.parse(raw.toString()); } catch { return; }
+    switch (m.type) {
+      case "session.created":
+        send(sessionUpdate(VOICE, TTS_INSTRUCTIONS));
+        break;
+      case "session.updated":
+        send({
+          type: "conversation.item.create",
+          item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+        });
+        send({ type: "response.create" });
+        break;
+      case "response.output_audio.delta":
+        if (m.delta) push(new Uint8Array(Buffer.from(m.delta, "base64")));
+        break;
+      case "response.done": {
+        // A response that "completed" with no audio is a failure the model did
+        // not call one; say what it did say, so the next retirement is readable.
+        const status = m.response?.status;
+        if (bytes === 0) finish(`no audio: ${status ?? "?"} ${JSON.stringify(m.response?.status_details ?? {}).slice(0, 200)}`);
+        else finish();
+        break;
+      }
+      case "error":
+        finish(JSON.stringify(m.error).slice(0, 300));
+        break;
+    }
+  });
+  ws.on("unexpected-response", (_r, res) => finish(`HTTP ${res.statusCode ?? "?"} at handshake`));
+  ws.on("error", (e: Error) => finish(e.message));
+  ws.on("close", () => finish());
+
+  const ok = await Promise.race([
+    first,
+    new Promise<boolean>((r) => setTimeout(() => r(bytes > 0), FIRST_AUDIO_MS)),
+  ]);
+  if (!ok) {
+    finish(failure ?? "no audio before the deadline");
+    return new Response(JSON.stringify({ error: "voice_unavailable", detail: (failure ?? "").slice(0, 200) }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    });
+  }
 
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      ws = new WebSocket(url, { headers: { "api-key": KEY } });
-      let closed = false;
-      const send = (o: unknown) => {
-        try { ws?.send(JSON.stringify(o)); } catch { /* socket gone */ }
-      };
-      const timeout = setTimeout(() => finish("timeout"), 30000);
-      finish = (err?: string) => {
-        if (closed) return;
-        closed = true;
-        clearTimeout(timeout);
-        try { ws?.close(); } catch { /* ignore */ }
-        try { controller.close(); } catch { /* already closed */ }
-        if (err) log.error("voice_speak_failed", new Error(err));
-      };
-
-      ws.on("message", (raw: Buffer) => {
-        let m: { type?: string; delta?: string; error?: unknown };
-        try { m = JSON.parse(raw.toString()); } catch { return; }
-        switch (m.type) {
-          case "session.created":
-            send({
-              type: "session.update",
-              session: {
-                modalities: ["audio", "text"],
-                voice: VOICE,
-                output_audio_format: "pcm16",
-                instructions: TTS_INSTRUCTIONS,
-                turn_detection: null,
-              },
-            });
-            break;
-          case "session.updated":
-            send({
-              type: "conversation.item.create",
-              item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
-            });
-            send({ type: "response.create", response: { modalities: ["audio", "text"] } });
-            break;
-          case "response.audio.delta":
-            if (m.delta) {
-              try { controller.enqueue(new Uint8Array(Buffer.from(m.delta, "base64"))); }
-              catch { /* stream closed by client */ }
-            }
-            break;
-          case "response.done":
-            finish();
-            break;
-          case "error":
-            finish(JSON.stringify(m.error).slice(0, 200));
-            break;
-        }
-      });
-      ws.on("error", (e: Error) => finish(e.message));
-      ws.on("close", () => finish());
+    start(c) {
+      controller = c;
+      for (const chunk of pending) {
+        try { c.enqueue(chunk); } catch { /* closed */ }
+      }
+      pending.length = 0;
+      if (closed) { try { c.close(); } catch { /* already closed */ } }
     },
     cancel() {
-      // Client aborted playback (toggled voice off / new reply) — stop generating.
+      // Client aborted playback (toggled voice off / interrupted) — stop generating.
       finish();
     },
   });

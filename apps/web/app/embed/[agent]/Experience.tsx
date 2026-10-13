@@ -140,6 +140,7 @@ export const STR = {
     voiceConnecting: "Connecting…",
     voiceSpeaking: "Speaking…",
     voiceListening: "Listening…",
+    voiceInterrupt: "Speak now",
     withdraw: "Withdraw & erase",
     withdrawHint: "Withdraw my permission — stop everything and erase what was collected",
     withdrawing: "Withdrawing…",
@@ -213,6 +214,7 @@ export const STR = {
     voiceConnecting: "جارٍ الاتصال…",
     voiceSpeaking: "جارٍ التحدث…",
     voiceListening: "جارٍ الاستماع…",
+    voiceInterrupt: "تحدّث الآن",
     withdraw: "سحب الإذن ومسح البيانات",
     withdrawHint: "اسحب إذني — أوقِف كل شيء وامسح ما تم جمعه",
     withdrawing: "جارٍ السحب…",
@@ -3098,6 +3100,13 @@ export function Experience({
               <div className={`dlg-voice-bar${voice.error ? " is-error" : voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
                 <span className="dlg-voice-bar-dot" />
                 <span>{voice.error ? voice.error : voice.connecting ? t.voiceConnecting : voice.speaking ? t.voiceSpeaking : voice.listening ? t.voiceListening : t.voiceOn}</span>
+                {/* A way to interrupt that does not depend on the microphone
+                    hearing them over the assistant: one tap, the voice stops
+                    and the mic opens. The automatic barge-in (useVoiceChat)
+                    runs on desktop only. */}
+                {voice.speaking ? (
+                  <button type="button" className="dlg-voice-bar-stop" onClick={voice.interrupt}>{t.voiceInterrupt}</button>
+                ) : null}
                 <button type="button" className="dlg-voice-bar-stop" onClick={voice.toggle}>{t.voiceStop}</button>
               </div>
             ) : null}

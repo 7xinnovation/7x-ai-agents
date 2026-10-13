@@ -13,8 +13,13 @@ import { nativeVoiceAllowed } from "./nativeBridge";
  *    so the same agent (tools, journeys, case panel) handles it. If the
  *    transcribe endpoint isn't available yet, it gracefully uses the on-device
  *    recognition text instead.
- *  - TTS: each new assistant reply is spoken with SpeechSynthesis; the mic is
- *    paused while it streams/speaks (no echo) and resumes after.
+ *  - TTS: each new assistant reply is spoken with the gpt-realtime voice streamed
+ *    from /api/nxn/voice/speak (SpeechSynthesis if that is unavailable); the mic
+ *    is paused while it streams/speaks (no echo) and resumes after.
+ *  - Barge-in: while the assistant speaks, the recogniser listens for the
+ *    CUSTOMER — words that are not the assistant's own coming back through the
+ *    microphone — and only then stops the voice and hands the turn over. See
+ *    heardTheCustomer. A tap on the voice bar interrupts too.
  */
 interface Msg { role: string; content: string; pulse?: boolean }
 
@@ -75,6 +80,79 @@ export function forSpeech(md: string, locale: "en" | "ar" = "en"): string {
   );
 }
 
+/**
+ * BARGE-IN IS A QUESTION OF WORDS, NOT VOLUME.
+ *
+ * Reported 12 October: "it replies with 2 words and then disconnects and goes
+ * back to listening." The interrupt detector was an energy meter on the
+ * microphone — any sustained sound above a floor, a third of a second long, was
+ * taken for the customer. The assistant's own voice coming out of the speakers
+ * is a sustained sound above that floor. Echo cancellation hides most of it
+ * when the voice is played through Web Audio, and none of it when the device's
+ * own speech engine is speaking (the fallback the retired preview API had
+ * forced on everybody), and in a room with a second laptop playing audio it
+ * does not matter which: the meter tripped on nearly every reply, a few hundred
+ * milliseconds in.
+ *
+ * Volume cannot tell the customer from the assistant. Words can: the recogniser
+ * runs while the voice speaks, and what it hears is compared with what is being
+ * said. The assistant's own voice comes back as its own words; the customer
+ * brings words of their own. Numbers are left out of the comparison, because
+ * the voice says "six hundred ninety-five dirhams" where the text says "AED
+ * 695", and so are the little words every sentence shares.
+ */
+const SHARED_WORDS = new Set([
+  // English function words and the number words the voice turns figures into.
+  "the", "and", "for", "you", "your", "with", "that", "this", "are", "can", "will", "have", "has", "our", "one", "two",
+  "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "twenty", "thirty", "forty", "fifty",
+  "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "point", "dirham", "dirhams", "aed", "per", "year", "years",
+  // Arabic equivalents.
+  "في", "من", "على", "إلى", "هذا", "هذه", "التي", "الذي", "درهم", "درهماً", "دراهم", "مئة", "مائة", "ألف", "سنة", "سنوات",
+]);
+
+/** The words of a sentence, lowercased, with everything else dropped. */
+export function bagOfWords(s: string): Set<string> {
+  return new Set(
+    s
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+}
+
+/**
+ * Did the microphone hear the CUSTOMER, or the assistant's own voice coming back?
+ *
+ * True when what was heard carries at least two content words that are not in
+ * what the assistant is saying, and those are at least half of its content
+ * words. Short fragments and anything that is mostly the spoken text are the
+ * voice itself, and are ignored.
+ */
+export function heardTheCustomer(heard: string, spoken: string): boolean {
+  const said = bagOfWords(spoken);
+  const words = [...bagOfWords(heard)].filter((w) => w.length >= 3 && !/^\p{N}+$/u.test(w) && !SHARED_WORDS.has(w));
+  if (words.length < 2) return false;
+  const novel = words.filter((w) => !said.has(w));
+  return novel.length >= 2 && novel.length * 2 >= words.length;
+}
+
+/**
+ * Where the recogniser may run while the assistant speaks.
+ *
+ * On desktop Chromium it is a second, silent listener. On Android the system
+ * recogniser takes audio focus from whatever is playing, and on Apple devices
+ * every start is announced with a tone; in both the cure would be the disease.
+ * Those customers interrupt with a tap on the voice bar instead.
+ */
+function autoBargeIn(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  if (/android|iphone|ipad|ipod/i.test(ua)) return false;
+  if (/apple/i.test(navigator.vendor ?? "")) return false;
+  return true;
+}
+
 function pickMime(): string {
   const MR = typeof window !== "undefined" ? (window as any).MediaRecorder : undefined;
   if (!MR?.isTypeSupported) return "";
@@ -107,17 +185,17 @@ export function useVoiceChat(opts: {
   const sendRef = useRef(send);
   sendRef.current = send;
   const micRef = useRef<MediaStream | null>(null);
-  const recRef = useRef<any>(null); // SpeechRecognition
+  const recRef = useRef<any>(null); // SpeechRecognition, capturing an utterance
   const busyRef = useRef(false); // an utterance is being recognized/transcribed
   const spokenRef = useRef(-1);
   const audioCtxRef = useRef<AudioContext | null>(null); // playback of gpt-realtime audio
   const ttsAbortRef = useRef<AbortController | null>(null); // in-flight /speak stream
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]); // scheduled audio nodes
-  // Barge-in: an analyser on the LIVE mic (never routed to output) whose energy
-  // we watch while the assistant speaks, so the customer can talk over it.
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const vadBufRef = useRef<Float32Array | null>(null);
-  const vadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Barge-in: a second recogniser that runs only while the assistant speaks, and
+  // the text being spoken, which is what its hearing is compared against.
+  const bargeRecRef = useRef<any>(null);
+  const spokenTextRef = useRef("");
+  const warnedRef = useRef(false);
 
   const supported =
     typeof window !== "undefined" &&
@@ -194,6 +272,57 @@ export function useVoiceChat(opts: {
     ttsSourcesRef.current = [];
   }, []);
 
+  /** The barge-in recogniser, off. */
+  const stopBargeListener = useCallback(() => {
+    const rec = bargeRecRef.current;
+    bargeRecRef.current = null;
+    if (rec) { try { rec.onend = null; rec.onresult = null; rec.onerror = null; rec.abort(); } catch { /* ignore */ } }
+  }, []);
+
+  /**
+   * The customer interrupted — by speaking over the assistant, or by tapping
+   * the voice bar. Silence ourselves and start listening. The in-flight
+   * speak()'s done() then resumes as a harmless no-op.
+   */
+  const interrupt = useCallback(() => {
+    if (!speakingRef.current) return;
+    stopBargeListener();
+    stopRealtimeAudio();
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    speakingRef.current = false;
+    setSpeaking(false);
+    if (activeRef.current && !streamingRef.current) listenOnce();
+  }, [stopBargeListener, stopRealtimeAudio, listenOnce]);
+
+  /** The barge-in recogniser, on: it listens for the customer while the assistant speaks. */
+  const startBargeListener = useCallback(() => {
+    if (bargeRecRef.current || !speakingRef.current || !activeRef.current || !autoBargeIn()) return;
+    const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    let rec: any;
+    try { rec = new SR(); } catch { return; }
+    rec.lang = locale === "ar" ? "ar-SA" : "en-US";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e: any) => {
+      let heard = "";
+      const results = e?.results ?? [];
+      for (let i = e?.resultIndex ?? 0; i < results.length; i++) heard += " " + (results[i]?.[0]?.transcript ?? "");
+      if (heardTheCustomer(heard, spokenTextRef.current)) interrupt();
+    };
+    rec.onerror = () => { /* onend follows */ };
+    rec.onend = () => {
+      if (bargeRecRef.current !== rec) return;
+      bargeRecRef.current = null;
+      // Chromium ends a continuous recognition on its own after a silence; while
+      // the assistant is still talking, listen again.
+      if (speakingRef.current && activeRef.current) setTimeout(startBargeListener, 150);
+    };
+    bargeRecRef.current = rec;
+    try { rec.start(); } catch { bargeRecRef.current = null; }
+  }, [locale, interrupt]);
+
   // Speak with the natural gpt-realtime voice: stream PCM16 (24 kHz mono) from
   // /api/nxn/voice/speak and play it via Web Audio, scheduling chunks back to
   // back. Returns true if audio actually played; false to fall back to on-device
@@ -240,7 +369,15 @@ export function useVoiceChat(opts: {
         signal: controller.signal,
       });
     } catch { return false; }
-    if (!resp.ok || !resp.body) return false;
+    if (!resp.ok || !resp.body) {
+      // Said once per session, so a silent fallback to the device voice is at
+      // least visible in the console — the preview API's retirement was not.
+      if (!warnedRef.current) {
+        warnedRef.current = true;
+        console.warn(`[voice] the natural voice is unavailable (${resp.status}); using the device's own voice`);
+      }
+      return false;
+    }
 
     const gain = ctx.createGain();
     gain.connect(ctx.destination);
@@ -285,6 +422,9 @@ export function useVoiceChat(opts: {
       }
     } catch { /* aborted or stream error */ }
     if (!played) { try { gain.disconnect(); } catch { /* ignore */ } return false; }
+    // Interrupted: the sources are already stopped; do not sit out the rest of
+    // an utterance nobody is hearing.
+    if (controller.signal.aborted) { try { gain.disconnect(); } catch { /* ignore */ } return true; }
     const remaining = Math.max(0, scheduled - ctx.currentTime);
     await new Promise((r) => setTimeout(r, remaining * 1000 + 80));
     // One gain node per reply, and the context outlives the reply.
@@ -305,55 +445,16 @@ export function useVoiceChat(opts: {
     } catch { done(); }
   }, [locale]);
 
-  // ── Barge-in: while the assistant speaks, watch the live mic; a sustained
-  //    voice above the floor stops playback so the customer can interrupt. Echo
-  //    cancellation keeps our own audio from self-triggering; the constants are
-  //    the thing to tune on-device if bleed causes false interrupts. ───────────
-  const BARGE_RMS = 0.055;
-  const BARGE_SUSTAIN_MS = 260;
-  const VAD_INTERVAL_MS = 60;
-  const rms = useCallback((): number => {
-    const an = analyserRef.current;
-    const buf = vadBufRef.current;
-    if (!an || !buf) return 0;
-    an.getFloatTimeDomainData(buf as any);
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) { const v = buf[i] ?? 0; sum += v * v; }
-    return Math.sqrt(sum / buf.length);
-  }, []);
-  const stopVadMonitor = useCallback(() => {
-    if (vadTimerRef.current) { clearInterval(vadTimerRef.current); vadTimerRef.current = null; }
-  }, []);
-  const startVadMonitor = useCallback(() => {
-    if (vadTimerRef.current || !analyserRef.current) return;
-    let over = 0;
-    vadTimerRef.current = setInterval(() => {
-      if (!speakingRef.current) { over = 0; return; }
-      if (rms() > BARGE_RMS) {
-        over += VAD_INTERVAL_MS;
-        if (over >= BARGE_SUSTAIN_MS) {
-          over = 0;
-          // The customer interrupted: silence ourselves and start listening. The
-          // in-flight speak()'s done() then resumes as a harmless no-op.
-          stopRealtimeAudio();
-          try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
-          speakingRef.current = false;
-          setSpeaking(false);
-          if (activeRef.current && !streamingRef.current) listenOnce();
-        }
-      } else {
-        over = 0;
-      }
-    }, VAD_INTERVAL_MS);
-  }, [rms, stopRealtimeAudio, listenOnce]);
-
   const speak = useCallback((text: string) => {
     const clean = forSpeech(text, locale === "ar" ? "ar" : "en");
     if (!clean) { listenOnce(); return; }
     stopRecognition();
     speakingRef.current = true;
     setSpeaking(true);
+    spokenTextRef.current = clean;
+    startBargeListener();
     const done = () => {
+      stopBargeListener();
       speakingRef.current = false;
       setSpeaking(false);
       ttsAbortRef.current = null;
@@ -367,21 +468,19 @@ export function useVoiceChat(opts: {
         else done();
       })
       .catch(() => { if (activeRef.current) speakBrowser(clean, done); else done(); });
-  }, [listenOnce, stopRecognition, speakRealtime, speakBrowser, locale]);
+  }, [listenOnce, stopRecognition, startBargeListener, stopBargeListener, speakRealtime, speakBrowser, locale]);
 
   const cleanup = useCallback(() => {
     stopRecognition();
+    stopBargeListener();
     stopRealtimeAudio();
-    stopVadMonitor();
-    try { analyserRef.current?.disconnect(); } catch { /* ignore */ }
-    analyserRef.current = null;
     micRef.current?.getTracks().forEach((t) => t.stop());
     micRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     speakingRef.current = false;
     setSpeaking(false);
     setListening(false);
-  }, [stopRecognition, stopRealtimeAudio, stopVadMonitor]);
+  }, [stopRecognition, stopBargeListener, stopRealtimeAudio]);
 
   const toggle = useCallback(async () => {
     if (!supported) return;
@@ -409,27 +508,12 @@ export function useVoiceChat(opts: {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
       micRef.current = mic;
-      // Wire the live mic into an analyser for barge-in energy detection (analyser
-      // only, never to destination, so it can never feed back into playback).
-      try {
-        const ctx = audioCtxRef.current;
-        if (ctx) {
-          const srcNode = ctx.createMediaStreamSource(mic);
-          const an = ctx.createAnalyser();
-          an.fftSize = 1024;
-          an.smoothingTimeConstant = 0.5;
-          srcNode.connect(an);
-          analyserRef.current = an;
-          vadBufRef.current = new Float32Array(an.fftSize);
-          startVadMonitor();
-        }
-      } catch { /* barge-in unavailable; turn-taking still works */ }
       listenOnce();
     } catch {
       setError("Microphone access is needed. Allow it and try again.");
       // keep active so the error stays visible; user taps Turn off
     }
-  }, [supported, messages.length, cleanup, listenOnce, startVadMonitor]);
+  }, [supported, messages.length, cleanup, listenOnce]);
 
   // Pause the mic while the agent responds; speak each new reply.
   useEffect(() => {
@@ -468,5 +552,5 @@ export function useVoiceChat(opts: {
     audioCtxRef.current = null;
   }, [cleanup]);
 
-  return { supported, active, connecting: false, listening, speaking, error, toggle };
+  return { supported, active, connecting: false, listening, speaking, error, toggle, interrupt };
 }

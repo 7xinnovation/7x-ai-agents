@@ -26,7 +26,27 @@ export async function GET(req: NextRequest) {
   if (!agent) return NextResponse.json({ error: "unknown agent" }, { status: 404 });
 
   const env = (agent.definition.activeEnvironment as "staging" | "production") ?? "staging";
-  const integ = (await listIntegrations(agent.id)).find((i) => i.enabled && (i.environments[env] || i.environments.staging));
+  /**
+   * THE PO BOX INTEGRATION, BY NAME — not whichever row is newest.
+   *
+   * Reported 12 October: "Couldn't load the map" the moment Browse was tapped,
+   * on staging and production, for every emirate. The chat's own branch cards
+   * were fine, because a tool knows the row it belongs to. This proxy took the
+   * FIRST enabled row, and listIntegrations orders newest first: since the EMX
+   * Tracking integration was added on 22 September, "first" has been the
+   * tracking gateway, whose base URL has no Rental/BoxLocations — an empty list,
+   * which this component shows as a map that could not load. Locally there was
+   * no tracking row, so locally it worked. Same choice as epGeocode and
+   * epSavedCards make: the row named NXN; failing that, the one that actually
+   * carries the branch operation.
+   */
+  const rows = await listIntegrations(agent.id);
+  const forEnv = (i: (typeof rows)[number]) => i.enabled && Boolean(i.environments[env] || i.environments.staging);
+  const carriesBranches = (i: (typeof rows)[number]) =>
+    Object.values(i.environments).some((s) =>
+      ((s as { operations?: { path?: string }[] } | undefined)?.operations ?? []).some((o) => /Rental\/BoxLocations/i.test(String(o?.path ?? "")))
+    );
+  const integ = rows.find((i) => forEnv(i) && /nxn/i.test(i.name)) ?? rows.find((i) => forEnv(i) && carriesBranches(i));
   const spec = integ?.environments[env] || integ?.environments.staging;
   if (!spec) return NextResponse.json({ error: "branch service not configured" }, { status: 502 });
 

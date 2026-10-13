@@ -5115,6 +5115,27 @@ export async function executeOperation(
     if ((res.status === 401 || res.status === 403) && tokenAuth && !isAuthOperation(op)) {
       if (!bearer) return { result: signInMsg, isError: true };
       // What was rejected decides the remedy (FB-1485).
+      if (bearerSource === "identity" && /Rental\/(FreeBoxes|GetRejectedBoxDetails)/i.test(op.path)) {
+        /**
+         * BOX AVAILABILITY IS NOT PUBLISHED TO A UAE PASS SIGN-IN (13 October 2026).
+         *
+         * Reported from staging, signed in with UAE PASS, in three emirates:
+         * "I'm unable to retrieve available box numbers ... temporary system
+         * issue". It is not temporary and it is not an issue. Rental/FreeBoxes
+         * answers 401 to the API key alone (verified again today) and to the UAE
+         * PASS access token this chat holds; it answers only Emirates Post's OWN
+         * session — the one its app and website carry and hand to this widget
+         * as the host token, which is why the same step works inside them
+         * (production, 8 September: box 2062 at office 201). Signing in again
+         * yields another token of the same kind. So the model is told the
+         * truth it can act on, instead of a cause we had not established.
+         */
+        return {
+          result:
+            "Emirates Post publishes available box numbers only to its OWN signed-in session (the one its app and website hold), and it has rejected the UAE PASS sign-in made in this chat. This is not temporary and signing in again will not change it, so do NOT ask them to sign in again, do NOT call it a system issue, and never start a passcode flow. Tell the customer plainly that the list of available box numbers cannot be shown in this channel; keep everything already collected; offer to continue the rental in the Emirates Post app or website, where the box list is available, or a callback. Never invent a box number.",
+          isError: true,
+        };
+      }
       if (bearerSource === "identity") {
         // The customer's own UAE PASS token was refused. TWO different causes look
         // identical from here and we cannot tell them apart:
