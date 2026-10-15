@@ -107,7 +107,9 @@ const JOURNEYS: Journey[] = [
       // Any agent reply, with markdown stripped: "Auto-renewal is now **ON**" is the confirmation.
       const said = transcript.split("AGENT:").slice(1).join(" ").replace(/\*\*/g, "");
       const done = /auto-?renew(al)? (is )?(now )?(confirmed )?(on|switched on|enabled|turned on)\b|switched on auto-?renew|is now (on|enabled)/i.test(said);
-      return { ok: done && t.status.state !== "TASK_STATE_FAILED", why: `state ${t.status.state}; confirmed on: ${done}` };
+      const action = t.artifacts?.find((a) => a.name === "action-outcome")?.parts[0]?.data as { actions?: { tool: string; enabled?: boolean }[] } | undefined;
+      const closed = t.status.state === "TASK_STATE_COMPLETED" && Boolean(action?.actions?.some((x) => x.tool === "nxn_set_auto_renew" && x.enabled === true));
+      return { ok: done && closed, why: `state ${t.status.state}; confirmed on: ${done}; action-outcome: ${JSON.stringify(action ?? null)}` };
     },
   },
   {
