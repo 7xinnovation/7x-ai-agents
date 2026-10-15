@@ -66,11 +66,11 @@ export function InviteClient({ token, email, name, organization }: { token: stri
   };
 
   return (
-    <div data-rise className="mx-auto w-full max-w-[460px] py-6 sm:py-10">
-      <h1 className="text-[22px] font-bold tracking-tight text-ink">Set your password</h1>
+    <div className="mx-auto w-full max-w-[460px] py-6 sm:py-10">
+      <h1 className="text-[22px] font-semibold text-ink">Set your password</h1>
       <p className="mt-1.5 text-sm text-muted">You were invited to Dialog Developers. Choose a password to finish creating the account.</p>
 
-      <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 rounded-xl border border-[var(--color-line)] bg-surface px-4 py-3.5 text-[13.5px] shadow-[var(--shadow-xs)]">
+      <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 rounded-xl border border-[var(--color-line)] bg-surface px-4 py-3.5 text-[13.5px] ">
         <dt className="text-muted">Organisation</dt>
         <dd className="font-medium text-ink">{organization}</dd>
         <dt className="text-muted">Name</dt>

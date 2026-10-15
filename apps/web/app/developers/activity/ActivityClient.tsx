@@ -141,14 +141,14 @@ export function ActivityClient({ initialTasks, initialRequests }: { initialTasks
   ];
 
   return (
-    <div data-rise>
+    <div>
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {live}
       </span>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-[26px] font-bold tracking-tight text-ink">Activity</h1>
+          <h1 className="text-[24px] font-semibold text-ink">Activity</h1>
           <p className="mt-1 max-w-[62ch] text-[14px] text-muted">
             The tasks your applications created and every call they made on the doorway. The most recent {TASKS_LIMIT} tasks and {REQUESTS_LIMIT}{" "}
             requests.
@@ -175,7 +175,7 @@ export function ActivityClient({ initialTasks, initialRequests }: { initialTasks
         ) : null}
       </div>
 
-      <div role="tablist" aria-label="Activity sections" className="mt-6 inline-flex rounded-lg border border-[var(--color-line)] bg-surface p-1 shadow-[var(--shadow-xs)]">
+      <div role="tablist" aria-label="Activity sections" className="mt-6 inline-flex rounded-lg border border-[var(--color-line)] bg-surface p-1 ">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -221,9 +221,9 @@ function TasksTable({ rows, now, onCopied }: { rows: TaskRow[]; now: number | nu
     return <Empty title="No tasks yet" text="A task appears here the first time one of your applications sends a message to the agent." />;
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]">
+    <div className="overflow-x-auto rounded-xl border border-[var(--color-line)] bg-surface ">
       <table className="w-full min-w-[980px] text-left text-[13px]">
-        <thead className="border-b border-[var(--color-line)] text-[11.5px] uppercase tracking-wide text-muted">
+        <thead className="border-b border-[var(--color-line)] bg-[var(--color-canvas)] text-[12.5px] font-medium text-muted">
           <tr>
             <Th>State</Th>
             <Th>Agent</Th>
@@ -277,9 +277,9 @@ function RequestsTable({ rows, now, onCopied }: { rows: RequestRow[]; now: numbe
     return <Empty title="No requests yet" text="Every call made with your credentials is listed here: the token exchange, each message and each task read." />;
   }
   return (
-    <div className="overflow-x-auto rounded-xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]">
+    <div className="overflow-x-auto rounded-xl border border-[var(--color-line)] bg-surface ">
       <table className="w-full min-w-[860px] text-left text-[13px]">
-        <thead className="border-b border-[var(--color-line)] text-[11.5px] uppercase tracking-wide text-muted">
+        <thead className="border-b border-[var(--color-line)] bg-[var(--color-canvas)] text-[12.5px] font-medium text-muted">
           <tr>
             <Th>Time</Th>
             <Th>Method</Th>
@@ -334,11 +334,11 @@ function Th({ className, children }: { className?: string; children: React.React
 function Td({ className, children }: { className?: string; children: React.ReactNode }) {
   return <td className={cn("px-4 py-3 first:pl-5 last:pr-5", className)}>{children}</td>;
 }
-const Dash = () => <span className="text-muted">—</span>;
+const Dash = () => <span className="text-muted">-</span>;
 
 function Empty({ title, text }: { title: string; text: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-[var(--color-line)] bg-surface px-5 py-8 shadow-[var(--shadow-xs)]">
+    <div className="rounded-xl border border-dashed border-[var(--color-line)] bg-surface px-5 py-8 ">
       <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
       <p className="mt-1 max-w-[60ch] text-[13.5px] leading-relaxed text-ink-2">{text}</p>
     </div>

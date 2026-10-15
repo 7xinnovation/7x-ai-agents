@@ -21,9 +21,9 @@ export function CodeBlock({ code, title, lang = "text", className = "" }: { code
   };
   return (
     <div className={`dev-code ${className}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-[#1b1f2a] px-3.5 py-2">
-        <span className="mono text-[11px] uppercase tracking-wide text-[#8b93a7]">{title ?? lang}</span>
-        <button type="button" onClick={copy} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-medium text-[#aab2c5] transition-colors hover:bg-white/10 hover:text-white" aria-label="Copy code">
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-3.5 py-2">
+        <span className="mono text-[11.5px] text-[#9aa3ae]">{title ?? lang}</span>
+        <button type="button" onClick={copy} className="inline-flex items-center gap-1.5 rounded-[2px] px-2 py-1 text-[11.5px] font-medium text-[#aab2c5] transition-colors hover:bg-white/10 hover:text-white" aria-label="Copy code">
           {copied ? <Check size={13} strokeWidth={2.2} /> : <Copy size={13} strokeWidth={2} />}
           {copied ? "Copied" : "Copy"}
         </button>

@@ -38,11 +38,11 @@ const REPLY = S.REPLY_URI;
  */
 export default function DocsPage() {
   return (
-    <div className="grid gap-8 lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-12" data-rise>
+    <div className="grid gap-8 lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-12">
       <DocsToc sections={SECTIONS} />
 
       <article className="dev-prose min-w-0">
-        <p className="mono mb-2 text-[12px] uppercase tracking-wide text-muted">A2A protocol 1.0 · sandbox · 2026-10-15</p>
+        <p className="mb-2 text-[13px] text-muted">Reference, last updated 15 October 2026</p>
         <h1>Emirates Post PO Box Agent over A2A</h1>
         <p className="text-[16.5px] text-ink-2">
           This is the reference for integrating with the sandbox of the Emirates Post PO Box agent through the Agent-to-Agent protocol (A2A, Linux Foundation, version 1.0). It covers what
@@ -541,7 +541,7 @@ export default function DocsPage() {
                 <td>
                   <code>configuration.taskPushNotificationConfig</code>
                 </td>
-                <td>—</td>
+                <td className="text-muted">None</td>
                 <td>Ignored; push notifications are not supported.</td>
               </tr>
             </tbody>
@@ -946,7 +946,7 @@ export default function DocsPage() {
           <Exchange
             rows={[
               ["ahmed-al-mansoori", "Renew my PO Box 50500 in Dubai for one more year, same bundle and options.", "A summary block (box, bundle, term, total AED 695), a pay block, and buttons: “Pay with Noqodi instead”, “Change the term”. State INPUT_REQUIRED, awaiting payment. Artifact payment-request."],
-              ["—", "(POST sandbox.settleUrl { outcome: \"paid\" })", "The task goes WORKING, then COMPLETED: “Your renewal is confirmed…” with the receipt link. Artifact service-outcome."],
+              ["(no message)", "(POST sandbox.settleUrl { outcome: \"paid\" })", "The task goes WORKING, then COMPLETED: “Your renewal is confirmed…” with the receipt link. Artifact service-outcome."],
               ["", "thanks", "Refused: -32004, the task is TASK_STATE_COMPLETED. Send with the contextId only to open a new task."],
             ]}
           />
@@ -960,7 +960,7 @@ export default function DocsPage() {
               ["", "Al Barsha", "Cards or buttons with available box numbers; then buttons for the term (1 year, 2 years)."],
               ["", "1 year", "Toggles: terms acceptance, auto-renewal; confirm “Continue to payment”."],
               ["", "I accept the Terms: Yes. Renew automatically each year: No. Continue to payment.", "Summary and pay block. Awaiting payment; artifact payment-request."],
-              ["—", "(settle paid)", "COMPLETED with service-outcome: reference, order number, receipt."],
+              ["(no message)", "(settle paid)", "COMPLETED with service-outcome: reference, order number, receipt."],
             ]}
           />
         </Section>

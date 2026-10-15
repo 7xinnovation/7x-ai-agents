@@ -10,7 +10,7 @@ import { Mark } from "@/components/developers/Mark";
  * Where a successful sign-in lands: a path inside this portal, or its
  * applications page. "/developers/console" is fine. "https://evil.example" is
  * not, nor "//evil.example" (protocol-relative, another host), nor anything
- * outside /developers — the login page must not be a way to send someone
+ * outside /developers: the login page must not be a way to send someone
  * somewhere else with the credibility of having just signed in.
  */
 export function sameSitePath(next: string | null | undefined): string {
@@ -20,9 +20,10 @@ export function sameSitePath(next: string | null | undefined): string {
 }
 
 const PANEL_LINES: [string, string][] = [
-  ["A2A 1.0", "JSON-RPC and REST bindings, one Agent Card"],
-  ["Credentials you control", "An OAuth client and an API key per application; rotate or revoke at any time"],
-  ["Every call to the agent in your request log", "Method, binding, status, latency and the task it touched"],
+  ["Protocol", "A2A 1.0, JSON-RPC and REST"],
+  ["Credentials", "OAuth client and API key per application"],
+  ["Request log", "Every call, with status and latency"],
+  ["Environment", "Sandbox. Test data only"],
 ];
 
 export function LoginClient() {
@@ -62,40 +63,28 @@ export function LoginClient() {
   };
 
   return (
-    <div data-rise className="mx-auto grid w-full max-w-[1040px] overflow-hidden rounded-2xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-sm)] lg:grid-cols-[1.1fr_1fr]">
-      {/* Brand panel: a composition element of the light theme, not a theme flip. */}
-      <aside className="relative hidden overflow-hidden bg-[#06070c] lg:flex lg:flex-col lg:justify-between lg:p-10">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 [background-image:radial-gradient(90%_70%_at_15%_110%,rgba(0,32,245,.55),transparent_60%),radial-gradient(60%_40%_at_85%_-10%,rgba(43,70,255,.25),transparent_60%)]"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[.22] [background-image:radial-gradient(rgba(255,255,255,.35)_1px,transparent_1px)] [background-size:26px_26px]"
-        />
-        <div className="relative flex items-center gap-3">
-          <Mark size={36} />
-          <span className="text-[15px] font-semibold tracking-tight text-white">
-            Dialog <span className="font-normal text-white/55">Developers</span>
+    <div className="mx-auto grid w-full max-w-[1000px] border border-[var(--color-line)] bg-white lg:grid-cols-[1fr_1fr]">
+      <aside className="hidden flex-col justify-between bg-[#0f1720] p-10 text-white lg:flex">
+        <div className="flex items-center gap-3">
+          <Mark size={30} />
+          <span className="text-[14.5px] font-semibold">
+            Dialog <span className="font-normal text-white/60">Developers</span>
           </span>
         </div>
 
-        <div className="relative max-w-md">
-          <h2 className="text-balance text-[36px] font-bold leading-[1.08] tracking-[-0.02em] text-white">One doorway to every Dialog agent.</h2>
-          <p className="mt-4 max-w-[42ch] text-[14.5px] leading-relaxed text-white/55">
-            Create an application, take a token, send a task. The agent runs the journey and reports its state until it is done.
-          </p>
-          <dl className="mt-9 max-w-sm">
+        <div>
+          <h2 className="max-w-[18ch] text-[28px] font-semibold leading-[1.2]">Integrate with Dialog agents over A2A.</h2>
+          <dl className="mt-8 border-t border-white/15">
             {PANEL_LINES.map(([term, desc]) => (
-              <div key={term} className="border-t border-white/10 py-3.5 first:border-t-0">
-                <dt className="text-[13.5px] font-semibold text-white/90">{term}</dt>
-                <dd className="mt-0.5 text-[12.5px] text-white/45">{desc}</dd>
+              <div key={term} className="grid grid-cols-[132px_1fr] gap-4 border-b border-white/15 py-3.5 text-[13px]">
+                <dt className="text-white/55">{term}</dt>
+                <dd className="text-white/90">{desc}</dd>
               </div>
             ))}
           </dl>
         </div>
 
-        <p className="relative text-[12.5px] text-white/35">7X Dialog · A2A protocol 1.0 · sandbox</p>
+        <p className="text-[12px] text-white/45">7X Innovation Studio, Emirates Post Group</p>
       </aside>
 
       {/* Form panel */}
@@ -105,7 +94,7 @@ export function LoginClient() {
             <Mark size={40} />
           </span>
 
-          <h1 id="login-title" className="text-[22px] font-bold tracking-tight text-ink">
+          <h1 id="login-title" className="text-[22px] font-semibold text-ink">
             Sign in
           </h1>
           <p className="mt-1.5 text-sm text-muted">Dialog Developers: your applications, the console and your request log.</p>

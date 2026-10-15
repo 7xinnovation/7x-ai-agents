@@ -60,7 +60,7 @@ export function DocsToc({ sections }: { sections: DocsSection[] }) {
           id="docs-toc-select"
           value={current}
           onChange={(e) => go(e.target.value)}
-          className="h-10 w-full rounded-lg border border-[#d0d5dd] bg-surface px-3 text-sm text-ink shadow-[var(--shadow-xs)] outline-none focus:border-[var(--color-brand)] focus:ring-4 focus:ring-[var(--color-ring)]"
+          className="h-10 w-full rounded-lg border border-[#d0d5dd] bg-surface px-3 text-sm text-ink  outline-none focus:border-[var(--color-brand)] focus:ring-4 focus:ring-[var(--color-ring)]"
         >
           {sections.map((s, i) => (
             <option key={s.id} value={s.id}>
@@ -72,7 +72,7 @@ export function DocsToc({ sections }: { sections: DocsSection[] }) {
 
       {/* Wide: the sticky list. */}
       <nav className="dev-toc sticky top-[72px] hidden max-h-[calc(100dvh-96px)] overflow-y-auto pr-2 lg:block" aria-label="Contents">
-        <p className="mb-2 px-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Contents</p>
+        <p className="mb-2 px-2.5 text-[13px] font-semibold text-ink">On this page</p>
         <ol className="flex flex-col gap-0.5">
           {sections.map((s, i) => (
             <li key={s.id}>
@@ -84,7 +84,7 @@ export function DocsToc({ sections }: { sections: DocsSection[] }) {
                   go(s.id);
                 }}
               >
-                <span className="mono mr-2 text-[11px] text-muted">{String(i + 1).padStart(2, "0")}</span>
+                
                 {s.title}
               </a>
             </li>

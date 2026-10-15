@@ -1,15 +1,39 @@
 /*
- * The developer portal, on the console's tokens (admin-tw.css) with a few of
- * its own: a mono stack for code and identifiers, a reading column for the
- * docs, and code blocks that read like documentation rather than a terminal.
+ * The developer portal. It sits on the console's tokens (admin-tw.css) and
+ * redefines a few of them for this surface only, in the 7X house language the
+ * printed brief uses: square geometry, hairline rules instead of shadows,
+ * Inter for reading, Plex Mono for identifiers, one electric blue.
  */
 .dev {
-  --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: var(--font-dev-sans), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-dev-mono), "SFMono-Regular", Menlo, Consolas, monospace;
+  /* Square geometry: everything that was soft is now 2-6px. */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 6px;
+  /* Hairlines carry the structure; elevation is reserved for overlays. */
+  --shadow-xs: 0 0 0 0 transparent;
+  --shadow-sm: 0 0 0 0 transparent;
+  --shadow-md: 0 8px 24px -12px rgba(15, 23, 32, 0.18);
+  --color-canvas: #f6f7f9;
+  --color-line: #dfe3e8;
+  --color-line-soft: #eceff2;
+  --color-ink: #0f1720;
+  --color-ink-2: #3b4450;
+  --color-muted: #66707c;
+  --color-brand: #1330f0;
+  --color-ring: #b9c3fb;
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01", "tnum";
   background: var(--color-canvas);
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
+.dev h1, .dev h2, .dev h3 { letter-spacing: -0.011em; }
+.dev h1 { font-weight: 600; }
 .dev code,
 .dev kbd,
 .dev pre,
@@ -32,11 +56,10 @@
   tab-size: 2;
 }
 .dev-code {
-  background: #0b0d12;
+  background: #0f1720;
   color: #e6e8ee;
-  border-radius: 12px;
-  border: 1px solid #1b1f2a;
-  box-shadow: var(--shadow-sm);
+  border-radius: 4px;
+  border: 1px solid #0f1720;
 }
 .dev-code pre {
   padding: 14px 16px;
@@ -53,7 +76,7 @@
   font-size: 15px;
   line-height: 1.7;
 }
-.dev-prose h1 { color: var(--color-ink); font-size: 30px; line-height: 1.15; font-weight: 700; margin: 0 0 10px; }
+.dev-prose h1 { color: var(--color-ink); font-size: 30px; line-height: 1.15; font-weight: 600; margin: 0 0 10px; }
 .dev-prose h2 { color: var(--color-ink); font-size: 21px; font-weight: 600; margin: 44px 0 12px; padding-top: 12px; border-top: 1px solid var(--color-line); }
 .dev-prose h3 { color: var(--color-ink); font-size: 16px; font-weight: 600; margin: 28px 0 8px; }
 .dev-prose p { margin: 0 0 14px; }
@@ -67,17 +90,17 @@
 .dev-prose td { vertical-align: top; border-bottom: 1px solid var(--color-line-soft); padding: 8px 10px 8px 0; }
 .dev-prose td:first-child { white-space: nowrap; }
 .dev-prose .dev-code { margin: 10px 0 18px; }
-.dev-prose blockquote { margin: 0 0 14px; padding: 10px 14px; border-left: 3px solid var(--color-brand); background: color-mix(in srgb, var(--color-brand) 5%, white); color: var(--color-ink-2); border-radius: 0 10px 10px 0; }
+.dev-prose blockquote { margin: 0 0 14px; padding: 10px 14px; border-left: 3px solid var(--color-brand); background: color-mix(in srgb, var(--color-brand) 5%, white); color: var(--color-ink-2); border-radius: 0; }
 .dev-prose hr { border: 0; border-top: 1px solid var(--color-line); margin: 32px 0; }
 
 /* The docs sidebar: the current section carries the brand colour. */
-.dev-toc a { display: block; padding: 6px 10px; border-radius: 8px; font-size: 13.5px; color: var(--color-ink-2); }
+.dev-toc a { display: block; padding: 6px 10px; border-radius: 0; border-left: 2px solid transparent; font-size: 13.5px; color: var(--color-ink-2); }
 .dev-toc a:hover { background: var(--color-line-soft); color: var(--color-ink); }
-.dev-toc a[aria-current="true"] { background: color-mix(in srgb, var(--color-brand) 8%, white); color: var(--color-brand); font-weight: 600; }
+.dev-toc a[aria-current="true"] { background: transparent; border-left-color: var(--color-brand); color: var(--color-ink); font-weight: 600; }
 
 /* State badges for tasks and requests. */
-.dev-state { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--color-line); background: var(--color-canvas); color: var(--color-ink-2); white-space: nowrap; }
-.dev-state::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: #98a2b3; }
+.dev-state { display: inline-flex; align-items: center; gap: 6px; border-radius: 3px; padding: 2px 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--color-line); background: var(--color-canvas); color: var(--color-ink-2); white-space: nowrap; }
+.dev-state::before { content: ""; width: 6px; height: 6px; border-radius: 1px; background: #98a2b3; }
 .dev-state[data-state="TASK_STATE_COMPLETED"] { color: #067647; border-color: #abefc6; background: #ecfdf3; }
 .dev-state[data-state="TASK_STATE_COMPLETED"]::before { background: #17b26a; }
 .dev-state[data-state="TASK_STATE_WORKING"], .dev-state[data-state="TASK_STATE_SUBMITTED"] { color: var(--color-brand); border-color: var(--color-ring); background: color-mix(in srgb, var(--color-brand) 7%, white); }
@@ -88,6 +111,6 @@
 .dev-state[data-state="TASK_STATE_FAILED"]::before, .dev-state[data-state="TASK_STATE_REJECTED"]::before { background: #f04438; }
 .dev-state[data-state="TASK_STATE_CANCELED"] { color: var(--color-muted); }
 
-@media (prefers-reduced-motion: no-preference) {
-  .dev [data-rise] { animation: dlg-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
-}
+
+/* Badges and pills from the shared primitives are squared off here too. */
+.dev .rounded-full:not(.dev-keep-round) { border-radius: 3px; }

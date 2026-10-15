@@ -34,10 +34,10 @@ export function ConsoleBlocks({ blocks, disabled, onSend, payment }: { blocks: R
 }
 
 const chip =
-  "inline-flex items-center rounded-full border border-[var(--color-line)] bg-surface px-3 py-1.5 text-left text-[13px] font-medium text-ink-2 shadow-[var(--shadow-xs)] transition-colors hover:border-[var(--color-brand)] hover:text-brand focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50";
+  "inline-flex items-center rounded-full border border-[var(--color-line)] bg-surface px-3 py-1.5 text-left text-[13px] font-medium text-ink-2  transition-colors hover:border-[var(--color-brand)] hover:text-brand focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50";
 
 function Kind({ children }: { children: React.ReactNode }) {
-  return <span className="mono text-[10.5px] uppercase tracking-wide text-muted">{children}</span>;
+  return <span className="text-[12px] font-medium text-muted">{children}</span>;
 }
 
 function Block({ block, disabled, onSend, payment }: { block: ReplyBlock; disabled: boolean; onSend: (text: string) => void; payment: PaymentControls | null }) {
@@ -96,7 +96,7 @@ function Block({ block, disabled, onSend, payment }: { block: ReplyBlock; disabl
                 disabled={disabled || c.disabled}
                 onClick={() => onSend(c.title)}
                 className={cn(
-                  "flex flex-col items-start gap-1 rounded-xl border border-[var(--color-line)] bg-surface p-3 text-left shadow-[var(--shadow-xs)] transition-colors hover:border-[var(--color-brand)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50",
+                  "flex flex-col items-start gap-1 rounded-xl border border-[var(--color-line)] bg-surface p-3 text-left  transition-colors hover:border-[var(--color-brand)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50",
                   c.disabled && "border-dashed"
                 )}
               >
@@ -241,7 +241,7 @@ function Toggles({ block, disabled, onSend }: { block: Extract<ReplyBlock, { typ
 function Pay({ block, payment, disabled }: { block: Extract<ReplyBlock, { type: "pay" }>; payment: PaymentControls | null; disabled: boolean }) {
   const canSettle = Boolean(payment?.active && payment.settleUrl);
   return (
-    <div className="rounded-xl border border-[var(--color-line)] bg-surface p-3 shadow-[var(--shadow-xs)]">
+    <div className="rounded-xl border border-[var(--color-line)] bg-surface p-3 ">
       <div className="flex items-start justify-between gap-3">
         <div>
           <Kind>pay</Kind>
@@ -267,7 +267,7 @@ function Pay({ block, payment, disabled }: { block: Extract<ReplyBlock, { type: 
               type="button"
               disabled={disabled || payment.settling || !canSettle}
               onClick={() => payment.onSettle("paid")}
-              className="inline-flex h-8 items-center rounded-lg bg-brand px-3 text-[13px] font-semibold text-white shadow-[var(--shadow-xs)] hover:bg-[color-mix(in_srgb,var(--color-brand)_90%,#000)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
+              className="inline-flex h-8 items-center rounded-lg bg-brand px-3 text-[13px] font-semibold text-white  hover:bg-[color-mix(in_srgb,var(--color-brand)_90%,#000)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
             >
               {payment.settling ? "Settling…" : "Settle in sandbox"}
             </button>
@@ -275,7 +275,7 @@ function Pay({ block, payment, disabled }: { block: Extract<ReplyBlock, { type: 
               type="button"
               disabled={disabled || payment.settling || !canSettle}
               onClick={() => payment.onSettle("failed")}
-              className="inline-flex h-8 items-center rounded-lg border border-[var(--color-line)] bg-surface px-3 text-[13px] font-medium text-ink-2 shadow-[var(--shadow-xs)] hover:bg-[var(--color-canvas)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
+              className="inline-flex h-8 items-center rounded-lg border border-[var(--color-line)] bg-surface px-3 text-[13px] font-medium text-ink-2  hover:bg-[var(--color-canvas)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-50"
             >
               Mark failed
             </button>

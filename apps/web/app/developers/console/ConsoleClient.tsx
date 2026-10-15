@@ -437,7 +437,7 @@ export function ConsoleClient({ apps, agent, personas, identityExtension }: Prop
   return (
     <div className="flex flex-col gap-4">
       {/* Top bar */}
-      <div className="grid gap-3 rounded-xl border border-[var(--color-line)] bg-surface p-3 shadow-[var(--shadow-xs)] sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_auto]">
+      <div className="grid gap-3 rounded-xl border border-[var(--color-line)] bg-surface p-3  sm:grid-cols-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_auto]">
         <div className="flex flex-col gap-1">
           <label htmlFor="console-app" className="text-[12px] font-medium text-ink-2">
             Application
@@ -490,7 +490,7 @@ export function ConsoleClient({ apps, agent, personas, identityExtension }: Prop
 
         <div className="flex flex-col gap-1">
           <span className="text-[12px] font-medium text-ink-2">Transport</span>
-          <label className="flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-[#d0d5dd] bg-surface px-3 text-[13px] text-ink-2 shadow-[var(--shadow-xs)]">
+          <label className="flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-[#d0d5dd] bg-surface px-3 text-[13px] text-ink-2 ">
             <input type="checkbox" className="h-4 w-4 accent-[var(--color-brand)]" checked={streaming} onChange={(e) => setStreaming(e.target.checked)} />
             Streaming
           </label>
@@ -500,7 +500,7 @@ export function ConsoleClient({ apps, agent, personas, identityExtension }: Prop
 
       {/* Body */}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="flex min-h-[520px] flex-col rounded-xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]" aria-label="Conversation">
+        <section className="flex min-h-[520px] flex-col rounded-xl border border-[var(--color-line)] bg-surface " aria-label="Conversation">
           <div className="flex-1 overflow-y-auto px-4 py-4 lg:max-h-[calc(100dvh-330px)]">
             {transcript.length === 0 && !partial ? (
               <Empty agentName={agent.name} persona={activePersona} onSend={(t) => void send(t)} disabled={composerDisabled} />
@@ -649,7 +649,7 @@ function Empty({ agentName, persona, onSend, disabled }: { agentName: string; pe
             type="button"
             disabled={disabled}
             onClick={() => onSend(s)}
-            className="rounded-full border border-[var(--color-line)] bg-surface px-3 py-1.5 text-[13px] text-ink-2 shadow-[var(--shadow-xs)] hover:border-[var(--color-brand)] hover:text-brand focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:opacity-50"
+            className="rounded-full border border-[var(--color-line)] bg-surface px-3 py-1.5 text-[13px] text-ink-2  hover:border-[var(--color-brand)] hover:text-brand focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)] disabled:opacity-50"
           >
             {s}
           </button>
@@ -693,7 +693,7 @@ function Entry({ entry, disabled, onSend, payment }: { entry: TranscriptEntry; d
       );
     case "divider":
       return (
-        <div className="flex items-center gap-3 text-[11.5px] uppercase tracking-wide text-muted">
+        <div className="flex items-center gap-3 text-[12px] text-muted">
           <span className="h-px flex-1 bg-[var(--color-line)]" />
           {entry.text}
           <span className="h-px flex-1 bg-[var(--color-line)]" />

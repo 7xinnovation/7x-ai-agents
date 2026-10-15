@@ -51,7 +51,7 @@ export function ConsoleTaskPanel({
   const cancellable = Boolean(task && !isTerminalState(state));
 
   return (
-    <aside className="flex flex-col rounded-xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]" aria-label="Current task">
+    <aside className="flex flex-col rounded-xl border border-[var(--color-line)] bg-surface " aria-label="Current task">
       <div className="flex items-center gap-1 border-b border-[var(--color-line-soft)] px-2 pt-2" role="tablist" aria-label="Task panel">
         {(["task", "raw"] as const).map((t) => (
           <button
@@ -96,9 +96,9 @@ export function ConsoleTaskPanel({
               <IdValue value={taskId} />
             </dd>
             <dt className="text-muted">journey</dt>
-            <dd className="mono text-ink-2">{journey ?? "—"}</dd>
+            <dd className="mono text-ink-2">{journey ?? "-"}</dd>
             <dt className="text-muted">step</dt>
-            <dd className="mono text-ink-2">{step ?? "—"}</dd>
+            <dd className="mono text-ink-2">{step ?? "-"}</dd>
             {typeof meta.persona === "string" ? (
               <>
                 <dt className="text-muted">persona</dt>
@@ -157,7 +157,7 @@ export function ConsoleTaskPanel({
                 ))}
               </div>
             ) : (
-              <p className="text-muted">{lastCase ? "Nothing missing." : "—"}</p>
+              <p className="text-muted">{lastCase ? "Nothing missing." : "-"}</p>
             )}
           </Section>
 
@@ -224,7 +224,7 @@ export function ConsoleTaskPanel({
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
     <section>
-      <h3 className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-muted">
+      <h3 className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-ink">
         {title}
         {count ? <span className="mono rounded-full bg-[var(--color-line-soft)] px-1.5 text-[11px] font-medium text-ink-2">{count}</span> : null}
       </h3>
@@ -235,7 +235,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
 
 function IdValue({ value }: { value: string | null }) {
   const [copied, setCopied] = useState(false);
-  if (!value) return <span className="text-muted">—</span>;
+  if (!value) return <span className="text-muted">-</span>;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(value);
@@ -266,7 +266,7 @@ export const pretty = (v: unknown): string => {
 };
 
 function valueText(v: unknown): string {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "-";
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   try {

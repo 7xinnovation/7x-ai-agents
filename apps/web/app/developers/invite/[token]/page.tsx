@@ -24,8 +24,8 @@ export default async function InvitePage({ params }: Props) {
 
 function InvalidInvite() {
   return (
-    <div data-rise className="mx-auto w-full max-w-[460px] py-10">
-      <h1 className="text-[22px] font-bold tracking-tight text-ink">This invitation is not valid</h1>
+    <div className="mx-auto w-full max-w-[460px] py-10">
+      <h1 className="text-[22px] font-semibold text-ink">This invitation is not valid</h1>
       <p className="mt-3 text-[14px] leading-relaxed text-ink-2">
         The link has expired, has already been used, or is not complete. Invitations work once and for seven days.
       </p>
@@ -33,7 +33,7 @@ function InvalidInvite() {
       <div className="mt-6">
         <Link
           href="/developers/login"
-          className="inline-flex h-[38px] items-center rounded-lg border border-[var(--color-line)] bg-surface px-3.5 text-[13.5px] font-semibold text-ink-2 shadow-[var(--shadow-xs)] hover:bg-[var(--color-canvas)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)]"
+          className="inline-flex h-[38px] items-center rounded-lg border border-[var(--color-line)] bg-surface px-3.5 text-[13.5px] font-semibold text-ink-2  hover:bg-[var(--color-canvas)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--color-ring)]"
         >
           Go to sign in
         </Link>

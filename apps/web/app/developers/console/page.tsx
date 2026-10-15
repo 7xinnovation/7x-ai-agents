@@ -29,7 +29,7 @@ export default async function ConsolePage() {
     .map((a) => ({ id: a.id, name: a.name, clientId: a.clientId, apiKeyHint: a.apiKeyHint, agentSlugs: a.agentSlugs }));
 
   return (
-    <div className="flex flex-col gap-5" data-rise>
+    <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight text-ink">Console</h1>
@@ -55,7 +55,7 @@ export default async function ConsolePage() {
           </p>
           <Link
             href="/developers/apps"
-            className="mt-5 inline-flex h-9 items-center rounded-lg bg-brand px-4 text-[13.5px] font-semibold text-white shadow-[var(--shadow-xs)] hover:bg-[color-mix(in_srgb,var(--color-brand)_90%,#000)]"
+            className="mt-5 inline-flex h-9 items-center rounded-lg bg-brand px-4 text-[13.5px] font-semibold text-white  hover:bg-[color-mix(in_srgb,var(--color-brand)_90%,#000)]"
           >
             Go to Applications
           </Link>

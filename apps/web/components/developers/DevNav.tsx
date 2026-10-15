@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 const PUBLIC = [
   { href: "/developers", label: "Overview", exact: true },
-  { href: "/developers/docs", label: "Docs", exact: false },
+  { href: "/developers/docs", label: "Documentation", exact: false },
 ];
 const PRIVATE = [
   { href: "/developers/apps", label: "Applications", exact: false },
@@ -14,11 +14,12 @@ const PRIVATE = [
   { href: "/developers/activity", label: "Activity", exact: false },
 ];
 
+/** Tabs on the product bar; the current one carries a 2px blue rule, like the printed brief. */
 export function DevNav({ signedIn }: { signedIn: boolean }) {
   const pathname = usePathname() ?? "";
   const items = signedIn ? [...PUBLIC, ...PRIVATE] : PUBLIC;
   return (
-    <nav className="hidden items-center gap-1 md:flex" aria-label="Portal">
+    <nav className="hidden h-full items-stretch gap-6 md:flex" aria-label="Portal">
       {items.map((it) => {
         const active = it.exact ? pathname === it.href : pathname.startsWith(it.href);
         return (
@@ -27,8 +28,8 @@ export function DevNav({ signedIn }: { signedIn: boolean }) {
             href={it.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "rounded-lg px-3 py-1.5 text-[13.5px] font-medium transition-colors",
-              active ? "bg-[color-mix(in_srgb,var(--color-brand)_8%,white)] text-brand" : "text-ink-2 hover:bg-[var(--color-line-soft)] hover:text-ink"
+              "-mb-px inline-flex items-center border-b-2 text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]",
+              active ? "border-[#1330f0] font-medium text-ink" : "border-transparent text-muted hover:text-ink"
             )}
           >
             {it.label}

@@ -170,14 +170,14 @@ export function AppsClient({ initial }: { initial: DevApp[] }) {
   const revoked = apps.filter((a) => a.revokedAt);
 
   return (
-    <div data-rise>
+    <div>
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {live}
       </span>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-[26px] font-bold tracking-tight text-ink">Applications</h1>
+          <h1 className="text-[24px] font-semibold text-ink">Applications</h1>
           <p className="mt-1 max-w-[62ch] text-[14px] text-muted">
             Each application is an OAuth client and an API key for the sandbox agent. The secret and the key are shown once, when created or rotated.
           </p>
@@ -189,7 +189,7 @@ export function AppsClient({ initial }: { initial: DevApp[] }) {
       </div>
 
       {creating ? (
-        <form id="new-app" onSubmit={create} className="mt-5 rounded-xl border border-[var(--color-line)] bg-surface p-4 shadow-[var(--shadow-xs)] sm:p-5">
+        <form id="new-app" onSubmit={create} className="mt-5 rounded-xl border border-[var(--color-line)] bg-surface p-4  sm:p-5">
           <div className="flex flex-col gap-1.5 sm:max-w-[420px]">
             <Label htmlFor="new-app-name">Application name</Label>
             <Input
@@ -221,7 +221,7 @@ export function AppsClient({ initial }: { initial: DevApp[] }) {
           <div
             role={note.tone === "error" ? "alert" : "status"}
             className={cn(
-              "mt-5 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-[13.5px] shadow-[var(--shadow-xs)]",
+              "mt-5 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-[13.5px] ",
               note.tone === "error" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-[var(--color-line)] bg-surface text-ink-2"
             )}
           >
@@ -238,7 +238,7 @@ export function AppsClient({ initial }: { initial: DevApp[] }) {
       ) : null}
 
       {apps.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-[var(--color-line)] bg-surface px-5 py-8 shadow-[var(--shadow-xs)]">
+        <div className="mt-6 rounded-xl border border-dashed border-[var(--color-line)] bg-surface px-5 py-8 ">
           <KeyRound size={20} strokeWidth={2} className="text-brand" />
           <h2 className="mt-3 text-[16px] font-semibold text-ink">No applications yet</h2>
           <p className="mt-1 max-w-[56ch] text-[13.5px] leading-relaxed text-ink-2">
@@ -274,7 +274,7 @@ export function AppsClient({ initial }: { initial: DevApp[] }) {
           </ul>
           {revoked.length ? (
             <section className="mt-8" aria-labelledby="revoked-heading">
-              <h2 id="revoked-heading" className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">
+              <h2 id="revoked-heading" className="text-[14px] font-semibold text-ink">
                 Revoked
               </h2>
               <ul className="mt-3 flex flex-col gap-3" aria-label="Revoked applications">
@@ -323,7 +323,7 @@ function AppCard(props: {
   const renaming = busy === `rename:${app.id}`;
 
   return (
-    <li className={cn("rounded-xl border border-[var(--color-line)] bg-surface shadow-[var(--shadow-xs)]", revoked && "opacity-75")}>
+    <li className={cn("rounded-xl border border-[var(--color-line)] bg-surface ", revoked && "opacity-75")}>
       <div className="flex flex-col gap-3 px-5 pt-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           {editing !== null ? (
