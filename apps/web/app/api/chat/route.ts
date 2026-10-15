@@ -105,6 +105,14 @@ const Body = z.object({
   // allows mock (uaePassMockAllowed) — lets QA complete flows whose EP ops need a
   // live session / real box by substituting simulated responses.
   mock: z.boolean().optional(),
+  /**
+   * The payable sandbox (2026-10-14). Set only by the A2A task doorway for the
+   * sandbox agent: the Emirates Post calls that need their session are
+   * simulated, the simulated order opens a payment on our mock checkout, and
+   * the confirm answers from that payment's real state. The widget never sends
+   * it, so the demo persona and the `?mock=1` testers are unchanged.
+   */
+  sandbox: z.boolean().optional(),
 });
 
 // Internal directive used for the post-sign-in account pulse. Never shown to the
@@ -1321,7 +1329,8 @@ export async function POST(req: NextRequest) {
     // ?mock=1, or the signed-in user is the mock persona), simulate the EP ops
     // that can't run without a live session (FreeBoxes) or a real box
     // (Guest/Renewal Details+Pricing), so guest AND signed-in demos complete.
-    mockSimulate: uaePassMockAllowed() && (session.userRef === MOCK_PERSONA_SUB || body.mock === true),
+    mockSimulate: uaePassMockAllowed() && (session.userRef === MOCK_PERSONA_SUB || body.mock === true || body.sandbox === true),
+    mockPayable: uaePassMockAllowed() && body.sandbox === true,
   });
   const { tools: allApiTools, exec: execIntegration } = apiTools;
   /**

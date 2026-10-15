@@ -124,13 +124,224 @@ export function stagingTestBoxNumbers(
 /** The last simulated renewal order, so the simulated confirm can answer for it. */
 let lastSimulatedOrder: { ref: string; amount: number } | null = null;
 
-export function simulateNxnMockOp(
+/**
+ * THE PAYABLE SANDBOX (2026-10-14).
+ *
+ * The simulation above was written for a laptop demo: the save points at an
+ * N-Genius page nobody can pay on, and the confirm answers "paid" regardless.
+ * An integrator testing the PO Box journeys over the A2A doorway needs the
+ * opposite — an order whose payment can actually be made, and a confirm that
+ * tells the truth about it — and needs the two Emirates Post calls that were
+ * never simulated at all (Rental/Select, which reserves the box, and
+ * Rental/Save, which creates the order) because a new rental stops dead
+ * without them.
+ *
+ * So with a context the simulation becomes payable: Select returns a hold with
+ * a price breakdown in Emirates Post's own shape; Save creates a `payments` row
+ * and points the pay button at OUR mock checkout, which settles that row
+ * through the signed webhook like a real gateway would; and the confirm reads
+ * the row and answers paid only when it is. Without a context everything
+ * behaves exactly as before — the demo persona keeps its demo.
+ */
+export interface SimulationContext {
+  payable: true;
+  conversationId?: string;
+  agentId?: string;
+  locale?: string;
+  /** What this bundle rents for over `years`, from the live price book when it is known. */
+  rentFor?: (bundleId: string, years: number) => number | null;
+}
+
+/** Fixed sandbox fees, stated as such in the response. */
+const SANDBOX_REGISTRATION_FEE = 70;
+const SANDBOX_AGENT_FEE = 50;
+const SANDBOX_KEY_DELIVERY_FEE = 30;
+
+/** The public origin, so a payment link in a tool result is complete wherever it is read. */
+function publicOrigin(): string {
+  const pin = process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_DIALOG_HOST || "";
+  if (/^https?:\/\//i.test(pin)) {
+    try {
+      return new URL(pin).origin;
+    } catch {
+      /* fall through */
+    }
+  }
+  return "";
+}
+
+function yearsUntil(iso: string | undefined): number {
+  const t = Date.parse(String(iso ?? ""));
+  if (!Number.isFinite(t)) return 1;
+  const years = Math.round((t - Date.now()) / (365.2425 * 24 * 60 * 60 * 1000));
+  return Math.min(Math.max(years, 1), 20);
+}
+
+/** A reference nobody will mistake for Emirates Post's: SBX, the time, four random characters. */
+function sandboxReference(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
+/**
+ * Open a payment on OUR books for a simulated order, and hand back the link the
+ * pay button should carry. The row is what the mock checkout settles and what
+ * the confirm reads; it is also what the receipt and the audit trail are built
+ * from, so a sandbox purchase leaves the same records a real one does.
+ */
+async function openSandboxPayment(ctx: SimulationContext, amount: number): Promise<{ reference: string; url: string } | null> {
+  if (!ctx.conversationId) return null;
+  try {
+    const { getCase } = await import("./conversation");
+    const { getDb, payments } = await import("@dialog/db");
+    const c = await getCase(ctx.conversationId);
+    if (!c) return null;
+    const reference = sandboxReference("SBX");
+    await getDb()
+      .insert(payments)
+      .values({
+        caseId: c.caseId,
+        conversationId: ctx.conversationId,
+        agentId: ctx.agentId ?? c.agentId,
+        reference,
+        amount,
+        currency: "AED",
+        status: "initiated",
+        provider: "sandbox",
+      });
+    const lang = ctx.locale === "ar" ? "ar" : "en";
+    const url = `${publicOrigin()}/api/payments/mock-checkout?ref=${encodeURIComponent(reference)}&caseId=${encodeURIComponent(c.caseId)}&lang=${lang}`;
+    return { reference, url };
+  } catch {
+    return null;
+  }
+}
+
+/** Has the sandbox payment behind this order been made? Reads the row the checkout settles. */
+async function sandboxPaymentState(
+  ctx: SimulationContext,
+  reference: string | null
+): Promise<{ reference: string; amount: number; paid: boolean } | null> {
+  if (!ctx.conversationId) return null;
+  try {
+    const { getDb, payments } = await import("@dialog/db");
+    const { and, eq, desc } = await import("drizzle-orm");
+    const db = getDb();
+    const rows = reference
+      ? await db.select().from(payments).where(eq(payments.reference, reference)).limit(1)
+      : await db
+          .select()
+          .from(payments)
+          .where(and(eq(payments.conversationId, ctx.conversationId), eq(payments.provider, "sandbox")))
+          .orderBy(desc(payments.createdAt))
+          .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return { reference: row.reference, amount: Number(row.amount), paid: row.status === "paid" };
+  } catch {
+    return null;
+  }
+}
+
+export async function simulateNxnMockOp(
   toolName: string,
-  input: Record<string, unknown>
-): { result: string; isError?: boolean; raw?: string } | null {
+  input: Record<string, unknown>,
+  ctx?: SimulationContext
+): Promise<{ result: string; isError?: boolean; raw?: string } | null> {
   const t = toolName.toLowerCase();
   const inp = (input ?? {}) as Record<string, any>;
   const ok = (body: unknown) => ({ result: `HTTP 200 OK\n${JSON.stringify(body)}`, isError: false, raw: JSON.stringify(body) });
+  const bodyOf = (): Record<string, any> => {
+    let body: any = inp.body ?? inp;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = {};
+      }
+    }
+    return body || {};
+  };
+
+  if (ctx?.payable) {
+    // Reserve the box. Emirates Post's own field names, including their typo in
+    // the expiry key, because the hold parser downstream reads exactly those.
+    if (/rental_select$/i.test(t)) {
+      const body = bodyOf();
+      const bundleId = String(body.bundleId ?? body.BundleId ?? "").trim() || "IN";
+      const expiry = String(body.poBoxExpiryDate ?? body.PoBoxExpiryDate ?? "");
+      const years = yearsUntil(expiry);
+      const rent = ctx.rentFor?.(bundleId, years) ?? rateForBundleId(bundleId) * years;
+      const minimumAmount = rent + SANDBOX_REGISTRATION_FEE;
+      const holdExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      const line = (serviceType: string, totalAmount: number, serviceCriteria: string) => ({
+        bundleID: bundleId,
+        serviceType,
+        totalAmount,
+        serviceCriteria,
+      });
+      return ok({
+        isSuccess: true,
+        simulated: true,
+        payload: {
+          subscriptionReferenceNumber: sandboxReference("SBXHOLD"),
+          subcsriptionReferenceNumberExpiryDate: holdExpiry,
+          minimumAmount,
+          poBoxExpiryDate: expiry || new Date(Date.now() + years * 365.2425 * 24 * 60 * 60 * 1000).toISOString(),
+          uniqueBoxID: String(body.uniqueBoxID ?? body.uniqueBoxId ?? body.boxNumber ?? ""),
+          priceDetails: [
+            line("RENT", rent, "M"),
+            line("NEW-REG", SANDBOX_REGISTRATION_FEE, "M"),
+            line("AGENT", SANDBOX_AGENT_FEE, "I"),
+            line("AGENT", SANDBOX_AGENT_FEE, "A"),
+            line("KEY-DELIVERY", SANDBOX_KEY_DELIVERY_FEE, "A"),
+          ],
+        },
+      });
+    }
+    // Create the order and open its payment — on our checkout, where it can be made.
+    if (/(rental_save|guest_renewal_save)$/i.test(t)) {
+      const body = bodyOf();
+      const total =
+        Number(body.totalAmount ?? body.amount ?? 0) ||
+        rateForBundleId(String(body.newBundleId ?? body.NewBundleId ?? body.bundleId ?? ""));
+      const opened = await openSandboxPayment(ctx, total);
+      const ref = opened?.reference ?? sandboxReference("SBX");
+      const url = opened?.url ?? `${publicOrigin()}/api/payments/mock-checkout?ref=${encodeURIComponent(ref)}`;
+      lastSimulatedOrder = { ref, amount: total };
+      return ok({
+        isSuccess: true,
+        simulated: true,
+        payload: {
+          orderNo: `SBX${Date.now().toString().slice(-8)}`,
+          totalAmount: total,
+          paymentGateWayResponse: {
+            referenceNumber: ref,
+            paymentUrl: url,
+            niOrderResult: { _id: `urn:order:${ref}`, reference: ref, amount: { value: Math.round(total * 100), currencyCode: "AED" } },
+          },
+        },
+      });
+    }
+    // Has it been paid? The truth, from the row the checkout settles.
+    if (/(updatepayment|confirmpayment)/i.test(t)) {
+      const body = bodyOf();
+      const named =
+        String(inp.paymentReferenceNo ?? inp.PaymentReferenceNo ?? body.referenceNumber ?? body.paymentReferenceNo ?? body.paymentRefNo ?? "").trim() || null;
+      const state = (await sandboxPaymentState(ctx, named)) ?? (lastSimulatedOrder ? { reference: lastSimulatedOrder.ref, amount: lastSimulatedOrder.amount, paid: false } : null);
+      return ok({
+        isSuccess: true,
+        simulated: true,
+        payload: {
+          isPaymentSuccess: Boolean(state?.paid),
+          amountPaid: state?.paid ? state.amount : 0,
+          referenceNumber: state?.reference ?? named ?? "",
+          paymentDetails: state?.paid
+            ? { amountPaid: state.amount, paymentRefNo: state.reference, simulated: true }
+            : { simulated: true, paymentStatus: 2, note: "No payment has been made for this order yet. The customer pays on the payment page the save returned." },
+        },
+      });
+    }
+  }
 
   if (t.includes("rental_freeboxes")) {
     const bundleId = String(inp.BundleId ?? inp.bundleId ?? "");

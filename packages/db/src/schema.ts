@@ -440,5 +440,123 @@ export const blockedCompanyBatches = pgTable(
   (t) => ({ agentIdx: index("blocked_batches_agent_idx").on(t.agentId) })
 );
 
+// ─── Developer portal and the A2A task doorway (2026-10-14) ──────────────────
+
+/**
+ * An external organisation integrating with an agent over A2A — the Prime
+ * Minister's Office technical team, to begin with. Separate from `users`:
+ * these accounts never see the console, only their own applications, tasks
+ * and request log. Invited like console users (random token, SHA-256 stored,
+ * single use, expiring); the password is set by the person, never by us.
+ */
+export const developerAccounts = pgTable(
+  "developer_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organization: text("organization").notNull(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash"),
+    active: boolean("active").default(true).notNull(),
+    inviteTokenHash: text("invite_token_hash"),
+    inviteExpiresAt: timestamp("invite_expires_at", { withTimezone: true }),
+    invitedBy: text("invited_by"),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    createdAt: ts(),
+  },
+  (t) => ({
+    emailIdx: index("developer_accounts_email_idx").on(t.email),
+    inviteIdx: index("developer_accounts_invite_idx").on(t.inviteTokenHash),
+  })
+);
+
+/**
+ * One set of credentials a developer account minted: an OAuth2 client
+ * (client_id + secret, client-credentials grant) and an API key for the same
+ * application. Only hashes are stored; the secret and the key are shown once.
+ * `agentSlugs` is the allow-list of A2A agents the application may call.
+ */
+export const developerApps = pgTable(
+  "developer_apps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => developerAccounts.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    clientId: text("client_id").notNull().unique(),
+    clientSecretHash: text("client_secret_hash").notNull(),
+    apiKeyHash: text("api_key_hash").notNull().unique(),
+    /** The key's last four characters, so a person can tell two keys apart. */
+    apiKeyHint: text("api_key_hint").notNull(),
+    agentSlugs: jsonb("agent_slugs").$type<string[]>().default([]).notNull(),
+    scopes: jsonb("scopes").$type<string[]>().default(["tasks"]).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: ts(),
+  },
+  (t) => ({
+    accountIdx: index("developer_apps_account_idx").on(t.accountId),
+    clientIdx: index("developer_apps_client_idx").on(t.clientId),
+    keyIdx: index("developer_apps_key_idx").on(t.apiKeyHash),
+  })
+);
+
+/**
+ * An A2A task: one unit of work a client agent handed to one of ours. It wraps
+ * a Dialog conversation (the A2A `contextId` IS the conversation id) and keeps
+ * the protocol-shaped status, artifacts and message history, so GetTask and
+ * ListTasks answer from here without replaying the conversation.
+ */
+export const a2aTasks = pgTable(
+  "a2a_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** The Dialog agent that does the work. */
+    agentId: uuid("agent_id").notNull(),
+    /** The A2A agent key the client addressed (the catalogue entry). */
+    agentSlug: text("agent_slug").notNull(),
+    appId: uuid("app_id")
+      .notNull()
+      .references(() => developerApps.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").notNull(),
+    caseId: uuid("case_id"),
+    state: text("state").notNull(),
+    status: jsonb("status").$type<Record<string, unknown>>().notNull(),
+    artifacts: jsonb("artifacts").$type<unknown[]>().default([]).notNull(),
+    history: jsonb("history").$type<unknown[]>().default([]).notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+    /** What an interrupted task is waiting for: "input" | "auth" | "payment". */
+    awaiting: text("awaiting"),
+    createdAt: ts(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    appIdx: index("a2a_tasks_app_updated_idx").on(t.appId, t.updatedAt),
+    convIdx: index("a2a_tasks_conversation_idx").on(t.conversationId),
+  })
+);
+
+/** One call on the doorway, for the developer's own request log. Not an audit record. */
+export const a2aRequests = pgTable(
+  "a2a_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    appId: uuid("app_id").references(() => developerApps.id, { onDelete: "cascade" }),
+    agentSlug: text("agent_slug"),
+    taskId: uuid("task_id"),
+    method: text("method").notNull(),
+    /** "jsonrpc" | "rest" | "oauth" | "sandbox" */
+    binding: text("binding").notNull(),
+    ok: boolean("ok").notNull(),
+    errorCode: integer("error_code"),
+    httpStatus: integer("http_status").notNull(),
+    latencyMs: integer("latency_ms").notNull(),
+    createdAt: ts(),
+  },
+  (t) => ({ appIdx: index("a2a_requests_app_created_idx").on(t.appId, t.createdAt) })
+);
+
 // Ensure the pgvector extension exists (applied via raw SQL in push/seed).
 export const ensureVectorExtension = sql`CREATE EXTENSION IF NOT EXISTS vector;`;

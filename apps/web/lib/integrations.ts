@@ -1202,6 +1202,13 @@ export async function buildApiTools(
     authenticated?: boolean;
     mockSimulate?: boolean;
     /**
+     * The payable sandbox (2026-10-14): the simulated Emirates Post order opens a
+     * payment on OUR mock checkout and the simulated confirm answers from that
+     * payment's real state. Also simulates Rental/Select and Rental/Save, which
+     * the demo persona never needed. Set only for sandbox callers.
+     */
+    mockPayable?: boolean;
+    /**
      * Submission writes that must not run before the customer has paid.
      * `toolSuffixes` are unprefixed operation tool names (e.g. post_api_Rental_Save)
      * for journeys whose submission requiresPayment; the gate is live while the
@@ -1945,7 +1952,7 @@ export async function buildApiTools(
     // wait and the paid-at stamp below were dead code for every rental. The
     // signed-in renewal's `post_api_Renewal_ConfirmPayment` was missed the other
     // way, by a pattern that only named the GUEST one.
-    if (/(updatepayment|confirmpayment)/i.test(toolName) && gatewayPayment?.openedAt && !gatewayPayment.paidAt) {
+    if (/(updatepayment|confirmpayment)/i.test(toolName) && gatewayPayment?.openedAt && !gatewayPayment.paidAt && !opts.mockPayable) {
       const age = Date.now() - Date.parse(gatewayPayment.openedAt);
       if (Number.isFinite(age) && age >= 0 && age < PAYMENT_SETTLE_GRACE_MS) {
         const wait = Math.ceil((PAYMENT_SETTLE_GRACE_MS - age) / 1000);
@@ -2931,8 +2938,10 @@ export async function buildApiTools(
     // that their responses pass through the same capture a real one does — the
     // gateway payment, the "not paid yet" instruction — instead of returning here
     // with a payment URL nothing records (2026-10-11).
-    if (opts.mockSimulate && !/(renewal_save|confirmpayment)$/i.test(toolName)) {
-      const sim = simulateNxnMockOp(toolName, input ?? {});
+    // The reservation, the order and the confirm are simulated at the call itself
+    // too (payable sandbox, 2026-10-14), for the same reason as the save.
+    if (opts.mockSimulate && !/(renewal_save|confirmpayment|rental_select|rental_save|updatepayment)/i.test(toolName)) {
+      const sim = await simulateNxnMockOp(toolName, input ?? {});
       if (sim) return sim;
     }
     // MyHome availability is EMIRATE-wide, not branch-by-branch.
@@ -3188,7 +3197,27 @@ export async function buildApiTools(
     // learn the holder's name, email, phone, or ID.
     const identified = Boolean(opts.authenticated) || Boolean(runtimeToken()) || Boolean(opts.uaePassToken);
     let res =
-      (opts.mockSimulate ? simulateNxnMockOp(toolName, input ?? {}) : null) ??
+      (opts.mockSimulate
+        ? await simulateNxnMockOp(
+            toolName,
+            input ?? {},
+            opts.mockPayable
+              ? {
+                  payable: true,
+                  conversationId: opts.conversationId,
+                  agentId,
+                  locale: opts.locale,
+                  // The live price book when Rental/Bundle has been read this
+                  // conversation, so the simulated hold agrees with the card.
+                  rentFor: (bundleId, years) => {
+                    const periods = bundlePriceBook.get(bundleId) ?? [];
+                    const hit = periods.find((p) => p.years === years) ?? periods[0];
+                    return hit && Number.isFinite(hit.price) ? hit.price : null;
+                  },
+                }
+              : undefined
+          )
+        : null) ??
       (await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), {
       redactPII: !identified,
       identityToken: opts.uaePassToken,

@@ -8,6 +8,7 @@ import { getCase, saveCase, audit } from "@/lib/conversation";
 import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
 import { gatewayForPayment } from "@/lib/paymentGateway";
 import { log } from "@/lib/logger";
+import { onPaymentSettled } from "@/lib/a2a/tasks";
 
 export const runtime = "nodejs";
 
@@ -61,6 +62,8 @@ export async function GET(req: NextRequest) {
     await db.update(payments).set({ status, updatedAt: new Date() }).where(eq(payments.reference, reference));
     const c = await getCase(conversationId);
     if (c) await saveCase(c.caseId, setPayment(c.state, { status }));
+    // An A2A task waiting for this payment continues by itself (2026-10-14).
+    if (status === "paid") void onPaymentSettled(conversationId).catch(() => {});
     await audit({
       agentId: pay.agentId,
       conversationId,

@@ -101,12 +101,12 @@ function stateFor(agent: AgentDefinition, data: Record<string, unknown>, opts: P
 async function main() {
   // ════ FB-1427 (NXN): expired-box mock renewal details + grace pricing ════
   {
-    const det = simulateNxnMockOp("nxnstaging__get_api_Guest_Renewal_Details", { BoxNumber: "33417" });
+    const det = await simulateNxnMockOp("nxnstaging__get_api_Guest_Renewal_Details", { BoxNumber: "33417" });
     const ok = Boolean(det && det.result.includes("2026-02-03T00:00:00"));
     check("FB-1427 mock details returns box 33417's real (expired) date", ok, det?.result.slice(0, 120));
-    const active = simulateNxnMockOp("nxnstaging__get_api_Guest_Renewal_Details", { BoxNumber: "50500" });
+    const active = await simulateNxnMockOp("nxnstaging__get_api_Guest_Renewal_Details", { BoxNumber: "50500" });
     check("FB-1427 mock details returns box 50500's active date", Boolean(active?.result.includes("2026-08-19T00:00:00")));
-    const price = simulateNxnMockOp("nxnstaging__post_api_Guest_Renewal_Pricing", {
+    const price = await simulateNxnMockOp("nxnstaging__post_api_Guest_Renewal_Pricing", {
       body: { newBundleId: "MYBOX1", expiryDate: "2027-12-31T00:00:00" },
     });
     const parsed = JSON.parse((price?.result ?? "").split("\n").slice(1).join("\n"));

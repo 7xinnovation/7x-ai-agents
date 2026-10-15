@@ -1,0 +1,93 @@
+/*
+ * The developer portal, on the console's tokens (admin-tw.css) with a few of
+ * its own: a mono stack for code and identifiers, a reading column for the
+ * docs, and code blocks that read like documentation rather than a terminal.
+ */
+.dev {
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  background: var(--color-canvas);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.dev code,
+.dev kbd,
+.dev pre,
+.dev .mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "liga" 0;
+}
+.dev code:not(pre code) {
+  font-size: 0.86em;
+  padding: 0.1em 0.4em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  color: var(--color-ink);
+}
+.dev pre {
+  margin: 0;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+.dev-code {
+  background: #0b0d12;
+  color: #e6e8ee;
+  border-radius: 12px;
+  border: 1px solid #1b1f2a;
+  box-shadow: var(--shadow-sm);
+}
+.dev-code pre {
+  padding: 14px 16px;
+}
+.dev-code .tok-k { color: #8fb3ff; }
+.dev-code .tok-s { color: #a8e0a2; }
+.dev-code .tok-n { color: #ffd38a; }
+.dev-code .tok-c { color: #6b7480; }
+
+/* Documentation prose: a measured column, quiet headings, tables that breathe. */
+.dev-prose {
+  max-width: 76ch;
+  color: var(--color-ink-2);
+  font-size: 15px;
+  line-height: 1.7;
+}
+.dev-prose h1 { color: var(--color-ink); font-size: 30px; line-height: 1.15; font-weight: 700; margin: 0 0 10px; }
+.dev-prose h2 { color: var(--color-ink); font-size: 21px; font-weight: 600; margin: 44px 0 12px; padding-top: 12px; border-top: 1px solid var(--color-line); }
+.dev-prose h3 { color: var(--color-ink); font-size: 16px; font-weight: 600; margin: 28px 0 8px; }
+.dev-prose p { margin: 0 0 14px; }
+.dev-prose ul, .dev-prose ol { margin: 0 0 14px; padding-left: 22px; }
+.dev-prose li { margin: 4px 0; }
+.dev-prose li::marker { color: var(--color-muted); }
+.dev-prose a { color: var(--color-brand); text-decoration: none; }
+.dev-prose a:hover { text-decoration: underline; }
+.dev-prose table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 13.5px; }
+.dev-prose th { text-align: left; font-weight: 600; color: var(--color-ink); border-bottom: 1px solid var(--color-line); padding: 8px 10px 8px 0; }
+.dev-prose td { vertical-align: top; border-bottom: 1px solid var(--color-line-soft); padding: 8px 10px 8px 0; }
+.dev-prose td:first-child { white-space: nowrap; }
+.dev-prose .dev-code { margin: 10px 0 18px; }
+.dev-prose blockquote { margin: 0 0 14px; padding: 10px 14px; border-left: 3px solid var(--color-brand); background: color-mix(in srgb, var(--color-brand) 5%, white); color: var(--color-ink-2); border-radius: 0 10px 10px 0; }
+.dev-prose hr { border: 0; border-top: 1px solid var(--color-line); margin: 32px 0; }
+
+/* The docs sidebar: the current section carries the brand colour. */
+.dev-toc a { display: block; padding: 6px 10px; border-radius: 8px; font-size: 13.5px; color: var(--color-ink-2); }
+.dev-toc a:hover { background: var(--color-line-soft); color: var(--color-ink); }
+.dev-toc a[aria-current="true"] { background: color-mix(in srgb, var(--color-brand) 8%, white); color: var(--color-brand); font-weight: 600; }
+
+/* State badges for tasks and requests. */
+.dev-state { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; border: 1px solid var(--color-line); background: var(--color-canvas); color: var(--color-ink-2); white-space: nowrap; }
+.dev-state::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: #98a2b3; }
+.dev-state[data-state="TASK_STATE_COMPLETED"] { color: #067647; border-color: #abefc6; background: #ecfdf3; }
+.dev-state[data-state="TASK_STATE_COMPLETED"]::before { background: #17b26a; }
+.dev-state[data-state="TASK_STATE_WORKING"], .dev-state[data-state="TASK_STATE_SUBMITTED"] { color: var(--color-brand); border-color: var(--color-ring); background: color-mix(in srgb, var(--color-brand) 7%, white); }
+.dev-state[data-state="TASK_STATE_WORKING"]::before, .dev-state[data-state="TASK_STATE_SUBMITTED"]::before { background: var(--color-brand); }
+.dev-state[data-state="TASK_STATE_INPUT_REQUIRED"], .dev-state[data-state="TASK_STATE_AUTH_REQUIRED"] { color: #b54708; border-color: #fedf89; background: #fffaeb; }
+.dev-state[data-state="TASK_STATE_INPUT_REQUIRED"]::before, .dev-state[data-state="TASK_STATE_AUTH_REQUIRED"]::before { background: #f79009; }
+.dev-state[data-state="TASK_STATE_FAILED"], .dev-state[data-state="TASK_STATE_REJECTED"] { color: #b42318; border-color: #fecdca; background: #fef3f2; }
+.dev-state[data-state="TASK_STATE_FAILED"]::before, .dev-state[data-state="TASK_STATE_REJECTED"]::before { background: #f04438; }
+.dev-state[data-state="TASK_STATE_CANCELED"] { color: var(--color-muted); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .dev [data-rise] { animation: dlg-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+}

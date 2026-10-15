@@ -8,6 +8,7 @@ import { getCase, saveCase, audit } from "@/lib/conversation";
 import { emitEvent } from "@/lib/analytics";
 import { getAgentById } from "@/lib/agents";
 import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
+import { onPaymentSettled } from "@/lib/a2a/tasks";
 
 export const runtime = "nodejs";
 
@@ -101,6 +102,12 @@ export async function POST(req: NextRequest) {
   // should be able to do because a conversation went well.
   if (outcome === "paid" && pay.agentId && pay.conversationId) {
     await notifyEpglIfLicenceFee(pay.agentId, pay.conversationId, reference, Number(pay.amount ?? 0));
+  }
+
+  // An A2A task waiting for this payment continues by itself (2026-10-14). Not
+  // awaited: the gateway gets its 200 now, the engine runs its settled turn.
+  if (outcome === "paid" && pay.conversationId) {
+    void onPaymentSettled(pay.conversationId).catch(() => {});
   }
 
   return NextResponse.json({ ok: true, reference, status: outcome });
