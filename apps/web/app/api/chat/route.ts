@@ -1602,7 +1602,7 @@ export async function POST(req: NextRequest) {
     } else if (userRef === MOCK_PERSONA_SUB) {
       // TEST-ONLY: the mock UAE PASS persona (UAEPASS_MOCK=1) is given a couple of
       // existing PO Boxes so signed-in flows have account data to work with.
-      customerContext = mockPersonaContext();
+      customerContext = mockPersonaContext(session.state.data.__mock_auto_renew as Record<string, boolean> | undefined);
     } else {
       const facts = await knownCustomerFacts(agent.id, userRef).catch(() => null);
       if (facts && (facts.boxes.length || facts.contactPhone || facts.contactEmail || facts.history.length)) {
@@ -2192,6 +2192,15 @@ export async function POST(req: NextRequest) {
   const PIN_TOOL = "nxn_address_from_pin";
   const CARDS_TOOL = "nxn_saved_cards";
   const AUTORENEW_TOOL = "nxn_set_auto_renew";
+  /**
+   * Management actions that SUCCEEDED this turn (2026-10-15). Sent to the
+   * client as one `action_completed` event after the text, so a machine caller
+   * (the A2A doorway) can close the request: switching auto-renewal on has an
+   * outcome as definite as a paid order, it just has no payment.
+   */
+  const actionsThisTurn: { tool: string; box: string | null; enabled?: boolean; simulated: boolean }[] = [];
+  /** The mock persona's simulated switches, carried on the case so the next turn's context agrees with them. */
+  let mockAutoRenew: Record<string, boolean> | null = null;
   const gsbTools: Anthropic.Tool[] = isNxn
     ? [
         {
@@ -2572,8 +2581,17 @@ export async function POST(req: NextRequest) {
       // renewal can be exercised locally end to end.
       if (uaePassMockAllowed() && session.userRef === MOCK_PERSONA_SUB) {
         const enabled = input.enabled === true;
-        await audit({ ...a, actor: "system", action: "mock_auto_renew", payload: { tool: AUTORENEW_TOOL, input: { boxNumber: input.boxNumber ?? null, enabled }, simulated: true } }).catch(() => {});
-        return { result: `AUTO-RENEWAL IS NOW ${enabled ? "ON" : "OFF"} for this box.` };
+        const box = String(input.boxNumber ?? "").trim() || null;
+        const known = { ...((session.state.data.__mock_auto_renew as Record<string, boolean> | undefined) ?? {}), ...(mockAutoRenew ?? {}) };
+        const already = box !== null && known[box] === enabled;
+        if (box) mockAutoRenew = { ...known, [box]: enabled };
+        await audit({ ...a, actor: "system", action: "mock_auto_renew", payload: { tool: AUTORENEW_TOOL, input: { boxNumber: box, enabled }, simulated: true, changed: !already } }).catch(() => {});
+        if (!already) actionsThisTurn.push({ tool: AUTORENEW_TOOL, box, enabled, simulated: true });
+        return {
+          result: already
+            ? `AUTO-RENEWAL WAS ALREADY ${enabled ? "ON" : "OFF"} for this box — nothing changed. Do not call this tool again unless the customer asks for a different setting, and do not repeat the confirmation.`
+            : `AUTO-RENEWAL IS NOW ${enabled ? "ON" : "OFF"} for this box. This is done: do not call this tool again for this box unless the customer asks for a different setting.`,
+        };
       }
       if (!caller) {
         return {
@@ -2597,6 +2615,7 @@ export async function POST(req: NextRequest) {
           input.enabled === true, caller
         );
         if (r.ok) {
+          if (r.changed) actionsThisTurn.push({ tool: AUTORENEW_TOOL, box: String(input.boxNumber ?? "") || null, enabled: r.enabled, simulated: false });
           return {
             result: r.changed
               ? `AUTO-RENEWAL IS NOW ${r.enabled ? "ON" : "OFF"} for this box.`
@@ -3671,6 +3690,8 @@ export async function POST(req: NextRequest) {
           ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
+        // What this turn actually did, for a machine caller; the widget ignores it.
+        if (actionsThisTurn.length) send({ type: "action_completed", actions: actionsThisTurn });
 
         // Deterministic "browse nearby branches" map: the model reliably shows the
         // branch cards but often forgets the ```map block, so if it looked up branch
@@ -4597,6 +4618,7 @@ export async function POST(req: NextRequest) {
         if (courierSeen && !finalState.data.key_delivery) {
           finalState = { ...finalState, data: { ...finalState.data, key_delivery: "courier" } };
         }
+        if (mockAutoRenew) finalState = { ...finalState, data: { ...finalState.data, __mock_auto_renew: mockAutoRenew } };
         await saveCase(session.caseId, finalState);
         // Persist a BACKEND session token minted this turn (e.g. OTP login) for later
         // turns. Never overwrite a stored UAE PASS identity token with it: the two

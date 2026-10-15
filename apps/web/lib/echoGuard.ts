@@ -95,14 +95,50 @@ export interface EchoGuard {
  * is on their screen before the second is written, which is the whole reason
  * this runs in the stream rather than over the finished reply.
  */
+/**
+ * A short prose sentence said word for word a second time (2026-10-15).
+ *
+ * "Goodbye!Goodbye!" and "What is your company's trade licence number?What is
+ * your company's trade licence number?" reached the A2A doorway: the model
+ * wrote the reply, called a tool, and wrote it again. Too short for the
+ * overlap test above, and glued to the first copy with no space, so the
+ * sentence splitter saw one sentence. So an EXACT repeat of prose goes,
+ * whatever its length, when it has the shape of a second round: glued to what
+ * came before, or opening a new paragraph. "Yes. Yes." inside one line is
+ * ordinary writing and stays; list rows and headings are left alone, where
+ * repetition can be the content.
+ */
+const exactKey = (sentence: string): string | null => {
+  const s = sentence.trim();
+  if (!s || /^[-#|>*\d]/.test(s)) return null;
+  const k = s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return k.length >= 3 ? k : null;
+};
+
 export function echoGuard(): EchoGuard {
   const said: Set<string>[] = [];
+  const exact = new Set<string>();
+  /** What separated the unit being decided from the one before: "" glued, "\n\n" a new paragraph. */
+  let before: string | null = null;
+  /** Inside a repeated run: every exact repeat goes until something new is said. */
+  let echoing = false;
   let buf = "";
   let inFence = false;
   let drops = 0;
 
   /** Emit the sentence, unless the reply has already made it. */
   const decide = (sentence: string): boolean => {
+    const key = exactKey(sentence);
+    if (key) {
+      const roundShaped = before === "" || (before !== null && /\n[ \t]*\n/.test(before));
+      if (exact.has(key) && (roundShaped || echoing)) {
+        drops += 1;
+        echoing = true;
+        return false;
+      }
+      exact.add(key);
+    }
+    echoing = false;
     if (!substantial(sentence)) return true;
     const words = bag(sentence);
     for (const earlier of said) {
@@ -124,16 +160,20 @@ export function echoGuard(): EchoGuard {
         out += buf.slice(0, end + 3);
         buf = buf.slice(end + 3);
         inFence = false;
+        before = "\n\n";
         continue;
       }
       const start = buf.indexOf("```");
       const upto = start === -1 ? buf : buf.slice(0, start);
-      const m = /^([\s\S]*?[.!?؟])(\s+)/.exec(upto);
+      // A sentence ends at its punctuation and the space after it, or where the
+      // next one starts with no space at all: "…number?What is…" is two.
+      const m = /^([\s\S]*?[.!?؟])(\s+|(?=[A-Z\u0600-\u06FF]))/.exec(upto);
       if (m) {
         const sentence = m[1]!;
         // A repeat goes, but not the paragraph break after it — a fence that
         // ends up mid-line stops being a fence. See narrationGuard.keptSeparator.
         out += decide(sentence) ? sentence + m[2] : keptSeparator(m[2]!);
+        before = m[2]!;
         buf = buf.slice(m[0].length);
         continue;
       }
@@ -141,7 +181,15 @@ export function echoGuard(): EchoGuard {
       const nl = upto.indexOf("\n");
       if (nl !== -1) {
         const line = upto.slice(0, nl + 1);
+        // A blank line is the paragraph break the next unit comes after.
+        if (!line.trim()) {
+          out += line;
+          before = (before ?? "") + line;
+          buf = buf.slice(nl + 1);
+          continue;
+        }
         out += decide(line.trim()) ? line : "";
+        before = "\n";
         buf = buf.slice(nl + 1);
         continue;
       }

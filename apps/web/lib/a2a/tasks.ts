@@ -205,6 +205,8 @@ interface TurnOutcome {
   error: string | null;
   httpError: string | null;
   expired: string | null;
+  /** Management actions the engine reports as done this turn (auto-renewal switched, …). */
+  actions: { tool: string; box: string | null; enabled?: boolean; simulated: boolean }[];
 }
 
 async function runEngineTurn(input: {
@@ -243,6 +245,7 @@ async function runEngineTurn(input: {
     error: null,
     httpError: null,
     expired: null,
+    actions: [],
   };
 
   const res = await chatPost(req);
@@ -296,6 +299,9 @@ async function runEngineTurn(input: {
         break;
       case "session":
         if (ev.expired) out.expired = String(ev.expired);
+        break;
+      case "action_completed":
+        if (Array.isArray(ev.actions)) out.actions.push(...(ev.actions as TurnOutcome["actions"]));
         break;
       default:
         break;
@@ -481,6 +487,19 @@ function decide(input: {
           collected: caseSummary(state)!.collected,
         }),
       ],
+    });
+    return { state: "TASK_STATE_COMPLETED", awaiting: null, newArtifacts: artifacts, text: turn.text };
+  }
+
+  // A management request that was carried out (auto-renewal switched on, …) has
+  // an outcome as definite as a paid order. The task closes; anything else the
+  // customer wants is a new task in the same contextId.
+  if (turn.actions.length && !(owes && paymentRef)) {
+    artifacts.push({
+      artifactId: newId(),
+      name: "action-outcome",
+      description: "What the agent did on the customer's account in this request.",
+      parts: [dataPart({ journey: state?.journeyKey ?? null, actions: turn.actions })],
     });
     return { state: "TASK_STATE_COMPLETED", awaiting: null, newArtifacts: artifacts, text: turn.text };
   }

@@ -113,5 +113,21 @@ console.log("\nNothing is lost: what goes out is a subset of what came in");
   check("the guard reports what it dropped", g.dropped() >= 1, g.dropped());
 }
 
+// 2026-10-15: whole replies said twice across a tool round, reached through the A2A doorway.
+{
+  const run = (t: string, size = 5) => stream(t, size);
+  check("a short reply glued to its own copy is said once", run("Goodbye!Goodbye!") === "Goodbye!", run("Goodbye!Goodbye!"));
+  const q = "What is your company's trade licence number?";
+  check("a question glued to its own copy is asked once", run(q + q) === q, run(q + q));
+  const pay = "How would you like to pay?\n\n```buttons\n- Pay with Card\n- Pay with Noqodi (UAE Pay)\n```";
+  const twice = run(pay + "How would you like to pay?");
+  check("a question repeated after its buttons block goes; the block stays", (twice.match(/How would you like to pay\?/g) ?? []).length === 1 && twice.includes("```buttons"), twice);
+  check("a separated short repeat goes too", run("Goodbye, Ahmed! Take care.\n\nGoodbye, Ahmed! Take care.").trim() === "Goodbye, Ahmed! Take care.", run("Goodbye, Ahmed! Take care.\n\nGoodbye, Ahmed! Take care."));
+  check("prices with decimals are not split", run("The total is AED 695.00 for one year.") === "The total is AED 695.00 for one year.");
+  check("repeated list rows survive", run("Options:\n- Yes\n- Yes\n") === "Options:\n- Yes\n- Yes\n", run("Options:\n- Yes\n- Yes\n"));
+  check("two different short sentences both survive", run("Yes. Thank you.") === "Yes. Thank you.");
+  check("Arabic glued repeat is said once", run("شكراً لك!شكراً لك!") === "شكراً لك!", run("شكراً لك!شكراً لك!"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

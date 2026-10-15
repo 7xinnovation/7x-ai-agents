@@ -42,12 +42,20 @@ export const MOCK_PERSONA_BOXES: MockBox[] = [
  * System-prompt context describing the signed-in persona + its PO Boxes, so the
  * model uses the boxes on file across every authenticated flow without asking.
  */
-export function mockPersonaContext(): string {
-  const lines = MOCK_PERSONA_BOXES.map(
-    (b, i) =>
+/**
+ * `autoRenew` overrides the boxes' auto-renewal with what this conversation has
+ * switched (2026-10-15). Without it the persona read "auto-renewal OFF" on every
+ * turn after the customer had switched it on, and the agent switched it on
+ * again on each "thanks" and "goodbye", restating the confirmation each time.
+ */
+export function mockPersonaContext(autoRenew?: Record<string, boolean>): string {
+  const lines = MOCK_PERSONA_BOXES.map((b, i) => {
+    const on = autoRenew && b.box in autoRenew ? autoRenew[b.box]! : b.autoRenew;
+    return (
       `${i + 1}) PO Box ${b.box}, ${b.emirate} — ${b.branch}, ${b.bundle} bundle (${b.rate}), expires ${b.expiry}, ` +
-      `auto-renewal ${b.autoRenew ? "ON" : "OFF"}, ${b.savedCard ? `card on file (${b.savedCard})` : "no saved card"}.`
-  ).join(" ");
+      `auto-renewal ${on ? "ON" : "OFF"}, ${b.savedCard ? `card on file (${b.savedCard})` : "no saved card"}.`
+    );
+  }).join(" ");
   return (
     `The signed-in customer is ${MOCK_PERSONA_NAME}. Contact on the customer profile: mobile ${MOCK_PERSONA_CONTACT.mobile}, email ${MOCK_PERSONA_CONTACT.email} — when a journey needs a contact phone or email, record THESE with collect_field and ask the customer only to confirm them; NEVER ask them to type their mobile number or email. ` +
     `Usual branch: ${MOCK_PERSONA_BOXES[0]!.branch} — when presenting branches you may highlight it with a badge (e.g. "Your usual branch"), but never pre-select it. ` +
