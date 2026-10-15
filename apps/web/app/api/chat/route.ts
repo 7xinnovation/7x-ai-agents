@@ -3229,6 +3229,7 @@ export async function POST(req: NextRequest) {
 
         let finalState = session.state;
         let finalText = "";
+        let doneMessage = "";
         // The pay button is only ever as good as the URL behind it, and the model
         // writes that URL from memory. Anything it emits is checked against the
         // order the backend actually created before the customer can click it.
@@ -3569,8 +3570,13 @@ export async function POST(req: NextRequest) {
           if (ev.type === "case") finalState = liveState = withPartnerTypes(ev.state);
           else if (ev.type === "done") {
             finalState = liveState = ev.state;
-            // Fall back to the round's text only if nothing was streamed.
-            if (!finalText) finalText = ev.message;
+            // The round's own text is the fallback for a turn that streamed
+            // nothing — decided AFTER the guards have released what they hold
+            // (below). Taken here, a short reply still held by a guard was saved
+            // twice: once from this message and again when the guard flushed —
+            // "Take care!Take care!" in the transcript, which the model then read
+            // back as its own habit (2026-10-15).
+            doneMessage = ev.message;
           } else if (ev.type === "citation" && !citedThisTurn) {
             citedThisTurn = true;
             await emitEvent({ type: "knowledge.retrieved", ...std, attributes: { source: ev.source } });
@@ -3690,6 +3696,7 @@ export async function POST(req: NextRequest) {
           ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
         }
+        if (!finalText.trim() && doneMessage) finalText = doneMessage;
         // What this turn actually did, for a machine caller; the widget ignores it.
         if (actionsThisTurn.length) send({ type: "action_completed", actions: actionsThisTurn });
 
