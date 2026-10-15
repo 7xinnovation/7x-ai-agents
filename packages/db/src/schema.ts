@@ -457,6 +457,8 @@ export const developerAccounts = pgTable(
     name: text("name").notNull(),
     email: text("email").notNull().unique(),
     passwordHash: text("password_hash"),
+    /** "developer" sees its own applications; "admin" also manages every account, application, setting and log (2026-10-15). */
+    role: text("role").default("developer").notNull(),
     active: boolean("active").default(true).notNull(),
     inviteTokenHash: text("invite_token_hash"),
     inviteExpiresAt: timestamp("invite_expires_at", { withTimezone: true }),
@@ -542,6 +544,14 @@ export const a2aTasks = pgTable(
     convIdx: index("a2a_tasks_conversation_idx").on(t.conversationId),
   })
 );
+
+/** Portal-wide settings an admin changes from the portal; read with defaults by lib/developer/settings.ts. */
+export const portalSettings = pgTable("portal_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<unknown>().notNull(),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 /** One call on the doorway, for the developer's own request log. Not an audit record. */
 export const a2aRequests = pgTable(

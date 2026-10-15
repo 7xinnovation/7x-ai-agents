@@ -8,7 +8,7 @@
  * From apps/web:
  *   npx tsx scripts/provision-developer-account-2026-10-14.ts --env <file> \
  *     --org "Prime Minister's Office" --name "PMO Technical Team" --email someone@example.gov.ae \
- *     --base https://<public host>
+ *     --base https://<public host> [--role admin]
  */
 import { databaseUrlFromArgs } from "./lib/envFile";
 import { poolFor } from "./lib/pgPool";
@@ -23,6 +23,7 @@ async function main() {
   const name = arg("--name");
   const email = arg("--email")?.trim().toLowerCase();
   const base = (arg("--base") ?? "http://localhost:3000").replace(/\/$/, "");
+  const role = arg("--role") === "admin" ? "admin" : "developer";
   if (!org || !name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     console.error("usage: --env <file> --org <organisation> --name <contact name> --email <email> [--base <public origin>]");
     process.exit(2);
@@ -30,18 +31,18 @@ async function main() {
   const pool = await poolFor(databaseUrlFromArgs());
   try {
     const { rows } = await pool.query(
-      `insert into developer_accounts (organization, name, email, invited_by, active)
-       values ($1, $2, $3, $4, true)
-       on conflict (email) do update set organization = excluded.organization, name = excluded.name, active = true
+      `insert into developer_accounts (organization, name, email, invited_by, active, role)
+       values ($1, $2, $3, $4, true, $5)
+       on conflict (email) do update set organization = excluded.organization, name = excluded.name, active = true, role = excluded.role
        returning id, (xmax = 0) as created`,
-      [org, name, email, "script:provision-developer-account-2026-10-14"]
+      [org, name, email, "script:provision-developer-account-2026-10-14", role]
     );
     const row = rows[0];
     await pool.query(`insert into audit_log (actor, action, payload) values ('system', $1, $2::jsonb)`, [
       row.created ? "developer_account_invited" : "developer_account_reinvited",
-      JSON.stringify({ by: "script:provision-developer-account-2026-10-14", accountId: row.id, organization: org, email }),
+      JSON.stringify({ by: "script:provision-developer-account-2026-10-14", accountId: row.id, organization: org, email, role }),
     ]);
-    console.log(`${row.created ? "Created" : "Reactivated"} ${email} (${org}) · account ${row.id}`);
+    console.log(`${row.created ? "Created" : "Updated"} ${email} (${org}, ${role}) · account ${row.id}`);
     console.log(`Sign-in link (a one-time code is emailed when they ask for it):\n\n  ${base}/developers/login?email=${encodeURIComponent(email)}\n`);
   } finally {
     await pool.end();

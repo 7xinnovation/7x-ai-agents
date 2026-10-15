@@ -12,6 +12,7 @@ import { getDb, developerAccounts, developerApps, a2aRequests, a2aTasks } from "
 import { hashPassword, verifyPassword, newInviteToken, hashInviteToken } from "@/lib/users";
 import { newApiKey, newClientId, newClientSecret, sha256 } from "@/lib/a2a/auth";
 import { A2A_AGENTS } from "@/lib/a2a/catalogue";
+import { getSettings } from "./settings";
 
 export type DeveloperAccount = typeof developerAccounts.$inferSelect;
 export type DeveloperApp = typeof developerApps.$inferSelect;
@@ -142,7 +143,7 @@ export async function createApp(accountId: string, name: string) {
       clientSecretHash: sha256(clientSecret),
       apiKeyHash: sha256(apiKey),
       apiKeyHint: apiKey.slice(-4),
-      agentSlugs: defaultAgentSlugs(),
+      agentSlugs: (await getSettings()).defaultAgents,
       scopes: ["tasks"],
     })
     .returning();

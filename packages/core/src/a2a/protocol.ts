@@ -305,6 +305,7 @@ export const A2A_ERRORS = {
   UnauthenticatedError: { code: -32010, http: 401, message: "Authentication required" },
   PermissionDeniedError: { code: -32011, http: 403, message: "Permission denied" },
   RateLimitedError: { code: -32012, http: 429, message: "Too many requests" },
+  UnavailableError: { code: -32013, http: 503, message: "The doorway is paused" },
 } as const;
 
 export type A2AErrorName = keyof typeof A2A_ERRORS;

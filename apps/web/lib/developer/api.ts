@@ -30,3 +30,11 @@ export async function readJson<T>(req: Request): Promise<T | null> {
     return null;
   }
 }
+
+/** An admin, checked against the account row on this request; otherwise a 401 or 403 the route returns as is. */
+export async function requireAdmin(req: Request): Promise<{ dev: DeveloperClaims } | { response: Response }> {
+  const auth = await requireDeveloper(req);
+  if ("response" in auth) return auth;
+  if (auth.dev.role !== "admin") return { response: json({ error: "forbidden" }, 403) };
+  return auth;
+}

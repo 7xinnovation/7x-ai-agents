@@ -15,9 +15,11 @@ const PRIVATE = [
 ];
 
 /** Tabs on the product bar; the current one carries a 2px blue rule, like the printed brief. */
-export function DevNav({ signedIn }: { signedIn: boolean }) {
+const ADMIN = [{ href: "/developers/admin", label: "Admin", exact: false }];
+
+export function DevNav({ signedIn, role }: { signedIn: boolean; role?: "developer" | "admin" }) {
   const pathname = usePathname() ?? "";
-  const items = signedIn ? [...PUBLIC, ...PRIVATE] : PUBLIC;
+  const items = signedIn ? [...PUBLIC, ...PRIVATE, ...(role === "admin" ? ADMIN : [])] : PUBLIC;
   return (
     <nav className="hidden h-full items-stretch gap-6 md:flex" aria-label="Portal">
       {items.map((it) => {

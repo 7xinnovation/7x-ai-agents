@@ -13,6 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, developerAccounts } from "@dialog/db";
 import { sendEmail, textToHtml } from "@/lib/email";
 import { log } from "@/lib/logger";
+import { getSettings } from "./settings";
 
 export const OTP_TTL_MS = 10 * 60 * 1000;
 export const OTP_MAX_ATTEMPTS = 5;
@@ -37,15 +38,16 @@ export async function requestSignInCode(rawEmail: string, origin?: string): Prom
   if (!account || !account.active) return "no_account";
   if (account.otpSentAt && Date.now() - account.otpSentAt.getTime() < OTP_RESEND_AFTER_MS) return "throttled";
 
+  const { codeTtlMinutes } = await getSettings();
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   await db
     .update(developerAccounts)
-    .set({ otpHash: hashCode(account.id, code), otpExpiresAt: new Date(Date.now() + OTP_TTL_MS), otpAttempts: 0, otpSentAt: new Date() })
+    .set({ otpHash: hashCode(account.id, code), otpExpiresAt: new Date(Date.now() + codeTtlMinutes * 60_000), otpAttempts: 0, otpSentAt: new Date() })
     .where(eq(developerAccounts.id, account.id));
 
   const text =
     `Your sign-in code for Dialog Developers is:\n\n${code}\n\n` +
-    `It expires in 10 minutes and works once. If you did not try to sign in, you can ignore this email.\n\n` +
+    `It expires in ${codeTtlMinutes} minutes and works once. If you did not try to sign in, you can ignore this email.\n\n` +
     `${account.organization}, ${email}` +
     (origin ? `\n${origin}/developers` : "");
   const result = await sendEmail({
@@ -78,14 +80,15 @@ export async function verifySignInCode(rawEmail: string, rawCode: string): Promi
   const [account] = await db.select().from(developerAccounts).where(eq(developerAccounts.email, email)).limit(1);
   if (!account || !account.active || !account.otpHash || !account.otpExpiresAt) return { ok: false, reason: "invalid" };
   if (account.otpExpiresAt.getTime() < Date.now()) return { ok: false, reason: "expired" };
-  if (account.otpAttempts >= OTP_MAX_ATTEMPTS) return { ok: false, reason: "too_many_attempts" };
+  const { codeMaxAttempts } = await getSettings();
+  if (account.otpAttempts >= codeMaxAttempts) return { ok: false, reason: "too_many_attempts" };
 
   if (code.length !== 6 || !sameHex(account.otpHash, hashCode(account.id, code))) {
     await db
       .update(developerAccounts)
       .set({ otpAttempts: account.otpAttempts + 1 })
       .where(eq(developerAccounts.id, account.id));
-    return { ok: false, reason: account.otpAttempts + 1 >= OTP_MAX_ATTEMPTS ? "too_many_attempts" : "invalid" };
+    return { ok: false, reason: account.otpAttempts + 1 >= codeMaxAttempts ? "too_many_attempts" : "invalid" };
   }
   // Spend the code atomically: a second use, or a race with another tab, finds no hash.
   const [signedIn] = await db

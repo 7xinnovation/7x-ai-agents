@@ -4,6 +4,8 @@
  * a portal session never opens the console.
  */
 import { cookies } from "next/headers";
+import { eq } from "drizzle-orm";
+import { getDb, developerAccounts } from "@dialog/db";
 import { derivedSecret, signJwt, verifyJwt, type JwtClaims } from "./jwt";
 
 export const DEV_COOKIE = "dlg_dev";
@@ -15,15 +17,34 @@ export interface DeveloperClaims extends JwtClaims {
   email: string;
   name: string;
   org: string;
+  /** Filled from the database on every read, never trusted from the cookie. */
+  role?: "developer" | "admin";
 }
 
-export async function signDeveloperSession(c: Omit<DeveloperClaims, "exp" | "iat">): Promise<string> {
-  return signJwt(c, derivedSecret(SECRET_LABEL), TTL_SECONDS);
+export async function signDeveloperSession(c: Omit<DeveloperClaims, "exp" | "iat" | "role">): Promise<string> {
+  return signJwt({ aid: c.aid, email: c.email, name: c.name, org: c.org }, derivedSecret(SECRET_LABEL), TTL_SECONDS);
 }
 
+/**
+ * The signed cookie names the account; the account's row decides the rest.
+ * A deactivated account is signed out on its next request, a role change takes
+ * effect at once, and the cookie's own copy of name and organisation is
+ * refreshed from the row.
+ */
 export async function verifyDeveloperSession(token: string | undefined | null): Promise<DeveloperClaims | null> {
   const claims = await verifyJwt<DeveloperClaims>(token, derivedSecret(SECRET_LABEL));
-  return claims && claims.aid ? claims : null;
+  if (!claims || !claims.aid) return null;
+  try {
+    const [row] = await getDb()
+      .select({ active: developerAccounts.active, role: developerAccounts.role, name: developerAccounts.name, org: developerAccounts.organization, email: developerAccounts.email })
+      .from(developerAccounts)
+      .where(eq(developerAccounts.id, claims.aid))
+      .limit(1);
+    if (!row || !row.active) return null;
+    return { ...claims, name: row.name, org: row.org, email: row.email, role: row.role === "admin" ? "admin" : "developer" };
+  } catch {
+    return null;
+  }
 }
 
 export const developerCookie = (token: string) => ({

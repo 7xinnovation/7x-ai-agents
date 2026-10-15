@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { currentDeveloper } from "@/lib/developer/session";
+import { getSettings } from "@/lib/developer/settings";
 import { Mark } from "./Mark";
 import { SignOutButton } from "./SignOutButton";
 import { DevNav } from "./DevNav";
@@ -10,13 +11,13 @@ import { DevNav } from "./DevNav";
  * from the cookie without a round trip; the nav highlights itself on the client.
  */
 export async function DevHeader() {
-  const dev = await currentDeveloper();
+  const [dev, settings] = await Promise.all([currentDeveloper(), getSettings()]);
   return (
     <header className="sticky top-0 z-30">
       <div className="bg-[#0f1720] text-[12px] text-white/70">
         <div className="mx-auto flex h-8 max-w-[1200px] items-center justify-between gap-4 px-4 sm:px-6">
           <span>
-            <span className="font-medium text-white">Sandbox environment.</span> Test data only. No box is rented and no payment is taken.
+            <span className="font-medium text-white">Sandbox environment.</span> {settings.bannerText}
           </span>
           <span className="hidden sm:inline">A2A protocol 1.0</span>
         </div>
@@ -29,7 +30,7 @@ export async function DevHeader() {
               Dialog <span className="font-normal text-muted">Developers</span>
             </span>
           </Link>
-          <DevNav signedIn={Boolean(dev)} />
+          <DevNav signedIn={Boolean(dev)} role={dev?.role} />
           <div className="ml-auto flex items-center gap-3">
             {dev ? (
               <>

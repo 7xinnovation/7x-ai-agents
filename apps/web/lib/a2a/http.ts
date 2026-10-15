@@ -9,6 +9,20 @@ import { assertMayCall, authenticateRequest } from "./auth";
 import type { A2AContext } from "./tasks";
 import { logRequest, type RequestLogEntry } from "./log";
 import { log } from "@/lib/logger";
+import { getSettings } from "@/lib/developer/settings";
+
+/** Calls per application in the current minute, per process. */
+const windows = new Map<string, { minute: number; count: number }>();
+function overLimit(appId: string, limit: number): boolean {
+  const minute = Math.floor(Date.now() / 60_000);
+  const w = windows.get(appId);
+  if (!w || w.minute !== minute) {
+    windows.set(appId, { minute, count: 1 });
+    return false;
+  }
+  w.count += 1;
+  return w.count > limit;
+}
 
 /** The origin the client reached, honouring a proxy only when it agrees with the host that answered. */
 export function originOf(req: Request): { origin: string; host?: string; proto?: string } {
@@ -42,8 +56,13 @@ export async function contextFor(req: Request, entry: A2AAgentEntry): Promise<A2
   if (version && !/^(1\.0|0\.3)$/.test(version)) {
     throw new A2AError("VersionNotSupportedError", `this agent speaks A2A 1.0; the request declared ${version}`, { supported: ["1.0"] });
   }
+  const settings = await getSettings();
+  if (!settings.doorwayEnabled) throw new A2AError("UnavailableError", "the sandbox is paused by 7X; try again later");
   const app = await authenticateRequest(req);
   assertMayCall(app, entry.key);
+  if (settings.rateLimitPerMinute > 0 && overLimit(app.id, settings.rateLimitPerMinute)) {
+    throw new A2AError("RateLimitedError", `more than ${settings.rateLimitPerMinute} calls a minute from this application`, { limitPerMinute: settings.rateLimitPerMinute });
+  }
   const { origin, host, proto } = originOf(req);
   return { entry, app, origin, forwardedHost: host, forwardedProto: proto };
 }

@@ -87,9 +87,18 @@ export const DDL = [
   `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS otp_expires_at timestamptz`,
   `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS otp_attempts integer NOT NULL DEFAULT 0`,
   `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS otp_sent_at timestamptz`,
+  // Super admin and settings (2026-10-15).
+  `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'developer'`,
+  `CREATE TABLE IF NOT EXISTS portal_settings (
+     key text PRIMARY KEY,
+     value jsonb NOT NULL,
+     updated_by text,
+     updated_at timestamptz NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS audit_action_created_idx ON audit_log (action, created_at)`,
 ];
 
-const TABLES = ["developer_accounts", "developer_apps", "a2a_tasks", "a2a_requests"];
+const TABLES = ["developer_accounts", "developer_apps", "a2a_tasks", "a2a_requests", "portal_settings"];
 
 async function main() {
   const pool = await poolFor(databaseUrlFromArgs());
