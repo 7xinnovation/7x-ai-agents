@@ -258,7 +258,7 @@ async function main() {
   // Two at a time: fast enough, gentle on the staging app and the model quota.
   const results: Result[] = [];
   for (let i = 0; i < list.length; i += 2) {
-    const batch = await Promise.all(list.slice(i, i + 2).map((j) => run(j).catch((e) => ({ id: j.id, status: "fail" as const, turns: 0, seconds: 0, why: String(e), lastAgent: "" }))));
+    const batch = await Promise.all(list.slice(i, i + 2).map((j) => run(j).catch((e): Result => ({ id: j.id, status: "fail", turns: 0, seconds: 0, why: String(e), lastAgent: "" }))));
     for (const r of batch) {
       results.push(r);
       console.log(`${r.status === "pass" ? "ok  " : r.status === "limitation" ? "LIM " : "FAIL"} ${r.id.padEnd(30)} ${String(r.turns).padStart(2)} turns ${String(r.seconds).padStart(4)}s  ${r.why}`);
