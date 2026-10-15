@@ -65,6 +65,7 @@ export async function POST(req: Request) {
     recordRequest(start, { method: "token", binding: "oauth", ok: false, httpStatus: status });
     return json(result, status, status === 401 ? { "www-authenticate": 'Basic realm="a2a"' } : {});
   }
-  recordRequest(start, { method: "token", binding: "oauth", ok: true, httpStatus: 200 });
-  return json(result, 200);
+  const { appId, ...tokenResponse } = result;
+  recordRequest(start, { appId, method: "token", binding: "oauth", ok: true, httpStatus: 200 });
+  return json(tokenResponse, 200);
 }

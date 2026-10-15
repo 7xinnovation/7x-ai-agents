@@ -47,11 +47,18 @@ function highlight(code: string, lang: string): string {
       .replace(/(:\s*)(-?\d+(?:\.\d+)?)/g, '$1<span class="tok-n">$2</span>');
   }
   if (lang === "bash" || lang === "http") {
+    // Line by line: a comment line is wrapped whole and never tokenised again,
+    // so the class name of its own span cannot be read as a string.
     return safe
-      .replace(/(^|\n)(#[^\n]*)/g, '$1<span class="tok-c">$2</span>')
-      .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="tok-s">$1</span>')
-      .replace(/(^|\n)(curl|POST|GET|DELETE|export)\b/g, '$1<span class="tok-k">$2</span>')
-      .replace(/(\s)(-[A-Za-z-]+)/g, '$1<span class="tok-n">$2</span>');
+      .split("\n")
+      .map((line) => {
+        if (/^\s*#/.test(line)) return `<span class="tok-c">${line}</span>`;
+        return line
+          .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="tok-s">$1</span>')
+          .replace(/^(\s*)(curl|POST|GET|DELETE|PATCH|export)\b/, '$1<span class="tok-k">$2</span>')
+          .replace(/(\s)(-{1,2}[A-Za-z][\w-]*)/g, '$1<span class="tok-n">$2</span>');
+      })
+      .join("\n");
   }
   if (lang === "js" || lang === "python") {
     return safe

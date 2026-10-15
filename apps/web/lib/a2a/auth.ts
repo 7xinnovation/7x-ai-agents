@@ -80,7 +80,7 @@ export async function issueAccessToken(
   clientId: string,
   clientSecret: string,
   requestedScope?: string
-): Promise<{ access_token: string; token_type: "Bearer"; expires_in: number; scope: string } | { error: string; error_description: string }> {
+): Promise<{ access_token: string; token_type: "Bearer"; expires_in: number; scope: string; appId: string } | { error: string; error_description: string }> {
   const row = clientId ? await appByClientId(clientId) : null;
   if (!row || row.revokedAt || !clientSecret || !sameHash(row.clientSecretHash, sha256(clientSecret))) {
     return { error: "invalid_client", error_description: "Unknown client or wrong secret." };
@@ -92,7 +92,7 @@ export async function issueAccessToken(
   const scope = (asked.length ? asked : granted).join(" ");
   const token = await signJwt({ iss: "dialog-a2a", sub: row.clientId, app: row.id, scope }, derivedSecret(TOKEN_SECRET_LABEL), ACCESS_TOKEN_TTL_SECONDS);
   touch(row.id);
-  return { access_token: token, token_type: "Bearer", expires_in: ACCESS_TOKEN_TTL_SECONDS, scope };
+  return { access_token: token, token_type: "Bearer", expires_in: ACCESS_TOKEN_TTL_SECONDS, scope, appId: row.id };
 }
 
 /** A token for an application the portal user owns — what the Console uses, so the secret is never in the browser. */
