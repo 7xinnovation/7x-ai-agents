@@ -742,16 +742,66 @@ function AuthPrompt({ persona, onContinue }: { persona: ConsolePersona | null; o
   );
 }
 
+/**
+ * The little markdown the agent writes — bold, links, code spans and dashed
+ * lists — rendered as such, so a reply reads the way it does in the widget
+ * instead of showing its asterisks. Anything else stays literal.
+ */
+const INLINE = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\((?:https?:\/\/|\/)[^)\s]+\))/g;
+
+function Inline({ text }: { text: string }) {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let k = 0;
+  for (const m of text.matchAll(INLINE)) {
+    const i = m.index ?? 0;
+    if (i > last) out.push(text.slice(last, i));
+    const tok = m[0];
+    if (tok.startsWith("**")) out.push(<strong key={k++} className="font-semibold text-ink">{tok.slice(2, -2)}</strong>);
+    else if (tok.startsWith("`")) out.push(<code key={k++}>{tok.slice(1, -1)}</code>);
+    else {
+      const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok);
+      if (link) {
+        out.push(
+          <a key={k++} href={link[2]} target="_blank" rel="noopener noreferrer" className="text-brand underline-offset-2 hover:underline">
+            {link[1]}
+          </a>
+        );
+      } else out.push(tok);
+    }
+    last = i + tok.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return <>{out}</>;
+}
+
 function Paragraphs({ text }: { text: string }) {
   const parts = text.split(/\n{2,}/).filter((p) => p.trim());
   if (!parts.length) return null;
   return (
     <>
-      {parts.map((p, i) => (
-        <p key={i} className={cn("whitespace-pre-wrap break-words", i > 0 && "mt-2")}>
-          {p}
-        </p>
-      ))}
+      {parts.map((p, i) => {
+        const lines = p.split("\n");
+        const isList = lines.length > 0 && lines.every((l) => /^\s*[-•]\s+/.test(l) || !l.trim());
+        if (isList) {
+          return (
+            <ul key={i} className={cn("list-disc space-y-0.5 pl-5", i > 0 && "mt-2")}>
+              {lines
+                .filter((l) => l.trim())
+                .map((l, j) => (
+                  <li key={j} className="break-words">
+                    <Inline text={l.replace(/^\s*[-•]\s+/, "")} />
+                  </li>
+                ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={i} className={cn("whitespace-pre-wrap break-words", i > 0 && "mt-2")}>
+            <Inline text={p} />
+          </p>
+        );
+      })}
     </>
   );
 }
