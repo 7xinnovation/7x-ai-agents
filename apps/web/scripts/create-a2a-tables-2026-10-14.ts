@@ -82,6 +82,11 @@ export const DDL = [
      created_at timestamptz NOT NULL DEFAULT now()
    )`,
   `CREATE INDEX IF NOT EXISTS a2a_requests_app_created_idx ON a2a_requests (app_id, created_at)`,
+  // Sign-in by one-time code (2026-10-15).
+  `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS otp_hash text`,
+  `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS otp_expires_at timestamptz`,
+  `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS otp_attempts integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE developer_accounts ADD COLUMN IF NOT EXISTS otp_sent_at timestamptz`,
 ];
 
 const TABLES = ["developer_accounts", "developer_apps", "a2a_tasks", "a2a_requests"];

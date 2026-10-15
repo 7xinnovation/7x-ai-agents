@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { accountByInviteToken } from "@/lib/developer/accounts";
-import { InviteClient } from "./InviteClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +19,8 @@ export default async function InvitePage({ params }: Props) {
   const { token } = await params;
   const account = await accountByInviteToken(token);
   if (!account) return <InvalidInvite />;
-  return <InviteClient token={token} email={account.email} name={account.name} organization={account.organization} />;
+  // Sign-in is by emailed code now: the invitation only says which address to use.
+  redirect(`/developers/login?email=${encodeURIComponent(account.email)}`);
 }
 
 function InvalidInvite() {
@@ -29,7 +30,7 @@ function InvalidInvite() {
       <p className="mt-3 text-[14px] leading-relaxed text-ink-2">
         The link has expired, has already been used, or is not complete. Invitations work once and for seven days.
       </p>
-      <p className="mt-3 text-[14px] leading-relaxed text-ink-2">Ask your 7X contact to send a new one. If you have already set a password, sign in instead.</p>
+      <p className="mt-3 text-[14px] leading-relaxed text-ink-2">Ask your 7X contact to send a new one. You can also sign in directly with your email address.</p>
       <div className="mt-6">
         <Link
           href="/developers/login"

@@ -8,8 +8,9 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Sign in" };
 
 /** Developer sign-in. A signed-in developer has nothing to do here and goes to their applications. */
-export default async function DeveloperLogin() {
+export default async function DeveloperLogin({ searchParams }: { searchParams: Promise<{ email?: string }> }) {
   const dev = await currentDeveloper();
   if (dev) redirect("/developers/apps");
-  return <LoginClient />;
+  const { email } = await searchParams;
+  return <LoginClient initialEmail={typeof email === "string" ? email.slice(0, 200) : ""} />;
 }

@@ -462,6 +462,11 @@ export const developerAccounts = pgTable(
     inviteExpiresAt: timestamp("invite_expires_at", { withTimezone: true }),
     invitedBy: text("invited_by"),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    /** Sign-in by one-time code (2026-10-15): only the code's hash is kept, for ten minutes, five tries. */
+    otpHash: text("otp_hash"),
+    otpExpiresAt: timestamp("otp_expires_at", { withTimezone: true }),
+    otpAttempts: integer("otp_attempts").default(0).notNull(),
+    otpSentAt: timestamp("otp_sent_at", { withTimezone: true }),
     createdAt: ts(),
   },
   (t) => ({

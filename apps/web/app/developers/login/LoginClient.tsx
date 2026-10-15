@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowRight, Eye, EyeOff } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/field";
 import { Mark } from "@/components/developers/Mark";
@@ -26,31 +26,68 @@ const PANEL_LINES: [string, string][] = [
   ["Environment", "Sandbox. Test data only"],
 ];
 
-export function LoginClient() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [reveal, setReveal] = useState(false);
-  const [capsLock, setCapsLock] = useState(false);
+export function LoginClient({ initialEmail = "" }: { initialEmail?: string }) {
+  const [step, setStep] = useState<"email" | "code">("email");
+  const [email, setEmail] = useState(initialEmail);
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [wait, setWait] = useState(0);
+  const codeRef = useRef<HTMLInputElement>(null);
 
-  const submit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
+  useEffect(() => {
+    if (step === "code") codeRef.current?.focus();
+  }, [step]);
+
+  const sendCode = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/developers/otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      if (res.status === 429) return setError("Too many requests. Wait a few minutes and try again.");
+      if (res.status === 502) return setError("The code could not be sent. Try again, or contact your 7X representative.");
+      if (!res.ok) return setError("Enter a valid email address.");
+      setStep("code");
+      setCode("");
+      setWait(60);
+      setNotice(`If ${email.trim()} has an account, a six-digit code is on its way. It expires in 10 minutes.`);
+    } catch {
+      setError("Something went wrong. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verify = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/developers/login", {
+      const res = await fetch("/api/developers/otp/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ email: email.trim(), code }),
       });
       if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
         setError(
-          res.status === 429
-            ? "Too many attempts. Wait a moment and try again."
-            : res.status === 401
-              ? "Incorrect email or password."
-              : `Sign-in failed (HTTP ${res.status}). Try again.`
+          body.error === "expired"
+            ? "This code has expired. Send a new one."
+            : body.error === "too_many_attempts"
+              ? "Too many wrong attempts. Send a new code."
+              : "That code is not correct. Check the latest email and try again."
         );
         return;
       }
@@ -87,95 +124,89 @@ export function LoginClient() {
         <p className="text-[12px] text-white/45">7X Innovation Studio, Emirates Post Group</p>
       </aside>
 
-      {/* Form panel */}
       <section className="flex items-center justify-center px-5 py-10 sm:px-10 lg:py-14" aria-labelledby="login-title">
         <div className="w-full max-w-[360px]">
           <span className="mb-7 inline-block lg:hidden">
-            <Mark size={40} />
+            <Mark size={36} />
           </span>
-
           <h1 id="login-title" className="text-[22px] font-semibold text-ink">
-            Sign in
+            {step === "email" ? "Sign in" : "Enter your code"}
           </h1>
-          <p className="mt-1.5 text-sm text-muted">Dialog Developers: your applications, the console and your request log.</p>
+          <p className="mt-1.5 text-[14px] text-muted">
+            {step === "email" ? "We will email you a one-time code. No password is needed." : <>Sent to <span className="font-medium text-ink">{email.trim()}</span></>}
+          </p>
 
-          <form onSubmit={submit} className="mt-7 flex flex-col gap-4" noValidate>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="dev-email">Email</Label>
-              <Input
-                id="dev-email"
-                name="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-                autoComplete="username"
-                placeholder="you@organisation.gov.ae"
-                className="h-11"
-                aria-invalid={Boolean(error)}
-                required
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="dev-password">Password</Label>
-              <div className="relative">
+          {step === "email" ? (
+            <form onSubmit={sendCode} className="mt-7 flex flex-col gap-4" noValidate>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="dev-email">Work email</Label>
                 <Input
-                  id="dev-password"
-                  name="password"
-                  type={reveal ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyUp={(e) => setCapsLock(e.getModifierState?.("CapsLock") ?? false)}
-                  autoComplete="current-password"
-                  placeholder="Your password"
-                  className="h-11 pr-11"
-                  aria-invalid={Boolean(error)}
-                  aria-describedby={capsLock ? "dev-capslock" : undefined}
-                  required
+                  id="dev-email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  autoFocus
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@organisation.gov.ae"
+                  className="h-11"
                 />
+              </div>
+              <Button type="submit" disabled={busy || !email.trim()} className="h-11 w-full text-[14px]">
+                {busy ? "Sending" : "Send code"}
+                {!busy ? <ArrowRight size={16} strokeWidth={1.75} /> : null}
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={verify} className="mt-7 flex flex-col gap-4" noValidate>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="dev-code">Six-digit code</Label>
+                <Input
+                  ref={codeRef}
+                  id="dev-code"
+                  name="code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="mono h-12 text-center text-[22px] tracking-[0.4em]"
+                  aria-describedby="dev-code-help"
+                />
+                <span id="dev-code-help" className="text-[12.5px] text-muted">
+                  The code expires in 10 minutes. Check your spam folder if it has not arrived.
+                </span>
+              </div>
+              <Button type="submit" disabled={busy || code.length !== 6} className="h-11 w-full text-[14px]">
+                {busy ? "Verifying" : "Sign in"}
+              </Button>
+              <div className="flex items-center justify-between text-[13px]">
                 <button
                   type="button"
-                  onClick={() => setReveal((v) => !v)}
-                  aria-label={reveal ? "Hide password" : "Show password"}
-                  aria-pressed={reveal}
-                  className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-lg text-muted outline-none transition-colors hover:text-ink focus-visible:ring-4 focus-visible:ring-[var(--color-ring)]"
+                  onClick={() => {
+                    setStep("email");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                  className="text-muted hover:text-ink"
                 >
-                  {reveal ? <EyeOff size={17} strokeWidth={2} /> : <Eye size={17} strokeWidth={2} />}
+                  Use a different email
+                </button>
+                <button type="button" disabled={wait > 0 || busy} onClick={() => void sendCode()} className="font-medium text-[#1330f0] hover:underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline">
+                  {wait > 0 ? `Resend in ${wait}s` : "Send a new code"}
                 </button>
               </div>
-              {capsLock ? (
-                <span id="dev-capslock" className="text-xs font-medium text-amber-700">
-                  Caps Lock is on.
-                </span>
-              ) : null}
-            </div>
+            </form>
+          )}
 
-            <div aria-live="polite" aria-atomic="true">
-              {error ? (
-                <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-[13px] text-rose-700">
-                  {error}
-                </div>
-              ) : null}
-            </div>
+          <div aria-live="polite" className="mt-4 empty:hidden">
+            {error ? <p role="alert" className="border border-[#fecdca] bg-[#fef3f2] px-3.5 py-2.5 text-[13px] text-[#b42318]">{error}</p> : null}
+            {!error && notice ? <p className="border border-[var(--color-line)] bg-[var(--color-canvas)] px-3.5 py-2.5 text-[13px] text-ink-2">{notice}</p> : null}
+          </div>
 
-            <Button type="submit" disabled={busy || !email || !password} className="h-11 w-full text-sm">
-              {busy ? (
-                <>
-                  <span aria-hidden className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white motion-reduce:animate-none" />
-                  Signing in
-                </>
-              ) : (
-                <>
-                  Sign in
-                  <ArrowRight size={16} strokeWidth={2.2} />
-                </>
-              )}
-            </Button>
-          </form>
-
-          <p className="mt-8 text-[13px] leading-relaxed text-muted">
-            Accounts are created by invitation. If you were invited, use the link in your invitation to set a password first. For a new account or a
-            lost password, ask your 7X contact.
+          <p className="mt-8 border-t border-[var(--color-line)] pt-5 text-[12.5px] leading-relaxed text-muted">
+            Accounts are created by 7X for each integrating organisation. To request access, contact your 7X representative.
           </p>
         </div>
       </section>
