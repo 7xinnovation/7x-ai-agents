@@ -669,14 +669,18 @@ export function Experience({
     authenticatedRef.current = authenticated;
     // An app that answered — however slowly — must not then be told it did not.
     // Signed in for real: whatever they were switching to, they have arrived.
-    if (authenticated) switchAccount.current = false;
+    if (authenticated) {
+      switchAccount.current = false;
+      portalSignInFailed.current = false;
+      try { window.localStorage.removeItem(`dlg-skip-portal-${agent.slug}`); } catch { /* private mode */ }
+    }
     if (authenticated && nativeAskTimer.current) {
       window.clearTimeout(nativeAskTimer.current);
       nativeAskTimer.current = null;
       setAuthReason(null);
       setAuthInfo(null);
     }
-  }, [authenticated]);
+  }, [authenticated, agent.slug]);
   const [authReason, setAuthReason] = useState<string | null>(null);
   /**
    * THE BUTTON SAYS SOMETHING THE MOMENT IT IS PRESSED.
@@ -1630,6 +1634,18 @@ export function Experience({
     setAuthenticated(false);
     setAuthReason(null);
     /**
+     * AND THE NEXT SIGN-IN DOES NOT GO THROUGH THE PORTAL (2026-10-16).
+     *
+     * The Emirates Post portal keeps its session in its own storage, and we can
+     * only clear that from a script on their pages — which was found not to
+     * run there. Its token is ended at Emirates Post (lib/epLogout), but the
+     * page still greets the previous customer from storage and hands nothing
+     * back. So until somebody signs in again, "Sign in" goes to UAE PASS
+     * itself, which asks who they are. Kept across a reload.
+     */
+    portalSignInFailed.current = true;
+    try { window.localStorage.setItem(`dlg-skip-portal-${agent.slug}`, "1"); } catch { /* private mode */ }
+    /**
      * The next sign-in asks UAE PASS to authenticate again (`prompt=login`),
      * whatever happens below. The server keeps the same fact in a cookie — set
      * by both sign-out routes, cleared by a completed sign-in — so a reload or
@@ -2055,7 +2071,10 @@ export function Experience({
      * properly. The reason is gone, so the clause is gone with it — the portal
      * is the only door that comes with an account attached.
      */
-    const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative() && !portalSignInFailed.current;
+    let skipPortal = portalSignInFailed.current;
+    try { skipPortal = skipPortal || window.localStorage.getItem(`dlg-skip-portal-${agent.slug}`) === "1"; } catch { /* private mode */ }
+    if (skipPortal) switchAccount.current = true;
+    const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative() && !skipPortal;
     if (hostLoginUsable && typeof window !== "undefined") {
       const win = openExternal(agent.hostLoginUrl!, { name: "dlg-host-login", kind: "signin" });
       if (!win) {
