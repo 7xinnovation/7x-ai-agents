@@ -2124,29 +2124,38 @@ export function Experience({
       hostLoginWin.current = win;
       setAuthReason(null);
       if (portalWatch.current) window.clearTimeout(portalWatch.current);
+      /**
+       * A portal that never hands a sign-in back (16 October 2026).
+       *
+       * Ninety seconds, not twenty: a real UAE PASS sign-in inside the portal
+       * (app approval, OTP) routinely takes longer, and closing the window then
+       * killed a login that was working. Only where our own UAE PASS door works
+       * is the window closed and that door offered; elsewhere (production) the
+       * window is left alone — it may be mid-login — and we only say so.
+       */
       portalWatch.current = window.setTimeout(() => {
         portalWatch.current = null;
         if (authenticatedRef.current || uaePass.current) return;
-        const open = hostLoginWin.current;
-        hostLoginWin.current = null;
-        try { open?.close(); } catch { /* already gone */ }
         if (agent.uaePassDirect) {
+          const open = hostLoginWin.current;
+          hostLoginWin.current = null;
+          try { open?.close(); } catch { /* already gone */ }
           portalSignInFailed.current = true;
-          console.warn("[dialog] the Emirates Post portal did not hand a sign-in back within 20s; the next Sign in goes to UAE PASS directly.");
+          console.warn("[dialog] the Emirates Post portal did not hand a sign-in back within 90s; the next Sign in goes to UAE PASS directly.");
           setAuthReason(
             locale === "ar"
               ? "لم يكتمل تسجيل الدخول عبر بوابة بريد الإمارات. اضغط «تسجيل الدخول» مرة أخرى للمتابعة عبر الهوية الرقمية (UAE PASS)."
               : "Sign-in through the Emirates Post portal did not complete. Tap Sign in again to continue with UAE PASS."
           );
         } else {
-          console.warn("[dialog] the Emirates Post portal did not hand a sign-in back within 20s.");
+          console.warn("[dialog] the Emirates Post portal has not handed a sign-in back after 90s.");
           setAuthReason(
             locale === "ar"
-              ? "لم يكتمل تسجيل الدخول عبر بوابة بريد الإمارات. يرجى المحاولة مرة أخرى."
-              : "Sign-in through the Emirates Post portal did not complete. Please try again."
+              ? "لم يكتمل تسجيل الدخول عبر بوابة بريد الإمارات بعد. أكمل تسجيل الدخول في النافذة المفتوحة، أو أغلقها وحاول مرة أخرى."
+              : "Sign-in through the Emirates Post portal has not completed yet. Finish signing in in the open window, or close it and try again."
           );
         }
-      }, 20000);
+      }, 90000);
       return;
     }
     if (agent.uaePassEnabled && typeof window !== "undefined") {

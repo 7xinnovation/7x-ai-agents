@@ -98,7 +98,8 @@ check("the logout URL is UAE PASS's own, returning to /uaepass/done", /new URL\(
   check("the page tells the widget whether our own UAE PASS sign-in works here", /uaePassDirect: uaePassConfigured\(\) && uaePassDirectSignInUsable\(\),/.test(page) && /process\.env\.UAEPASS_DIRECT_SIGNIN !== "0"/.test(uaepass));
   check("sign-out marks the portal as skipped only where that door works", /if \(agent\.uaePassDirect\) \{\s*portalSignInFailed\.current = true;/.test(fn));
   check("sign-in skips the portal only where that door works", /let skipPortal = Boolean\(agent\.uaePassDirect\) && portalSignInFailed\.current;/.test(exp) && /Boolean\(agent\.uaePassDirect\) && window\.localStorage\.getItem\(`dlg-skip-portal-/.test(exp));
-  check("a portal that never answers promises UAE PASS only where it works", /if \(agent\.uaePassDirect\) \{\s*portalSignInFailed\.current = true;\s*console\.warn\("\[dialog\] the Emirates Post portal did not hand/.test(exp));
+  check("a portal that never answers promises UAE PASS only where it works", /if \(agent\.uaePassDirect\) \{\s*const open = hostLoginWin\.current;[\s\S]{0,200}portalSignInFailed\.current = true;/.test(exp));
+  check("...waits 90s, not 20s, so a real UAE PASS login in the portal is not cut off", /\}, 90000\);/.test(exp) && !/\}, 20000\);/.test(exp));
   check("an opened sign-in window never gets the 'did not open' banner", /if \(win && !isNative\(\)\) return;/.test(exp));
 }
 
