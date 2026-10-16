@@ -124,6 +124,8 @@ export function echoGuard(): EchoGuard {
   let echoing = false;
   let buf = "";
   let inFence = false;
+  /** Where in `buf` the closing fence may start: 3 while the opening fence is still in the buffer, 0 after. */
+  let fenceFrom = 0;
   let drops = 0;
 
   /** Emit the sentence, unless the reply has already made it. */
@@ -155,8 +157,21 @@ export function echoGuard(): EchoGuard {
     let out = "";
     for (;;) {
       if (inFence) {
-        const end = buf.indexOf("```");
-        if (end === -1) { out += buf; buf = ""; return out; }
+        // The buffer starts with the OPENING fence; the closing one is after it.
+        // Searching from 0 found the opening fence itself, so the block's kind
+        // ("buttons") was then read as a line of prose — harmless until exact
+        // repeats were dropped, when a reply's second ```buttons lost its label
+        // (2026-10-16).
+        const end = buf.indexOf("```", fenceFrom);
+        if (end === -1) {
+          // Emit what is certainly inside the block, but hold a trailing "`" or
+          // "``": it may be the start of the closing fence, split across deltas.
+          const keep = final ? 0 : (/`{1,2}$/.exec(buf)?.[0].length ?? 0);
+          out += buf.slice(0, buf.length - keep);
+          buf = buf.slice(buf.length - keep);
+          fenceFrom = 0;
+          return out;
+        }
         out += buf.slice(0, end + 3);
         buf = buf.slice(end + 3);
         inFence = false;
@@ -198,6 +213,7 @@ export function echoGuard(): EchoGuard {
         if (upto) out += decide(upto) ? upto : "";
         buf = buf.slice(start);
         inFence = true;
+        fenceFrom = 3; // past the opening fence, which is where the buffer now starts
         continue;
       }
       if (final && buf) {

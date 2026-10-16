@@ -129,5 +129,16 @@ console.log("\nNothing is lost: what goes out is a subset of what came in");
   check("Arabic glued repeat is said once", run("شكراً لك!شكراً لك!") === "شكراً لك!", run("شكراً لك!شكراً لك!"));
 }
 
+// 2026-10-16: two blocks of the same kind in one reply keep their labels.
+{
+  const two = "Renew now?\n\n```buttons\n- Renew PO Box 50500 for another year\n```\n\nWhat would you like to do next?\n\n```buttons\n- Renew PO Box 33417 for another year\n- Rent a new PO Box\n```";
+  for (const size of [3, 7, 50]) {
+    const out = stream(two, size);
+    check(`two buttons blocks both keep "buttons" (chunks of ${size})`, (out.match(/```buttons\n/g) ?? []).length === 2 && out === two, out);
+  }
+  const cards = "Pick one:\n\n```cards\n- title: A\n```\n\nOr:\n\n```cards\n- title: B\n```";
+  check("two cards blocks are untouched", stream(cards, 5) === cards, stream(cards, 5));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
