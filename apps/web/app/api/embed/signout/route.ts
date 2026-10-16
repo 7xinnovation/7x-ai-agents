@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod/v3";
 import { getDb, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
-import { signOutConversation, audit } from "@/lib/conversation";
+import { signOutConversation, audit, conversationSessionToken } from "@/lib/conversation";
+import { endEmiratesPostSession } from "@/lib/epLogout";
 import { getAgentBySlug } from "@/lib/agents";
 import { RELOGIN_COOKIE } from "@/lib/uaepass";
 
@@ -39,13 +40,17 @@ export async function POST(req: NextRequest) {
   // the answer the customer wants — they are signed out.
   if (!conv || conv.agentId !== agent.id) return NextResponse.json({ ok: true, authenticated: false });
 
+  // Emirates Post's own session ends too, at Emirates Post (see lib/epLogout).
+  const epSession = agent.definition.tenantSlug === "nxn"
+    ? await endEmiratesPostSession(agent.id, agent.definition.activeEnvironment ?? "production", (await conversationSessionToken(conversationId)).token)
+    : "skipped";
   await signOutConversation(conversationId);
   await audit({
     agentId: agent.id,
     conversationId,
     actor: "user",
     action: "signed_out",
-    payload: { response: "The customer signed out; the session token, the authenticated flag and the verified Emirates ID were cleared." },
+    payload: { response: "The customer signed out; the session token, the authenticated flag and the verified Emirates ID were cleared.", emiratesPostSession: epSession },
   }).catch(() => undefined);
 
   const res = NextResponse.json({ ok: true, authenticated: false });

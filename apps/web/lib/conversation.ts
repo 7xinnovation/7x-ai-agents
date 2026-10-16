@@ -51,6 +51,12 @@ export async function saveSessionToken(
   await getDb().update(conversations).set({ sessionToken: encryptSecret(tagged) }).where(eq(conversations.id, conversationId));
 }
 
+/** The session token a conversation holds, decrypted, for a caller that must use it once more (sign-out). */
+export async function conversationSessionToken(conversationId: string): Promise<{ token?: string; kind?: "backend" | "uaepass" }> {
+  const conv = await getDb().query.conversations.findFirst({ where: eq(conversations.id, conversationId) });
+  return readSessionToken(conv?.sessionToken);
+}
+
 /** Split a stored token into its provenance + the raw token. */
 function readSessionToken(stored: string | null | undefined): {
   token?: string;

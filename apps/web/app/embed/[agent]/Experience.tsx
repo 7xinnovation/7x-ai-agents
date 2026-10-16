@@ -651,6 +651,16 @@ export function Experience({
   const [authenticated, setAuthenticated] = useState(false);
   /** Host sign-in popup, so a window closed without a token can be reported. */
   const hostLoginWin = useRef<ExternalWindow | null>(null);
+  /**
+   * The portal did not hand a sign-in back (2026-10-16). Reported: after a
+   * sign-out, "Sign in" opened box.emiratespost.ae on its dashboard, still
+   * signed in as the previous customer, and the window sat there. The portal
+   * passes the session to the chat through our relay script, and that script
+   * was found not to run on their pages; when nothing comes back, the window is
+   * closed and the NEXT tap goes to UAE PASS directly instead.
+   */
+  const portalSignInFailed = useRef(false);
+  const portalWatch = useRef<number | null>(null);
   /** The "the app never answered" timer, so a later answer can cancel it. */
   const nativeAskTimer = useRef<number | null>(null);
   /** Auth as it stands NOW, for callbacks that outlive the render they were made in. */
@@ -2045,7 +2055,7 @@ export function Experience({
      * properly. The reason is gone, so the clause is gone with it — the portal
      * is the only door that comes with an account attached.
      */
-    const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative();
+    const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative() && !portalSignInFailed.current;
     if (hostLoginUsable && typeof window !== "undefined") {
       const win = openExternal(agent.hostLoginUrl!, { name: "dlg-host-login", kind: "signin" });
       if (!win) {
@@ -2058,6 +2068,21 @@ export function Experience({
       }
       hostLoginWin.current = win;
       setAuthReason(null);
+      if (portalWatch.current) window.clearTimeout(portalWatch.current);
+      portalWatch.current = window.setTimeout(() => {
+        portalWatch.current = null;
+        if (authenticatedRef.current || uaePass.current) return;
+        const open = hostLoginWin.current;
+        hostLoginWin.current = null;
+        try { open?.close(); } catch { /* already gone */ }
+        portalSignInFailed.current = true;
+        console.warn("[dialog] the Emirates Post portal did not hand a sign-in back within 20s; the next Sign in goes to UAE PASS directly.");
+        setAuthReason(
+          locale === "ar"
+            ? "لم يكتمل تسجيل الدخول عبر بوابة بريد الإمارات. اضغط «تسجيل الدخول» مرة أخرى للمتابعة عبر الهوية الرقمية (UAE PASS)."
+            : "Sign-in through the Emirates Post portal did not complete. Tap Sign in again to continue with UAE PASS."
+        );
+      }, 20000);
       return;
     }
     if (agent.uaePassEnabled && typeof window !== "undefined") {
@@ -2126,7 +2151,7 @@ export function Experience({
       if (!win || !win.closed) return;
       hostLoginWin.current = null;
       setTimeout(() => {
-        if (uaePass.current) return;
+        if (uaePass.current || portalSignInFailed.current) return;
         setAuthReason(
           locale === "ar"
             ? "لم يكتمل تسجيل الدخول. حاول مرة أخرى."

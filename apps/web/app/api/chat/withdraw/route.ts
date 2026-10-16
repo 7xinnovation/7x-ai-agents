@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { getDb, conversations } from "@dialog/db";
 import type { Locale } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
-import { getCase, saveCase, signOutConversation, audit } from "@/lib/conversation";
+import { getCase, saveCase, signOutConversation, audit, conversationSessionToken } from "@/lib/conversation";
+import { endEmiratesPostSession } from "@/lib/epLogout";
 import { customerActionLog } from "@/lib/customerActionLog";
 import { summariseWithdrawal } from "@/lib/withdrawPermission";
 import { RELOGIN_COOKIE } from "@/lib/uaepass";
@@ -63,6 +64,9 @@ export async function POST(req: NextRequest) {
 
   // Erase the collected case and revoke the session/consents/identity.
   if (c && summary.cleared) await saveCase(c.caseId, summary.cleared);
+  if (agent.definition.tenantSlug === "nxn") {
+    await endEmiratesPostSession(agent.id, agent.definition.activeEnvironment ?? "production", (await conversationSessionToken(conversationId)).token);
+  }
   await signOutConversation(conversationId);
 
   // Record the withdrawal itself — counts only, never the erased values.
