@@ -2711,16 +2711,6 @@ export async function POST(req: NextRequest) {
         };
       }
       const detail = [found.building, found.street, found.area, found.emirate].filter(Boolean).join(", ");
-      // A MyHome box delivers within its own emirate (2026-10-16): a pin in
-      // another emirate is not an address this box can use.
-      const boxEmirate = str(liveState.data.emirate)?.toUpperCase();
-      const myHome = /^myhome/i.test(str(liveState.data.package) ?? "") || /myhome/i.test(String(liveState.journeyKey ?? "")) || /^myhome/i.test(String(apiTools.getLastHold()?.bundleId ?? ""));
-      if (myHome && boxEmirate && found.emirateCode && found.emirateCode.toUpperCase() !== boxEmirate) {
-        return {
-          result:
-            `THAT ADDRESS IS IN ${found.emirateCode} (${detail}), BUT THE BOX IS IN ${boxEmirate}. A MyHome box only delivers to an address in its own emirate, so this address cannot be used. Tell the customer plainly and offer: an address in ${boxEmirate}, or renting the box in ${found.emirateCode} instead (emirate, branch and box are then chosen again there), or a MyBox collected at the ${boxEmirate} branch. Do NOT record this address.`,
-        };
-      }
       const remote = found.remote
         ? " Emirates Post marks this location as OUTSIDE ITS NORMAL DELIVERY AREA — tell the customer deliveries there may be slower or limited, and let them decide before continuing."
         : "";
@@ -2737,7 +2727,7 @@ export async function POST(req: NextRequest) {
               detailedAddress: detail,
             }) +
             remote +
-            `\n\nSHOW the customer this address and ask them to confirm it, and to add their villa or apartment number — the pin cannot know it. Send regionName EXACTLY as given. The pin also decides the EMIRATE: if ${found.emirateCode} is not the emirate they picked for the box, tell them, because the box has to be in the emirate they live in.`,
+            `\n\nSHOW the customer this address and ask them to confirm it, and to add their villa or apartment number — the pin cannot know it. Send regionName EXACTLY as given, and send emirateCode ${found.emirateCode} as the address's emirate. The delivery address may be in a different emirate from the box — that is fine; do not warn about it or ask them to change either.`,
         };
       }
       const near = (found.candidates ?? []).map((r) => `${r.code} = ${r.nameEn}`).join("\n");
@@ -2749,12 +2739,9 @@ export async function POST(req: NextRequest) {
     }
     if (name === AREAS_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
-      // For a MyHome box the address is searched in the BOX'S emirate, whatever
-      // the model passed (2026-10-16): a Sharjah area for a Dubai box then comes
-      // back as "not in Dubai — it is in Sharjah", and the customer chooses.
-      const boxEmirate = str(liveState.data.emirate)?.toUpperCase();
-      const myHomeBox = /^myhome/i.test(str(liveState.data.package) ?? "") || /^myhome/i.test(String(apiTools.getLastHold()?.bundleId ?? ""));
-      const emirate = myHomeBox && boxEmirate ? boxEmirate : String(input.emirateCode ?? "").trim().toUpperCase();
+      // Searched in the emirate the address is in, which may differ from the
+      // box's: a MyHome box delivers to any emirate (revised 2026-10-16).
+      const emirate = String(input.emirateCode ?? "").trim().toUpperCase();
       const rows = await regionsFor(env, emirate);
       if (!rows.length) {
         return {
@@ -2774,7 +2761,7 @@ export async function POST(req: NextRequest) {
           const where = elsewhere.map((x) => `${x.region.nameEn} is in ${x.emirateName}`).join("; ");
           return {
             result:
-              `"${q}" IS NOT IN ${emirateName.toUpperCase()} — it is in another emirate: ${where}. Say that plainly, because the customer almost certainly has the emirate wrong rather than the area. Ask whether they want the box in that emirate instead (if so, the emirate has to change and the box must be chosen again there), or, if the address really is in ${emirateName}, ask which ${emirateName} district it is in. Do NOT repeat that it is not a delivery area.`,
+              `"${q}" IS NOT IN ${emirateName.toUpperCase()} — it is in another emirate: ${where}. That is fine for a delivery address: the address may be in a different emirate from the box. Search again with that emirate's code and the same words, offer the matches as CARDS, and record the address with that emirate. Do NOT ask the customer to move the box, and do NOT call it an error.`,
           };
         }
         const samples = rows.filter((r) => r.deliverable).slice(0, 8).map((r) => r.nameEn).join(", ");

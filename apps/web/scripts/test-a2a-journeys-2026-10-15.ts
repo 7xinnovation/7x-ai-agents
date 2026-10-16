@@ -90,15 +90,13 @@ const JOURNEYS: Journey[] = [
     locale: "en",
     opening: "I want to rent a MyHome PO Box in Dubai.",
     customer:
-      "You are Ahmed Al Mansoori, signed in. You want a MyHome box in Dubai, at Dubai Central Post Office, the first box number offered, 1 year. When asked for your home address, FIRST insist it is in Al Nahda, Sharjah (Al Nahda Street, Building 12, Apartment 304). If the agent says a Dubai MyHome box cannot deliver to Sharjah, accept that and give a Dubai address instead: Al Barsha 1, Street 23, Villa 12. No authorised agent. Contact details on file are correct. Accept the terms; decline saving the card and auto-renewal. Pay by card.",
+      "You are Ahmed Al Mansoori, signed in. You want a MyHome box in Dubai, at Dubai Central Post Office, the first box number offered, 1 year. You live in Sharjah: your home address is Al Nahda, Sharjah (Al Nahda Street, Building 12, Apartment 304). Give that address when asked and keep it. No authorised agent. Contact details on file are correct. Accept the terms; decline saving the card and auto-renewal. Pay by card.",
+    // Decided 16 October: a MyHome box delivers to any emirate, so this completes with the Sharjah address.
     expect: (t, transcript) => {
       const agentSaid = transcript.split("AGENT:").slice(1).join(" ");
-      const refused = /(only|deliver[s]?) (with)?in (its own emirate|dubai)|cannot (be used|deliver)|not in dubai|in sharjah[^.]*(not|cannot)|sharjah[^.]*dubai box|only delivers/i.test(agentSaid);
-      const o = outcome(t) as { collected?: Record<string, unknown> } | undefined;
-      const addr = JSON.stringify(o?.collected ?? {}).toLowerCase();
-      const noSharjah = !/nahda|sharjah|shj/.test(addr);
-      const ok = refused && (t.status.state !== "TASK_STATE_COMPLETED" || noSharjah);
-      return { ok, why: `refused the Sharjah address: ${refused}; state ${t.status.state}; Sharjah in the saved data: ${!noSharjah}` };
+      const refused = /only (deliver|within)|delivers only|cannot (be used|deliver)|outside dubai|must be in dubai|rent the box in sharjah/i.test(agentSaid);
+      const base = completedWith("personal_po_box_rental")(t);
+      return { ok: base.ok && !refused, why: `${base.why}; agent refused or warned about Sharjah: ${refused}` };
     },
   },
   {

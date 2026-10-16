@@ -2470,33 +2470,16 @@ export async function buildApiTools(
         const mh = { ...((body.myHomeProfile ?? {}) as Record<string, unknown>) };
         const addr = { ...((mh.myHomeAddress ?? {}) as Record<string, unknown>) };
         /**
-         * THE BOX'S EMIRATE, NOT THE ADDRESS'S (2026-10-16).
+         * THE ADDRESS'S OWN EMIRATE (revised 2026-10-16).
          *
-         * Reported: a MyHome box rented in Dubai with a delivery address in
-         * Sharjah. MyHome is delivered by the box's emirate, to an address in
-         * that emirate. The area used to be checked against the emirate written
-         * on the ADDRESS, so a Sharjah address was checked against Sharjah's
-         * areas and passed. It is now checked against the box's emirate, and an
-         * address that declares another emirate is refused outright.
+         * A MyHome box may be delivered to an address in another emirate — a
+         * Dubai box for a customer living in Sharjah is a normal rental. The
+         * area is therefore checked against the emirate of the ADDRESS, and only
+         * when the address does not say falls back to the box's emirate.
          */
         const boxEmirate = (opts.rentalSaveFacts?.().emirateCode ?? lastBranchQuery?.emirate ?? "").toUpperCase();
         const addressEmirate = asStr(addr.emirateCode).toUpperCase();
-        if (boxEmirate && addressEmirate && addressEmirate !== boxEmirate) {
-          void audit({
-            agentId,
-            conversationId: opts.conversationId,
-            actor: "system",
-            action: "myhome_address_wrong_emirate",
-            payload: { tool: toolName, method: entry.op.method, path: entry.op.path, input: { boxEmirate, addressEmirate }, response: "REFUSED LOCALLY" },
-          }).catch(() => {});
-          return {
-            result:
-              `NOT SAVED: the delivery address is in ${addressEmirate} but this MyHome box is in ${boxEmirate}. A MyHome box delivers only to an address in its own emirate. Nothing has been charged and the hold is still valid. ` +
-              `Tell the customer plainly, and offer the two real options: give an address in ${boxEmirate}, or rent the box in ${addressEmirate} instead (the emirate, branch and box are then chosen again there). A MyBox at a branch is a third option if they want to keep the ${boxEmirate} box.`,
-            isError: true,
-          };
-        }
-        const emirate = boxEmirate || addressEmirate;
+        const emirate = addressEmirate || boxEmirate;
         const env = /-stg\.|-stg\/|box-stg/.test(entry.spec.baseUrl) ? "staging" : "production";
         const rows = emirate ? await regionsFor(env, emirate) : [];
         if (rows.length) {
