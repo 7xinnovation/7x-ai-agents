@@ -66,5 +66,17 @@ console.log("\nThe app and the logout URL");
 check("the native host is told where UAE PASS's logout is", /postNative\(\{ source: "dialog-native", action: "signed-out", uaePassLogoutUrl: agent\.uaePassEnabled \? uaePassLogoutUrl : null \}\);/.test(fn));
 check("the logout URL is UAE PASS's own, returning to /uaepass/done", /new URL\(`\$\{c\.base\}\/idshub\/logout`\);\s*u\.searchParams\.set\("redirect_uri", redirectTo\);/.test(uaepass) && /buildLogoutUrl\(`\$\{origin\}\/uaepass\/done`/.test(logout));
 
+// 2026-10-16: the top-bar shield ("Withdraw & erase") is a sign-out too.
+{
+  const w = exp.slice(exp.indexOf("const withdrawPermission = useCallback"), exp.indexOf("}, [withdrawBusy, agent.slug, locale, storageKey"));
+  const callAt = w.indexOf("void signOut()");
+  const firstAwait = w.indexOf("await ");
+  check("withdraw runs the full sign-out for a signed-in customer", /if \(authenticated \|\| uaePass\.current\) void signOut\(\);/.test(w));
+  check("...before its first await, so the UAE PASS window opens in the tap", callAt > 0 && firstAwait > callAt, { callAt, firstAwait });
+  check("...and the erasure is sent keepalive, surviving a trip to UAE PASS", /keepalive: true/.test(w));
+  const withdrawRoute = src("../app/api/chat/withdraw/route.ts");
+  check("the withdraw route sets the ask-again cookie", /res\.cookies\.set\("uaepass_relogin", "1", RELOGIN_COOKIE\)/.test(withdrawRoute));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

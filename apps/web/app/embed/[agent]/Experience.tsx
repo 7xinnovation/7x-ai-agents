@@ -2456,12 +2456,25 @@ export function Experience({
     if (withdrawBusy) return;
     const cid = convId.current;
     try { abortRef.current?.abort(); } catch { /* ignore */ }
+    /**
+     * WITHDRAWING IS SIGNING OUT, ALL THE WAY (2026-10-16).
+     *
+     * Reported: "when I log out from the top menu it doesn't really log out of
+     * UAE PASS". The top-bar button is this one, and it ended only OUR session:
+     * no UAE PASS logout, no portal sign-out, nothing for the app, no
+     * "ask again" on the next sign-in. So a signed-in customer now gets the
+     * whole sign-out first, called here SYNCHRONOUSLY so its window opens in
+     * this tap (see signOut), and the erasure follows.
+     */
+    if (authenticated || uaePass.current) void signOut();
     setWithdrawBusy(true);
     let receipt: string | null = null;
     try {
       if (cid) {
         const res = await fetch("/api/chat/withdraw", {
           method: "POST",
+          // A sign-out may take this page to UAE PASS and back; the erasure must still arrive.
+          keepalive: true,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ agentSlug: agent.slug, conversationId: cid, locale }),
         });
@@ -2492,7 +2505,7 @@ export function Experience({
       postNative({ source: "dialog-native", action: "signed-out" });
       setWithdrawBusy(false);
     }
-  }, [withdrawBusy, agent.slug, locale, storageKey]);
+  }, [withdrawBusy, agent.slug, locale, storageKey, authenticated, signOut]);
 
   /**
    * Watch for a silent stretch inside a turn that has already said something.

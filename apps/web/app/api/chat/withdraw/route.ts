@@ -6,6 +6,7 @@ import { getAgentBySlug } from "@/lib/agents";
 import { getCase, saveCase, signOutConversation, audit } from "@/lib/conversation";
 import { customerActionLog } from "@/lib/customerActionLog";
 import { summariseWithdrawal } from "@/lib/withdrawPermission";
+import { RELOGIN_COOKIE } from "@/lib/uaepass";
 
 export const runtime = "nodejs";
 
@@ -73,8 +74,12 @@ export async function POST(req: NextRequest) {
     payload: { erasedCategories: summary.erased.length, actionsDone: done.length },
   }).catch(() => undefined);
 
-  return NextResponse.json(
+  const res = NextResponse.json(
     { message: summary.message, done: summary.done, erased: summary.erased },
     { headers: { "Cache-Control": "no-store" } }
   );
+  // A withdrawal is a sign-out too (2026-10-16): the next sign-in from this
+  // browser asks UAE PASS to authenticate again, exactly as after Sign out.
+  res.cookies.set("uaepass_relogin", "1", RELOGIN_COOKIE);
+  return res;
 }
