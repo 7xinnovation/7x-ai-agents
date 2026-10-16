@@ -10,7 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const entry = agentEntry(DEFAULT_AGENT_KEY)!;
+  const entry = agentEntry(DEFAULT_AGENT_KEY);
+  if (!entry) return jsonResponse({ error: "no agent is published on this host" }, 404);
   return jsonResponse(buildAgentCard(entry, originOf(req).origin), 200, {
     "cache-control": "public, max-age=300",
     etag: `"${entry.key}-${entry.version}"`,

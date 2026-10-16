@@ -15,7 +15,7 @@
  *   npx tsx scripts/test-a2a-sandbox-2026-10-14.ts --base <origin> --client-id <id> --secret <secret>
  */
 import { A2A_ERRORS, A2AError, isTerminal, validateInboundMessage, type AgentCard, type Task } from "@dialog/core";
-import { buildAgentCard, agentEntry, CITIZEN_IDENTITY_EXTENSION } from "../lib/a2a/catalogue";
+import { buildAgentCard, agentEntry, A2A_AGENTS, CITIZEN_IDENTITY_EXTENSION } from "../lib/a2a/catalogue";
 import { parseReply } from "../lib/a2a/blocks";
 import { simulateNxnMockOp } from "../lib/mockPersona";
 
@@ -55,7 +55,8 @@ async function partOne() {
   check("no parts is InvalidParams; a file part is ContentTypeNotSupported; an agent role is refused", refuse({ parts: [] }) === "InvalidParamsError" && refuse({ parts: [{ url: "https://x" }] }) === "ContentTypeNotSupportedError" && refuse({ role: "ROLE_AGENT", parts: [{ text: "x" }] }) === "InvalidParamsError");
 
   console.log("\nThe Agent Card");
-  const entry = agentEntry("po-box-sandbox")!;
+  const entry = A2A_AGENTS["po-box-sandbox"]!;
+  check("sandbox agents are hidden where simulation is off", process.env.UAEPASS_MOCK === "1" || process.env.UAEPASS_MOCK_ALLOWED === "1" || agentEntry("po-box-sandbox") === null);
   const card: AgentCard = buildAgentCard(entry, "https://example.gov.ae");
   check("required fields present", Boolean(card.name && card.description && card.version && card.capabilities && card.defaultInputModes.length && card.defaultOutputModes.length && card.skills.length));
   check("JSON-RPC first, HTTP+JSON second, both 1.0 on the card's origin", card.supportedInterfaces[0]!.protocolBinding === "JSONRPC" && card.supportedInterfaces[1]!.protocolBinding === "HTTP+JSON" && card.supportedInterfaces.every((i) => i.protocolVersion === "1.0" && i.url.startsWith("https://example.gov.ae/a2a/po-box-sandbox")));

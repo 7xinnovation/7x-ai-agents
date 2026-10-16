@@ -10,6 +10,7 @@
  */
 import type { AgentCard, AgentSkill } from "@dialog/core";
 import { A2A_PROTOCOL_VERSION } from "@dialog/core";
+import { uaePassMockAllowed } from "@/lib/uaepass";
 
 /**
  * The citizen's identity travelling INSIDE the task — the position the AGSP
@@ -121,9 +122,17 @@ export const A2A_AGENTS: Record<string, A2AAgentEntry> = {
 
 export const DEFAULT_AGENT_KEY = "po-box-sandbox";
 
+/**
+ * Sandbox agents exist only where the deployment allows simulation
+ * (UAEPASS_MOCK / UAEPASS_MOCK_ALLOWED). Elsewhere — production — the
+ * simulation is off, so a "sandbox" task would reach Emirates Post's live
+ * systems; the agent is therefore not served at all there (2026-10-16).
+ */
 export function agentEntry(key: string | undefined | null): A2AAgentEntry | null {
   if (!key) return null;
-  return A2A_AGENTS[key] ?? null;
+  const entry = A2A_AGENTS[key] ?? null;
+  if (entry?.sandbox && !uaePassMockAllowed()) return null;
+  return entry;
 }
 
 export function restBase(origin: string, entry: A2AAgentEntry): string {
