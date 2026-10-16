@@ -75,6 +75,8 @@ export interface PublicAgent {
   /** A URL a native host intercepts to run sign-in itself. See nativeBridge. */
   // Whether real UAE PASS sign-in is configured (vs the dev mock auth toggle).
   uaePassEnabled?: boolean;
+  /** Our own UAE PASS sign-in works here (false on prod: callback not registered). Without it the portal is the only door. */
+  uaePassDirect?: boolean;
   // Whether GPT Realtime voice mode is configured (AZURE_REALTIME_* env present).
   voiceEnabled?: boolean;
 }

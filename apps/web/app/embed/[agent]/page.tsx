@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getAgentBySlug } from "@/lib/agents";
-import { uaePassConfigured } from "@/lib/uaepass";
+import { uaePassConfigured, uaePassDirectSignInUsable } from "@/lib/uaepass";
 import { Experience } from "./Experience";
 import type { PublicAgent } from "./types";
 
@@ -55,6 +55,7 @@ export default async function EmbedPage({
     nativeUaePassFallback: d.nativeUaePassFallback,
     stackedChoices: d.stackedChoices,
     uaePassEnabled: uaePassConfigured(),
+    uaePassDirect: uaePassConfigured() && uaePassDirectSignInUsable(),
     voiceEnabled: Boolean(process.env.AZURE_REALTIME_KEY && process.env.AZURE_REALTIME_ENDPOINT),
   };
 

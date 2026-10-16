@@ -28,7 +28,7 @@ const signout = src("../app/api/embed/signout/route.ts");
 const uaepass = src("../lib/uaepass.ts");
 
 console.log("\nThe window, and when it opens");
-const fn = exp.slice(exp.indexOf("const signOut = useCallback(async () => {"), exp.indexOf("}, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.hostLogoutUrl, locale, storageKey]);"));
+const fn = exp.slice(exp.indexOf("const signOut = useCallback(async () => {"), exp.indexOf("}, [agent.slug, agent.uaePassEnabled, agent.uaePassDirect, agent.hostLoginUrl, agent.hostLogoutUrl, locale, storageKey]);"));
 check("signOut exists with the dependencies it reads", fn.length > 1000);
 const openAt = fn.indexOf("opened = openExternal(uaePassLogout, SIGNOUT_WINDOW);");
 const code = fn.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -88,6 +88,18 @@ check("the logout URL is UAE PASS's own, returning to /uaepass/done", /new URL\(
   check("both sign-out routes close it", /await closeConversation\(conversationId\);/.test(src("../app/api/embed/signout/route.ts")) && /await closeConversation\(conversationId\);/.test(src("../app/api/chat/withdraw/route.ts")));
   check("both end the Emirates Post session at Emirates Post", /endEmiratesPostSession/.test(src("../app/api/embed/signout/route.ts")) && /endEmiratesPostSession/.test(src("../app/api/chat/withdraw/route.ts")));
   check("after a sign-out the next Sign in skips the portal", /portalSignInFailed\.current = true;/.test(fn) && /dlg-skip-portal-/.test(exp) && /!skipPortal;/.test(exp));
+}
+
+// 2026-10-16 (prod): our own UAE PASS door does not work on production — Emirates
+// Post's clients lack our callback (callback.not.match) — so the portal must
+// never be skipped there.
+{
+  const page = src("../app/embed/[agent]/page.tsx");
+  check("the page tells the widget whether our own UAE PASS sign-in works here", /uaePassDirect: uaePassConfigured\(\) && uaePassDirectSignInUsable\(\),/.test(page) && /process\.env\.UAEPASS_DIRECT_SIGNIN !== "0"/.test(uaepass));
+  check("sign-out marks the portal as skipped only where that door works", /if \(agent\.uaePassDirect\) \{\s*portalSignInFailed\.current = true;/.test(fn));
+  check("sign-in skips the portal only where that door works", /let skipPortal = Boolean\(agent\.uaePassDirect\) && portalSignInFailed\.current;/.test(exp) && /Boolean\(agent\.uaePassDirect\) && window\.localStorage\.getItem\(`dlg-skip-portal-/.test(exp));
+  check("a portal that never answers promises UAE PASS only where it works", /if \(agent\.uaePassDirect\) \{\s*portalSignInFailed\.current = true;\s*console\.warn\("\[dialog\] the Emirates Post portal did not hand/.test(exp));
+  check("an opened sign-in window never gets the 'did not open' banner", /if \(win && !isNative\(\)\) return;/.test(exp));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

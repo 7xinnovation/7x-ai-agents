@@ -1643,8 +1643,18 @@ export function Experience({
      * back. So until somebody signs in again, "Sign in" goes to UAE PASS
      * itself, which asks who they are. Kept across a reload.
      */
-    portalSignInFailed.current = true;
-    try { window.localStorage.setItem(`dlg-skip-portal-${agent.slug}`, "1"); } catch { /* private mode */ }
+    /**
+     * Only where our own UAE PASS sign-in actually works. On production it does
+     * not (Emirates Post's clients lack our callback: "callback.not.match"), so
+     * skipping the portal there sent every returning customer to a UAE PASS
+     * error page — 16 October 2026. There the portal stays the door.
+     */
+    if (agent.uaePassDirect) {
+      portalSignInFailed.current = true;
+      try { window.localStorage.setItem(`dlg-skip-portal-${agent.slug}`, "1"); } catch { /* private mode */ }
+    } else {
+      try { window.localStorage.removeItem(`dlg-skip-portal-${agent.slug}`); } catch { /* private mode */ }
+    }
     /**
      * The next sign-in asks UAE PASS to authenticate again (`prompt=login`),
      * whatever happens below. The server keeps the same fact in a cookie — set
@@ -1893,7 +1903,7 @@ export function Experience({
     else console.warn("[dialog] UAE PASS did not report back within 8s: its logout was issued but not confirmed; the next sign-in asks UAE PASS to authenticate again (prompt=login).");
     if (opened!.closed) return;
     toPortal(opened);
-  }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.hostLogoutUrl, locale, storageKey]);
+  }, [agent.slug, agent.uaePassEnabled, agent.uaePassDirect, agent.hostLoginUrl, agent.hostLogoutUrl, locale, storageKey]);
 
   /**
    * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.
@@ -2095,8 +2105,10 @@ export function Experience({
      * properly. The reason is gone, so the clause is gone with it — the portal
      * is the only door that comes with an account attached.
      */
-    let skipPortal = portalSignInFailed.current;
-    try { skipPortal = skipPortal || window.localStorage.getItem(`dlg-skip-portal-${agent.slug}`) === "1"; } catch { /* private mode */ }
+    // Skipping the portal is only an option where our own UAE PASS door works
+    // (agent.uaePassDirect); elsewhere it leads to UAE PASS's error page.
+    let skipPortal = Boolean(agent.uaePassDirect) && portalSignInFailed.current;
+    try { skipPortal = skipPortal || (Boolean(agent.uaePassDirect) && window.localStorage.getItem(`dlg-skip-portal-${agent.slug}`) === "1"); } catch { /* private mode */ }
     if (skipPortal) switchAccount.current = true;
     const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative() && !skipPortal;
     if (hostLoginUsable && typeof window !== "undefined") {
@@ -2118,13 +2130,22 @@ export function Experience({
         const open = hostLoginWin.current;
         hostLoginWin.current = null;
         try { open?.close(); } catch { /* already gone */ }
-        portalSignInFailed.current = true;
-        console.warn("[dialog] the Emirates Post portal did not hand a sign-in back within 20s; the next Sign in goes to UAE PASS directly.");
-        setAuthReason(
-          locale === "ar"
-            ? "لم يكتمل تسجيل الدخول عبر بوابة بريد الإمارات. اضغط «تسجيل الدخول» مرة أخرى للمتابعة عبر الهوية الرقمية (UAE PASS)."
-            : "Sign-in through the Emirates Post portal did not complete. Tap Sign in again to continue with UAE PASS."
-        );
+        if (agent.uaePassDirect) {
+          portalSignInFailed.current = true;
+          console.warn("[dialog] the Emirates Post portal did not hand a sign-in back within 20s; the next Sign in goes to UAE PASS directly.");
+          setAuthReason(
+            locale === "ar"
+              ? "لم يكتمل تسجيل الدخول عبر بوابة بريد الإمارات. اضغط «تسجيل الدخول» مرة أخرى للمتابعة عبر الهوية الرقمية (UAE PASS)."
+              : "Sign-in through the Emirates Post portal did not complete. Tap Sign in again to continue with UAE PASS."
+          );
+        } else {
+          console.warn("[dialog] the Emirates Post portal did not hand a sign-in back within 20s.");
+          setAuthReason(
+            locale === "ar"
+              ? "لم يكتمل تسجيل الدخول عبر بوابة بريد الإمارات. يرجى المحاولة مرة أخرى."
+              : "Sign-in through the Emirates Post portal did not complete. Please try again."
+          );
+        }
       }, 20000);
       return;
     }
@@ -2172,12 +2193,15 @@ export function Experience({
       // Nothing opened, and only a browser can fall back by navigating itself:
       // in a WebView that would replace the conversation with a login page.
       if (!win && !isNative()) window.location.href = base;
+      // In a browser, a window that opened is its own feedback — the result
+      // comes back by message. "Did not open" over an open window was wrong.
+      if (win && !isNative()) return;
     } else {
       setAuthenticated(true);
       setAuthReason(null);
     }
     armSignInFallback(tried);
-  }, [agent.uaePassEnabled, agent.hostLoginUrl, agent.nativeUaePassFallback, agent.slug, locale, armSignInFallback]);
+  }, [agent.uaePassEnabled, agent.uaePassDirect, agent.hostLoginUrl, agent.nativeUaePassFallback, agent.slug, locale, armSignInFallback]);
 
   /**
    * The host sign-in popup closed. If no token reached us, say so instead of

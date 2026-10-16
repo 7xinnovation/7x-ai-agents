@@ -14,6 +14,25 @@ export function uaePassMock(): boolean {
   return process.env.UAEPASS_MOCK === "1";
 }
 
+/**
+ * Whether our OWN UAE PASS sign-in (/api/uaepass/login) is a working door on
+ * this deployment, as opposed to merely configured.
+ *
+ * 16 October 2026: on production it is not. Emirates Post's UAE PASS clients
+ * (epg_retail_web_prod, epg_web_prod) do not have agent.7x.ae/api/uaepass/callback
+ * registered, so UAE PASS answers invalid_callback / callback.not.match and the
+ * customer sees "Sorry! Looks like something went wrong". There the portal
+ * (hostLoginUrl) is the only way in, and the widget must never route around it.
+ * Staging uses UAE PASS's public sandbox_stage client, where it works.
+ *
+ * UAEPASS_DIRECT_SIGNIN=0 says "not usable here"; anything else, or unset, keeps
+ * the old behaviour. Set it back once Emirates Post registers our callback.
+ */
+export function uaePassDirectSignInUsable(): boolean {
+  if (uaePassMock()) return true;
+  return process.env.UAEPASS_DIRECT_SIGNIN !== "0";
+}
+
 export function uaePassConfigured(tenant?: string): boolean {
   if (uaePassMock()) return true;
   const { clientId, clientSecret } = credentials(tenant);
