@@ -2711,6 +2711,16 @@ export async function POST(req: NextRequest) {
         };
       }
       const detail = [found.building, found.street, found.area, found.emirate].filter(Boolean).join(", ");
+      // A MyHome box delivers within its own emirate (2026-10-16): a pin in
+      // another emirate is not an address this box can use.
+      const boxEmirate = str(liveState.data.emirate)?.toUpperCase();
+      const myHome = /^myhome/i.test(str(liveState.data.package) ?? "") || /myhome/i.test(String(liveState.journeyKey ?? "")) || /^myhome/i.test(String(apiTools.getLastHold()?.bundleId ?? ""));
+      if (myHome && boxEmirate && found.emirateCode && found.emirateCode.toUpperCase() !== boxEmirate) {
+        return {
+          result:
+            `THAT ADDRESS IS IN ${found.emirateCode} (${detail}), BUT THE BOX IS IN ${boxEmirate}. A MyHome box only delivers to an address in its own emirate, so this address cannot be used. Tell the customer plainly and offer: an address in ${boxEmirate}, or renting the box in ${found.emirateCode} instead (emirate, branch and box are then chosen again there), or a MyBox collected at the ${boxEmirate} branch. Do NOT record this address.`,
+        };
+      }
       const remote = found.remote
         ? " Emirates Post marks this location as OUTSIDE ITS NORMAL DELIVERY AREA — tell the customer deliveries there may be slower or limited, and let them decide before continuing."
         : "";
@@ -2739,7 +2749,12 @@ export async function POST(req: NextRequest) {
     }
     if (name === AREAS_TOOL) {
       const env = agent.definition.activeEnvironment ?? "production";
-      const emirate = String(input.emirateCode ?? "").trim().toUpperCase();
+      // For a MyHome box the address is searched in the BOX'S emirate, whatever
+      // the model passed (2026-10-16): a Sharjah area for a Dubai box then comes
+      // back as "not in Dubai — it is in Sharjah", and the customer chooses.
+      const boxEmirate = str(liveState.data.emirate)?.toUpperCase();
+      const myHomeBox = /^myhome/i.test(str(liveState.data.package) ?? "") || /^myhome/i.test(String(apiTools.getLastHold()?.bundleId ?? ""));
+      const emirate = myHomeBox && boxEmirate ? boxEmirate : String(input.emirateCode ?? "").trim().toUpperCase();
       const rows = await regionsFor(env, emirate);
       if (!rows.length) {
         return {
