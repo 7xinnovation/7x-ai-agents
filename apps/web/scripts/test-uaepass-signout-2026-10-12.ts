@@ -52,6 +52,8 @@ check("it tells the window that opened it, on our origin only", /window\.opener\
 check("opened as the tab itself, it carries the tab back to the widget's own path", /window\.sessionStorage\.getItem\("dlg-signout-return"\)/.test(done) && /if \(!told && back && \/\^\\\/\(\?!\\\/\)\/\.test\(back\)\) \{\s*window\.location\.replace\(back\);/.test(done));
 check("...a path on this origin only, never a scheme or another host", (() => { const re = /^\/(?!\/)/; return re.test("/embed/nxn-dialog?locale=en&cid=1") && !re.test("//evil.example/x") && !re.test("https://evil.example") && !re.test("javascript:alert(1)"); })());
 
+check("having told the opener, it does NOT close itself — the widget takes it on to the portal's sign-out (2026-10-16)", /told \? 20000 : 400/.test(done) && !/told \? 150/.test(done));
+
 console.log("\nWhen no window can open");
 check("a tab of its own goes to UAE PASS's logout itself and remembers the way back", /const standalone = !isNative\(\) && window\.top === window\.self;/.test(fn) && /window\.sessionStorage\.setItem\("dlg-signout-return", back\)/.test(fn) && /window\.location\.assign\(uaePassLogout\);/.test(fn));
 check("a frame says so plainly and relies on the server's prompt=login", /the sign-out window was blocked, so the UAE PASS session was NOT ended from here/.test(fn));

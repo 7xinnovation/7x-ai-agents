@@ -39,9 +39,22 @@ export default function UaePassDone() {
       window.location.replace(back);
       return;
     }
+    /**
+     * TOLD, THE OPENER DRIVES THIS WINDOW — DO NOT CLOSE IT (16 October 2026).
+     *
+     * This used to close itself 150 ms after reporting. The widget polls for
+     * the report, so it usually found the window already closed, read that as
+     * "the customer closed it", and skipped the next hop: the Emirates Post
+     * portal's ?dlg-signout=1, which is what clears the portal's stored token.
+     * The portal kept the token we had just ended, and the next Sign in sat on
+     * its dashboard ("Welcome MOHAMMAD!") with nothing to hand back.
+     *
+     * Now the widget takes the window on to the portal and closes it itself.
+     * The long timer is only a fallback for an opener that went away.
+     */
     const t = window.setTimeout(() => {
       try { window.close(); } catch { /* a window we did not open stays open */ }
-    }, told ? 150 : 400);
+    }, told ? 20000 : 400);
     return () => window.clearTimeout(t);
   }, []);
   return (
