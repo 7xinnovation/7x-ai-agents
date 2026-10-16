@@ -28,7 +28,7 @@ const signout = src("../app/api/embed/signout/route.ts");
 const uaepass = src("../lib/uaepass.ts");
 
 console.log("\nThe window, and when it opens");
-const fn = exp.slice(exp.indexOf("const signOut = useCallback(async () => {"), exp.indexOf("}, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.hostLogoutUrl, locale]);"));
+const fn = exp.slice(exp.indexOf("const signOut = useCallback(async () => {"), exp.indexOf("}, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.hostLogoutUrl, locale, storageKey]);"));
 check("signOut exists with the dependencies it reads", fn.length > 1000);
 const openAt = fn.indexOf("opened = openExternal(uaePassLogout, SIGNOUT_WINDOW);");
 const code = fn.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -76,6 +76,18 @@ check("the logout URL is UAE PASS's own, returning to /uaepass/done", /new URL\(
   check("...and the erasure is sent keepalive, surviving a trip to UAE PASS", /keepalive: true/.test(w));
   const withdrawRoute = src("../app/api/chat/withdraw/route.ts");
   check("the withdraw route sets the ask-again cookie", /res\.cookies\.set\("uaepass_relogin", "1", RELOGIN_COOKIE\)/.test(withdrawRoute));
+}
+
+// 2026-10-16: a sign-out starts a clean chat and closes the conversation on the server.
+{
+  check("sign-out forgets the conversation: storage, id, transcript, panel", /window\.localStorage\.removeItem\(storageKey\)/.test(fn) && /convId\.current = null;/.test(fn) && /setMessages\(\[\]\);/.test(fn) && /setCaseState\(null\);/.test(fn));
+  check("...and takes cid out of the address bar, so a refresh cannot reload it", /for \(const k of \["cid", "uaepass", "upt"\]\) u\.searchParams\.delete\(k\);/.test(fn));
+  const conv = src("../lib/conversation.ts");
+  check("a closed conversation is never continued by a new message", /if \(conv && !\(await conversationClosed\(conv\.id\)\)\) \{/.test(conv));
+  check("...nor served to a reload", /if \(\(caseRow\?\.state as CaseState \| undefined\)\?\.data\?\.\[CLOSED_AT_KEY\]\) return null;/.test(conv));
+  check("both sign-out routes close it", /await closeConversation\(conversationId\);/.test(src("../app/api/embed/signout/route.ts")) && /await closeConversation\(conversationId\);/.test(src("../app/api/chat/withdraw/route.ts")));
+  check("both end the Emirates Post session at Emirates Post", /endEmiratesPostSession/.test(src("../app/api/embed/signout/route.ts")) && /endEmiratesPostSession/.test(src("../app/api/chat/withdraw/route.ts")));
+  check("after a sign-out the next Sign in skips the portal", /portalSignInFailed\.current = true;/.test(fn) && /dlg-skip-portal-/.test(exp) && /!skipPortal;/.test(exp));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

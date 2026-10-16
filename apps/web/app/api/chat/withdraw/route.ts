@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, conversations } from "@dialog/db";
 import type { Locale } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
-import { getCase, saveCase, signOutConversation, audit, conversationSessionToken } from "@/lib/conversation";
+import { getCase, saveCase, signOutConversation, closeConversation, audit, conversationSessionToken } from "@/lib/conversation";
 import { endEmiratesPostSession } from "@/lib/epLogout";
 import { customerActionLog } from "@/lib/customerActionLog";
 import { summariseWithdrawal } from "@/lib/withdrawPermission";
@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
     await endEmiratesPostSession(agent.id, agent.definition.activeEnvironment ?? "production", (await conversationSessionToken(conversationId)).token);
   }
   await signOutConversation(conversationId);
+  await closeConversation(conversationId);
 
   // Record the withdrawal itself — counts only, never the erased values.
   await audit({

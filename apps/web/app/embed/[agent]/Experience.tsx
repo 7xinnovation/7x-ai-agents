@@ -1747,6 +1747,29 @@ export function Experience({
           body: JSON.stringify({ conversationId: convId.current, agentSlug: agent.slug }),
         }).catch(() => undefined)
       : Promise.resolve(undefined);
+    /**
+     * AND THE CHAT STARTS CLEAN (2026-10-16).
+     *
+     * Reported: "on refresh it continues the session again". The conversation
+     * id stayed in storage and in the address bar, so a refresh brought the
+     * previous customer's transcript and panel back. The server now closes the
+     * conversation on sign-out; here the page forgets it — storage, address bar,
+     * transcript, panel — so the next person starts from a fresh chat.
+     */
+    try { window.localStorage.removeItem(storageKey); } catch { /* private mode */ }
+    convId.current = null;
+    pulsed.current = false;
+    setSignedInPulse(false);
+    setCaseState(null);
+    setActivity(null);
+    setActivityOpen(false);
+    setInput("");
+    setMessages([]);
+    try {
+      const u = new URL(window.location.href);
+      for (const k of ["cid", "uaepass", "upt"]) u.searchParams.delete(k);
+      window.history.replaceState({}, "", u.pathname + (u.search ? u.search : ""));
+    } catch { /* not a URL we can rewrite */ }
     try {
       // Tell the host page too, so its own header can follow and it can drop the
       // token it is holding. It may not be listening; that is its business.
@@ -1764,7 +1787,8 @@ export function Experience({
       window.removeEventListener("message", heardDone);
       const standalone = !isNative() && window.top === window.self;
       if (standalone) {
-        const back = `${window.location.pathname}?${new URLSearchParams({ locale, ...(convId.current ? { cid: convId.current } : {}) }).toString()}`;
+        // Back to a FRESH chat: the conversation was closed by this sign-out.
+        const back = `${window.location.pathname}?${new URLSearchParams({ locale }).toString()}`;
         try { window.sessionStorage.setItem("dlg-signout-return", back); } catch { /* the done page then simply says so */ }
         await endOurs;
         window.location.assign(uaePassLogout);
@@ -1869,7 +1893,7 @@ export function Experience({
     else console.warn("[dialog] UAE PASS did not report back within 8s: its logout was issued but not confirmed; the next sign-in asks UAE PASS to authenticate again (prompt=login).");
     if (opened!.closed) return;
     toPortal(opened);
-  }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.hostLogoutUrl, locale]);
+  }, [agent.slug, agent.uaePassEnabled, agent.hostLoginUrl, agent.hostLogoutUrl, locale, storageKey]);
 
   /**
    * AND IF NONE OF IT LANDS, SAY SO — whatever route was taken.

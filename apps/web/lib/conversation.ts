@@ -304,6 +304,29 @@ function withoutIdentity(state: CaseState): CaseState {
   return { ...state, data };
 }
 
+/**
+ * CLOSED BY A SIGN-OUT (2026-10-16).
+ *
+ * Reported: "on refresh it continues the session again". Our sign-out ended
+ * the authentication, but the conversation itself stayed open: the browser
+ * kept its id, a refresh reloaded the previous customer's transcript and panel
+ * (their name, their PO Boxes), and the next message continued with their
+ * history. A sign-out now closes the conversation: it is not served again by
+ * id, and any message sent to it starts a new one.
+ */
+export const CLOSED_AT_KEY = "__closed_at";
+
+export async function closeConversation(conversationId: string): Promise<void> {
+  const c = await getDb().query.cases.findFirst({ where: eq(cases.conversationId, conversationId) });
+  if (!c) return;
+  await mutateCase(c.id, (st) => ({ ...st, data: { ...st.data, [CLOSED_AT_KEY]: new Date().toISOString() } })).catch(() => undefined);
+}
+
+export async function conversationClosed(conversationId: string): Promise<boolean> {
+  const c = await getDb().query.cases.findFirst({ where: eq(cases.conversationId, conversationId) });
+  return Boolean((c?.state as CaseState | undefined)?.data?.[CLOSED_AT_KEY]);
+}
+
 export async function signOutConversation(conversationId: string): Promise<void> {
   const db = getDb();
   await db
@@ -525,7 +548,9 @@ export async function getOrCreateSession(input: {
     const conv = await db.query.conversations.findFirst({
       where: and(eq(conversations.id, input.conversationId), eq(conversations.agentId, input.agentId)),
     });
-    if (conv) {
+    // A conversation closed by a sign-out is never continued: whoever sends to
+    // its id gets a fresh conversation, not the previous person's history.
+    if (conv && !(await conversationClosed(conv.id))) {
       // Auth is sticky and server-authoritative: once a conversation is signed in
       // (UAE PASS callback sets authenticated + a session token), a later client
       // request claiming "guest" must NOT downgrade it — otherwise the next
@@ -797,6 +822,8 @@ export async function loadConversation(conversationId: string) {
   const conv = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) });
   if (!conv) return null;
   const caseRow = await db.query.cases.findFirst({ where: eq(cases.conversationId, conv.id) });
+  // Closed by a sign-out: not served again (see closeConversation).
+  if ((caseRow?.state as CaseState | undefined)?.data?.[CLOSED_AT_KEY]) return null;
   const history = await db
     // createdAt so a resumed transcript carries the same times the live one does.
     .select({ role: messages.role, content: messages.content, meta: messages.meta, createdAt: messages.createdAt })

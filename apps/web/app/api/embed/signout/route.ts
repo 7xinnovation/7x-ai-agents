@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod/v3";
 import { getDb, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
-import { signOutConversation, audit, conversationSessionToken } from "@/lib/conversation";
+import { signOutConversation, closeConversation, audit, conversationSessionToken } from "@/lib/conversation";
 import { endEmiratesPostSession } from "@/lib/epLogout";
 import { getAgentBySlug } from "@/lib/agents";
 import { RELOGIN_COOKIE } from "@/lib/uaepass";
@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
     ? await endEmiratesPostSession(agent.id, agent.definition.activeEnvironment ?? "production", (await conversationSessionToken(conversationId)).token)
     : "skipped";
   await signOutConversation(conversationId);
+  await closeConversation(conversationId);
   await audit({
     agentId: agent.id,
     conversationId,
