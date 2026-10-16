@@ -100,6 +100,29 @@ const JOURNEYS: Journey[] = [
     },
   },
   {
+    // Reported 16 October: picking MyHome got an address request (and a map pin)
+    // at once, then the branch, then the address AGAIN after the agent step.
+    id: "myhome-address-asked-late-and-once",
+    persona: "ahmed-al-mansoori",
+    locale: "en",
+    opening: "I want to rent a new PO Box.",
+    customer:
+      "You are Ahmed Al Mansoori, signed in. A personal box. When the packages are offered, choose MyHome (reply just 'MyHome'). The box is in Dubai, at Dubai Central Post Office, the first box number offered, 1 year. No authorised agent. Only when asked for your home address, give: Al Nahda, Sharjah (Al Nahda Street, Building 12, Apartment 304). Contact details on file are correct. Accept the terms; decline saving the card and auto-renewal. Pay by card.",
+    expect: (t, transcript) => {
+      const turns = transcript.split(/\n(?=(?:AGENT|CUSTOMER):)/);
+      // An agent turn that ASKS for it — a request or a map pin — not one that describes MyHome ("delivered to your home address").
+      const asks = (l: string) => /(pin|share|give|type|enter|provide|what is|what's|send)\b[^.?\n]{0,40}\b(address|location)|```\s*locate/i.test(l);
+      const picked = turns.findIndex((l) => /^CUSTOMER:.*\bMyHome\b/i.test(l));
+      const nextAgent = turns.slice(picked + 1).find((l) => l.startsWith("AGENT:")) ?? "";
+      const early = picked !== -1 && asks(nextAgent);
+      // Asked = an agent turn that asks for the address before the customer has given it.
+      const given = turns.findIndex((l) => /^CUSTOMER:.*Al Nahda/i.test(l));
+      const askedTimes = turns.slice(0, given === -1 ? turns.length : given).filter((l) => l.startsWith("AGENT:") && asks(l)).length;
+      const base = completedWith("personal_po_box_rental")(t);
+      return { ok: picked !== -1 && !early && askedTimes <= 1 && base.ok, why: `${base.why}; asked right after MyHome: ${early}; address asks before it was given: ${askedTimes}` };
+    },
+  },
+  {
     id: "personal-renewal-arabic",
     persona: "ahmed-al-mansoori",
     locale: "ar",
@@ -231,7 +254,7 @@ async function run(j: Journey): Promise<Result> {
   let turns = 1;
   for (; turns < 22; turns++) {
     const said = textOf(task);
-    transcript += `AGENT: ${said}\n`;
+    transcript += `AGENT: ${said}${/"locate"/.test(JSON.stringify(dataOf(task).blocks ?? [])) ? " [map pin offered: ```locate]" : ""}\n`;
     if (task.status.state === "TASK_STATE_COMPLETED" || task.status.state === "TASK_STATE_FAILED" || task.status.state === "TASK_STATE_CANCELED") break;
 
     // A payment to make: settle it the way an integrator would in the sandbox, then wait for the task to move on.
@@ -266,6 +289,7 @@ async function run(j: Journey): Promise<Result> {
   const final = (await rpc("GetTask", { id: task.id })).result as Task;
   const verdict = j.expect(final, transcript);
   const lastAgent = textOf(final);
+  if (process.env.JOURNEY_TRANSCRIPT_DIR) { const { writeFileSync } = await import("node:fs"); writeFileSync(`${process.env.JOURNEY_TRANSCRIPT_DIR}/${j.id}.txt`, transcript); }
   const status = verdict.ok ? "pass" : j.limitation && j.limitation.test(transcript.split("AGENT:").slice(-3).join(" ")) ? "limitation" : "fail";
   return { id: j.id, status, turns, seconds: Math.round((Date.now() - started) / 1000), why: verdict.why, contextId: task.contextId, lastAgent: lastAgent.replace(/\s+/g, " ").slice(0, 300) };
 }
