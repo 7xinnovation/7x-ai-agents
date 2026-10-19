@@ -2,6 +2,7 @@ import React from "react";
 import { UploadSimple, Camera, DeviceMobile, CheckCircle, ArrowClockwise, FileText, Warning, LockSimple, CaretDown, MagnifyingGlass } from "@phosphor-icons/react";
 import { tr, type LocalizedString, type Locale } from "@dialog/config";
 import { ChatMap } from "./ChatMap";
+import { toEmirateCode } from "@/lib/emirates";
 import { ChatLocate } from "./ChatLocate";
 import { openExternal, onNativeEvent, isNative, type ExternalWindow } from "./nativeBridge";
 
@@ -1296,7 +1297,12 @@ export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { 
           if (m && /^emirate$/i.test(m[1]!)) mEmirate = m[2]!.trim().toUpperCase();
           else if (m) mBundle = m[2]!.trim();
         }
-        if (onSelect && mEmirate && mBundle) nodes.push(<ChatMap key={k++} emirate={mEmirate} bundle={mBundle} onSelect={onSelect} locale={lang} />);
+        // An emirate we cannot read is not a map: the model writes this block by
+        // hand and sometimes writes "Dubai" where the code belongs (2026-10-19).
+        // The name is understood; anything else shows nothing, rather than a red
+        // "Couldn't load the map" over a branch list that is perfectly usable.
+        const mCode = toEmirateCode(mEmirate);
+        if (onSelect && mCode && mBundle) nodes.push(<ChatMap key={k++} emirate={mCode} bundle={mBundle} onSelect={onSelect} locale={lang} />);
         continue;
       }
       if (isCards) {

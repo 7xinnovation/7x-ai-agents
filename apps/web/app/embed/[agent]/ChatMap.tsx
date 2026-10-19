@@ -2,6 +2,7 @@
 
 import React from "react";
 import { NavigationArrow, MapPin, MagnifyingGlass, ArrowClockwise, Warning } from "@phosphor-icons/react";
+import { toEmirateCode, EMIRATE_LABEL } from "@/lib/emirates";
 
 /**
  * In-chat "Browse nearby branches" map (a ```map block naming emirate + bundle).
@@ -108,19 +109,12 @@ export const MAP_STR = {
 } as const;
 
 /**
- * The emirate in words, for a heading that has to say WHICH branches these are.
- * The list is fetched per emirate, so "Nearest branches to you" was describing
- * the sort order and being read as the contents.
+ * The emirate in words, for a heading that has to say WHICH branches these are
+ * (the list is fetched per emirate, so "Nearest branches to you" was describing
+ * the sort order and being read as the contents), and the code to fetch them
+ * by. Both come from lib/emirates, which also understands "Dubai" — see there
+ * for why the widget no longer depends on the model writing "DXB".
  */
-const EMIRATE_NAME: Record<string, { en: string; ar: string }> = {
-  AUH: { en: "Abu Dhabi", ar: "أبوظبي" },
-  DXB: { en: "Dubai", ar: "دبي" },
-  SHJ: { en: "Sharjah", ar: "الشارقة" },
-  AJM: { en: "Ajman", ar: "عجمان" },
-  UAQ: { en: "Umm Al Quwain", ar: "أم القيوين" },
-  RAK: { en: "Ras Al Khaimah", ar: "رأس الخيمة" },
-  FUJ: { en: "Fujairah", ar: "الفجيرة" },
-};
 
 /** Near enough that "nearest to you" is a true description, not a sort order. */
 const NEAR_KM = 60;
@@ -134,6 +128,9 @@ export function ChatMap({
   locale?: string;
 }) {
   const t = MAP_STR[locale === "ar" ? "ar" : "en"];
+  // Belt and braces: Markdown only renders this for an emirate it could read,
+  // and the route understands the name too.
+  const code = toEmirateCode(emirate);
   // Emirates Post send both names for every branch and this component was only
   // ever showing the English one -- on the pins, in the popups and in the list,
   // inside a conversation the customer was holding in Arabic. The name that goes
@@ -181,7 +178,7 @@ export function ChatMap({
     if (phase !== "idle") return;
     setPhase("loading");
     const branchesP = fetch(
-      `/api/nxn/branches?agentSlug=${encodeURIComponent(agentSlug)}&emirate=${encodeURIComponent(emirate)}&bundle=${encodeURIComponent(bundle)}`
+      `/api/nxn/branches?agentSlug=${encodeURIComponent(agentSlug)}&emirate=${encodeURIComponent(code ?? emirate)}&bundle=${encodeURIComponent(bundle)}`
     ).then((r) => r.json()).catch(() => ({ error: "network" }));
     const geoP = new Promise<{ lat: number; lng: number } | null>((res) => {
       if (!navigator.geolocation) return res(null);
@@ -333,7 +330,7 @@ export function ChatMap({
     ? branches.filter((b) => label(b).toLowerCase().includes(needle) || (b.hours ?? "").toLowerCase().includes(needle))
     : branches;
   const topN = needle ? matched.slice(0, 20) : matched.slice(0, 6);
-  const emirateName = EMIRATE_NAME[emirate.toUpperCase()]?.[locale === "ar" ? "ar" : "en"];
+  const emirateName = code ? EMIRATE_LABEL[code][locale === "ar" ? "ar" : "en"] : undefined;
   return (
     <div className="dlg-map is-ready">
       {mapboxRef.current && branches.some(hasPin) ? <div ref={mapEl} className="dlg-map-canvas" /> : null}

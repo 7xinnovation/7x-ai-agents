@@ -3,6 +3,8 @@ import { getAgentBySlug } from "@/lib/agents";
 import { listIntegrations } from "@/lib/integrations";
 import { decryptSecret, isEncrypted } from "@/lib/crypto";
 import { placeBranches } from "@/lib/branchPlaces";
+import { toEmirateCode } from "@/lib/emirates";
+import { log } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -13,13 +15,23 @@ export const runtime = "nodejs";
  * returns the Mapbox public token alongside so the client can render without a
  * build-time env. Query: agentSlug, emirate (AUH/DXB/…), bundle (bundle_Id).
  */
-const EMIRATES = new Set(["AUH", "DXB", "SHJ", "AJM", "UAQ", "RAK", "FUJ"]);
-
 export async function GET(req: NextRequest) {
   const slug = req.nextUrl.searchParams.get("agentSlug") || "nxn-dialog";
-  const emirate = (req.nextUrl.searchParams.get("emirate") || "").toUpperCase();
+  const asked = req.nextUrl.searchParams.get("emirate") || "";
   const bundle = req.nextUrl.searchParams.get("bundle") || "";
-  if (!EMIRATES.has(emirate) || !bundle) {
+  /**
+   * THE NAME IS AS GOOD AS THE CODE (2026-10-19).
+   *
+   * The map block is written by the model, and `emirate: Dubai` used to be a
+   * 400 that the widget could only show as "Couldn't load the map" — the one
+   * failure message it has — above a branch list that was perfectly fine. The
+   * name is now translated; only text that names no emirate at all is refused,
+   * and that is worth a line in the log, because this failure is invisible
+   * otherwise.
+   */
+  const emirate = toEmirateCode(asked);
+  if (!emirate || !bundle) {
+    log.warn("nxn_branches_bad_request", { agentSlug: slug, emirate: asked, bundle });
     return NextResponse.json({ error: "emirate (AUH/DXB/…) and bundle are required" }, { status: 400 });
   }
 
