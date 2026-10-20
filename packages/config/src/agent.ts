@@ -233,6 +233,26 @@ export const AgentDefinition = z.object({
    */
   showActivityLog: z.boolean().default(false),
   /**
+   * WHETHER THE ANSWER SHOWS WHERE IT CAME FROM.
+   *
+   * A knowledge-base answer carries the sections it was drawn from, and the
+   * widget lists them under "Sources". They were once bare chips that read as
+   * internal references leaking into the chat, and the fix then was to label
+   * them.
+   *
+   * Reported on EPGL, 20 October: a licensing answer ended in four chips
+   * reading "EPGL Licensing Guide §1, §2, §3, §7". The section numbers are ours
+   * — they name documents the customer has never seen and cannot open — so to
+   * them it is a citation to nothing, under a paragraph they had already
+   * understood.
+   *
+   * On by default, because an agent that quotes a regulation should be able to
+   * say which one, and nothing changes for an agent nobody has complained
+   * about. Off where the sources are internal structure rather than something
+   * the customer can go and read.
+   */
+  showSources: z.boolean().default(true),
+  /**
    * Hard cap on how many in-chat upload controls one assistant message may show
    * (FB-1565: the next step must be a single, unambiguous ask). The prompt has
    * always told the agent to request one document at a time, but at the opening

@@ -3178,7 +3178,7 @@ export function Experience({
                       nothing around it — and read as internal references leaking
                       into the chat, which is exactly how they were reported. The
                       label existed in the strings all along and was never used. */}
-                  {m.citations?.length ? (
+                  {m.citations?.length && agent.showSources !== false ? (
                     <div className="dlg-sources">
                       <span className="dlg-sources-label">{t.sources}</span>
                       {m.citations.map((s, k) => (

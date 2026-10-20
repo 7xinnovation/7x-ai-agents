@@ -33,6 +33,7 @@ export default async function EmbedPage({
     progressPlacement: d.progressPlacement ?? "panel",
     uploadsPerMessage: d.uploadsPerMessage,
     showActivityLog: d.showActivityLog ?? false,
+    showSources: d.showSources ?? true,
     journeys: d.journeys.map((j) => ({
       key: j.key,
       title: j.title,

@@ -56,6 +56,10 @@ export interface PublicAgent {
   // Whether the case panel shows the "What has been done" action log. EPGL's
   // artefact asks for it; a PO Box rental has no ledger worth showing.
   showActivityLog?: boolean;
+  /** Whether a knowledge-base answer lists the sections it came from.
+   *  Off for EPGL: its section numbers name documents the customer cannot open.
+   *  See showSources in packages/config/src/agent.ts. */
+  showSources?: boolean;
   journeys: PublicJourney[];
   // Origins permitted to embed this agent. Also the allow-list for the host
   // handoff: a postMessage carrying a session token is only read when it comes
