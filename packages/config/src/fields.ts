@@ -15,6 +15,10 @@ export const FieldType = z.enum([
   "phone",
   "date",
   "enum",
+  // Several of one list. Salesforce's multipicklists (temperature-sensitive
+  // categories, outsourced activity codes) are semicolon-delimited strings on
+  // the wire; this is what they are to the applicant (2026-10-20).
+  "multienum",
   "boolean",
   "document", // captured via DocumentRequirement, mirrored here for the case view
   "group", // repeatable sub-object, e.g. shareholders
