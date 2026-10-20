@@ -431,10 +431,28 @@ const HALL_TTL_MS = 2 * 60 * 60 * 1000;
  * What we call ourselves on Emirates Post's PO Box APIs.
  *
  * Their website sends "Web"; their API team asked for a distinct value so bot
- * transactions can be identified. Overridable by env in case they settle on a
- * different string, so changing it is a setting rather than a deploy.
+ * transactions can be identified, and added ours to their own enum:
+ * `Source` = Web | Mobile | AutoRenewJobEngine | Wayn | Escher | PoBoxAIBot
+ * (checked live against their production swagger, 20 October 2026).
+ *
+ * It must be exactly that string. "ChatBot", which this used to send, is not a
+ * value their API knows. Overridable by env in case they settle on a different
+ * one, so changing it is a setting rather than a deploy.
  */
-const REQUEST_SOURCE = process.env.NXN_REQUEST_SOURCE || "ChatBot";
+const REQUEST_SOURCE = process.env.NXN_REQUEST_SOURCE || "PoBoxAIBot";
+
+/**
+ * The name their schema gives the field, which is not the same on every call:
+ * the saves declare `requestSource`, a few of the card and device operations
+ * declare `source`. We stamp the one THIS operation declares and nothing else —
+ * every save schema is `additionalProperties: false`, so a field they did not
+ * ask for is not a harmless extra, it is an invalid body.
+ */
+function sourceFieldOf(op: { inputSchema?: { properties?: Record<string, unknown> } }): string | null {
+  const body = op.inputSchema?.properties?.body as { properties?: Record<string, unknown> } | undefined;
+  const names = Object.keys(body?.properties ?? {});
+  return names.find((n) => /^(request)?source$/i.test(n)) ?? null;
+}
 
 const offeredBoxMemory = new Map<string, { at: number; shown: string[] }>();
 const OFFERED_TTL_MS = 2 * 60 * 60 * 1000;
@@ -3129,10 +3147,14 @@ export async function buildApiTools(
     if (/emiratespost\.ae/i.test(String(entry.spec.baseUrl ?? ""))) {
       if (/^(POST|PUT|PATCH)$/i.test(String(entry.op.method))) {
         const b = (input ?? {}).body;
-        if (b && typeof b === "object" && !Array.isArray(b)) {
+        const field = sourceFieldOf(entry.op);
+        if (field && b && typeof b === "object" && !Array.isArray(b)) {
           const body = { ...(b as Record<string, unknown>) };
-          if (!asStr(body.Source) && !asStr(body.source)) {
-            body.Source = REQUEST_SOURCE;
+          // Any casing already on the payload counts as set: the model is told
+          // to send requestSource on the guest renewal, and what it sent wins.
+          const already = Object.keys(body).some((k) => /^(request)?source$/i.test(k) && asStr(body[k]));
+          if (!already) {
+            body[field] = REQUEST_SOURCE;
             input = { ...input, body };
           }
         }
