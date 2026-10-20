@@ -1,9 +1,9 @@
 # EPGL 2.0 — the status and decision endpoint, for Salesforce
 
 *20 October 2026. The endpoint 7X exposes for Salesforce to push an
-application's progress to. Asked for twice; this is the spec. Nothing in it
-needs a change to the three APIs already delivered — the body is deliberately
-the one `getApplicationStatus` already returns.*
+application's progress to. Nothing in it needs a change to the three APIs
+already delivered — the body is deliberately the one `getApplicationStatus`
+already returns.*
 
 ---
 
