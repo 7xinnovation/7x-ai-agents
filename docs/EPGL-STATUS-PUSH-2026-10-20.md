@@ -136,10 +136,12 @@ in the regulator's mouth.
 If an event does not fit, send `status.changed` — we key the applicant's message
 off `applicantStatus` and `decision`, and treat `eventType` as a hint.
 
-**For `information.requested` we need `informationRequest.details` populated** —
-which documents and why. `getApplicationStatus` returns `null` there today and
-the detail lives in `/licensing/informationRequest`. Either inline it here or we
-will call that endpoint on receipt; inlining saves a round trip and a race.
+**For `information.requested`, please inline the document list.** The status
+payload's `informationRequest` gives `open`, `requestedOn` and `details` (your
+reviewer's comment), which is the summary — the per-document reasons live in
+`/licensing/informationRequest` as `documentsToReupload`. Either is workable; if
+you can include that array here we save a round trip and the race that comes
+with it. If not, say so and we will call the endpoint on receipt.
 
 ## 5. What we answer
 

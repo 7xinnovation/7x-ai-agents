@@ -12,7 +12,10 @@ against the live NewLaw sandbox, not against the documents alone.*
   *principal's* CEP licence, the operator hiring the applicant; `requiresCepLicence`
   is the applicant's own, checked from their trade licence. Both are required.
   Built.
-- **Pricing, status and document re-upload.** All three tested live and working.
+- **Pricing, status and document re-upload.** All three tested live and working,
+  including an open information request: `documentsToReupload` carries a reason
+  per document and `documentsReuploaded` shows what has already been answered,
+  which is exactly the RFI loop we needed.
   CEP30-GEN-DOM quoted 20,000 AED against the catalogue and the fee sheet. The
   status payload carries `applicantStatus` in both languages, which answers our
   earlier question about `Applicant_Status__c`. Registered as tools.
@@ -58,7 +61,7 @@ cover this — could you confirm either way? If the limits cannot move and there
 is no separate file endpoint, we will have to tell applicants to convert and
 shrink their own documents, which is the sort of thing that ends an application.
 
-## 4. Two defects we found while testing
+## 4. One defect we found while testing
 
 **The status endpoint reports a missing application as a success.**
 `getApplicationStatus` with an unknown id returns **HTTP 200**, with `status: 404`
@@ -66,10 +69,6 @@ in the body and `desc.code: "RTA-S-0000"` — your *success* code. The pricing
 endpoint returns a proper HTTP 404 for the same mistake. We read the body, so
 this does not block us, but anything that trusts the HTTP status will treat
 "no such application" as "all fine".
-
-**`informationRequest.details` is always null in the status payload.** The detail
-lives only in `/licensing/informationRequest`. See §5 of the push spec — inlining
-it would save us a round trip and a race.
 
 ## 5. The status and decision endpoint
 
