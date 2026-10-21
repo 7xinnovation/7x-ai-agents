@@ -5,6 +5,7 @@ import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
+import { recordApiCall } from "./apiCallLog";
 import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
@@ -1425,7 +1426,7 @@ export async function buildApiTools(
 }> {
   const integrations = (await listIntegrations(agentId)).filter((i) => i.enabled);
   const tools: Anthropic.Tool[] = [];
-  const map = new Map<string, { spec: EnvSpec; op: ApiOperation }>();
+  const map = new Map<string, { spec: EnvSpec; op: ApiOperation; integration: string }>();
 
   for (const intg of integrations) {
     const spec = intg.environments[activeEnv];
@@ -1437,7 +1438,7 @@ export async function buildApiTools(
       if ((op as { enabled?: boolean }).enabled === false) continue;
       const toolName = `${pfx}__${op.toolName}`.slice(0, 64);
       if (map.has(toolName)) continue;
-      map.set(toolName, { spec, op });
+      map.set(toolName, { spec, op, integration: intg.name });
       tools.push({
         name: toolName,
         description: `[${intg.name}] ${op.summary}`.slice(0, 380),
@@ -3259,6 +3260,13 @@ export async function buildApiTools(
       // Already-verified customer: a backend 401 must never be reported as "sign in
       // again" (FB-1485) — their identity is fine, that backend session is not.
       customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
+      callLog: {
+        agentId,
+        conversationId: opts.conversationId,
+        integration: entry.integration,
+        environment: activeEnv,
+        tool: toolName,
+      },
       }));
 
     /**
@@ -3294,6 +3302,13 @@ export async function buildApiTools(
         redactPII: !identified,
         identityToken: opts.uaePassToken,
         customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
+        callLog: {
+          agentId,
+          conversationId: opts.conversationId,
+          integration: entry.integration,
+          environment: activeEnv,
+          tool: toolName,
+        },
       });
       void audit({
         agentId,
@@ -5054,8 +5069,34 @@ export async function executeOperation(
   op: ApiOperation,
   input: Record<string, unknown>,
   runtimeToken?: string,
-  opts: { redactPII?: boolean; identityToken?: string; customerAuthenticated?: boolean } = {}
+  opts: {
+    redactPII?: boolean;
+    identityToken?: string;
+    customerAuthenticated?: boolean;
+    /**
+     * Who this call belongs to, for the admin's API Logs page. Absent in the
+     * test scripts, which call this directly and should not write rows.
+     */
+    callLog?: { agentId?: string; conversationId?: string; integration?: string; environment?: string; tool?: string };
+  } = {}
 ): Promise<{ result: string; isError?: boolean; raw?: string }> {
+  const startedAt = Date.now();
+  // Hoisted so the catch below can say WHICH call failed: everything else is
+  // scoped inside the try, and a timeout has no response to read it from.
+  let calledUrl = "";
+  let sentBody: string | undefined;
+  const record = (outcome: { status?: number | null; ok: boolean; error?: string | null; responseBody?: string | null }) => {
+    if (!opts.callLog) return;
+    recordApiCall({
+      ...opts.callLog,
+      method: op.method,
+      path: op.path,
+      url: calledUrl || `${spec.baseUrl}${op.path}`,
+      durationMs: Date.now() - startedAt,
+      requestBody: sentBody ?? null,
+      ...outcome,
+    });
+  };
   try {
     const tokenAuth = spec.authType === "bearer" || spec.authType === "uaepass_test" || spec.authType === "uaepass_live";
     // Effective bearer, in strict precedence (FB-1485):
@@ -5147,6 +5188,8 @@ export async function executeOperation(
 
     const qs = query.toString();
     const url = `${spec.baseUrl}${path}${qs ? `?${qs}` : ""}`;
+    calledUrl = url;
+    sentBody = body;
 
     const doFetch = async () => {
       const ctrl = new AbortController();
@@ -5173,6 +5216,17 @@ export async function executeOperation(
         /* fall through to the generic 401 handling below */
       }
     }
+
+    /**
+     * READ ONCE, HERE.
+     *
+     * The 401/403 translations below return without touching the body, so the
+     * log would have had nothing to show for exactly the calls someone opens
+     * this page to look at. A response body can only be read once, so it is
+     * read before the branching and reused.
+     */
+    let text = await res.text();
+    record({ status: res.status, ok: res.ok, responseBody: text });
 
     // Backend says auth is required/insufficient — translate to guidance instead
     // of a raw 401/403 (the backend is the source of truth for what needs a session).
@@ -5231,7 +5285,6 @@ export async function executeOperation(
       };
     }
 
-    let text = await res.text();
     // Redact BEFORE truncation so a long payload can't smuggle PII past the cut.
     if (opts.redactPII) text = redactGuestPII(text);
     const trimmed = text.length > 4000 ? text.slice(0, 4000) + "…(truncated)" : text;
@@ -5246,6 +5299,7 @@ export async function executeOperation(
     // failed sends the customer to support for something that may already be done,
     // and a retry could book it twice.
     const aborted = e instanceof Error && /abort/i.test(e.message);
+    record({ status: null, ok: false, error: aborted ? "timed out" : e instanceof Error ? e.message : "error" });
     if (aborted && op.method !== "GET" && op.method !== "HEAD") {
       return {
         result:

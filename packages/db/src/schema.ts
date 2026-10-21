@@ -573,5 +573,56 @@ export const a2aRequests = pgTable(
   (t) => ({ appIdx: index("a2a_requests_app_created_idx").on(t.appId, t.createdAt) })
 );
 
+/**
+ * Every call the agents make to somebody else's API, and how it went.
+ *
+ * Asked for on 21 October: an audit log on the admin showing which endpoints
+ * are being called, which succeed and which fail, per agent. Until now a failed
+ * Emirates Post or Salesforce call left a line in the server log — which lives
+ * in Azure, is not per agent, and is gone when the app restarts — and a
+ * sentence in the chat written by the model.
+ *
+ * One row per outbound HTTP call from `executeOperation`, which is the single
+ * door every integration tool goes through. Recorded after the fact and never
+ * in the customer's way: the insert is fire-and-forget, and a logging failure
+ * is swallowed rather than turned into a failed rental.
+ *
+ * WHAT IS NOT IN HERE: credentials. No Authorization header, no API key, no
+ * client secret — the URL is stored with its query string, so anything secret
+ * in a query parameter is masked before the row is written. Bodies are redacted
+ * for personal data and truncated; see apps/web/lib/apiCallLog.ts.
+ */
+export const apiCalls = pgTable(
+  "api_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id"),
+    conversationId: uuid("conversation_id"),
+    /** The integration's name as the admin shows it, e.g. "EPGL Licensing". */
+    integration: text("integration"),
+    /** Which environment's spec was called — staging / production. */
+    environment: text("environment"),
+    /** The tool the model called, e.g. nxn_rental_save. */
+    tool: text("tool"),
+    method: text("method").notNull(),
+    /** Path only, for grouping; the full URL is in `url`. */
+    path: text("path").notNull(),
+    url: text("url").notNull(),
+    /** Null when nothing came back at all — a timeout, DNS, a refused socket. */
+    status: integer("status"),
+    ok: boolean("ok").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    /** The network/abort error, when there is no status to explain it. */
+    error: text("error"),
+    requestBody: text("request_body"),
+    responseBody: text("response_body"),
+    createdAt: ts(),
+  },
+  (t) => ({
+    agentIdx: index("api_calls_agent_created_idx").on(t.agentId, t.createdAt),
+    okIdx: index("api_calls_agent_ok_idx").on(t.agentId, t.ok),
+  })
+);
+
 // Ensure the pgvector extension exists (applied via raw SQL in push/seed).
 export const ensureVectorExtension = sql`CREATE EXTENSION IF NOT EXISTS vector;`;

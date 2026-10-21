@@ -4,6 +4,7 @@ import { resolveAdapters, setPayment, adapterContext } from "@dialog/core";
 import { getDb, payments, agents, conversations, cases, escalations, analyticsEvents, auditLog } from "@dialog/db";
 import { getAgentById } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
+import { pruneApiCalls } from "@/lib/apiCallLog";
 import { getCase, saveCase, audit } from "@/lib/conversation";
 import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
 import { emitEvent } from "@/lib/analytics";
@@ -130,7 +131,18 @@ export async function POST(req: NextRequest) {
     out.callbackBreaches++;
   }
 
-  return NextResponse.json({ ok: true, ...out });
+  /**
+   * And keep the endpoint log to a month.
+   *
+   * It is the one table that grows with traffic rather than with customers —
+   * the portal screenshot that prompted it shows 83,000 calls — and left alone
+   * it becomes the biggest thing in the database and the slowest page in the
+   * admin. A month covers every bug list we have worked from. Last, and
+   * swallowed: a failed prune must not cost the payment sweep above it.
+   */
+  const pruned = await pruneApiCalls(Number(process.env.API_LOG_RETENTION_DAYS ?? 30)).catch(() => 0);
+
+  return NextResponse.json({ ok: true, ...out, apiCallsPruned: pruned });
 }
 
 export async function GET() {

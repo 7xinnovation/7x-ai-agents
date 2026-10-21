@@ -1,5 +1,6 @@
 import { epglAuth } from "./epglRead";
 import { log } from "./logger";
+import { recordApiCall } from "./apiCallLog";
 import type { EnvKey } from "./integrations";
 
 /**
@@ -161,10 +162,40 @@ export async function createEpglCallback(
       headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
     });
+  const startedAt = Date.now();
   let res = await call(auth.bearer);
   if (res.status === 401) res = await call(await auth.retry());
+  const raw = await res.text();
+  /**
+   * The callback case shows up on the admin's API Logs page too.
+   *
+   * It is the one EPGL call that does NOT go through `executeOperation` — it is
+   * a direct POST to their standard REST API rather than an operation off a
+   * spec — so without this the page would be silent about exactly the thing
+   * three duplicate cases were reported against on 20 October.
+   */
+  recordApiCall({
+    agentId,
+    integration: "EPGL Salesforce",
+    environment: env,
+    tool: "epgl_callback_case",
+    method: "POST",
+    path: "/services/data/v62.0/sobjects/Case",
+    url,
+    status: res.status,
+    ok: res.ok,
+    durationMs: Date.now() - startedAt,
+    requestBody: JSON.stringify(body),
+    responseBody: raw,
+  });
 
-  const json = (await res.json().catch(() => null)) as
+  const json = ((() => {
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      return null;
+    }
+  })()) as
     | { id?: string; success?: boolean }
     | { errorCode?: string; message?: string }[]
     | null;
