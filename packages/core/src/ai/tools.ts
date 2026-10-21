@@ -6,6 +6,43 @@ import { adapterContext } from "../adapters/registry";
 import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition } from "../case/engine";
 import { RECORD_IDENTITY } from "./extract";
 
+/**
+ * How long after an enquiry a SECOND one can be a second enquiry at all.
+ *
+ * Every duplicate reported on 20 October was filed within the same minute or
+ * two of the first — the model answering "no, thanks" or "when will they call?"
+ * by raising the case again. A customer who genuinely has a second, unrelated
+ * matter has by then had a conversation about the first.
+ */
+const NEW_ENQUIRY_AFTER_MINUTES = 10;
+
+/**
+ * Is this the enquiry we already raised, restated?
+ *
+ * The same words in a different order, with a filler or two dropped, is the
+ * same complaint — the model rarely repeats itself verbatim. Compared the way
+ * the echo guard compares sentences: as a bag of words, against the shorter of
+ * the two, because the second attempt is usually the terser one.
+ */
+export function sameEnquiry(a: string, b: string): boolean {
+  const words = (s: string) =>
+    new Set(
+      String(s ?? "")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2)
+    );
+  const x = words(a);
+  const y = words(b);
+  // Nothing to tell apart: treat it as the same, so a reason-less retry is
+  // never a second case.
+  if (!x.size || !y.size) return true;
+  let shared = 0;
+  for (const w of y) if (x.has(w)) shared++;
+  return shared / Math.min(x.size, y.size) >= 0.6;
+}
+
 /** Tool schemas exposed to Claude. Generic across every agent/journey. */
 export const TOOL_DEFS: Anthropic.Tool[] = [
   {
@@ -856,6 +893,47 @@ export async function dispatchTool(
 
     case "request_escalation": {
       if (!adapters.crm) return { result: "No CRM configured for escalation.", state, events, isError: true };
+      /**
+       * ONE ENQUIRY, ONE REFERENCE.
+       *
+       * Reported on both agents on 20 October. On NXN a complaint was raised as
+       * ENQ-F64B6E11, the customer answered "No, thanks" to "anything else?",
+       * and the reply to THAT handed them ENQ-B4607CDE for the same complaint.
+       * On EPGL it cost three real Salesforce cases in one conversation —
+       * 500NM009JB0XLv2YYG, 500NM009Gm1TDq8YIG, 500NM009IBmKe3YYYS — one per
+       * customer turn, the second announced as "I filed the escalation request
+       * but I need to actually submit it properly". Nothing had failed. The
+       * model had simply lost sight of its own earlier call, and the tool
+       * result it got back the first time said nothing that would stop it.
+       *
+       * Three cases in a queue is three officers ringing the same person about
+       * the same thing, and the reference the customer was told to keep handy
+       * is the one that is no longer the only one.
+       *
+       * So the case remembers, and a second call is answered with the FIRST
+       * reference rather than a second case. The way out is a genuinely
+       * different matter later in the conversation — different words, and far
+       * enough apart that it cannot be the same turn restated. A retry, a
+       * confirmation, a thank-you and a "when will they call?" are none of
+       * those, which is exactly what was being filed.
+       */
+      const already = state.escalation;
+      if (already) {
+        const since = (Date.now() - Date.parse(already.at)) / 60_000;
+        const newMatter =
+          Number.isFinite(since) && since >= NEW_ENQUIRY_AFTER_MINUTES && !sameEnquiry(already.reason, String(input.reason ?? ""));
+        if (!newMatter) {
+          return {
+            result:
+              `ALREADY RAISED — NOTHING FAILED AND NOTHING IS MISSING. This conversation's enquiry is already with the team under reference ${already.reference}, ` +
+              `and no second one has been created. Do NOT say you are filing it, submitting it properly, or raising it again, and do NOT invent a new reference: ` +
+              `if the reference comes up at all, it is ${already.reference} and it is the same one you already gave them. ` +
+              `Answer whatever they actually asked — if that was "no, thanks" or a thank-you, simply close warmly and stop.`,
+            state,
+            events,
+          };
+        }
+      }
       const actx = adapterContext(agent, agent.integrations.crm);
       /**
        * A CALLBACK THAT CANNOT BE ARRANGED IS A SENTENCE, NOT A DEAD CHAT.
@@ -898,7 +976,11 @@ export async function dispatchTool(
           isError: true,
         };
       }
-      state = { ...state, status: "escalated" };
+      state = {
+        ...state,
+        status: "escalated",
+        escalation: { reference, at: new Date().toISOString(), reason: String(input.reason ?? "") },
+      };
       events.push({ type: "escalation", reference });
       events.push({ type: "case", state });
       return {

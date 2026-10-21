@@ -220,6 +220,34 @@ export const CaseState = z.object({
    * lookup happens turns before the save.
    */
   gsbCompanies: z.array(z.string()).default([]),
+  /**
+   * The enquiry, complaint or callback already raised in this conversation.
+   *
+   * 20 October, reported on BOTH agents. NXN: a complaint got reference
+   * ENQ-F64B6E11, the customer answered "No, thanks" to "anything else?", and
+   * the next reply handed them ENQ-B4607CDE for the same complaint. EPGL, the
+   * same hour and worse, because those are real Salesforce cases: three of
+   * them, 500NM009JB0XLv2YYG then 500NM009Gm1TDq8YIG then 500NM009IBmKe3YYYS,
+   * one per customer turn — the middle one announced as "I filed the escalation
+   * request but I need to actually submit it properly", which is the model
+   * inventing a failure that never happened and filing again on the strength of
+   * it.
+   *
+   * Nothing in the tool result said a case already existed, so every reason the
+   * model found to call it again was a good one. The case remembers instead,
+   * and `request_escalation` hands the same reference back. See the fence in
+   * packages/core/src/ai/tools.ts.
+   */
+  escalation: z
+    .object({
+      reference: z.string(),
+      /** ISO, so a genuinely later enquiry can still be told apart from a retry. */
+      at: z.string(),
+      /** What it was about, as sent — compared against a second call's reason. */
+      reason: z.string().default(""),
+    })
+    .nullable()
+    .default(null),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   /**
@@ -257,6 +285,7 @@ export function emptyCase(): CaseState {
     confirmationEmailedAt: null,
     receiptOfferedAt: null,
     gsbCompanies: [],
+    escalation: null,
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null, provider: null, method: null },
     reference: null,

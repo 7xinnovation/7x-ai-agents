@@ -190,7 +190,84 @@ export function stripInternalNarration(text: string): string {
  * prose, and holding it back would stall the card rendering the customer is
  * waiting for.
  */
-export function narrationGuard() {
+/**
+ * The duration the customer just picked, acknowledged as a different one.
+ *
+ * 20 October, a personal rental, verbatim and all in one bubble:
+ *
+ *   customer: "1 Year"
+ *   Mira:     "Three years, noted. Would you like to add an authorised agent
+ *              to this PO Box?
+ *              1 year, noted."
+ *
+ * Both acknowledgements are the model's, either side of the tool round that
+ * recorded the choice: it answered before it had written the value down, got
+ * the number wrong, and said the right one on the way back. The second one is
+ * correct and the case was right too — but the customer reads the first, and
+ * the first says they are buying three years for 970 instead of one for 370.
+ *
+ * The echo guard does not catch it: the two sentences are short and they
+ * disagree, and it is built for the long paragraph said twice.
+ *
+ * This is decidable without waiting for anything. When the customer's whole
+ * message is a term off the duration ladder — which is what a card click sends
+ * — any sentence in the reply that ACKNOWLEDGES a different term is wrong at
+ * the moment it is written. It goes, and the question beside it stays.
+ *
+ * Deliberately narrow: only a short acknowledgement ("Three years, noted.",
+ * "Got it — 3 years."), never a sentence that explains or compares, so
+ * "The 3-year option is AED 970" is untouched.
+ */
+const SPELLED: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  واحدة: 1, سنتين: 2, ثلاث: 3, خمس: 5, عشر: 10,
+};
+const YEAR_WORD = "(?:years?|yrs?|سنوات|سنة|سنه)";
+
+/** The number of years a short phrase names, or nothing. */
+function yearsNamed(text: string): number | null {
+  const t = text.toLowerCase();
+  const digits = new RegExp(`\\b(\\d{1,2})\\s*[-\u2011\u2013 ]?\\s*${YEAR_WORD}`, "iu").exec(t);
+  if (digits) {
+    const n = Number(digits[1]);
+    if (n > 0 && n <= 30) return n;
+  }
+  const spelled = new RegExp(`\\b(${Object.keys(SPELLED).join("|")})\\s*[-\u2011\u2013 ]?\\s*${YEAR_WORD}`, "iu").exec(t);
+  if (spelled) return SPELLED[spelled[1]!] ?? null;
+  // "سنتين" is two years on its own, with no year word after it.
+  if (/\bسنتين\b/.test(t)) return 2;
+  return null;
+}
+
+/**
+ * The customer's message, when it is nothing but a term — a duration card
+ * click, or someone typing "1 year" at the question. Anything longer is a
+ * sentence we are not entitled to read a decision out of.
+ */
+export function durationChosen(userMessage: string): number | null {
+  const bare = String(userMessage ?? "")
+    .trim()
+    .replace(/^[\s"'\u201c\u2018]+|[\s"'.!\u201d\u2019]+$/g, "");
+  if (!bare || bare.length > 24) return null;
+  const only = new RegExp(`^(?:\\d{1,2}|${Object.keys(SPELLED).join("|")})\\s*[-\u2011\u2013 ]?\\s*${YEAR_WORD}$`, "iu");
+  return only.test(bare) ? yearsNamed(bare) : null;
+}
+
+/** Words that make a sentence an acknowledgement rather than an explanation. */
+const ACK =
+  /\b(noted|got it|understood|confirmed|perfect|great|excellent|sure|okay|ok|thanks|thank you)\b|^\s*(?:\u062a\u0645|\u062d\u0633\u0646\u0627\u064b?|\u0645\u0645\u062a\u0627\u0632|\u0639\u0644\u0645\u062a)\b/iu;
+
+/** Does this sentence acknowledge a term that is not the one just chosen? */
+export function contradictsChosenDuration(sentence: string, chosen: number | null): boolean {
+  if (!chosen) return false;
+  const s = sentence.trim();
+  if (!s || s.length > 70) return false;
+  if (!ACK.test(s)) return false;
+  const named = yearsNamed(s);
+  return named !== null && named !== chosen;
+}
+
+export function narrationGuard(opts?: { chosenDuration?: () => number | null }) {
   let buf = "";
   let inFence = false;
 
@@ -214,7 +291,8 @@ export function narrationGuard() {
         const sentence = m[1]!;
         // The words may go; the line break they sat on does not. See keptSeparator.
         // The words may go; the line break they sat on does not. See keptSeparator.
-        out += isInternalNarration(sentence) ? keptSeparator(m[2]!) : sentence + m[2];
+        const drop = isInternalNarration(sentence) || contradictsChosenDuration(sentence, opts?.chosenDuration?.() ?? null);
+        out += drop ? keptSeparator(m[2]!) : sentence + m[2];
         buf = buf.slice(m[0].length);
         continue;
       }
@@ -223,7 +301,11 @@ export function narrationGuard() {
       if (nl !== -1) {
         const line = upto.slice(0, nl + 1);
         const bare = line.trim();
-        const keep = !bare || bare.startsWith("-") || bare.startsWith("#") || !isInternalNarration(bare);
+        const keep =
+          !bare ||
+          bare.startsWith("-") ||
+          bare.startsWith("#") ||
+          (!isInternalNarration(bare) && !contradictsChosenDuration(bare, opts?.chosenDuration?.() ?? null));
         out += keep ? line : "";
         buf = buf.slice(nl + 1);
         continue;
@@ -236,7 +318,7 @@ export function narrationGuard() {
         continue;
       }
       if (final && buf) {
-        out += isInternalNarration(buf) ? "" : buf;
+        out += isInternalNarration(buf) || contradictsChosenDuration(buf, opts?.chosenDuration?.() ?? null) ? "" : buf;
         buf = "";
       }
       return out;

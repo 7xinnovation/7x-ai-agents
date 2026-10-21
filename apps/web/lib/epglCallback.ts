@@ -1,4 +1,5 @@
 import { epglAuth } from "./epglRead";
+import { log } from "./logger";
 import type { EnvKey } from "./integrations";
 
 /**
@@ -179,5 +180,34 @@ export async function createEpglCallback(
   }
   const created = json as { id?: string; success?: boolean };
   if (!created.success || !created.id) throw new Error("Salesforce accepted the callback case but returned no id");
-  return { reference: created.id };
+
+  /**
+   * THE NUMBER THEIR TEAM WORKS BY, NOT THE ONE THE API ANSWERS WITH.
+   *
+   * 20 October, from the live agent: "Your reference number is
+   * 500NM009JB0XLv2YYG - keep that handy when they contact you." That is the
+   * Case's record id. It is the right thing to hold on OUR side and the wrong
+   * thing to read down a phone: the officer's queue, their emails and the case
+   * header all show CaseNumber — 00003600 in the PreProd case we raised in
+   * September — and nobody in the licensing team is going to recognise an
+   * 18-character id, let alone type it.
+   *
+   * Create does not return it (Salesforce answers id and nothing else), so it
+   * is read back. If that read fails the id still goes out: a reference that is
+   * awkward to quote is a great deal better than losing a case that exists.
+   */
+  const caseNumber = await caseNumberOf(auth, created.id).catch(() => null);
+  if (!caseNumber) log.warn("epgl_callback_no_case_number", { id: created.id });
+  return { reference: caseNumber ?? created.id };
+}
+
+async function caseNumberOf(auth: { baseUrl: string; bearer: string; retry: () => Promise<string> }, id: string): Promise<string | null> {
+  const url = `${auth.baseUrl}/services/data/v62.0/sobjects/Case/${id}?fields=CaseNumber`;
+  const call = (bearer: string) => fetch(url, { headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" } });
+  let res = await call(auth.bearer);
+  if (res.status === 401) res = await call(await auth.retry());
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as { CaseNumber?: string } | null;
+  const n = String(body?.CaseNumber ?? "").trim();
+  return n || null;
 }

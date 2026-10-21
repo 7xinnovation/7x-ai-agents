@@ -67,7 +67,7 @@ import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale, historyLocale } from "@/lib/replyLocale";
-import { narrationGuard } from "@/lib/narrationGuard";
+import { narrationGuard, durationChosen } from "@/lib/narrationGuard";
 import { echoGuard } from "@/lib/echoGuard";
 import { identityGuard, identityValues } from "@/lib/identityGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
@@ -3250,8 +3250,11 @@ export async function POST(req: NextRequest) {
             )
           : null;
         const idFilter = internalIdFilter();
-        // The model talking to itself, kept out of the customer's chat.
-        const narration = narrationGuard();
+        // The model talking to itself, kept out of the customer's chat — and
+        // the duration it acknowledges held to the one the customer just
+        // picked, because on 20 October a reply to "1 Year" opened with "Three
+        // years, noted."
+        const narration = narrationGuard({ chosenDuration: () => durationChosen(body.userMessage) });
         // The model saying the same thing twice in one reply — what a tool round
         // does to a paragraph it started before the round and finished after it.
         // Downstream of the narration guard on purpose: a preamble that guard
