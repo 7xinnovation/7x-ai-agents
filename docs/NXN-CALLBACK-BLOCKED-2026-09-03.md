@@ -91,6 +91,20 @@ hostname list, under Hostname Management:
 Without them, Cloudflare refuses to issue a token at all and the widget reports
 error **110200**. Nothing reaches their endpoint to be judged.
 
+**Tested on 21 October, and this is exactly what happens.** With the site key
+configured on our staging app, the widget loaded on `7xagents.7x-lab.com` in a
+real browser and Cloudflare refused:
+
+```
+turnstile error 110200
+```
+
+Cloudflare's own table gives 110200 as *"Domain not authorized"*, with the fix
+*"Add current domain in Hostname Management."* The same key mints a token
+without complaint from `localhost`, so the key is live and working — our
+domains are simply not on its list. This is now the single thing standing
+between the customer and a real case number.
+
 The second unknown, which only a live attempt answers: whether their
 `/nextApi/case` handler passes the token to `siteverify` with an expected
 hostname of its own. If it does, our domain has to be acceptable there too.
