@@ -57,14 +57,55 @@ customer who is talking to us in chat, so there is no browser in the loop to
 issue one. It is not a matter of us obtaining a key: the mechanism assumes a
 front-end, and there isn't one at that moment.
 
+## Update, 21 October 2026 — they sent the site key
+
+Emirates Post supplied the Turnstile **site key** `0x4AAAAAAA7Tyw1honiP4a4B`
+and the snippet their own form uses. That is route 4 below, and it is the one
+we have now built: the widget runs in the customer's browser inside our chat,
+mints a token, and the token travels with the chat request to our server, which
+forwards it as `x-turnstile-token`. See `apps/web/lib/turnstile.ts` and
+`apps/web/app/embed/[agent]/useTurnstile.ts`.
+
+Two things we established the same day:
+
+**The 403 is their application's, not Cloudflare's edge.** The response carries
+`content-type: application/json` and no `cf-mitigated` header — we reach their
+app and their `/nextApi/case` handler rejects us. So route 2, an allow-list for
+our egress IPs, would not have worked: we were never being stopped at the edge.
+
+**The site key already has a configured hostname list.** Cloudflare's own
+documentation says a production site key does not permit `localhost` unless it
+has been added explicitly — and a token minted from `localhost` with this key
+was issued without complaint. So somebody has set that list up.
+
+## The one thing still outstanding
+
+A Turnstile token is bound to the **hostname that rendered the widget**. That is
+ours — `agent.7x.ae` — and not the page embedding us, even though the chat runs
+inside `www.emiratespost.ae`. So these have to be on the site key's allowed
+hostname list, under Hostname Management:
+
+- `agent.7x.ae` — production
+- `7xagents.7x-lab.com` — staging, so this can be tested before it is live
+
+Without them, Cloudflare refuses to issue a token at all and the widget reports
+error **110200**. Nothing reaches their endpoint to be judged.
+
+The second unknown, which only a live attempt answers: whether their
+`/nextApi/case` handler passes the token to `siteverify` with an expected
+hostname of its own. If it does, our domain has to be acceptable there too.
+
 ## What would unblock it — any one of these
 
 1. **An API key or service credential** that bypasses Turnstile for our
    registered service.
 2. **An allow-list** for our egress IPs on that endpoint.
 3. **A separate server-to-server endpoint** that creates the same case type,
-   without the CAPTCHA. This is our preference — it keeps the public form's
-   protection exactly as it is.
+   without the CAPTCHA. This was our preference in September — it keeps the
+   public form's protection exactly as it is.
+4. **Our domains on the site key's allowed hostname list**, so the challenge can
+   be answered in the customer's browser inside our chat. ← *this is the route
+   taken; see the update above for what is still needed to finish it.*
 
 We do not need the public endpoint changed or its protection relaxed.
 
@@ -76,6 +117,12 @@ reach your case queue, and the customer gets no case number.
 
 ## Where this lives our side
 
-`apps/web/lib/epCase.ts`. It is already written against the contract above and
-returns `not_configured` rather than calling, because a call without a token can
-only ever 403. Give us any of the three routes and it is a config change.
+`apps/web/lib/epCase.ts`, with the browser half in
+`apps/web/app/embed/[agent]/useTurnstile.ts`. It is written against the contract
+above and returns `not_configured` rather than calling when no token reached it,
+because a call without one can only ever 403.
+
+`NXN_CASE_API_BASE_URL` is deliberately still unset in every environment. The
+moment it is set, a customer asking for a callback files a case in their live
+queue — so it stays unset until the hostname list is confirmed and we have said
+out loud that the next test creates a real case.
