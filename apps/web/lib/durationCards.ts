@@ -133,7 +133,57 @@ export function stampDurationCards(block: string, terms: Term[]): string {
     .join("");
 }
 
-export function durationCardGuard(terms: () => Term[] | null) {
+/**
+ * Keep only the term the customer asked for.
+ *
+ * Reported 21 October: "Mira, can I change the subscription period to two
+ * years?" was answered with all five durations and "Which duration would you
+ * like?". The tester wrote back: "I asked to change the subscription period to
+ * two years. Why did you show all the options when my request was clear?"
+ *
+ * Showing somebody a menu they have just ordered from is not neutral — it reads
+ * as not having been heard, and it costs them another turn to say the same
+ * thing again.
+ *
+ * Cards that are not durations (a bundle, a branch, a box number) are left
+ * exactly where they are: this only has an opinion about a menu of terms. If
+ * the named term is not among them, nothing is dropped — a menu that does not
+ * contain what they asked for is the one case where seeing all of it helps.
+ */
+export function keepOnlyTerm(block: string, years: number): string {
+  const close = /\n[ \t]*```[ \t]*(\n|$)/.exec(block.slice(OPEN.length));
+  if (!close) return block;
+  const head = block.slice(0, OPEN.length);
+  const body = block.slice(OPEN.length, OPEN.length + close.index);
+  const tail = block.slice(OPEN.length + close.index);
+
+  // Split into entries on the top-level "- " that starts each card.
+  const lines = body.split("\n");
+  const entries: string[][] = [];
+  for (const line of lines) {
+    if (/^\s*-\s+\S/.test(line) && !/^\s{2,}-/.test(line)) entries.push([line]);
+    else if (entries.length) entries[entries.length - 1]!.push(line);
+    else entries.push([line]);
+  }
+
+  const titleOf = (entry: string[]) => /^\s*-\s+title:\s*(.+)$/i.exec(entry[0] ?? "")?.[1] ?? "";
+  const termEntries = entries.filter((e) => yearsInTitle(titleOf(e)) !== null);
+  // Nothing to collapse: not a menu, or a menu of one.
+  if (termEntries.length < 2) return block;
+  if (!termEntries.some((e) => yearsInTitle(titleOf(e)) === years)) return block;
+
+  const kept = entries.filter((e) => {
+    const y = yearsInTitle(titleOf(e));
+    return y === null || y === years;
+  });
+  return head + kept.map((e) => e.join("\n")).join("\n") + tail;
+}
+
+/**
+ * @param terms   what Emirates Post actually priced, for stamping the figures
+ * @param asked   the term the customer just named, if they named one
+ */
+export function durationCardGuard(terms: () => Term[] | null, asked?: () => number | null) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
 
@@ -157,8 +207,12 @@ export function durationCardGuard(terms: () => Term[] | null) {
       if (!close) return out;
       const end = OPEN.length + close.index + close[0].length;
       const known = terms();
-      const block = buf.slice(0, end);
-      out += known?.length ? stampDurationCards(block, known) : block;
+      let block = buf.slice(0, end);
+      // Prices first, then the menu is narrowed — so the card that survives
+      // carries the figure Emirates Post charges, not the one the model typed.
+      if (known?.length) block = stampDurationCards(block, known);
+      const wanted = asked?.() ?? null;
+      out += wanted !== null ? keepOnlyTerm(block, wanted) : block;
       buf = buf.slice(end);
       mode = "pass";
     }
