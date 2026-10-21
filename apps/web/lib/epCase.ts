@@ -12,12 +12,21 @@
  * IT IS CAPTCHA-GATED. Every request without a valid `x-turnstile-token` answers
  * 403 {"message":"Invalid CAPTCHA token"} — body and header names make no
  * difference, tested on 2 Sep. Cloudflare Turnstile issues that token to a
- * BROWSER, so a server cannot mint one. Until Emirates Post gives us a
- * server-to-server route, this returns notConfigured/rejected and the caller
- * falls back to the ops mailbox rather than losing the callback.
+ * BROWSER: bound to the hostname that rendered the widget, single-use, and good
+ * for about five minutes.
+ *
+ * Emirates Post supplied the site key on 21 October, so the token now comes from
+ * the customer's own browser — the widget runs inside our chat and the token
+ * travels with the chat request (lib/turnstile). The env var below is kept only
+ * as a manual override for probing their endpoint by hand; it cannot serve real
+ * traffic, because the second request would replay a burnt token.
+ *
+ * When no token reaches us the caller still falls back to the ops mailbox rather
+ * than losing the callback.
  */
 import { log } from "./logger";
 import { trackedFetch } from "./apiCallLog";
+import { takeTurnstileToken } from "./turnstile";
 
 export interface EpCaseInput {
   firstName: string;
@@ -54,13 +63,16 @@ export async function raiseEpCase(
   ctx: { agentId?: string; conversationId?: string } = {}
 ): Promise<EpCaseResult> {
   const base = (process.env.NXN_CASE_API_BASE_URL ?? "").replace(/\/$/, "");
-  const token = process.env.NXN_CASE_TURNSTILE_TOKEN ?? "";
+  // The browser's token first; the env var is the by-hand override (see above).
+  const token = takeTurnstileToken() ?? process.env.NXN_CASE_TURNSTILE_TOKEN ?? "";
   if (!base) return { ok: false, reason: "not_configured", detail: "NXN_CASE_API_BASE_URL is not set" };
   if (!token) {
     return {
       ok: false,
       reason: "not_configured",
-      detail: "no x-turnstile-token — /nextApi/case rejects every request without one and a server cannot mint it",
+      detail:
+        "no x-turnstile-token — /nextApi/case rejects every request without one, and this turn carried none " +
+        "(is NXN_CASE_TURNSTILE_SITE_KEY set, and did the widget load in the customer's browser?)",
     };
   }
   const mobile = epMobile(input.mobile);

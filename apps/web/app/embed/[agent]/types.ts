@@ -83,4 +83,12 @@ export interface PublicAgent {
   uaePassDirect?: boolean;
   // Whether GPT Realtime voice mode is configured (AZURE_REALTIME_* env present).
   voiceEnabled?: boolean;
+  /**
+   * Cloudflare Turnstile site key for Emirates Post's case endpoint.
+   *
+   * Present only where a callback is actually filed on /nextApi/case, so no
+   * other agent loads Cloudflare's script. Site keys are public — the secret
+   * half is Emirates Post's, and they verify the token.
+   */
+  turnstileSiteKey?: string;
 }

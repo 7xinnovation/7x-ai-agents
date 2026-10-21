@@ -74,6 +74,7 @@ import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchNa
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
+import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
 
 export const runtime = "nodejs";
 // Multi-tool turns (e.g. a renewal: details + pricing + payment) can run well past
@@ -113,6 +114,14 @@ const Body = z.object({
    * it, so the demo persona and the `?mock=1` testers are unchanged.
    */
   sandbox: z.boolean().optional(),
+  /**
+   * A Cloudflare Turnstile token minted by the widget in the customer's browser.
+   *
+   * Emirates Post's /nextApi/case will not take a callback without one, and only
+   * a browser can mint it. It is carried per turn because the token is
+   * single-use and expires in minutes — there is nothing worth storing.
+   */
+  turnstileToken: z.string().max(4096).optional(),
 });
 
 // Internal directive used for the post-sign-in account pulse. Never shown to the
@@ -3166,7 +3175,10 @@ export async function POST(req: NextRequest) {
   // never persisted and the customer had to start that turn again.
   let closed = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const stream = new ReadableStream({
+  // The browser's CAPTCHA token, in scope for the whole turn. `start` below runs
+  // synchronously inside the constructor, so the tools inherit it from here —
+  // see lib/turnstile for why it is request-scoped rather than a module value.
+  const stream = withTurnstileToken(body.turnstileToken, () => new ReadableStream({
     async start(controller) {
       // Writing to a stream nobody is reading is not an error worth failing the
       // turn over: mark it closed and let the work finish so the reply is saved.
@@ -4651,6 +4663,15 @@ export async function POST(req: NextRequest) {
         send({ type: "error", message: customerFacingError(err, body.locale) });
       } finally {
         clearInterval(heartbeat);
+        /**
+         * The browser's CAPTCHA token was spent on this turn — mint the next.
+         *
+         * Cloudflare burns a Turnstile token on first verify, and the verify
+         * happens at Emirates Post's end. The widget cannot see that, so the
+         * one fact the server has — the token went out of scope because
+         * `raiseEpCase` took it — is what tells the browser to refresh.
+         */
+        if (body.turnstileToken && !hasTurnstileToken()) send({ type: "turnstile_spent" });
         // Already closed means the client cancelled — closing again throws and
         // would skip the deferred drain below.
         if (!closed) {
@@ -4674,7 +4695,7 @@ export async function POST(req: NextRequest) {
       closed = true;
       if (heartbeat) clearInterval(heartbeat);
     },
-  });
+  }));
 
   return new Response(stream, {
     headers: {
