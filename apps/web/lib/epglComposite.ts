@@ -172,3 +172,45 @@ export function contentVersionMultipart(
   ]);
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
 }
+
+/**
+ * The application id Salesforce minted, out of the composite's answer.
+ *
+ * Salesforce issue it on create and return it as `applicationId` on the
+ * NewLicenseRequest item, in the form LR-xxxxx. It has to be kept, for two
+ * reasons that are easy to miss until they bite:
+ *
+ *   - their STATUS PUSH is keyed on it. The receiver finds the conversation by
+ *     matching the pushed applicationId against the case, so an id that was
+ *     never written down means every push arrives unmatched and the applicant
+ *     is never told their licence was approved;
+ *   - every later call needs it, and a later turn cannot read it off a tool
+ *     result that scrolled out of the context window.
+ *
+ * Deliberately not fussy about WHICH item carries it — their referenceId is a
+ * convention in an example, not a contract, so the first LR- shaped id in the
+ * response wins over hunting for a name they are free to change.
+ */
+export function applicationIdFrom(raw: string | undefined): string | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // A result line like `HTTP 200\n{...}` — take the JSON off the end.
+    const brace = raw.indexOf("{");
+    if (brace === -1) return null;
+    try {
+      parsed = JSON.parse(raw.slice(brace));
+    } catch {
+      return null;
+    }
+  }
+  const items = (parsed as { compositeResponse?: { referenceId?: string; body?: { applicationId?: unknown } }[] })?.compositeResponse;
+  if (!Array.isArray(items)) return null;
+  const named = items.find((i) => i?.referenceId === "NewLicenseRequest");
+  const ids = [named, ...items]
+    .map((i) => i?.body?.applicationId)
+    .filter((v): v is string => typeof v === "string" && /^LR-\w+$/i.test(v));
+  return ids[0] ?? null;
+}

@@ -10,6 +10,7 @@ import {
   isEpglCompositeTool,
   withEpglDocumentFiles,
   contentVersionMultipart,
+  applicationIdFrom,
   type EpglCaseFile,
 } from "./epglComposite";
 
@@ -1313,6 +1314,15 @@ export async function buildApiTools(
      * that choice turns on. See lib/epglComposite.
      */
     epglDocuments?: () => Promise<EpglCaseFile[]>;
+    /**
+     * Keep the application id Salesforce just minted.
+     *
+     * Their status push is keyed on it: the receiver finds the conversation by
+     * matching the pushed applicationId against the case. Without this the
+     * create succeeds, the customer gets their number — and every push about
+     * it afterwards arrives unmatched.
+     */
+    rememberEpglApplicationId?: (applicationId: string) => void | Promise<void>;
     /**
      * The rental duration the customer actually chose, from the case.
      *
@@ -4835,6 +4845,18 @@ export async function buildApiTools(
      * stands and the gap is named next to it.
      */
     if (documentNote && !res.isError) res = { ...res, result: `${res.result}\n\n${documentNote}` };
+
+    // The id their status push will be keyed on, written down while we have it.
+    if (!res.isError && isEpglCompositeTool(toolName) && opts.rememberEpglApplicationId) {
+      const id = applicationIdFrom((res as { raw?: string }).raw ?? res.result);
+      if (id) {
+        try {
+          await opts.rememberEpglApplicationId(id);
+        } catch {
+          // Losing the id costs the push, not the submission — never the turn.
+        }
+      }
+    }
     return res;
   };
 

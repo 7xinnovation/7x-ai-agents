@@ -1317,6 +1317,30 @@ export async function POST(req: NextRequest) {
       agent.definition.tenantSlug === "epgl"
         ? () => epglDocumentRows(session.caseId, session.state.documents, agent.definition, adapters)
         : undefined,
+    /**
+     * The application id onto the case, the moment Salesforce issue it.
+     *
+     * Their status push finds the conversation by matching its applicationId
+     * against `state.data.application_id` (see app/api/epgl/status). Nothing
+     * else writes it: the model is told to quote the id, not to file it, and a
+     * tool result from twenty turns ago is not a record.
+     */
+    rememberEpglApplicationId:
+      agent.definition.tenantSlug === "epgl"
+        ? async (applicationId: string) => {
+            await mutateCase(session.caseId, (st) => ({
+              ...st,
+              data: { ...st.data, application_id: applicationId },
+            }));
+            await audit({
+              agentId: agent.id,
+              conversationId: session.conversationId,
+              actor: "system",
+              action: "epgl_application_id",
+              payload: { applicationId },
+            });
+          }
+        : undefined,
     // The card Emirates Post already holds for them, so the payment page opens
     // on it instead of asking for the number again.
     savedCard:

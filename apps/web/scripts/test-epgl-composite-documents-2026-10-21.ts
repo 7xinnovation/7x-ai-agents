@@ -26,6 +26,7 @@ import {
   documentItemsOf,
   withEpglDocumentFiles,
   contentVersionMultipart,
+  applicationIdFrom,
   type EpglCaseFile,
 } from "@/lib/epglComposite";
 
@@ -133,6 +134,27 @@ check("Emirates ID", slugOfDocumentType("Copy of Emirates ID") === "copy_of_emir
   check("it ends with the closing boundary", text.trimEnd().endsWith(`--${boundary}--`));
 }
 
+// ------------------------------------------------- the id the push is keyed on
+{
+  // Their real create response, as returned by the sandbox on 21 October.
+  const real = JSON.stringify({ compositeResponse: [
+    { referenceId: "NewAccount", httpStatusCode: 201, body: { id: "001FW00001", success: true } },
+    { referenceId: "NewLicenseRequest", httpStatusCode: 200, body: { id: "a11FW000slgt25AYAQ", success: true, applicationId: "LR-54039" } },
+    { referenceId: "Doc1", httpStatusCode: 200, body: { id: "a0v", success: true, applicationId: null } },
+  ] });
+  check("the application id is read off the create response", applicationIdFrom(real) === "LR-54039");
+  check("...even behind an HTTP status line", applicationIdFrom(`HTTP 200 OK\n${real}`) === "LR-54039");
+  check("a null applicationId on a document item is not mistaken for it", applicationIdFrom(JSON.stringify({ compositeResponse: [{ referenceId: "Doc1", body: { applicationId: null } }] })) === null);
+  check("a response with no composite gives nothing", applicationIdFrom(JSON.stringify({ ok: true })) === null);
+  check("nonsense gives nothing rather than throwing", applicationIdFrom("not json at all") === null);
+  check("an empty result gives nothing", applicationIdFrom(undefined) === null);
+  // Their referenceId is a convention in an example, not a contract.
+  check("an id under a different referenceId is still found",
+    applicationIdFrom(JSON.stringify({ compositeResponse: [{ referenceId: "Renamed", body: { applicationId: "LR-99" } }] })) === "LR-99");
+  check("a Salesforce record id is not an application id",
+    applicationIdFrom(JSON.stringify({ compositeResponse: [{ referenceId: "NewLicenseRequest", body: { applicationId: "a11FW000slgt25AYAQ" } }] })) === null);
+}
+
 // ---------------------------------------------------------------- the wiring
 {
   const read = (p: string) => readFileSync(resolve(here, "..", p), "utf8");
@@ -142,9 +164,16 @@ check("Emirates ID", slugOfDocumentType("Copy of Emirates ID") === "copy_of_emir
   check("a missing document is reported alongside the success", /if \(documentNote && !res\.isError\)/.test(intg));
   check("1.x still strips its documents", /withoutEpglDocuments\(input\) \?\? input/.test(intg));
 
+  check("the id is captured after a successful composite", /isEpglCompositeTool\(toolName\) && opts\.rememberEpglApplicationId/.test(intg));
+  check("and losing it never costs the turn", /Losing the id costs the push, not the submission/.test(intg));
+
   const route = read("app/api/chat/route.ts");
   check("only EPGL gets the provider", /epglDocuments:\s*\n\s*agent\.definition\.tenantSlug === "epgl"/.test(route));
   check("it reads raw bytes, not base64", /bytes: stored\.bytes/.test(route));
+  // THE WHOLE POINT: the key the status receiver looks the case up by.
+  check("the id is written to state.data.application_id", /data: \{ \.\.\.st\.data, application_id: applicationId \}/.test(route));
+  const push = read("app/api/epgl/status/route.ts");
+  check("which is exactly what the status push matches on", /'data' ->> 'application_id'/.test(push));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
