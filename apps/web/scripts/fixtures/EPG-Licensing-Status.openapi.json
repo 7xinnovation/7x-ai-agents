@@ -1,0 +1,440 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EPG Licensing - Status API (step 5)",
+    "version": "1.1.0",
+    "description": "Application status for the delivery-activities regulation: send the application id, receive its three statuses (staff, applicant, payment) and the facts around them. Generated from the NewLaw sandbox catalogue on 2026-10-13T10:18:15Z."
+  },
+  "servers": [
+    {
+      "url": "https://epro--newlaw.sandbox.my.salesforce.com",
+      "description": "NewLaw sandbox"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication"
+    },
+    {
+      "name": "Status"
+    }
+  ],
+  "paths": {
+    "/services/oauth2/token": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get an access token (client credentials)",
+        "security": [],
+        "description": "Send grant_type=client_credentials with the client id and secret of the External Client App. Use access_token as Bearer token on every other call. Tokens expire after about two hours.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "grant_type",
+                  "client_id",
+                  "client_secret"
+                ],
+                "properties": {
+                  "grant_type": {
+                    "type": "string",
+                    "enum": [
+                      "client_credentials"
+                    ],
+                    "example": "client_credentials"
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "description": "Consumer key of the External Client App",
+                    "example": "<<EPGL_NEWLAW_CLIENT_ID>>"
+                  },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Consumer secret of the External Client App",
+                    "example": "<<EPGL_NEWLAW_CLIENT_SECRET>>"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "instance_url": {
+                      "type": "string"
+                    },
+                    "token_type": {
+                      "type": "string",
+                      "description": "Bearer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/services/apexrest/getApplicationStatus": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Status of an application (step 5)",
+        "description": "The external system may call this at any time with the application id. For a new-regulation application the answer carries its three statuses: requestStatus (the working status staff see), applicantStatus (the status the applicant may see, bilingual) and paymentStatus (Unpaid or Paid), with the current step, the team holding it, the pre-check result, any open information request with what was asked, the document slots and their validation, the fee quote and payment advice, the decision once taken and the licence once issued. The legacy envelope and decision node are kept; legacy applications keep the previous behaviour.",
+        "parameters": [
+          {
+            "name": "applicationId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Portal application id (applicationId__c)",
+            "examples": {
+              "CEP30-UAE-SME-DOM": {
+                "value": "APP-CEP30-UAE-SME-DOM-ONECALL-01"
+              },
+              "CEP30-UAE-SME-INTL": {
+                "value": "APP-CEP30-UAE-SME-INTL-ONECALL-01"
+              },
+              "CEP30-NONUAE-SME-DOM": {
+                "value": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01"
+              },
+              "CEP30-NONUAE-SME-INTL": {
+                "value": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01"
+              },
+              "CEP30-GEN-DOM": {
+                "value": "APP-CEP30-GEN-DOM-ONECALL-01"
+              },
+              "CEP30-GEN-INTL": {
+                "value": "APP-CEP30-GEN-INTL-ONECALL-01"
+              },
+              "FOODMED": {
+                "value": "APP-FOODMED-ONECALL-01"
+              },
+              "INTERMED": {
+                "value": "APP-INTERMED-ONECALL-01"
+              },
+              "LOCKERS": {
+                "value": "APP-LOCKERS-ONECALL-01"
+              },
+              "OUTSOURCE": {
+                "value": "APP-OUTSOURCE-ONECALL-01"
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status (or status 404 in the body when unknown)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing applicationId"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "access_token from /services/oauth2/token"
+      }
+    },
+    "schemas": {
+      "StatusResponse": {
+        "type": "object",
+        "description": "Legacy envelope plus the \"application\" node for new-regulation applications.",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "description": "200, or 404 when the application id is unknown (HTTP stays 200 for the unknown case, as in the legacy API)"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "desc": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            }
+          },
+          "decision": {
+            "type": "object",
+            "description": "Legacy node: code 0 in progress, 1 approved/issued, 2 information requested, 3 rejected; status = applicant status",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "status": {
+                "type": "object",
+                "properties": {
+                  "en": {
+                    "type": "string"
+                  },
+                  "ar": {
+                    "type": "string"
+                  }
+                }
+              },
+              "remarks": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "application": {
+            "$ref": "#/components/schemas/ApplicationStatus"
+          }
+        }
+      },
+      "ApplicationStatus": {
+        "type": "object",
+        "description": "The three statuses and the facts the portal shows next to them. Internal reviewer identities are never returned (BRD 4.8).",
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Salesforce application number (LR-xxxxx)"
+          },
+          "productCode": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "requestStatus": {
+            "type": "string",
+            "description": "Working status staff see",
+            "enum": [
+              "Draft",
+              "Pending Payment",
+              "Submitted",
+              "Under document review",
+              "Under Technical Review",
+              "Under Financial Review",
+              "Under Legal Review",
+              "Request for more documents",
+              "Submitted for Approval",
+              "Approved",
+              "Under License Issuance",
+              "License generated",
+              "Conditionally Issued",
+              "Under Post-Issuance Verification",
+              "Closed",
+              "Rejected",
+              "Revoked"
+            ]
+          },
+          "currentStep": {
+            "type": "string",
+            "description": "Name of the current milestone"
+          },
+          "handledBy": {
+            "type": "string",
+            "description": "Role whose turn it is (Customer, Licence Intake Officer, Technical Reviewer, Financial Reviewer, Legal Reviewer, Sign-off Authority)"
+          },
+          "applicantStatus": {
+            "type": "object",
+            "properties": {
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            },
+            "description": "What the applicant may see (BRD 4.8): Draft | Submitted | Under Review | Information Requested | Approved | Conditional Issuance | Issued | Rejected"
+          },
+          "paymentStatus": {
+            "type": "object",
+            "properties": {
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            },
+            "description": "Unpaid | Paid"
+          },
+          "precheckResult": {
+            "type": "string",
+            "description": "Filled at submission"
+          },
+          "informationRequest": {
+            "type": "object",
+            "properties": {
+              "open": {
+                "type": "boolean"
+              },
+              "requestedOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "details": {
+                "type": "string",
+                "description": "What the reviewer asked for"
+              }
+            }
+          },
+          "submittedOn": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operationalSlaDue": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "statutorySlaDue": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUpdatedOn": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fees": {
+            "type": "object",
+            "properties": {
+              "quoteTotal": {
+                "type": "number"
+              },
+              "currencyCode": {
+                "type": "string"
+              },
+              "paidOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "paymentReference": {
+                "type": "string"
+              },
+              "adviceNumber": {
+                "type": "string"
+              },
+              "adviceStatus": {
+                "type": "string"
+              }
+            }
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "documentType": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "uploaded": {
+                  "type": "boolean"
+                },
+                "validationStatus": {
+                  "type": "string",
+                  "description": "Pending | Passed | Failed"
+                },
+                "validTo": {
+                  "type": "string",
+                  "format": "date"
+                }
+              }
+            }
+          },
+          "decision": {
+            "type": "object",
+            "description": "Present once a final decision exists",
+            "properties": {
+              "outcome": {
+                "type": "string",
+                "description": "Approve | Reject"
+              },
+              "decisionType": {
+                "type": "string",
+                "description": "Auto | Manual"
+              },
+              "decidedOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "grounds": {
+                "type": "string"
+              }
+            }
+          },
+          "licence": {
+            "type": "object",
+            "description": "Present once a licence is issued",
+            "properties": {
+              "licenceNumber": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "validFrom": {
+                "type": "string",
+                "format": "date"
+              },
+              "validTo": {
+                "type": "string",
+                "format": "date"
+              },
+              "conditional": {
+                "type": "boolean"
+              },
+              "documentEnId": {
+                "type": "string"
+              },
+              "documentArId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

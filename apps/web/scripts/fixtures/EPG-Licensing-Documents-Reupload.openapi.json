@@ -1,0 +1,853 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EPG Licensing - Documents Re-upload API",
+    "version": "1.1.0",
+    "description": "Documents to re-upload after a reviewer's information request, with reasons. Generated from the NewLaw sandbox on 2026-10-13T10:18:15Z."
+  },
+  "servers": [
+    {
+      "url": "https://epro--newlaw.sandbox.my.salesforce.com",
+      "description": "NewLaw sandbox"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication"
+    },
+    {
+      "name": "Information request"
+    },
+    {
+      "name": "Documents"
+    }
+  ],
+  "paths": {
+    "/services/oauth2/token": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get an access token (client credentials)",
+        "security": [],
+        "description": "Send grant_type=client_credentials with the client id and secret of the External Client App. Use access_token as Bearer token on every other call. Tokens expire after about two hours.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "grant_type",
+                  "client_id",
+                  "client_secret"
+                ],
+                "properties": {
+                  "grant_type": {
+                    "type": "string",
+                    "enum": [
+                      "client_credentials"
+                    ],
+                    "example": "client_credentials"
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "description": "Consumer key of the External Client App",
+                    "example": "<<EPGL_NEWLAW_CLIENT_ID>>"
+                  },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Consumer secret of the External Client App",
+                    "example": "<<EPGL_NEWLAW_CLIENT_SECRET>>"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "instance_url": {
+                      "type": "string"
+                    },
+                    "token_type": {
+                      "type": "string",
+                      "description": "Bearer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/services/apexrest/licensing/informationRequest": {
+      "get": {
+        "tags": [
+          "Information request"
+        ],
+        "summary": "Documents the applicant must upload again, with the reasons",
+        "description": "When a reviewer rejects one or more documents and clicks \"Request information\", the application moves to Information Requested and this call lists the rejected documents with the reviewer's reason. The applicant re-uploads each one through the document call (POST /services/apexrest/CompositeHandler, same applicationId__c and Document_Type); the slot then shows as Re-uploaded here. The Intake Officer resumes the review in Salesforce. Read-only: the portal never changes the application status.",
+        "parameters": [
+          {
+            "name": "applicationId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "APP-CEP30-UAE-SME-DOM-ONECALL-01"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Information request state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InformationRequestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing applicationId"
+          },
+          "404": {
+            "description": "Unknown application id"
+          }
+        }
+      }
+    },
+    "/services/apexrest/CompositeHandler": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Re-upload a rejected document (existing document call)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompositeRequest"
+              },
+              "example": {
+                "allOrNone": false,
+                "compositeRequest": [
+                  {
+                    "method": "POST",
+                    "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                    "referenceId": "Doc1",
+                    "body": {
+                      "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
+                      "Document_Type": "Lease Contract",
+                      "fileName": "corrected.pdf",
+                      "content": "<base64>",
+                      "Valid_From__c": "2026-01-01",
+                      "Valid_To__c": "2027-12-31"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-item result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompositeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "access_token from /services/oauth2/token"
+      }
+    },
+    "schemas": {
+      "InformationRequestResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "applicationId": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "requestStatus": {
+            "type": "string"
+          },
+          "applicantStatus": {
+            "type": "object",
+            "properties": {
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            }
+          },
+          "informationRequested": {
+            "type": "boolean",
+            "description": "true while the application is in \"Request for more documents\""
+          },
+          "requestedOn": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "comment": {
+            "type": "string",
+            "description": "General comment of the reviewer"
+          },
+          "documentsToReupload": {
+            "type": "array",
+            "description": "Rejected documents the applicant must upload again",
+            "items": {
+              "$ref": "#/components/schemas/InformationRequestDocument"
+            }
+          },
+          "documentsReuploaded": {
+            "type": "array",
+            "description": "Rejected documents already replaced by the applicant, awaiting the reviewer",
+            "items": {
+              "$ref": "#/components/schemas/InformationRequestDocument"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "InformationRequestDocument": {
+        "type": "object",
+        "properties": {
+          "documentType": {
+            "type": "string",
+            "description": "Use exactly this value as Document_Type when re-uploading"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reviewer comment"
+          },
+          "reviewStatus": {
+            "type": "string",
+            "enum": [
+              "Rejected",
+              "Re-uploaded"
+            ]
+          },
+          "validationStatus": {
+            "type": "string"
+          },
+          "uploaded": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CompositeRequest": {
+        "type": "object",
+        "required": [
+          "compositeRequest"
+        ],
+        "description": "Company, owners, signatory, application, declarations, child items and documents in one transaction, in this order.",
+        "properties": {
+          "allOrNone": {
+            "type": "boolean",
+            "default": true,
+            "description": "true = any failed item rolls back every item"
+          },
+          "compositeRequest": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompositeItem"
+            }
+          }
+        }
+      },
+      "CompositeItem": {
+        "type": "object",
+        "required": [
+          "method",
+          "url",
+          "referenceId",
+          "body"
+        ],
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "Always POST",
+            "enum": [
+              "POST"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "/services/data/v60.0/sobjects/<Object>"
+          },
+          "referenceId": {
+            "type": "string",
+            "description": "Name later items use as @{referenceId.id}"
+          },
+          "body": {
+            "description": "One of the item bodies below, with \"sObject\" implied by the url",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountItem"
+              },
+              {
+                "$ref": "#/components/schemas/BeneficialOwnerItem"
+              },
+              {
+                "$ref": "#/components/schemas/ContactItem"
+              },
+              {
+                "$ref": "#/components/schemas/LicenseRequestItem"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationItemItem"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationSiteItem"
+              },
+              {
+                "$ref": "#/components/schemas/OperatorContractItem"
+              },
+              {
+                "$ref": "#/components/schemas/DocumentItem"
+              }
+            ]
+          }
+        }
+      },
+      "CompositeResponse": {
+        "type": "object",
+        "properties": {
+          "compositeResponse": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "referenceId": {
+                  "type": "string"
+                },
+                "httpStatusCode": {
+                  "type": "integer"
+                },
+                "body": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Salesforce id of the created/updated record"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Human-readable reasons when success is false"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "DocumentItem": {
+        "type": "object",
+        "description": "A file for one slot of the application, placed after the application item. Refused when Document_Type is not expected; format, size and expiry validated against the catalogue rules.",
+        "required": [
+          "applicationId__c",
+          "Document_Type",
+          "fileName",
+          "content"
+        ],
+        "properties": {
+          "applicationId__c": {
+            "type": "string",
+            "description": "Same value as on the application item"
+          },
+          "Document_Type": {
+            "type": "string",
+            "description": "documentType from the catalogue"
+          },
+          "fileName": {
+            "type": "string",
+            "description": "With extension; the extension is checked against acceptedFormats"
+          },
+          "content": {
+            "type": "string",
+            "description": "Base64 file content",
+            "format": "byte"
+          },
+          "Valid_From__c": {
+            "type": "string",
+            "format": "date"
+          },
+          "Valid_To__c": {
+            "type": "string",
+            "description": "Required when validityRequired is true",
+            "format": "date"
+          },
+          "EPG_File_Id__c": {
+            "type": "string",
+            "description": "Optional external file id"
+          }
+        }
+      },
+      "Bilingual": {
+        "type": "object",
+        "description": "Text in both languages",
+        "properties": {
+          "en": {
+            "type": "string",
+            "description": "English"
+          },
+          "ar": {
+            "type": "string",
+            "description": "Arabic"
+          }
+        }
+      },
+      "AccountItem": {
+        "type": "object",
+        "description": "The applying company. Matched by EPG_Trade_license_no__c: created when unknown, updated otherwise. Later items reference it as @{NewAccount.id}.",
+        "required": [
+          "RecordType",
+          "Name",
+          "EPG_Trade_license_no__c"
+        ],
+        "properties": {
+          "RecordType": {
+            "type": "string",
+            "example": "Licensed_Customer"
+          },
+          "Name": {
+            "type": "string",
+            "example": "Sample Courier Co LLC"
+          },
+          "EPG_Company_Name_Arabic__c": {
+            "type": "string",
+            "example": "شركة النموذج للتوصيل"
+          },
+          "EPG_Trade_license_no__c": {
+            "type": "string",
+            "example": "TL-SAMPLE-0001"
+          },
+          "EPG_Trade_Name_in_English__c": {
+            "type": "string",
+            "example": "Sample Courier"
+          },
+          "EPG_Trade_Name_in_Arabic__c": {
+            "type": "string",
+            "example": "النموذج للتوصيل"
+          },
+          "EPG_Regulator__c": {
+            "type": "string",
+            "example": "Dubai - Department of Economy and Tourism"
+          },
+          "EPG_Emirates__c": {
+            "type": "string",
+            "example": "Dubai"
+          },
+          "EPG_Region__c": {
+            "type": "string",
+            "example": "Al Quoz"
+          },
+          "BillingStreet": {
+            "type": "string",
+            "example": "Al Quoz 3"
+          },
+          "BillingCity": {
+            "type": "string",
+            "example": "Dubai"
+          },
+          "BillingCountry": {
+            "type": "string",
+            "example": "United Arab Emirates"
+          },
+          "Licensing_Tier_Declared__c": {
+            "type": "string",
+            "example": "General"
+          },
+          "UAE_National_Owned__c": {
+            "type": "boolean",
+            "example": false
+          },
+          "UAE_National_Ownership_Pct__c": {
+            "type": "number",
+            "example": 0
+          },
+          "Correspondence_Channel__c": {
+            "type": "string",
+            "example": "Email"
+          },
+          "HQ_Address_AR__c": {
+            "type": "string",
+            "example": "القوز 3"
+          }
+        }
+      },
+      "BeneficialOwnerItem": {
+        "type": "object",
+        "description": "One item per real beneficiary (Cabinet Resolution 58/2020). Matched by Account__c + Identifier__c.",
+        "required": [
+          "Account__c",
+          "Owner_Name_EN__c",
+          "Identifier_Type__c",
+          "Identifier__c",
+          "Nationality__c",
+          "Percentage_Held__c",
+          "Ownership_Basis__c"
+        ],
+        "properties": {
+          "Account__c": {
+            "type": "string",
+            "example": "@{NewAccount.id}"
+          },
+          "Owner_Name_EN__c": {
+            "type": "string",
+            "example": "Ali Owner"
+          },
+          "Owner_Name_AR__c": {
+            "type": "string",
+            "example": "علي المالك"
+          },
+          "Identifier_Type__c": {
+            "type": "string",
+            "example": "Emirates ID"
+          },
+          "Identifier__c": {
+            "type": "string",
+            "example": "784-1990-1234567-1"
+          },
+          "Identifier_Issuing_Country__c": {
+            "type": "string",
+            "example": "United Arab Emirates"
+          },
+          "Identifier_Expiry_Date__c": {
+            "type": "string",
+            "example": "2029-05-01"
+          },
+          "Nationality__c": {
+            "type": "string",
+            "example": "Emirati"
+          },
+          "Is_UAE_National__c": {
+            "type": "boolean",
+            "example": true
+          },
+          "Percentage_Held__c": {
+            "type": "number",
+            "example": 100
+          },
+          "Ownership_Basis__c": {
+            "type": "string",
+            "example": "Direct ownership (25% or more)"
+          },
+          "Beneficial_Since__c": {
+            "type": "string",
+            "example": "2020-01-15"
+          },
+          "Date_of_Birth__c": {
+            "type": "string",
+            "example": "1985-03-10"
+          }
+        }
+      },
+      "ContactItem": {
+        "type": "object",
+        "description": "The authorised signatory as a Contact of the company, matched by UId__c (UAE PASS id) within the company.",
+        "required": [
+          "AccountId",
+          "LastName",
+          "UId__c"
+        ],
+        "properties": {
+          "AccountId": {
+            "type": "string",
+            "example": "@{NewAccount.id}"
+          },
+          "FirstName": {
+            "type": "string",
+            "example": "Test"
+          },
+          "LastName": {
+            "type": "string",
+            "example": "Signatory"
+          },
+          "Email": {
+            "type": "string",
+            "example": "signatory@example.com"
+          },
+          "Phone": {
+            "type": "string",
+            "example": "0501234567"
+          },
+          "UId__c": {
+            "type": "string",
+            "example": "UAEPASS-SIG-0001"
+          },
+          "EPG_Is_Authorized_Signatory__c": {
+            "type": "boolean",
+            "example": true
+          },
+          "UAE_PASS_Verified_On__c": {
+            "type": "string",
+            "example": "2026-10-13T08:00:00.000Z"
+          },
+          "UAE_PASS_User_Type__c": {
+            "type": "string",
+            "example": "SOP3"
+          },
+          "UAE_PASS_Nationality__c": {
+            "type": "string",
+            "example": "ARE"
+          }
+        }
+      },
+      "LicenseRequestItem": {
+        "type": "object",
+        "description": "The application. Product_Code selects the product; the server creates it in Draft, quotes the fee and creates the document slots. applicationId__c is unique per company: re-sending it updates, sending it for another company is refused.",
+        "required": [
+          "applicationId__c",
+          "Product_Code",
+          "Signatory_UAE_PASS_Id",
+          "EPG_Account__c"
+        ],
+        "properties": {
+          "applicationId__c": {
+            "type": "string",
+            "description": "Portal application id"
+          },
+          "Product_Code": {
+            "type": "string",
+            "description": "A code from the catalogue",
+            "enum": [
+              "CEP30-UAE-SME-DOM",
+              "CEP30-UAE-SME-INTL",
+              "CEP30-NONUAE-SME-DOM",
+              "CEP30-NONUAE-SME-INTL",
+              "CEP30-GEN-DOM",
+              "CEP30-GEN-INTL",
+              "FOODMED",
+              "INTERMED",
+              "LOCKERS",
+              "OUTSOURCE"
+            ]
+          },
+          "Signatory_UAE_PASS_Id": {
+            "type": "string",
+            "description": "UId__c of the Contact item"
+          },
+          "EPG_Account__c": {
+            "type": "string",
+            "description": "@{NewAccount.id}"
+          },
+          "Declared_Tier__c": {
+            "type": "string",
+            "description": "Defaults to the product tier",
+            "enum": [
+              "General",
+              "Specialised",
+              "Projects and Establishments"
+            ]
+          },
+          "Declared_Scope__c": {
+            "type": "string",
+            "description": "Defaults to the product scope",
+            "enum": [
+              "Domestic",
+              "Domestic and International"
+            ]
+          },
+          "Declarations_Accepted_On__c": {
+            "type": "string",
+            "description": "ISO 8601 date-time",
+            "format": "date-time"
+          },
+          "Form_Data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Any answers without a dedicated field"
+          },
+          "Declared_Max_Shipment_Weight_Kg__c": {
+            "type": "number",
+            "description": "CEP30 activity"
+          },
+          "Declares_Food_Delivery__c": {
+            "type": "boolean",
+            "description": "FOODMED"
+          },
+          "Declares_Medicine_Delivery__c": {
+            "type": "boolean",
+            "description": "FOODMED"
+          },
+          "Cold_Chain_Capability__c": {
+            "type": "boolean",
+            "description": "FOODMED"
+          },
+          "Data_Handling_Confirmed__c": {
+            "type": "boolean",
+            "description": "INTERMED"
+          },
+          "Principal_Licence_Number": {
+            "type": "string",
+            "description": "LOCKERS (optional) / OUTSOURCE (required): licence number of the principal CEP licensee"
+          }
+        }
+      },
+      "ApplicationItemItem": {
+        "type": "object",
+        "description": "Declarations of the application (License_Request__c = @{NewLicenseRequest.id}). Updates the item the server created with the application.",
+        "required": [
+          "License_Request__c"
+        ],
+        "properties": {
+          "License_Request__c": {
+            "type": "string",
+            "description": "@{NewLicenseRequest.id}"
+          },
+          "Affirms_Shipment_Tracking__c": {
+            "type": "boolean",
+            "description": "CEP30"
+          },
+          "Affirms_Consignment_Notes__c": {
+            "type": "boolean",
+            "description": "CEP30"
+          },
+          "Insurance_Coverage_AED__c": {
+            "type": "number",
+            "description": "CEP30"
+          },
+          "Declared_Vehicle_Count__c": {
+            "type": "number",
+            "description": "CEP30"
+          },
+          "Temperature_Sensitive_Categories__c": {
+            "type": "string",
+            "description": "FOODMED, semicolon list"
+          },
+          "Intermediation_Model__c": {
+            "type": "string",
+            "description": "INTERMED"
+          },
+          "Intermediation_Parties__c": {
+            "type": "string",
+            "description": "INTERMED"
+          },
+          "Outsourced_Activities__c": {
+            "type": "string",
+            "description": "OUTSOURCE, semicolon list of activity codes"
+          }
+        }
+      },
+      "ApplicationSiteItem": {
+        "type": "object",
+        "description": "FOODMED storage premises or LOCKERS locker/PUDO site. Matched by License_Request__c + Site_Address_EN__c.",
+        "required": [
+          "License_Request__c",
+          "Site_Type__c",
+          "Site_Address_EN__c"
+        ],
+        "properties": {
+          "License_Request__c": {
+            "type": "string",
+            "description": "@{NewLicenseRequest.id}"
+          },
+          "Site_Type__c": {
+            "type": "string",
+            "enum": [
+              "Storage premises",
+              "Locker site",
+              "PUDO point",
+              "Other"
+            ]
+          },
+          "Site_Address_EN__c": {
+            "type": "string"
+          },
+          "Site_Address_AR__c": {
+            "type": "string"
+          },
+          "Emirate__c": {
+            "type": "string"
+          },
+          "Locker_Count__c": {
+            "type": "integer"
+          },
+          "Authentication_Mechanism__c": {
+            "type": "string"
+          },
+          "Site_Permission_Provided__c": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OperatorContractItem": {
+        "type": "object",
+        "description": "INTERMED: a contract with a licensed operator. Matched by License_Request__c + Operator_Trade_License_No__c.",
+        "required": [
+          "License_Request__c",
+          "Operator_Name__c",
+          "Operator_Trade_License_No__c"
+        ],
+        "properties": {
+          "License_Request__c": {
+            "type": "string",
+            "description": "@{NewLicenseRequest.id}"
+          },
+          "Operator_Name__c": {
+            "type": "string"
+          },
+          "Operator_Trade_License_No__c": {
+            "type": "string"
+          },
+          "Contract_Start_Date__c": {
+            "type": "string",
+            "format": "date"
+          },
+          "Contract_End_Date__c": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

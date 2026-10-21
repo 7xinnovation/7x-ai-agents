@@ -270,6 +270,19 @@ async function loadSpec(specUrl: string): Promise<{ spec: any; resolvedUrl: stri
 
 export async function parseSpec(specUrl: string, baseUrlOverride?: string): Promise<ParsedSpec> {
   const { spec, resolvedUrl } = await loadSpec(specUrl);
+  return parseSpecDocument(spec, resolvedUrl, baseUrlOverride);
+}
+
+/**
+ * The same parse, on a spec already in hand.
+ *
+ * `parseSpec` fetches, and fetching is checked (169.254.169.254 answers only
+ * from inside the host). A spec that arrived by email and sits on disk has not
+ * been fetched from anywhere, and routing it back out through an HTTP server so
+ * it can be fetched again would be ceremony, not safety — so the parse is
+ * separable from the fetch (2026-10-20, the EPGL 2.0 pricing/status specs).
+ */
+export function parseSpecDocument(spec: any, resolvedUrl: string, baseUrlOverride?: string): ParsedSpec {
   const title: string = spec.info?.title ?? "API";
   const baseUrl = (baseUrlOverride || deriveBaseUrl(spec, resolvedUrl)).replace(/\/$/, "");
 
