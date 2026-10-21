@@ -122,7 +122,15 @@ reach your case queue, and the customer gets no case number.
 above and returns `not_configured` rather than calling when no token reached it,
 because a call without one can only ever 403.
 
-`NXN_CASE_API_BASE_URL` is deliberately still unset in every environment. The
-moment it is set, a customer asking for a callback files a case in their live
-queue — so it stays unset until the hostname list is confirmed and we have said
-out loud that the next test creates a real case.
+Configuration, as it stands on 21 October:
+
+| | `NXN_CASE_API_BASE_URL` | `NXN_CASE_TURNSTILE_SITE_KEY` |
+|---|---|---|
+| staging | `https://www-stg.emiratespost.ae` | set |
+| production | *unset* | *unset* |
+
+Staging points at **their** staging site, which is why it is the right place to
+try this: a case filed there lands in their test environment, not in the queue
+their officers work. Production stays unset deliberately — the moment it is set,
+a customer asking for a callback files a real case — so it waits until staging
+has proved the whole path.
