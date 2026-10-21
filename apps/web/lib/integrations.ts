@@ -598,6 +598,38 @@ export function yearsUntil(date: string, now: Date = new Date()): number | null 
   return years >= 1 && years <= 20 ? years : null;
 }
 
+/**
+ * The reservation is for one term and the customer has since chosen another.
+ *
+ * Reported 21 October. A customer with a box held for ONE year asked to change
+ * to two. The duration card, the line items and the case all moved to two
+ * years; the hold did not, because nothing called Rental/Select again. Every
+ * figure downstream is computed from `hold.amount`, so the summary footed a
+ * 2-year rental at AED 400 — 370 for one year plus the AED 30 courier — and the
+ * payment card and the gateway order were opened for the same 400.
+ *
+ * The line items were right and the total was wrong, which is the worst
+ * arrangement: 600 + 70 + 30 is printed directly above a total of 400, and the
+ * customer who notices is the lucky one. The customer who does not pays for one
+ * year and believes they bought two.
+ *
+ * The hold's own expiry date is what it was taken for, so the two can simply be
+ * compared. Null when either is unreadable: an unknown term is not a mismatch,
+ * and refusing a rental over a date we could not parse would be its own bug.
+ */
+export function holdTermMismatch(
+  holdExpiry: string | null | undefined,
+  chosenDuration: string | null | undefined,
+  now: Date = new Date()
+): { held: number; chosen: number } | null {
+  if (!holdExpiry) return null;
+  const chosen = durationYears(chosenDuration);
+  if (chosen === null) return null;
+  const held = yearsUntil(holdExpiry, now);
+  if (held === null) return null;
+  return held === chosen ? null : { held, chosen };
+}
+
 /** A priced line from Rental/Select, by service and (optionally) criteria. */
 function priceOf(details: unknown, serviceType: string, criteria?: string): number | null {
   if (!Array.isArray(details)) return null;
@@ -2117,6 +2149,42 @@ export async function buildApiTools(
         return {
           result:
             "No hold exists for this rental. Emirates Post records a rental against a reservation created by Rental/Select, and that call has not succeeded in this conversation — so this save would fail with ERROR_GETTING_HOLD_DETAILS whatever is sent. Call Rental/Select first with the box's uniqueBoxId, then save. Do NOT invent a reference and do NOT take payment until the hold is confirmed.",
+          isError: true,
+        };
+      }
+      /**
+       * AND A HOLD FOR ONE TERM CANNOT PAY FOR ANOTHER.
+       *
+       * The refusal above covers having no reservation at all. This covers
+       * having the WRONG one: the customer changed the duration after the box
+       * was held, nothing re-reserved it, and Emirates Post would charge the
+       * held term while the customer believes they bought the chosen one.
+       *
+       * Refusing costs one more call. Not refusing costs a customer a year of
+       * the subscription they paid for.
+       */
+      const mismatch = holdTermMismatch(lastHold.expiryDate, opts.chosenDuration?.() ?? null);
+      if (mismatch) {
+        void audit({
+          agentId,
+          conversationId: opts.conversationId,
+          actor: "system",
+          action: "integration_call_failed",
+          payload: {
+            tool: toolName,
+            method: entry.op.method,
+            path: entry.op.path,
+            input: input ?? {},
+            response: `REFUSED LOCALLY: the hold is for ${mismatch.held} year(s), the customer chose ${mismatch.chosen}`,
+          },
+        }).catch(() => {});
+        return {
+          result:
+            `THE RESERVATION IS FOR THE WRONG TERM — NOTHING WAS SENT AND NOTHING IS LOST. The box is held for ${mismatch.held} year(s), ` +
+            `but the customer has since chosen ${mismatch.chosen}. Emirates Post charges against the reservation, so saving now would sell them ` +
+            `${mismatch.held} year(s) at the ${mismatch.held}-year price while every figure on screen says ${mismatch.chosen}. ` +
+            `Call Rental/Select again for the SAME box with the expiry date for ${mismatch.chosen} year(s), then save. ` +
+            `Do not quote a total, and do not open a payment, until that reservation has come back.`,
           isError: true,
         };
       }

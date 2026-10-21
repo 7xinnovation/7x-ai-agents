@@ -29,7 +29,7 @@ import { MOCK_PERSONA_SUB, MOCK_PERSONA_EID, MOCK_PERSONA_NAME, MOCK_PERSONA_CON
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
-import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
+import { normaliseCompanyKey, buildApiTools, holdTermMismatch } from "@/lib/integrations";
 import {
   companyByEmiratesId,
   companyByAccountId,
@@ -1465,7 +1465,23 @@ export async function POST(req: NextRequest) {
    * been told. Seeing it named in a card is being told.
    */
   let courierSeen = false;
+  /**
+   * The reservation is for a term the customer has since changed (21 Oct).
+   *
+   * Everything authoritative is computed from the hold, so while it disagrees
+   * with the chosen duration there is no figure worth stating: AED 400 printed
+   * under line items reading 600 + 70 + 30 is worse than no total at all.
+   */
+  const staleHold = () => {
+    const hold = apiTools.getLastHold();
+    const d = liveState.data as Record<string, unknown>;
+    return holdTermMismatch(hold?.expiryDate ?? null, str(d.duration) ?? str(d.rental_duration) ?? null);
+  };
+
   const authoritativeAmount = (extras?: { keyDelivery?: boolean }) => {
+    // A hold for the wrong term cannot price this rental. Saying nothing sends
+    // the model back to Rental/Select, which is the only thing that fixes it.
+    if (staleHold()) return null;
     const hold = apiTools.getLastHold();
     // A renewal has no hold; its authoritative figure is the last price Emirates
     // Post quoted for the chosen term and bundle (2026-10-11), so a Noqodi
