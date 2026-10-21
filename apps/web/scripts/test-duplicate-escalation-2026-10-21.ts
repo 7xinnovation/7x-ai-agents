@@ -86,7 +86,11 @@ check("the question survives", /Would you like to add an authorised agent/.test(
 check("the right acknowledgement survives", /1 year, noted\./.test(out), out);
 
 console.log("\nWired into the turn");
-check("the guard is given the customer's own message", /narrationGuard\(\{ chosenDuration: \(\) => durationChosen\(body\.userMessage\) \}\)/.test(route));
+// Matched loosely on purpose: the call gained a second reader on 21 October
+// (requestedDuration) and a line break with it. What matters is that the guard
+// is handed the customer's own message, not how the call is formatted.
+check("the guard is given the customer's own message",
+  /narrationGuard\(\{[\s\S]{0,200}?chosenDuration:\s*\(\)\s*=>\s*durationChosen\(body\.userMessage\)/.test(route));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

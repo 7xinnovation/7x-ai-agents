@@ -67,7 +67,7 @@ import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale, historyLocale } from "@/lib/replyLocale";
-import { narrationGuard, durationChosen } from "@/lib/narrationGuard";
+import { narrationGuard, durationChosen, durationRequested } from "@/lib/narrationGuard";
 import { echoGuard } from "@/lib/echoGuard";
 import { identityGuard, identityValues } from "@/lib/identityGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
@@ -3355,7 +3355,10 @@ export async function POST(req: NextRequest) {
         // the duration it acknowledges held to the one the customer just
         // picked, because on 20 October a reply to "1 Year" opened with "Three
         // years, noted."
-        const narration = narrationGuard({ chosenDuration: () => durationChosen(body.userMessage) });
+        const narration = narrationGuard({
+          chosenDuration: () => durationChosen(body.userMessage),
+          requestedDuration: () => durationRequested(body.userMessage),
+        });
         // The model saying the same thing twice in one reply — what a tool round
         // does to a paragraph it started before the round and finished after it.
         // Downstream of the narration guard on purpose: a preamble that guard
@@ -3567,7 +3570,13 @@ export async function POST(req: NextRequest) {
         // And the duration cards, held to the ladder the tool actually priced:
         // a term Emirates Post has never charged for gets no figure rather than
         // the annual rate multiplied out.
-        const durationGuard = durationCardGuard(() => apiTools.getDurationPrices()?.terms ?? null);
+        // A customer who names a term gets that term, not the menu again
+        // (21 October). Collapsed here rather than asked for in the prompt:
+        // the model had already been told, and showed five cards anyway.
+        const durationGuard = durationCardGuard(
+          () => apiTools.getDurationPrices()?.terms ?? null,
+          () => durationRequested(body.userMessage)
+        );
         const totalGuard = proseTotalGuard(() => (apiTools.getLastHold() ? authoritativeAmount() : null));
         let citedThisTurn = false;
         let submittedRef: string | null = null;
