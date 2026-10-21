@@ -1,4 +1,5 @@
 import { log } from "./logger";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * Transactional email sender (customer confirmations/receipts + internal ops
@@ -167,7 +168,7 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
      */
     if (sendgridKey) {
       const sender = splitSender(from);
-      const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      const res = await trackedFetch("https://api.sendgrid.com/v3/mail/send", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${sendgridKey}` },
         body: JSON.stringify({
@@ -181,7 +182,7 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
             ...(input.html ? [{ type: "text/html", value: input.html }] : []),
           ],
         }),
-      });
+      }, { integration: "SendGrid", tool: "email_send" });
       if (!res.ok) {
         const body = (await res.text()).slice(0, 300);
         log.error("email_send_failed", new Error(`sendgrid ${res.status}`), { to, body });
@@ -191,7 +192,7 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
     }
 
     if (resendKey) {
-      const res = await fetch("https://api.resend.com/emails", {
+      const res = await trackedFetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -204,7 +205,7 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
           text: input.text,
           ...(input.html ? { html: input.html } : {}),
         }),
-      });
+      }, { integration: "Resend", tool: "email_send" });
       if (!res.ok) {
         const body = (await res.text()).slice(0, 300);
         log.error("email_send_failed", new Error(`resend ${res.status}`), { to, body });
@@ -215,11 +216,15 @@ export async function sendEmail(input: EmailInput): Promise<EmailResult> {
     }
 
     if (webhookUrl) {
-      const res = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to, subject: input.subject, text: input.text, html: input.html }),
-      });
+      const res = await trackedFetch(
+        webhookUrl,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from, to, subject: input.subject, text: input.text, html: input.html }),
+        },
+        { integration: "Email webhook", tool: "email_send" }
+      );
       if (!res.ok) {
         log.error("email_send_failed", new Error(`webhook ${res.status}`), { to });
         return { ok: false, reason: `webhook_error_${res.status}` };

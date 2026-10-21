@@ -10,6 +10,7 @@
  * the area's CODE, e.g. "DXB-84", not its name. Sending a typed-in area name is
  * what produced the 173.
  */
+import { trackedFetch } from "./apiCallLog";
 
 const HOSTS: Record<string, string> = {
   staging: "https://masters-stg.epservices.ae",
@@ -38,10 +39,13 @@ export async function regionsFor(env: string, emirateCode: string): Promise<EpRe
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 12000);
   try {
-    const res = await fetch(`${host}/locations/api/Regions?EmirateCode=${emirate}`, {
-      signal: ctl.signal,
-      headers: { Accept: "application/json" },
-    });
+    const res = await trackedFetch(
+      `${host}/locations/api/Regions?EmirateCode=${emirate}`,
+      { signal: ctl.signal, headers: { Accept: "application/json" } },
+      // No agent in scope: the region list is shared and cached across them, so
+      // this row shows under "All agents".
+      { environment: env, integration: "Emirates Post", tool: "ep_regions" }
+    );
     if (!res.ok) return hit?.rows ?? [];
     const body = (await res.json()) as { data?: { list?: Record<string, unknown>[] } };
     const rows: EpRegion[] = (body?.data?.list ?? [])

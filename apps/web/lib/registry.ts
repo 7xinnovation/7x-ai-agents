@@ -252,7 +252,9 @@ export function ensureAdapters() {
         mobile: String(input.phone ?? ""),
         email: input.email,
         message: `${String(input.reason ?? "")}${context}`,
-      }).catch((e) => ({ ok: false as const, reason: "unreachable" as const, detail: String(e) }));
+      },
+        { agentId: agent?.id }
+      ).catch((e) => ({ ok: false as const, reason: "unreachable" as const, detail: String(e) }));
 
       if (epCase.ok) return { reference: epCase.caseNumber };
 

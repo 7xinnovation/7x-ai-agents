@@ -5,6 +5,7 @@
  * Credentials come from env (UAEPASS_*), never from code. Staging base is
  * https://stg-id.uaepass.ae ; production is https://id.uaepass.ae.
  */
+import { trackedFetch } from "./apiCallLog";
 /**
  * Dev/staging-only: simulate the UAE PASS round-trip without hitting UAE PASS, so
  * the whole sign-in → callback → authenticated-session → chat flow can be tested
@@ -304,18 +305,24 @@ function normaliseIdn(raw: unknown): string | undefined {
 export async function exchangeCode(code: string, redirectUri: string, tenant?: string): Promise<UaePassIdentity> {
   const c = cfg(tenant);
   const basic = Buffer.from(`${c.clientId}:${c.clientSecret}`).toString("base64");
-  const tokenRes = await fetch(`${c.base}/idshub/token`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri }),
-  });
+  const tokenRes = await trackedFetch(
+    `${c.base}/idshub/token`,
+    {
+      method: "POST",
+      headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri }),
+    },
+    { integration: "UAE PASS", tool: "uaepass_token" }
+  );
   if (!tokenRes.ok) throw new Error(`UAE PASS token exchange failed: ${tokenRes.status} ${await tokenRes.text().catch(() => "")}`.slice(0, 200));
   const tokens = (await tokenRes.json()) as { access_token?: string };
   if (!tokens.access_token) throw new Error("UAE PASS: no access_token returned");
 
-  const userRes = await fetch(`${c.base}/idshub/userinfo`, {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  });
+  const userRes = await trackedFetch(
+    `${c.base}/idshub/userinfo`,
+    { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+    { integration: "UAE PASS", tool: "uaepass_userinfo" }
+  );
   if (!userRes.ok) throw new Error(`UAE PASS userinfo failed: ${userRes.status}`);
   const u = (await userRes.json()) as Record<string, unknown> & {
     sub?: string; uuid?: string; idn?: string; fullnameEN?: string; firstnameEN?: string; lastnameEN?: string;

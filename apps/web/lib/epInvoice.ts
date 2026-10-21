@@ -1,6 +1,7 @@
 import { epUsersBaseUrl } from "./hostToken";
 import { log } from "./logger";
 import type { EnvKey } from "./integrations";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * The invoice Emirates Post issue for a PO Box payment.
@@ -43,7 +44,11 @@ export async function emiratesPostInvoice(
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, { headers: { Accept: "application/pdf" }, signal: ctl.signal });
+    const res = await trackedFetch(
+      url,
+      { headers: { Accept: "application/pdf" }, signal: ctl.signal },
+      { agentId, environment: env, integration: "Emirates Post", tool: "ep_invoice" }
+    );
     /**
      * ANY non-200 is "no invoice", not an error to report. An unknown reference
      * answers 500, so there is no status that reliably means "not found" — and

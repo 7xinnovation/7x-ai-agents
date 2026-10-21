@@ -1,7 +1,7 @@
 import { listAgentsForFilter } from "@/lib/metrics";
 import { currentScope, selectAgent } from "@/lib/scope";
 import { AgentFilter } from "../AgentFilter";
-import { apiCallStats, apiCallsByEndpoint, listApiCalls } from "@/lib/apiCallLog";
+import { PAGE_SIZE, apiCallStats, apiCallsByEndpoint, cursorAfter, listApiCalls } from "@/lib/apiCallLog";
 import { ApiLogsClient } from "./ApiLogsClient";
 
 export const runtime = "nodejs";
@@ -39,7 +39,7 @@ export default async function ApiLogs({
 
   const [stats, rows, endpoints] = await Promise.all([
     apiCallStats(filter),
-    listApiCalls({ ...filter, outcome, limit: 100 }),
+    listApiCalls({ ...filter, outcome, limit: PAGE_SIZE }),
     apiCallsByEndpoint(filter),
   ]);
 
@@ -58,7 +58,7 @@ export default async function ApiLogs({
 
       <ApiLogsClient
         agent={selected?.slug ?? ""}
-        initial={{ stats, rows: rows.map(serialise), endpoints }}
+        initial={{ stats, rows: rows.map(serialise), endpoints, nextCursor: cursorAfter(rows) }}
         outcome={outcome}
         q={filter.q ?? ""}
         hours={filter.hours}

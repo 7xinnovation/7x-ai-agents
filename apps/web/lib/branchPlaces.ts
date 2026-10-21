@@ -22,6 +22,7 @@
  * geocoder cannot place keeps its name and loses its coordinates: the map lists
  * it without a pin and without a distance, which is the truth we have.
  */
+import { trackedFetch } from "./apiCallLog";
 
 export type BranchInput = {
   id: string;
@@ -165,7 +166,8 @@ export async function geocodeInEmirate(
   name: string,
   emirate: string,
   token: string,
-  fetchImpl: Fetch = fetch
+  // Logged on the admin's API Logs page by default; the tests inject their own.
+  fetchImpl: Fetch = (u, i) => trackedFetch(String(u), i, { integration: "Mapbox", tool: "mapbox_geocode" })
 ): Promise<{ lat: number; lng: number } | null> {
   const code = emirate.toUpperCase();
   const box = EMIRATE_BOX[code];
@@ -214,7 +216,8 @@ export async function placeBranches(
   branches: BranchInput[],
   emirate: string,
   token: string | undefined,
-  fetchImpl: Fetch = fetch
+  // Logged on the admin's API Logs page by default; the tests inject their own.
+  fetchImpl: Fetch = (u, i) => trackedFetch(String(u), i, { integration: "Mapbox", tool: "mapbox_geocode" })
 ): Promise<PlacedBranch[]> {
   return Promise.all(
     branches.map(async (b): Promise<PlacedBranch> => {

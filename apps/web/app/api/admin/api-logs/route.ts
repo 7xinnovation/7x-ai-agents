@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { listAgentsForFilter } from "@/lib/metrics";
 import { currentScope, selectAgent } from "@/lib/scope";
-import { apiCallStats, apiCallsByEndpoint, listApiCalls, type Outcome } from "@/lib/apiCallLog";
+import { PAGE_SIZE, apiCallStats, apiCallsByEndpoint, cursorAfter, listApiCalls, type Outcome } from "@/lib/apiCallLog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
 
 /**
  * The API Logs page, refreshed.
@@ -33,12 +34,12 @@ export async function GET(req: Request) {
   const filter = { agentId, q, hours: Number.isFinite(hours) && hours > 0 ? Math.min(hours, 24 * 30) : 24 };
   const [stats, rows, endpoints] = await Promise.all([
     apiCallStats(filter),
-    listApiCalls({ ...filter, outcome, before: before && !Number.isNaN(before.getTime()) ? before : undefined, limit: 100 }),
+    listApiCalls({ ...filter, outcome, before: before && !Number.isNaN(before.getTime()) ? before : undefined, limit: PAGE_SIZE }),
     apiCallsByEndpoint(filter),
   ]);
 
   return NextResponse.json(
-    { agent: selected?.slug ?? null, stats, rows, endpoints },
+    { agent: selected?.slug ?? null, stats, rows, endpoints, nextCursor: cursorAfter(rows) },
     { headers: { "cache-control": "no-store, max-age=0" } }
   );
 }

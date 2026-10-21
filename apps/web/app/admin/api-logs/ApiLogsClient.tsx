@@ -34,6 +34,13 @@ export interface Stats {
   errors: number;
   avgMs: number;
 }
+interface Payload {
+  stats: Stats;
+  rows: CallRow[];
+  endpoints: EndpointRow[];
+  /** The timestamp to ask for the next page from, or null at the end. */
+  nextCursor: string | null;
+}
 
 const WINDOWS = [
   { hours: 1, label: "Last hour" },
@@ -59,7 +66,7 @@ export function ApiLogsClient({
   hours,
 }: {
   agent: string;
-  initial: { stats: Stats; rows: CallRow[]; endpoints: EndpointRow[] };
+  initial: Payload;
   outcome: "all" | "ok" | "error";
   q: string;
   hours: number;
@@ -71,6 +78,12 @@ export function ApiLogsClient({
   const [auto, setAuto] = useState(false);
   const [search, setSearch] = useState(q);
   const [open, setOpen] = useState<string | null>(null);
+  /**
+   * Where each page started. [] is page one; pushing the cursor the server
+   * handed back moves on, popping goes back — so "older" and "newer" are both
+   * exact, and no row is shown twice while new ones land at the top.
+   */
+  const [cursors, setCursors] = useState<string[]>([]);
   // The server sent this set; a refresh replaces it. Without this an auto-refresh
   // started under one filter would keep answering after the filter changed.
   const filterKey = `${agent}|${outcome}|${q}|${hours}`;
@@ -79,6 +92,7 @@ export function ApiLogsClient({
     if (lastKey.current !== filterKey) {
       lastKey.current = filterKey;
       setData(initial);
+      setCursors([]);
     }
   }, [filterKey, initial]);
 
@@ -94,26 +108,40 @@ export function ApiLogsClient({
     [params, router]
   );
 
-  const refresh = useCallback(async () => {
-    setBusy(true);
-    try {
-      const qs = new URLSearchParams();
-      if (agent) qs.set("agent", agent);
-      if (outcome !== "all") qs.set("outcome", outcome);
-      if (q) qs.set("q", q);
-      qs.set("hours", String(hours));
-      const res = await fetch(`/api/admin/api-logs?${qs}`, { cache: "no-store" });
-      if (res.ok) setData((await res.json()) as typeof initial);
-    } finally {
-      setBusy(false);
-    }
-  }, [agent, outcome, q, hours, initial]);
+  const load = useCallback(
+    async (stack: string[]) => {
+      setBusy(true);
+      try {
+        const qs = new URLSearchParams();
+        if (agent) qs.set("agent", agent);
+        if (outcome !== "all") qs.set("outcome", outcome);
+        if (q) qs.set("q", q);
+        qs.set("hours", String(hours));
+        const before = stack[stack.length - 1];
+        if (before) qs.set("before", before);
+        const res = await fetch(`/api/admin/api-logs?${qs}`, { cache: "no-store" });
+        if (res.ok) {
+          setData((await res.json()) as Payload);
+          setCursors(stack);
+          setOpen(null);
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [agent, outcome, q, hours]
+  );
+
+  const refresh = useCallback(() => load(cursors), [load, cursors]);
 
   useEffect(() => {
     if (!auto) return;
-    const t = setInterval(refresh, 5000);
+    // Auto-refresh follows the FIRST page only. Polling an older page would
+    // keep re-reading a window that is not moving, and the new calls — the
+    // reason the box is ticked — are at the top.
+    const t = setInterval(() => load([]), 5000);
     return () => clearInterval(t);
-  }, [auto, refresh]);
+  }, [auto, load]);
 
   const success = Math.max(0, data.stats.total - data.stats.errors);
   const failing = useMemo(() => data.endpoints.filter((e) => e.errors > 0), [data.endpoints]);
@@ -186,7 +214,7 @@ export function ApiLogsClient({
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             Auto-refresh
           </label>
-          <button type="button" className="sa-log-refresh" onClick={refresh} disabled={busy}>
+          <button type="button" className="sa-log-refresh" onClick={() => refresh()} disabled={busy}>
             <RefreshCw className={busy ? "spin" : ""} size={14} /> Refresh
           </button>
         </form>
@@ -216,7 +244,11 @@ export function ApiLogsClient({
       <section className="sa-panel">
         <div className="sa-panel-head">
           <h2>Calls</h2>
-          <span className="sa-muted">{data.rows.length === 100 ? "latest 100" : num(data.rows.length)}</span>
+          <span className="sa-muted">
+            {cursors.length ? `page ${cursors.length + 1}` : null}
+            {cursors.length ? " · " : ""}
+            {num(data.rows.length)} shown
+          </span>
         </div>
         {data.rows.length === 0 ? (
           <p className="sa-empty-line">
@@ -282,6 +314,27 @@ export function ApiLogsClient({
             );
           })}
         </div>
+        {data.rows.length || cursors.length ? (
+          <div className="sa-log-pager">
+            <button
+              type="button"
+              className="sa-log-refresh"
+              onClick={() => load(cursors.slice(0, -1))}
+              disabled={busy || cursors.length === 0}
+            >
+              Newer
+            </button>
+            <span className="sa-log-pager-at">Page {cursors.length + 1}</span>
+            <button
+              type="button"
+              className="sa-log-refresh"
+              onClick={() => data.nextCursor && load([...cursors, data.nextCursor])}
+              disabled={busy || !data.nextCursor}
+            >
+              Older
+            </button>
+          </div>
+        ) : null}
       </section>
     </>
   );

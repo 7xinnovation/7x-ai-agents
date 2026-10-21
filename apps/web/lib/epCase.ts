@@ -17,6 +17,7 @@
  * falls back to the ops mailbox rather than losing the callback.
  */
 import { log } from "./logger";
+import { trackedFetch } from "./apiCallLog";
 
 export interface EpCaseInput {
   firstName: string;
@@ -47,7 +48,11 @@ export function epMobile(raw: string | undefined): string {
   return /^971\d{9,}$/.test(national) ? `00${national}` : "";
 }
 
-export async function raiseEpCase(input: EpCaseInput): Promise<EpCaseResult> {
+export async function raiseEpCase(
+  input: EpCaseInput,
+  /** Who it belongs to, for the admin's API Logs page. */
+  ctx: { agentId?: string; conversationId?: string } = {}
+): Promise<EpCaseResult> {
   const base = (process.env.NXN_CASE_API_BASE_URL ?? "").replace(/\/$/, "");
   const token = process.env.NXN_CASE_TURNSTILE_TOKEN ?? "";
   if (!base) return { ok: false, reason: "not_configured", detail: "NXN_CASE_API_BASE_URL is not set" };
@@ -78,12 +83,16 @@ export async function raiseEpCase(input: EpCaseInput): Promise<EpCaseResult> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 15000);
   try {
-    const res = await fetch(`${base}/nextApi/case`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-turnstile-token": token },
-      body: JSON.stringify(body),
-      signal: ctl.signal,
-    });
+    const res = await trackedFetch(
+      `${base}/nextApi/case`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-turnstile-token": token },
+        body: JSON.stringify(body),
+        signal: ctl.signal,
+      },
+      { ...ctx, integration: "Emirates Post enquiries", tool: "ep_raise_case" }
+    );
     const text = await res.text();
     if (res.status === 403 || /captcha/i.test(text)) {
       return { ok: false, reason: "captcha", detail: text.slice(0, 200) };

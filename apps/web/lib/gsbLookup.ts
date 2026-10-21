@@ -1,5 +1,6 @@
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * Trade-licence lookups for NXN, over the Emirates Post MOE (GSB) endpoints.
@@ -113,6 +114,9 @@ function assertShape(value: string, pattern: RegExp, what: string): string {
 }
 
 interface Creds {
+  /** Who the call belongs to, for the admin's API Logs page. */
+  agentId: string;
+  env: EnvKey;
   baseUrl: string;
   apiKey?: string;
   /** A service bearer held by the integration itself, if one is configured. */
@@ -133,6 +137,8 @@ async function creds(agentId: string, env: EnvKey): Promise<Creds> {
   const apiKey = isEncrypted(spec.apiKey) ? decryptSecret(spec.apiKey) : spec.apiKey;
 
   return {
+    agentId,
+    env,
     baseUrl: String(spec.baseUrl).replace(/\/$/, ""),
     apiKey: (apiKey as string) || undefined,
     // A plain stored token is only a service bearer for the token-bearing auth types.
@@ -158,7 +164,7 @@ async function creds(agentId: string, env: EnvKey): Promise<Creds> {
 async function bearerFor(c: Creds, callerToken?: string): Promise<string> {
   if (c.oauth) {
     if (cached && Date.now() - cached.at < TOKEN_TTL_MS) return cached.token;
-    const res = await fetch(c.oauth.tokenUrl, {
+    const res = await trackedFetch(c.oauth.tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body: new URLSearchParams({
@@ -166,7 +172,7 @@ async function bearerFor(c: Creds, callerToken?: string): Promise<string> {
         client_id: c.oauth.clientId,
         client_secret: c.oauth.clientSecret,
       }).toString(),
-    });
+    }, { agentId: c.agentId, environment: c.env, integration: "GSB", tool: "gsb_oauth_token" });
     if (!res.ok) throw new Error(`GSB token request failed (HTTP ${res.status})`);
     const json = (await res.json()) as { access_token?: string };
     if (!json.access_token) throw new Error("GSB token response had no access_token");
@@ -194,7 +200,12 @@ async function get<T>(
   if (c.apiKey) headers["X-API-KEY"] = c.apiKey;
   if (auth === "bearer") headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
 
-  const res = await fetch(url, { headers });
+  const res = await trackedFetch(url.toString(), { headers }, {
+    agentId,
+    environment: env,
+    integration: "GSB",
+    tool: `gsb${path.replace(/\//g, "_")}`,
+  });
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 200);
     throw new Error(`GSB ${path} failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`);
@@ -487,7 +498,12 @@ export async function poBoxesByEmiratesId(
   if (c.apiKey) headers["X-API-KEY"] = c.apiKey;
   headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
 
-  const res = await fetch(url, { headers });
+  const res = await trackedFetch(url.toString(), { headers }, {
+    agentId,
+    environment: env,
+    integration: "GSB",
+    tool: "gsb_poboxes_by_emirates_id",
+  });
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 200);
     throw new Error(`GSB PoBoxes/getpoboxesbymobile failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`);
@@ -531,7 +547,12 @@ export async function poBoxesForSession(
   if (c.apiKey) headers["X-API-KEY"] = c.apiKey;
   headers.Authorization = `Bearer ${await bearerFor(c, callerToken)}`;
   try {
-    const res = await fetch(`${c.baseUrl.replace(/\/$/, "")}/users/api/v1/PoBoxes`, { headers });
+    const res = await trackedFetch(`${c.baseUrl.replace(/\/$/, "")}/users/api/v1/PoBoxes`, { headers }, {
+      agentId,
+      environment: env,
+      integration: "GSB",
+      tool: "gsb_poboxes",
+    });
     if (!res.ok) return null;
     const json = (await res.json()) as { payload?: unknown };
     const rows = Array.isArray(json?.payload) ? (json.payload as Record<string, any>[]) : [];

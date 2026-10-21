@@ -19,6 +19,7 @@
  * load is not worth a word of the confirmation.
  */
 import { log } from "./logger";
+import { trackedFetch } from "./apiCallLog";
 
 export type PulseService =
   | "rent_personal"
@@ -139,12 +140,16 @@ async function post(base: string, apiKey: string, path: string, body: unknown): 
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 8000);
   try {
-    const res = await fetch(`${base}${path}`, {
-      method: "POST",
-      headers: { "X-INTEGRATION-APIKEY": apiKey, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(body),
-      signal: ctl.signal,
-    });
+    const res = await trackedFetch(
+      `${base}${path}`,
+      {
+        method: "POST",
+        headers: { "X-INTEGRATION-APIKEY": apiKey, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+        signal: ctl.signal,
+      },
+      { integration: "Customer Pulse", tool: `pulse${path.replace(/\//g, "_")}` }
+    );
     const text = await res.text();
     if (!res.ok) {
       log.warn("customer_pulse_rejected", { path, status: res.status, body: text.slice(0, 300) });

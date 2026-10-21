@@ -16,6 +16,7 @@
  * own checkout is configured against, so the same API key reads it. No new
  * credential, and read-only: an access token and one GET.
  */
+import { trackedFetch } from "./apiCallLog";
 
 export interface GatewayOrderState {
   /** N-Genius's own word: PURCHASED, FAILED, STARTED, AWAIT_3DS… */
@@ -38,6 +39,10 @@ export async function gatewayOrderState(opts: {
   apiKey: string;
   orderId: string;
   timeoutMs?: number;
+  /** Who the call belongs to, for the admin's API Logs page. */
+  agentId?: string;
+  conversationId?: string;
+  environment?: string;
 }): Promise<GatewayOrderState | null> {
   const order = opts.orderId.replace(/^urn:order:/, "").trim();
   if (!order || !opts.apiKey || !opts.outletRef) return null;
@@ -45,7 +50,13 @@ export async function gatewayOrderState(opts: {
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 6000);
   try {
     const base = opts.baseUrl.replace(/\/$/, "");
-    const auth = await fetch(`${base}/identity/auth/access-token`, {
+    const ctx = {
+      agentId: opts.agentId,
+      conversationId: opts.conversationId,
+      environment: opts.environment,
+      integration: "N-Genius",
+    };
+    const auth = await trackedFetch(`${base}/identity/auth/access-token`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${opts.apiKey}`,
@@ -54,14 +65,15 @@ export async function gatewayOrderState(opts: {
       },
       body: "{}",
       signal: ctl.signal,
-    });
+    }, { ...ctx, tool: "ngenius_access_token" });
     if (!auth.ok) return null;
     const token = ((await auth.json()) as { access_token?: string }).access_token;
     if (!token) return null;
-    const res = await fetch(`${base}/transactions/outlets/${opts.outletRef}/orders/${order}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.ni-payment.v2+json" },
-      signal: ctl.signal,
-    });
+    const res = await trackedFetch(
+      `${base}/transactions/outlets/${opts.outletRef}/orders/${order}`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.ni-payment.v2+json" }, signal: ctl.signal },
+      { ...ctx, tool: "ngenius_order_state" }
+    );
     if (!res.ok) return null;
     return readOrder((await res.json()) as Record<string, unknown>);
   } catch {

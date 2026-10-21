@@ -5,7 +5,10 @@ import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
-import { recordApiCall } from "./apiCallLog";
+import { recordApiCall, trackedFetch } from "./apiCallLog";
+
+/** Who a hand-written call belongs to, for the admin's API Logs page. */
+type LogCtx = { agentId?: string; conversationId?: string; environment?: string };
 import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
@@ -3962,7 +3965,13 @@ export async function buildApiTools(
                 if (liveSpec.apiKey) h[liveSpec.apiKeyHeader || "X-API-KEY"] = String(liveSpec.apiKey);
                 const tok = runtimeToken();
                 if (tok) h.Authorization = `Bearer ${tok}`;
-                const r = await fetch(u, { headers: h, signal: ctl.signal });
+                const r = await trackedFetch(u.toString(), { headers: h, signal: ctl.signal }, {
+                  agentId,
+                  conversationId: opts.conversationId,
+                  environment: activeEnv,
+                  integration: entry.integration,
+                  tool: "ep_free_boxes_count",
+                });
                 if (!r.ok) return [loc, null] as const;
                 const parsed = (await r.json()) as { payload?: unknown };
                 const list = parsed?.payload ?? parsed;
@@ -4233,7 +4242,11 @@ export async function buildApiTools(
       // Named on the way out, so the model has the number in the same breath as
       // the submission rather than hunting for it a turn later.
       if (lastLicenceRequestId) {
-        const number = await epglRequestNumber(entry.spec, lastLicenceRequestId);
+        const number = await epglRequestNumber(entry.spec, lastLicenceRequestId, {
+          agentId,
+          conversationId: opts.conversationId,
+          environment: activeEnv,
+        });
         if (number) {
           res = {
             ...res,
@@ -4317,7 +4330,13 @@ export async function buildApiTools(
           // customer whose card was refused to "try the payment page again"
           // sends them round the same loop with the same card.
           const gw = opts.gateway && gatewayPayment?.gatewayOrderId
-            ? await gatewayOrderState({ ...opts.gateway, orderId: gatewayPayment.gatewayOrderId }).catch(() => null)
+            ? await gatewayOrderState({
+                ...opts.gateway,
+                orderId: gatewayPayment.gatewayOrderId,
+                agentId,
+                conversationId: opts.conversationId,
+                environment: activeEnv,
+              }).catch(() => null)
             : null;
           if (gw?.paid) {
             // The gateway took the money and the backend has not caught up.
@@ -4965,14 +4984,14 @@ const EPGL_STATUS_MEANING: Record<string, string> = {
  * Best-effort by design either way. A failure here costs a nicer reference, not
  * a submission, and the id still works everywhere it is actually needed.
  */
-async function epglRequestNumber(spec: EnvSpec, id: string): Promise<string | null> {
-  const viaStatus = await epglStatusIdentifier(spec, id).catch(() => null);
+async function epglRequestNumber(spec: EnvSpec, id: string, ctx: LogCtx): Promise<string | null> {
+  const viaStatus = await epglStatusIdentifier(spec, id, ctx).catch(() => null);
   if (viaStatus) return viaStatus;
-  return epglRequestNumberViaSoql(spec, id);
+  return epglRequestNumberViaSoql(spec, id, ctx);
 }
 
 /** Their own endpoint, which now carries the request number beside the status. */
-async function epglStatusIdentifier(spec: EnvSpec, id: string): Promise<string | null> {
+async function epglStatusIdentifier(spec: EnvSpec, id: string, ctx: LogCtx): Promise<string | null> {
   if (!/^[a-zA-Z0-9]{15,18}$/.test(id)) return null;
   const live: EnvSpec = {
     ...spec,
@@ -4982,9 +5001,10 @@ async function epglStatusIdentifier(spec: EnvSpec, id: string): Promise<string |
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 6000);
   try {
-    const res = await fetch(
+    const res = await trackedFetch(
       `${String(live.baseUrl).replace(/\/$/, "")}/services/apexrest/EPGL/LicenseRequest/status?id=${encodeURIComponent(id)}`,
-      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: ctl.signal }
+      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: ctl.signal },
+      { ...ctx, integration: "EPGL Salesforce", tool: "epgl_request_status" }
     );
     if (!res.ok) return null;
     const body = (await res.json()) as { requestIdentifier?: unknown };
@@ -4996,7 +5016,7 @@ async function epglStatusIdentifier(spec: EnvSpec, id: string): Promise<string |
   }
 }
 
-async function epglRequestNumberViaSoql(spec: EnvSpec, id: string): Promise<string | null> {
+async function epglRequestNumberViaSoql(spec: EnvSpec, id: string, ctx: LogCtx): Promise<string | null> {
   // Salesforce's own id, straight into a SOQL string. It is theirs rather than
   // anybody's input, and it is still checked before it is interpolated.
   if (!/^[a-zA-Z0-9]{15,18}$/.test(id)) return null;
@@ -5010,9 +5030,10 @@ async function epglRequestNumberViaSoql(spec: EnvSpec, id: string): Promise<stri
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 6000);
     try {
-      const res = await fetch(
+      const res = await trackedFetch(
         `${String(live.baseUrl).replace(/\/$/, "")}/services/data/v62.0/query?q=${encodeURIComponent(soql)}`,
-        { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: ctl.signal }
+        { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, signal: ctl.signal },
+        { ...ctx, integration: "EPGL Salesforce", tool: "epgl_request_name_soql" }
       );
       if (!res.ok) return null;
       const body = (await res.json()) as { records?: { Name?: unknown }[] };
@@ -5049,11 +5070,17 @@ async function getClientCredentialsToken(spec: EnvSpec, forceRefresh = false): P
   if (!forceRefresh && hit && Date.now() - hit.fetchedAt < OAUTH_CACHE_TTL_MS) return hit.token;
 
   const body = new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret });
-  const res = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body: body.toString(),
-  });
+  const res = await trackedFetch(
+    tokenUrl,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: body.toString(),
+    },
+    // No agent in scope: the token cache is shared by token URL and client id,
+    // so this row shows under "All agents".
+    { integration: "OAuth", tool: "oauth_client_credentials" }
+  );
   if (!res.ok) {
     const text = (await res.text()).slice(0, 300);
     throw new Error(`OAuth2 token request failed (HTTP ${res.status}): ${text}`);

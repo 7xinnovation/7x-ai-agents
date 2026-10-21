@@ -11,6 +11,7 @@
  */
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
+import { trackedFetch } from "./apiCallLog";
 
 const INTEGRATION_NAME = /nxn/i;
 
@@ -40,10 +41,11 @@ export async function savedCards(agentId: string, env: EnvKey, token: string): P
   try {
     const h: Record<string, string> = { Accept: "application/json", Authorization: `Bearer ${token}` };
     if (apiKey) h[spec.apiKeyHeader || "X-API-KEY"] = String(apiKey);
-    const res = await fetch(`${String(spec.baseUrl).replace(/\/$/, "")}/users/api/Payments/getcards`, {
-      headers: h,
-      signal: ctl.signal,
-    });
+    const res = await trackedFetch(
+      `${String(spec.baseUrl).replace(/\/$/, "")}/users/api/Payments/getcards`,
+      { headers: h, signal: ctl.signal },
+      { agentId, environment: env, integration: "Emirates Post", tool: "ep_saved_cards" }
+    );
     if (!res.ok) return [];
     const body = (await res.json()) as { payload?: Record<string, unknown>[] };
     return (body?.payload ?? []).map((c) => ({

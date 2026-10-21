@@ -10,7 +10,8 @@
  * Run from apps/web:  npx tsx scripts/test-api-call-log-2026-10-21.ts
  */
 import { readFileSync } from "node:fs";
-import { maskUrl, forStorage } from "../lib/apiCallLog";
+import { maskUrl, forStorage, maskSecrets, cursorAfter, PAGE_SIZE } from "../lib/apiCallLog";
+import { readdirSync } from "node:fs";
 import { DDL } from "./create-api-call-log-2026-10-21";
 
 let pass = 0, fail = 0;
@@ -57,7 +58,8 @@ check("...an access token too", /access_token=\*\*\*/.test(maskUrl("https://x.te
 check("...and an api key", /apiKey=\*\*\*/.test(maskUrl("https://x.test/a?apiKey=abc")));
 check("an ordinary parameter is left alone", /boxNumber=36672/.test(maskUrl("https://x.test/a?boxNumber=36672")));
 check("a URL we cannot parse is not mangled", maskUrl("not a url") === "not a url");
-check("headers are never stored", !/headers\b/.test(lib.replace(/\/\*[\s\S]*?\*\//g, "")));
+check("no column exists to put a header in", !DDL.some((d) => /header/i.test(d)) && !/header/i.test(schema.slice(schema.indexOf('"api_calls"'), schema.indexOf('"api_calls"') + 2000)));
+check("...and none is ever passed to the writer", !/headers:/.test(lib.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")));
 const body = JSON.stringify({ firstName: "Rama", email: "marmarika_88@hotmail.com", mobile: "0529498309", idNumber: "784-1988-1234567-1", boxNumber: "36672" });
 const stored = forStorage(body) ?? "";
 check("a name is redacted", !/Rama/.test(stored), stored);
@@ -68,6 +70,69 @@ const forStorageSrc = /export function forStorage[\s\S]*?\n\}/.exec(lib)?.[0] ??
 check("redaction happens BEFORE truncation", forStorageSrc.indexOf("redactGuestPII(body)") < forStorageSrc.indexOf("MAX_BODY"), forStorageSrc);
 check("a long body is cut", (forStorage("x".repeat(9000)) ?? "").length < 4100);
 check("nothing is stored for an empty body", forStorage("") === null && forStorage(null) === null);
+
+console.log("\nEvery outbound call, not just the ones off a spec");
+const LIB = new URL("../lib/", import.meta.url);
+const COVERED: Record<string, string> = {
+  "branchPlaces.ts": "Mapbox geocoding",
+  "customerPulse.ts": "the survey service",
+  "email.ts": "SendGrid / Resend / the webhook",
+  "emxTracking.ts": "Emirates Post tracking",
+  "epCase.ts": "the Emirates Post case endpoint",
+  "epGeocode.ts": "reverse geocoding",
+  "epglPayment.ts": "the EPGL payment notification",
+  "epglRead.ts": "EPGL token and SOQL",
+  "epInvoice.ts": "the invoice PDF",
+  "epLogout.ts": "ending the Emirates Post session",
+  "epRegions.ts": "the delivery regions",
+  "epSavedCards.ts": "saved cards",
+  "gatewayOrder.ts": "N-Genius",
+  "gsbLookup.ts": "the GSB licence registry",
+  "hostToken.ts": "host-token introspection",
+  "integrations.ts": "every integration tool",
+  "moeLicences.ts": "the MOE registry",
+  "nxnAutoRenew.ts": "auto-renewal",
+  "uaepass.ts": "UAE PASS",
+};
+for (const [file, what] of Object.entries(COVERED)) {
+  check(`${what} is logged`, /trackedFetch/.test(readFileSync(new URL(file, LIB), "utf8")), file);
+}
+// A file that calls out and is NOT in the list above is one nobody decided
+// about — which is how "all requests" quietly becomes "most requests".
+const DELIBERATELY_OUT = new Set(["apiCallLog.ts", "health.ts", "outboundUrl.ts", "epglCallback.ts"]);
+const callsOut = readdirSync(LIB)
+  .filter((f) => f.endsWith(".ts"))
+  .filter((f) => /\bfetch\(/.test(readFileSync(new URL(f, LIB), "utf8")));
+const undecided = callsOut.filter((f) => !COVERED[f] && !DELIBERATELY_OUT.has(f));
+check("no outbound library is left undecided", undecided.length === 0, undecided);
+check("the EPGL callback case is logged by hand", /recordApiCall\(/.test(readFileSync(new URL("epglCallback.ts", LIB), "utf8")));
+check("our own health probes are left out on purpose", !/trackedFetch/.test(readFileSync(new URL("health.ts", LIB), "utf8")));
+
+console.log("\nA token request is not a file of credentials");
+check("a form-encoded client_secret is masked", maskSecrets("grant_type=client_credentials&client_id=abc&client_secret=sh") === "grant_type=client_credentials&client_id=abc&client_secret=***", maskSecrets("grant_type=client_credentials&client_id=abc&client_secret=sh"));
+check("...and the client id is kept, because that is the question", /client_id=abc/.test(maskSecrets("client_id=abc&client_secret=sh")));
+check("a JSON secret is masked", /"clientSecret":"\*\*\*"/.test(maskSecrets(JSON.stringify({ clientId: "a", clientSecret: "b" }))));
+check("...at any depth", /"apiKey":"\*\*\*"/.test(maskSecrets(JSON.stringify({ a: { b: { apiKey: "k" } } }))));
+check("an access token in a body is masked", /"access_token":"\*\*\*"/.test(maskSecrets(JSON.stringify({ access_token: "t" }))));
+check("ordinary prose is untouched", maskSecrets("HTTP 500 Internal Server Error") === "HTTP 500 Internal Server Error");
+check("the stored body goes through it", /maskSecrets\(body\)/.test(lib));
+
+console.log("\nThe wrapper hands the response back untouched");
+check("the body is read off a clone", /res\.clone\(\)\.text\(\)/.test(lib));
+check("...and a PDF is noted, not stored", /textual \? await res\.clone/.test(lib) && /`<\$\{type\}>`/.test(lib));
+check("a thrown call is recorded and rethrown", /catch \(e\) \{[\s\S]{0,600}throw e;/.test(lib));
+
+console.log("\nPaginated, so the page does not stretch");
+check("a page is 50 rows", PAGE_SIZE === 50, PAGE_SIZE);
+check("a short page is the last page", cursorAfter([{ createdAt: new Date() }]) === null);
+check("a full page hands back the oldest row's time", cursorAfter(Array.from({ length: PAGE_SIZE }, (_, i) => ({ createdAt: new Date(1_700_000_000_000 + i) }))) === new Date(1_700_000_000_000 + PAGE_SIZE - 1).toISOString());
+check("the list asks for one page", /limit: PAGE_SIZE/.test(page) && /limit: PAGE_SIZE/.test(route));
+check("...keyed, not offset", /before: before && !Number\.isNaN/.test(route));
+check("the page offers Newer and Older", /Newer/.test(client) && /Older/.test(client));
+check("Newer is dead on the first page", /disabled=\{busy \|\| cursors\.length === 0\}/.test(client));
+check("Older is dead at the end", /disabled=\{busy \|\| !data\.nextCursor\}/.test(client));
+check("a filter change starts again at page one", /setCursors\(\[\]\);/.test(client));
+check("auto-refresh follows the first page only", /setInterval\(\(\) => load\(\[\]\), 5000\)/.test(client));
 
 console.log("\nSeparate for both agents");
 check("the page takes the admin's agent filter", /<AgentFilter agents=\{agentList\}/.test(page));
@@ -82,7 +147,7 @@ check("failing endpoints are rolled up", /Endpoints with failures/.test(client) 
 check("a row opens to the request and the response", /<h4>Request<\/h4>/.test(client) && /<h4>Response<\/h4>/.test(client));
 check("...and says the bodies are redacted", /Personal data is redacted/.test(client));
 check("the filters live in the URL", /router\.push\(`\/admin\/api-logs/.test(client));
-check("auto-refresh is off until asked for", /useState\(false\)/.test(client) && /setInterval\(refresh, 5000\)/.test(client));
+check("auto-refresh is off until asked for", /const \[auto, setAuto\] = useState\(false\)/.test(client) && /setInterval\(/.test(client));
 
 console.log("\nIt does not grow forever");
 check("the sweep prunes it", /pruneApiCalls\(Number\(process\.env\.API_LOG_RETENTION_DAYS \?\? 30\)\)/.test(cron));

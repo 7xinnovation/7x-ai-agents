@@ -17,6 +17,7 @@
  */
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
+import { trackedFetch } from "./apiCallLog";
 
 const INTEGRATION_NAME = /nxn/i;
 const BOX_NO = /^\d{3,12}$/;
@@ -54,7 +55,12 @@ export async function boxConfig(
   const url = new URL(`${s.baseUrl}/api/Renewal/Details`);
   url.searchParams.set("BoxNumber", boxNumber);
   url.searchParams.set("EmirateCode", emirateCode.toUpperCase());
-  const res = await fetch(url, { headers: headers(s.apiKey, token) });
+  const res = await trackedFetch(url.toString(), { headers: headers(s.apiKey, token) }, {
+    agentId,
+    environment: env,
+    integration: "Emirates Post",
+    tool: "ep_renewal_details",
+  });
   if (!res.ok) return null;
   const body = (await res.json()) as { payload?: Record<string, any> };
   // The record sits one level further down than the field names suggest:
@@ -86,7 +92,7 @@ export async function setAutoRenew(
   if (cfg.autoRenew === enabled) return { ok: true, changed: false, enabled };
 
   const s = await spec(agentId, env);
-  const res = await fetch(`${s.baseUrl}/api/UpdateAutoRenewConfig`, {
+  const res = await trackedFetch(`${s.baseUrl}/api/UpdateAutoRenewConfig`, {
     method: "POST",
     headers: { ...headers(s.apiKey, token), "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -95,7 +101,7 @@ export async function setAutoRenew(
       uniqueBoxId: cfg.uniqueBoxId,
       isAutoReNewEnabled: enabled,
     }),
-  });
+  }, { agentId, environment: env, integration: "Emirates Post", tool: "ep_set_auto_renew" });
   if (!res.ok) {
     const text = (await res.text()).slice(0, 400);
     return { ok: false, reason: "rejected", detail: `HTTP ${res.status} ${text}` };

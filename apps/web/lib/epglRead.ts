@@ -1,5 +1,6 @@
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * Read-only company + Form 9 lookups for EPGL (FB-1268 / FB-1269).
@@ -204,7 +205,8 @@ function assertShape(value: string, pattern: RegExp, what: string): string {
   return v;
 }
 
-interface Creds { baseUrl: string; tokenUrl: string; clientId: string; clientSecret: string }
+// agentId/env ride along so the API Logs page can attribute these calls.
+interface Creds { baseUrl: string; tokenUrl: string; clientId: string; clientSecret: string; agentId: string; env: EnvKey }
 
 let cached: { token: string; at: number } | null = null;
 const TOKEN_TTL_MS = 20 * 60_000;
@@ -223,6 +225,8 @@ async function creds(agentId: string, env: EnvKey): Promise<Creds> {
     tokenUrl: spec.oauthTokenUrl,
     clientId: spec.oauthClientId,
     clientSecret: clientSecret as string,
+    agentId,
+    env,
   };
 }
 
@@ -234,11 +238,15 @@ async function token(c: Creds): Promise<string> {
     client_secret: c.clientSecret,
   });
   // Salesforce rejects a `scope` parameter on this grant — do not add one.
-  const res = await fetch(c.tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body: body.toString(),
-  });
+  const res = await trackedFetch(
+    c.tokenUrl,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: body.toString(),
+    },
+    { agentId: c.agentId, environment: c.env, integration: "EPGL Salesforce", tool: "epgl_oauth_token" }
+  );
   if (!res.ok) throw new Error(`Salesforce token request failed (HTTP ${res.status})`);
   const json = (await res.json()) as { access_token?: string };
   if (!json.access_token) throw new Error("Salesforce token response had no access_token");
@@ -273,9 +281,11 @@ export async function epglAuth(agentId: string, env: EnvKey): Promise<{ baseUrl:
 async function query<T>(agentId: string, env: EnvKey, soql: string): Promise<T[]> {
   const c = await creds(agentId, env);
   const run = async (bearer: string) =>
-    fetch(`${c.baseUrl}/services/data/${API_VERSION}/query?q=${encodeURIComponent(soql)}`, {
-      headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" },
-    });
+    trackedFetch(
+      `${c.baseUrl}/services/data/${API_VERSION}/query?q=${encodeURIComponent(soql)}`,
+      { headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" } },
+      { agentId, environment: env, integration: "EPGL Salesforce", tool: "epgl_soql_query" }
+    );
   let res = await run(await token(c));
   if (res.status === 401) {
     cached = null; // token revoked or expired early — mint once more

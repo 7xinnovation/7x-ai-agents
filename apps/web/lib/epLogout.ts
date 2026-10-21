@@ -18,6 +18,7 @@
 import { epUsersBaseUrl } from "./hostToken";
 import { log } from "./logger";
 import type { EnvKey } from "./integrations";
+import { trackedFetch } from "./apiCallLog";
 
 export async function endEmiratesPostSession(agentId: string, env: EnvKey, token: string | undefined): Promise<"ended" | "rejected" | "skipped" | "failed"> {
   if (!token) return "skipped";
@@ -26,12 +27,16 @@ export async function endEmiratesPostSession(agentId: string, env: EnvKey, token
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 5000);
   try {
-    const res = await fetch(`${base}/api/Account/Logout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Type": "application/json" },
-      body: "{}",
-      signal: ctl.signal,
-    });
+    const res = await trackedFetch(
+      `${base}/api/Account/Logout`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Type": "application/json" },
+        body: "{}",
+        signal: ctl.signal,
+      },
+      { agentId, environment: env, integration: "Emirates Post", tool: "ep_logout" }
+    );
     return res.ok ? "ended" : "rejected";
   } catch (e) {
     log.warn("ep_logout_failed", { reason: e instanceof Error ? e.message : String(e) });

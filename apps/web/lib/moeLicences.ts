@@ -30,6 +30,7 @@
  */
 import { createHmac } from "node:crypto";
 import { log } from "./logger";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * The two constants that used to sit here named the government gateway's own
@@ -418,12 +419,16 @@ async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<
 async function bearer(cfg: MoeConfig): Promise<string> {
   if (tokenCache && Date.now() < tokenCache.expiresAt) return tokenCache.token;
   const res = await withTimeout((signal) =>
-    fetch(`${cfg.base}${AUTH_PATH}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret }),
-      signal,
-    })
+    trackedFetch(
+      `${cfg.base}${AUTH_PATH}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret }),
+        signal,
+      },
+      { integration: "MOE licence registry", tool: "moe_auth" }
+    )
   );
   if (!res.ok) throw new Error(`Registry auth failed (HTTP ${res.status})`);
   const json = (await res.json()) as { accessToken?: string; expiresIn?: string | number };
@@ -439,12 +444,16 @@ async function post(cfg: MoeConfig, path: string, body: unknown): Promise<unknow
   const call = async () => {
     const token = await bearer(cfg);
     return withTimeout((signal) =>
-      fetch(`${cfg.base}${path}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body),
-        signal,
-      })
+      trackedFetch(
+        `${cfg.base}${path}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+          signal,
+        },
+        { integration: "MOE licence registry", tool: `moe${path.replace(/\//g, "_")}` }
+      )
     );
   };
   let res = await call();

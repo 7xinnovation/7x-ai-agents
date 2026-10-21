@@ -1,5 +1,6 @@
 import { createHmac, createPublicKey, createVerify, timingSafeEqual } from "node:crypto";
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * Validation for the signed token the host site hands the embedded agent.
@@ -147,9 +148,11 @@ export async function introspectEmiratesPostToken(
 
   let res: Response;
   try {
-    res = await fetch(`${usersBaseUrl.replace(/\/$/, "")}/api/v1/Account`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-    });
+    res = await trackedFetch(
+      `${usersBaseUrl.replace(/\/$/, "")}/api/v1/Account`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+      { integration: "Emirates Post", tool: "ep_host_token_introspect" }
+    );
   } catch (e) {
     // A network failure is NOT proof the token is bad, so it is not cached as a
     // rejection — that would turn a blip into a sign-out for everyone holding one.

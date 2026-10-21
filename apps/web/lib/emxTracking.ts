@@ -1,5 +1,6 @@
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * Shipment tracking, over Emirates Post's EMX gateway.
@@ -267,10 +268,11 @@ export async function trackShipment(agentId: string, env: EnvKey, awbRaw: string
   const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(`${baseUrl}/tracking/api/Tracking?awbNumber=${encodeURIComponent(awb)}`, {
-      headers: { [header]: apiKey, Accept: "application/json, text/plain" },
-      signal: ctl.signal,
-    });
+    res = await trackedFetch(
+      `${baseUrl}/tracking/api/Tracking?awbNumber=${encodeURIComponent(awb)}`,
+      { headers: { [header]: apiKey, Accept: "application/json, text/plain" }, signal: ctl.signal },
+      { agentId, environment: env, integration: "Emirates Post", tool: "ep_tracking" }
+    );
   } finally {
     clearTimeout(timer);
   }

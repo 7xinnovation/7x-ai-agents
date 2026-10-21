@@ -1,5 +1,6 @@
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
+import { trackedFetch } from "./apiCallLog";
 
 /**
  * Tell EPGL's Salesforce that a licence fee has been paid.
@@ -61,7 +62,8 @@ export type PaymentNotificationResult =
   | { ok: true; status: number; correlationId?: string }
   | { ok: false; status: number; reason: string; retryable: boolean };
 
-interface Creds { baseUrl: string; tokenUrl: string; clientId: string; clientSecret: string }
+// agentId/env ride along so the API Logs page can attribute these calls.
+interface Creds { baseUrl: string; tokenUrl: string; clientId: string; clientSecret: string; agentId: string; env: EnvKey }
 
 let cached: { token: string; at: number } | null = null;
 const TOKEN_TTL_MS = 20 * 60_000;
@@ -80,20 +82,26 @@ async function creds(agentId: string, env: EnvKey): Promise<Creds> {
     tokenUrl: spec.oauthTokenUrl,
     clientId: spec.oauthClientId,
     clientSecret: clientSecret as string,
+    agentId,
+    env,
   };
 }
 
 async function token(c: Creds): Promise<string> {
   if (cached && Date.now() - cached.at < TOKEN_TTL_MS) return cached.token;
-  const res = await fetch(c.tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: c.clientId,
-      client_secret: c.clientSecret,
-    }).toString(),
-  });
+  const res = await trackedFetch(
+    c.tokenUrl,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        client_id: c.clientId,
+        client_secret: c.clientSecret,
+      }).toString(),
+    },
+    { agentId: c.agentId, environment: c.env, integration: "EPGL Salesforce", tool: "epgl_oauth_token" }
+  );
   if (!res.ok) throw new Error(`Salesforce token request failed (HTTP ${res.status})`);
   const json = (await res.json()) as { access_token?: string };
   if (!json.access_token) throw new Error("Salesforce token response had no access_token");
@@ -149,9 +157,11 @@ export async function paymentAdviceExists(
     const bearer = await token(c);
     // Fixed statement, one substituted value, already shape-checked above.
     const soql = `SELECT Id FROM EPG_Transaction__c WHERE EPG_License_Request__c = '${id}' LIMIT 1`;
-    const res = await fetch(`${c.baseUrl}/services/data/v62.0/query?q=${encodeURIComponent(soql)}`, {
-      headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" },
-    });
+    const res = await trackedFetch(
+      `${c.baseUrl}/services/data/v62.0/query?q=${encodeURIComponent(soql)}`,
+      { headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" } },
+      { agentId, environment: env, integration: "EPGL Salesforce", tool: "epgl_transaction_check" }
+    );
     if (!res.ok) return null;
     const j = (await res.json()) as { records?: unknown[] };
     return (j.records ?? []).length > 0;
@@ -202,11 +212,15 @@ export async function notifyEpglPayment(
   };
 
   const run = async (t: string) =>
-    fetch(`${c.baseUrl}${APEX_PATH}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(body),
-    });
+    trackedFetch(
+      `${c.baseUrl}${APEX_PATH}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+      },
+      { agentId, environment: env, integration: "EPGL Salesforce", tool: "epgl_payment_notify" }
+    );
 
   let res: Response;
   try {

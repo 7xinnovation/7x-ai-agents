@@ -20,6 +20,7 @@
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
 import { regionsFor, exactRegion, searchRegions, type EpRegion } from "./epRegions";
+import { trackedFetch } from "./apiCallLog";
 
 const INTEGRATION_NAME = /nxn/i;
 
@@ -53,7 +54,13 @@ async function spec(agentId: string, env: EnvKey) {
   return { baseUrl: String(s.baseUrl).replace(/\/$/, ""), apiKey: (apiKey as string) || undefined };
 }
 
-async function get(url: string, apiKey: string | undefined, token: string, locale: string) {
+async function get(
+  url: string,
+  apiKey: string | undefined,
+  token: string,
+  locale: string,
+  ctx: { agentId: string; env: EnvKey; tool: string }
+) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 10000);
   try {
@@ -63,7 +70,12 @@ async function get(url: string, apiKey: string | undefined, token: string, local
       "Accept-Language": locale === "ar" ? "ar" : "en",
     };
     if (apiKey) h["X-API-KEY"] = apiKey;
-    const res = await fetch(url, { headers: h, signal: ctl.signal });
+    const res = await trackedFetch(url, { headers: h, signal: ctl.signal }, {
+      agentId: ctx.agentId,
+      environment: ctx.env,
+      integration: "Emirates Post",
+      tool: ctx.tool,
+    });
     if (!res.ok) return null;
     // These two answer with JSON *inside* a JSON string — the body parses to
     // `"{\"emirateCode\":\"DXB\",…}"`, not to an object. Verified live on 1 Sep.
@@ -93,8 +105,8 @@ export async function addressFromPin(
   const s = await spec(agentId, env);
 
   const [rev, territory] = await Promise.all([
-    get(`${s.baseUrl}/shipping/api/MasterLocation/ReverseByProvider?Longitude=${lng}&Latitude=${lat}&Provider=1`, s.apiKey, token, locale),
-    get(`${s.baseUrl}/shipping/api/MasterLocation/Territories/Reversegeo?Take=1&Skip=0&Lng=${lng}&Lat=${lat}`, s.apiKey, token, locale),
+    get(`${s.baseUrl}/shipping/api/MasterLocation/ReverseByProvider?Longitude=${lng}&Latitude=${lat}&Provider=1`, s.apiKey, token, locale, { agentId, env, tool: "ep_reverse_geocode" }),
+    get(`${s.baseUrl}/shipping/api/MasterLocation/Territories/Reversegeo?Take=1&Skip=0&Lng=${lng}&Lat=${lat}`, s.apiKey, token, locale, { agentId, env, tool: "ep_reverse_territory" }),
   ]);
   if (!rev) return null;
   // The portal reads these off the response body directly; a payload wrapper is

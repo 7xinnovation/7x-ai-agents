@@ -47,11 +47,130 @@ export function maskUrl(raw: string): string {
   }
 }
 
-/** Redacted, then cut — so a long payload cannot carry PII past the truncation. */
+/**
+ * Field names whose VALUE is a secret wherever it appears in a body.
+ *
+ * The token endpoints are the reason: EPGL, GSB, UAE PASS and N-Genius all POST
+ * `client_secret=` as form data, and a log that kept request bodies verbatim
+ * would be a file of live credentials. `client_id` is deliberately NOT here —
+ * it is an identifier, and "which client did we send?" is a question this page
+ * exists to answer.
+ */
+const SECRET_KEY = /(secret|password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|bearer|signature)/i;
+
+/** Mask secret VALUES in a body, whether it is JSON or form-encoded. */
+export function maskSecrets(text: string): string {
+  const t = text.trim();
+  if (!t) return text;
+  if (t.startsWith("{") || t.startsWith("[")) {
+    try {
+      const walk = (n: unknown): unknown => {
+        if (Array.isArray(n)) return n.map(walk);
+        if (n && typeof n === "object") {
+          const out: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(n as Record<string, unknown>)) {
+            out[k] = SECRET_KEY.test(k) ? "***" : walk(v);
+          }
+          return out;
+        }
+        return n;
+      };
+      return JSON.stringify(walk(JSON.parse(t)));
+    } catch {
+      return text;
+    }
+  }
+  // application/x-www-form-urlencoded
+  if (/^[^\s=&]+=[^&]*(&[^\s=&]+=[^&]*)*$/.test(t)) {
+    return t
+      .split("&")
+      .map((pair) => {
+        const eq = pair.indexOf("=");
+        if (eq === -1) return pair;
+        const k = pair.slice(0, eq);
+        let name = k;
+        try {
+          name = decodeURIComponent(k);
+        } catch {
+          /* a key we cannot decode is matched as it stands */
+        }
+        return SECRET_KEY.test(name) ? `${k}=***` : pair;
+      })
+      .join("&");
+  }
+  return text;
+}
+
+/** Secrets masked, personal data redacted, then cut — in that order, so neither can ride past the truncation. */
 export function forStorage(body: string | undefined | null): string | null {
   if (!body) return null;
-  const clean = redactGuestPII(body);
+  const clean = redactGuestPII(maskSecrets(body));
   return clean.length > MAX_BODY ? `${clean.slice(0, MAX_BODY)}…(truncated)` : clean;
+}
+
+export interface TrackCtx {
+  agentId?: string | null;
+  conversationId?: string | null;
+  integration: string;
+  tool: string;
+  environment?: string | null;
+}
+
+/**
+ * `fetch`, with the call written down.
+ *
+ * Most of what the agents call goes through `executeOperation`, which records
+ * itself. The rest — Emirates Post's tracking and regions and saved cards,
+ * Salesforce's token and SOQL endpoints, the GSB licence registry, the payment
+ * gateway, UAE PASS, the mail providers — are hand-written fetches in a dozen
+ * small libraries, and on 21 October the ask was to see all of them.
+ *
+ * A drop-in wrapper rather than a rewrite of each one: the response is returned
+ * untouched and the body is read off a CLONE, so no call site has to change the
+ * way it handles what comes back. A binary response (an invoice PDF) is noted
+ * by its type rather than stored.
+ */
+export async function trackedFetch(input: string, init: RequestInit | undefined, ctx: TrackCtx): Promise<Response> {
+  const started = Date.now();
+  const method = String(init?.method ?? "GET").toUpperCase();
+  let path = input;
+  try {
+    path = new URL(input).pathname;
+  } catch {
+    /* a relative or malformed URL is logged as it stands */
+  }
+  const requestBody = typeof init?.body === "string" ? init.body : init?.body instanceof URLSearchParams ? init.body.toString() : null;
+  try {
+    const res = await fetch(input, init);
+    const type = (res.headers.get("content-type") ?? "").split(";")[0] ?? "";
+    const textual = !type || /json|text|xml|html|urlencoded/i.test(type);
+    const responseBody = textual ? await res.clone().text().catch(() => null) : `<${type}>`;
+    recordApiCall({
+      ...ctx,
+      method,
+      path,
+      url: input,
+      status: res.status,
+      ok: res.ok,
+      durationMs: Date.now() - started,
+      requestBody,
+      responseBody,
+    });
+    return res;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "error";
+    recordApiCall({
+      ...ctx,
+      method,
+      path,
+      url: input,
+      status: null,
+      ok: false,
+      durationMs: Date.now() - started,
+      error: /abort/i.test(message) ? "timed out" : message,
+    });
+    throw e;
+  }
 }
 
 export interface ApiCallRecord {
@@ -99,6 +218,22 @@ export function recordApiCall(row: ApiCallRecord): void {
       log.warn("api_call_log_failed", { reason: String((e as Error)?.message ?? e).slice(0, 200) });
     }
   })();
+}
+
+/**
+ * One screen of calls.
+ *
+ * "Paginate the page so it doesn't stretch" (21 October). Keyset rather than
+ * OFFSET: rows are written while someone is reading, so a page counted from the
+ * top would show the same call twice and skip another.
+ */
+export const PAGE_SIZE = 50;
+
+/** The cursor for the page after this one, or null when this is the last. */
+export function cursorAfter(rows: { createdAt: Date | string }[]): string | null {
+  if (rows.length < PAGE_SIZE) return null;
+  const last = rows[rows.length - 1]!.createdAt;
+  return (last instanceof Date ? last : new Date(last)).toISOString();
 }
 
 export type Outcome = "all" | "ok" | "error";
