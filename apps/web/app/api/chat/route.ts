@@ -75,6 +75,7 @@ import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
 import { log } from "@/lib/logger";
 import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
+import type { EpglCaseFile } from "@/lib/epglComposite";
 
 export const runtime = "nodejs";
 // Multi-tool turns (e.g. a renewal: details + pricing + payment) can run well past
@@ -705,6 +706,47 @@ function formatEpglProfileContext(p: Record<string, string>): string | undefined
  * Called only when a save actually runs: a base64 document is hundreds of
  * kilobytes and nothing else in the conversation needs the bytes.
  */
+/**
+ * The case's uploaded files, raw, for EPGL's New Regulation composite.
+ *
+ * Raw bytes rather than base64, because the size is what decides whether a
+ * document goes inside the composite or up through ContentVersion first, and
+ * base64 has already lost it — see lib/epglComposite.
+ */
+async function epglDocumentRows(
+  caseId: string,
+  stateDocs: { key: string; status: string; fileName?: string }[],
+  definition: AgentDefinition,
+  adapters: ReturnType<typeof resolveAdapters>
+): Promise<EpglCaseFile[]> {
+  const get = adapters.storage?.get?.bind(adapters.storage);
+  if (!get) return [];
+  const wanted = stateDocs.filter((d) => d.status === "uploaded" || d.status === "accepted");
+  if (!wanted.length) return [];
+  const sctx = adapterContext(definition, definition.integrations.storage);
+  const out: EpglCaseFile[] = [];
+  for (const d of wanted) {
+    try {
+      const row = await getDb().query.documents.findFirst({
+        where: and(eq(documentsTable.caseId, caseId), eq(documentsTable.key, d.key)),
+        orderBy: [desc(documentsTable.createdAt)],
+      });
+      if (!row?.storageKey) continue;
+      const stored = await get(sctx, { storageKey: row.storageKey });
+      if (!stored) continue;
+      out.push({
+        key: d.key,
+        fileName: row.fileName || d.fileName || `${d.key}.pdf`,
+        bytes: stored.bytes,
+        contentType: stored.contentType,
+      });
+    } catch {
+      // One unreadable file must not cost the customer the rest of them.
+    }
+  }
+  return out;
+}
+
 async function rentalAttachmentRows(
   caseId: string,
   stateDocs: { key: string; status: string; fileName?: string }[],
@@ -1267,6 +1309,13 @@ export async function POST(req: NextRequest) {
     rentalAttachments:
       agent.definition.tenantSlug === "nxn"
         ? () => rentalAttachmentRows(session.caseId, session.state.documents, agent.definition, adapters)
+        : undefined,
+    // The same files, raw, for EPGL's New Regulation composite — which carries
+    // its documents inside it, unlike the 1.x submission that sends each on its
+    // own call.
+    epglDocuments:
+      agent.definition.tenantSlug === "epgl"
+        ? () => epglDocumentRows(session.caseId, session.state.documents, agent.definition, adapters)
         : undefined,
     // The card Emirates Post already holds for them, so the payment page opens
     // on it instead of asking for the number again.

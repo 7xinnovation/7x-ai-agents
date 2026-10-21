@@ -3,7 +3,7 @@
   "info": {
     "title": "EPG Licensing - Status API (step 5)",
     "version": "1.1.0",
-    "description": "Application status for the delivery-activities regulation: send the application id, receive its three statuses (staff, applicant, payment) and the facts around them. Generated from the NewLaw sandbox catalogue on 2026-10-13T10:18:15Z."
+    "description": "Application status for the delivery-activities regulation: send the application id, receive its three statuses (staff, applicant, payment) and the facts around them. Generated from the NewLaw sandbox catalogue on 2026-10-21T08:25:45Z."
   },
   "servers": [
     {
@@ -50,12 +50,12 @@
                   "client_id": {
                     "type": "string",
                     "description": "Consumer key of the External Client App",
-                    "example": "<<EPGL_NEWLAW_CLIENT_ID>>"
+                    "example": "EPGL_NEWLAW_CLIENT_ID (read from the environment)"
                   },
                   "client_secret": {
                     "type": "string",
                     "description": "Consumer secret of the External Client App",
-                    "example": "<<EPGL_NEWLAW_CLIENT_SECRET>>"
+                    "example": "EPGL_NEWLAW_CLIENT_SECRET (read from the environment)"
                   }
                 }
               }
@@ -103,44 +103,13 @@
             "schema": {
               "type": "string"
             },
-            "description": "Portal application id (applicationId__c)",
-            "examples": {
-              "CEP30-UAE-SME-DOM": {
-                "value": "APP-CEP30-UAE-SME-DOM-ONECALL-01"
-              },
-              "CEP30-UAE-SME-INTL": {
-                "value": "APP-CEP30-UAE-SME-INTL-ONECALL-01"
-              },
-              "CEP30-NONUAE-SME-DOM": {
-                "value": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01"
-              },
-              "CEP30-NONUAE-SME-INTL": {
-                "value": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01"
-              },
-              "CEP30-GEN-DOM": {
-                "value": "APP-CEP30-GEN-DOM-ONECALL-01"
-              },
-              "CEP30-GEN-INTL": {
-                "value": "APP-CEP30-GEN-INTL-ONECALL-01"
-              },
-              "FOODMED": {
-                "value": "APP-FOODMED-ONECALL-01"
-              },
-              "INTERMED": {
-                "value": "APP-INTERMED-ONECALL-01"
-              },
-              "LOCKERS": {
-                "value": "APP-LOCKERS-ONECALL-01"
-              },
-              "OUTSOURCE": {
-                "value": "APP-OUTSOURCE-ONECALL-01"
-              }
-            }
+            "description": "The applicationId returned by the create response (LR-xxxxx)",
+            "example": "LR-53330"
           }
         ],
         "responses": {
           "200": {
-            "description": "Status (or status 404 in the body when unknown)",
+            "description": "Status",
             "content": {
               "application/json": {
                 "schema": {
@@ -151,6 +120,16 @@
           },
           "400": {
             "description": "Missing applicationId"
+          },
+          "404": {
+            "description": "Unknown application id (body: status 404 with a bilingual reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -171,7 +150,7 @@
         "properties": {
           "status": {
             "type": "integer",
-            "description": "200, or 404 when the application id is unknown (HTTP stays 200 for the unknown case, as in the legacy API)"
+            "description": "200, or 404 when the application id is unknown (the HTTP status is 404 as well)"
           },
           "correlationId": {
             "type": "string"
@@ -226,11 +205,12 @@
         "description": "The three statuses and the facts the portal shows next to them. Internal reviewer identities are never returned (BRD 4.8).",
         "properties": {
           "applicationId": {
-            "type": "string"
+            "type": "string",
+            "description": "The id Salesforce issued at creation (LR-xxxxx), returned by the create response"
           },
           "reference": {
             "type": "string",
-            "description": "Salesforce application number (LR-xxxxx)"
+            "description": "Salesforce application number (same value for new-regulation applications)"
           },
           "productCode": {
             "type": "string"
@@ -268,6 +248,10 @@
           "handledBy": {
             "type": "string",
             "description": "Role whose turn it is (Customer, Licence Intake Officer, Technical Reviewer, Financial Reviewer, Legal Reviewer, Sign-off Authority)"
+          },
+          "agentRequest": {
+            "type": "boolean",
+            "description": "true when the application came through the agent / assistant channel (isAgent_Request__c on the create)"
           },
           "applicantStatus": {
             "type": "object",
@@ -309,7 +293,14 @@
               },
               "details": {
                 "type": "string",
-                "description": "What the reviewer asked for"
+                "description": "The reviewing officer's comment (null when the officer left it blank, or when no request is open)"
+              },
+              "documentsToReupload": {
+                "type": "array",
+                "description": "While open: the rejected documents with the reviewer's reason (reviewComment), the same list as /licensing/informationRequest",
+                "items": {
+                  "$ref": "#/components/schemas/StatusDocument"
+                }
               }
             }
           },
@@ -356,26 +347,7 @@
           "documents": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "documentType": {
-                  "type": "string"
-                },
-                "required": {
-                  "type": "boolean"
-                },
-                "uploaded": {
-                  "type": "boolean"
-                },
-                "validationStatus": {
-                  "type": "string",
-                  "description": "Pending | Passed | Failed"
-                },
-                "validTo": {
-                  "type": "string",
-                  "format": "date"
-                }
-              }
+              "$ref": "#/components/schemas/StatusDocument"
             }
           },
           "decision": {
@@ -427,6 +399,36 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "StatusDocument": {
+        "type": "object",
+        "properties": {
+          "documentType": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "uploaded": {
+            "type": "boolean"
+          },
+          "validationStatus": {
+            "type": "string",
+            "description": "Pending | Passed | Failed"
+          },
+          "validTo": {
+            "type": "string",
+            "format": "date"
+          },
+          "reviewStatus": {
+            "type": "string",
+            "description": "null | Accepted | Rejected | Re-uploaded"
+          },
+          "reviewComment": {
+            "type": "string",
+            "description": "The reviewer's reason when Rejected / Re-uploaded"
           }
         }
       }

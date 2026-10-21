@@ -3,7 +3,7 @@
   "info": {
     "title": "EPG Licensing - New Regulation API (one call)",
     "version": "1.1.0",
-    "description": "Catalogue + one-call application API under the delivery-activities regulation. Step 1: GET the catalogue. Step 2: POST one composite call that creates the company, owners, signatory, application, declarations, child items and documents together. Generated from the NewLaw sandbox catalogue on 2026-10-13T10:18:15Z."
+    "description": "Catalogue + one-call application API under the delivery-activities regulation. Step 1: GET the catalogue. Step 2: POST one composite call that creates the company, owners, signatory, application, declarations, child items and documents together. Generated from the NewLaw sandbox catalogue on 2026-10-21T08:25:45Z."
   },
   "servers": [
     {
@@ -20,6 +20,12 @@
     },
     {
       "name": "Application"
+    },
+    {
+      "name": "Pricing"
+    },
+    {
+      "name": "Status"
     }
   ],
   "paths": {
@@ -47,13 +53,18 @@
                     "type": "string",
                     "enum": [
                       "client_credentials"
-                    ]
+                    ],
+                    "example": "client_credentials"
                   },
                   "client_id": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Consumer key of the External Client App",
+                    "example": "EPGL_NEWLAW_CLIENT_ID (read from the environment)"
                   },
                   "client_secret": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Consumer secret of the External Client App",
+                    "example": "EPGL_NEWLAW_CLIENT_SECRET (read from the environment)"
                   }
                 }
               }
@@ -231,6 +242,38 @@
                             },
                             {
                               "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
                               "validityMustCoverLicence": true,
                               "validityRequired": true,
                               "minSizeKb": null,
@@ -260,6 +303,22 @@
                                 "en": "Lease Contract"
                               },
                               "documentType": "Lease Contract"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -474,6 +533,38 @@
                             },
                             {
                               "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
                               "validityMustCoverLicence": true,
                               "validityRequired": true,
                               "minSizeKb": null,
@@ -503,6 +594,22 @@
                                 "en": "Lease Contract"
                               },
                               "documentType": "Lease Contract"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -717,6 +824,38 @@
                             },
                             {
                               "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
                               "validityMustCoverLicence": true,
                               "validityRequired": true,
                               "minSizeKb": null,
@@ -746,6 +885,22 @@
                                 "en": "Lease Contract"
                               },
                               "documentType": "Lease Contract"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -960,6 +1115,38 @@
                             },
                             {
                               "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
                               "validityMustCoverLicence": true,
                               "validityRequired": true,
                               "minSizeKb": null,
@@ -989,6 +1176,22 @@
                                 "en": "Lease Contract"
                               },
                               "documentType": "Lease Contract"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -1203,6 +1406,38 @@
                             },
                             {
                               "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
                               "validityMustCoverLicence": true,
                               "validityRequired": true,
                               "minSizeKb": null,
@@ -1232,6 +1467,22 @@
                                 "en": "Lease Contract"
                               },
                               "documentType": "Lease Contract"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -1430,6 +1681,38 @@
                             },
                             {
                               "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
                               "validityMustCoverLicence": true,
                               "validityRequired": true,
                               "minSizeKb": null,
@@ -1459,6 +1742,22 @@
                                 "en": "Lease Contract"
                               },
                               "documentType": "Lease Contract"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -1677,6 +1976,54 @@
                               "validityRequired": true,
                               "minSizeKb": null,
                               "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
                               "acceptedFormats": "pdf",
                               "requiredWhen": "Food declared",
                               "required": true,
@@ -1879,6 +2226,38 @@
                             {
                               "templateKey": null,
                               "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
                               "validityRequired": false,
                               "minSizeKb": null,
                               "maxSizeMb": 10,
@@ -1907,6 +2286,22 @@
                                 "en": "Intermediation Model Declaration"
                               },
                               "documentType": "Intermediation Model Declaration"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -2073,6 +2468,38 @@
                             {
                               "templateKey": null,
                               "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
                               "validityRequired": false,
                               "minSizeKb": null,
                               "maxSizeMb": 10,
@@ -2085,6 +2512,22 @@
                                 "en": "Locker / PUDO Site Locations and Contracts"
                               },
                               "documentType": "Locker / PUDO Site Locations and Contracts"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -2236,6 +2679,38 @@
                             {
                               "templateKey": null,
                               "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
                               "validityRequired": false,
                               "minSizeKb": null,
                               "maxSizeMb": 10,
@@ -2248,6 +2723,22 @@
                                 "en": "Liability and Indemnity Declaration"
                               },
                               "documentType": "Liability and Indemnity Declaration"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -2322,13 +2813,13 @@
                         "statutorySlaWorkingDays": 30,
                         "operationalSlaWorkingDays": 1
                       },
-                      "generatedOn": "2026-10-13T10:18:15Z"
+                      "generatedOn": "2026-10-21T08:25:45Z"
                     }
                   },
                   "oneProduct": {
                     "summary": "One product with ?code=CEP30-UAE-SME-INTL",
                     "value": {
-                      "generatedOn": "2026-10-13T10:18:15Z",
+                      "generatedOn": "2026-10-21T08:25:45Z",
                       "parameters": {
                         "documentMaxSizeMb": 10,
                         "onlinePaymentThresholdAed": 20000,
@@ -2438,6 +2929,38 @@
                             },
                             {
                               "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Emirates ID copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من الهوية الإماراتية",
+                                "en": "Copy of Emirates ID"
+                              },
+                              "documentType": "Copy of Emirates ID"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": true,
+                              "minSizeKb": null,
+                              "maxSizeMb": 10,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Passport copy of the authorised signatory (identity document; must be valid at application)",
+                              "name": {
+                                "ar": "نسخة من جواز السفر",
+                                "en": "Copy of Passport"
+                              },
+                              "documentType": "Copy of Passport"
+                            },
+                            {
+                              "templateKey": null,
                               "validityMustCoverLicence": true,
                               "validityRequired": true,
                               "minSizeKb": null,
@@ -2467,6 +2990,22 @@
                                 "en": "Lease Contract"
                               },
                               "documentType": "Lease Contract"
+                            },
+                            {
+                              "templateKey": null,
+                              "validityMustCoverLicence": false,
+                              "validityRequired": false,
+                              "minSizeKb": null,
+                              "maxSizeMb": 25,
+                              "acceptedFormats": "pdf,jpg,jpeg,png",
+                              "requiredWhen": "Always",
+                              "required": true,
+                              "purpose": "Memorandum of Association of the company (corporate document; 25 MB limit agreed with the portal)",
+                              "name": {
+                                "ar": "عقد التأسيس",
+                                "en": "Memorandum of Association"
+                              },
+                              "documentType": "Memorandum of Association"
                             },
                             {
                               "templateKey": null,
@@ -2613,7 +3152,7 @@
           "Application"
         ],
         "summary": "Create the company and its application with all documents in one call",
-        "description": "Items run in order inside one transaction and may reference earlier items with @{referenceId.id}. 1 Account (matched by trade licence number: created or updated), 2 Beneficial owners (matched by identifier), 3 Contact = signatory (matched by UAE PASS id), 4 License Request (Product_Code; created in Draft, fee quoted, document slots created), 5 Application Item declarations, 6 child items the product needs (site / operator contract), 7 one Document item per slot. With allOrNone=true any refused item rolls back the whole submission. Status 200 is returned even when items failed: read body.success and body.errors per item.\n\nIdempotency: the trade licence number (EPG_Trade_license_no__c) is the key of the company and applicationId__c is the key of the application, within that company. Sending the same body twice updates the existing company, owners, signatory, application and documents; nothing is duplicated. An applicationId__c already used by another company is refused.\n\nAbout the examples: they are the exact bodies that were run successfully against the NewLaw sandbox. Executing one from Swagger UI or Postman creates (or, on a second run, updates) the sample company \"Sample Courier Co LLC\" (trade licence TL-SAMPLE-0001) and the sample application whose id ends in -ONECALL-01. Change the trade licence number and the application id to create your own test company.",
+        "description": "Items run in order inside one transaction and may reference earlier items with @{referenceId.id}. 1 Account (matched by trade licence number: created or updated), 2 Beneficial owners (matched by identifier), 3 Contact = signatory (matched by UAE PASS id), 4 License Request (Product_Code; created in Draft, fee quoted, document slots created), 5 Application Item declarations, 6 child items the product needs (site / operator contract), 7 one Document item per slot. With allOrNone=true any refused item rolls back the whole submission. Status 200 is returned even when items failed: read body.success and body.errors per item.\n\nApplication id: issued by Salesforce (the LR number) and returned as body.applicationId on the application item; never send one on a create. Idempotency: the trade licence number (EPG_Trade_license_no__c) is the key of the company; a create re-sent for a company and product that already have an open application (Draft / Pending Payment) returns that application, so a retry after a timeout never creates a second one. To update an application later, send applicationId__c = the returned id; an id Salesforce did not issue, or one belonging to another company, is refused.\n\nAbout the examples: they are the exact bodies that were run successfully against the NewLaw sandbox. Executing one from Swagger UI or Postman creates (or, on a second run, updates) the sample company \"Sample Courier Co LLC\" (trade licence TL-SAMPLE-0001) and one application per product, whose id is returned in the response. Change the trade licence number to create your own test company.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2623,7 +3162,7 @@
               },
               "examples": {
                 "CEP30-UAE-SME-DOM": {
-                  "summary": "CEP Licence (≤30 kg) — UAE-national-owned SME — Domestic (fee 1000, 7 documents)",
+                  "summary": "CEP Licence (≤30 kg) — UAE-national-owned SME — Domestic (fee 1000, 10 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -2693,10 +3232,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
                           "Product_Code": "CEP30-UAE-SME-DOM",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "Projects and Establishments",
                           "Declared_Scope__c": "Domestic",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -2723,7 +3262,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -2734,9 +3273,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
-                          "Document_Type": "Insurance Certificate (goods in transit)",
-                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -2747,9 +3286,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc3",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
-                          "Document_Type": "Lease Contract",
-                          "fileName": "lease-contract.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -2760,7 +3299,44 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc4",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Insurance Certificate (goods in transit)",
+                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc5",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Lease Contract",
+                          "fileName": "lease-contract.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc7",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Fleet Declaration",
                           "fileName": "operational-fleet-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -2769,9 +3345,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc5",
+                        "referenceId": "Doc8",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Standards Self-declaration",
                           "fileName": "operational-standards-self-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -2780,9 +3356,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc6",
+                        "referenceId": "Doc9",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "SME Licence (federal or local government)",
                           "fileName": "sme-licence-federal-or-local-government-.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -2793,9 +3369,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc7",
+                        "referenceId": "Doc10",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence / Initial Name Approval",
                           "fileName": "trade-licence-initial-name-approval.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -2807,7 +3383,7 @@
                   }
                 },
                 "CEP30-UAE-SME-INTL": {
-                  "summary": "CEP Licence (≤30 kg) — UAE-national-owned SME — Domestic and International (fee 2000, 7 documents)",
+                  "summary": "CEP Licence (≤30 kg) — UAE-national-owned SME — Domestic and International (fee 2000, 10 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -2877,10 +3453,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
                           "Product_Code": "CEP30-UAE-SME-INTL",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "Projects and Establishments",
                           "Declared_Scope__c": "Domestic and International",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -2907,7 +3483,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -2918,9 +3494,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
-                          "Document_Type": "Insurance Certificate (goods in transit)",
-                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -2931,9 +3507,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc3",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
-                          "Document_Type": "Lease Contract",
-                          "fileName": "lease-contract.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -2944,7 +3520,44 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc4",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Insurance Certificate (goods in transit)",
+                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc5",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Lease Contract",
+                          "fileName": "lease-contract.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc7",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Fleet Declaration",
                           "fileName": "operational-fleet-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -2953,9 +3566,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc5",
+                        "referenceId": "Doc8",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Standards Self-declaration",
                           "fileName": "operational-standards-self-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -2964,9 +3577,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc6",
+                        "referenceId": "Doc9",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "SME Licence (federal or local government)",
                           "fileName": "sme-licence-federal-or-local-government-.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -2977,9 +3590,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc7",
+                        "referenceId": "Doc10",
                         "body": {
-                          "applicationId__c": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence / Initial Name Approval",
                           "fileName": "trade-licence-initial-name-approval.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -2991,7 +3604,7 @@
                   }
                 },
                 "CEP30-NONUAE-SME-DOM": {
-                  "summary": "CEP Licence (≤30 kg) — Non-UAE-national-owned SME — Domestic (fee 5000, 7 documents)",
+                  "summary": "CEP Licence (≤30 kg) — Non-UAE-national-owned SME — Domestic (fee 5000, 10 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -3061,10 +3674,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
                           "Product_Code": "CEP30-NONUAE-SME-DOM",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "Projects and Establishments",
                           "Declared_Scope__c": "Domestic",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -3091,7 +3704,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3102,9 +3715,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
-                          "Document_Type": "Insurance Certificate (goods in transit)",
-                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3115,9 +3728,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc3",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
-                          "Document_Type": "Lease Contract",
-                          "fileName": "lease-contract.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3128,7 +3741,44 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc4",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Insurance Certificate (goods in transit)",
+                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc5",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Lease Contract",
+                          "fileName": "lease-contract.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc7",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Fleet Declaration",
                           "fileName": "operational-fleet-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3137,9 +3787,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc5",
+                        "referenceId": "Doc8",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Standards Self-declaration",
                           "fileName": "operational-standards-self-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3148,9 +3798,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc6",
+                        "referenceId": "Doc9",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "SME Licence (federal or local government)",
                           "fileName": "sme-licence-federal-or-local-government-.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -3161,9 +3811,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc7",
+                        "referenceId": "Doc10",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence / Initial Name Approval",
                           "fileName": "trade-licence-initial-name-approval.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -3175,7 +3825,7 @@
                   }
                 },
                 "CEP30-NONUAE-SME-INTL": {
-                  "summary": "CEP Licence (≤30 kg) — Non-UAE-national-owned SME — Domestic and International (fee 10000, 7 documents)",
+                  "summary": "CEP Licence (≤30 kg) — Non-UAE-national-owned SME — Domestic and International (fee 10000, 10 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -3245,10 +3895,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
                           "Product_Code": "CEP30-NONUAE-SME-INTL",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "Projects and Establishments",
                           "Declared_Scope__c": "Domestic and International",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -3275,7 +3925,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3286,9 +3936,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
-                          "Document_Type": "Insurance Certificate (goods in transit)",
-                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3299,9 +3949,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc3",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
-                          "Document_Type": "Lease Contract",
-                          "fileName": "lease-contract.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3312,7 +3962,44 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc4",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Insurance Certificate (goods in transit)",
+                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc5",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Lease Contract",
+                          "fileName": "lease-contract.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc7",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Fleet Declaration",
                           "fileName": "operational-fleet-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3321,9 +4008,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc5",
+                        "referenceId": "Doc8",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Standards Self-declaration",
                           "fileName": "operational-standards-self-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3332,9 +4019,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc6",
+                        "referenceId": "Doc9",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "SME Licence (federal or local government)",
                           "fileName": "sme-licence-federal-or-local-government-.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -3345,9 +4032,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc7",
+                        "referenceId": "Doc10",
                         "body": {
-                          "applicationId__c": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence / Initial Name Approval",
                           "fileName": "trade-licence-initial-name-approval.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -3359,7 +4046,7 @@
                   }
                 },
                 "CEP30-GEN-DOM": {
-                  "summary": "CEP Licence (≤30 kg) — General — Domestic (fee 20000, 6 documents)",
+                  "summary": "CEP Licence (≤30 kg) — General — Domestic (fee 20000, 9 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -3429,10 +4116,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-DOM-ONECALL-01",
                           "Product_Code": "CEP30-GEN-DOM",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "General",
                           "Declared_Scope__c": "Domestic",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -3459,7 +4146,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3470,9 +4157,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-DOM-ONECALL-01",
-                          "Document_Type": "Insurance Certificate (goods in transit)",
-                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3483,9 +4170,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc3",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-DOM-ONECALL-01",
-                          "Document_Type": "Lease Contract",
-                          "fileName": "lease-contract.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3496,7 +4183,44 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc4",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Insurance Certificate (goods in transit)",
+                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc5",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Lease Contract",
+                          "fileName": "lease-contract.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc7",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Fleet Declaration",
                           "fileName": "operational-fleet-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3505,9 +4229,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc5",
+                        "referenceId": "Doc8",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Standards Self-declaration",
                           "fileName": "operational-standards-self-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3516,9 +4240,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc6",
+                        "referenceId": "Doc9",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-DOM-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence / Initial Name Approval",
                           "fileName": "trade-licence-initial-name-approval.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -3530,7 +4254,7 @@
                   }
                 },
                 "CEP30-GEN-INTL": {
-                  "summary": "CEP Licence (≤30 kg) — General — Domestic and International (fee 40000, 6 documents)",
+                  "summary": "CEP Licence (≤30 kg) — General — Domestic and International (fee 40000, 9 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -3600,10 +4324,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-INTL-ONECALL-01",
                           "Product_Code": "CEP30-GEN-INTL",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "General",
                           "Declared_Scope__c": "Domestic and International",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -3630,7 +4354,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3641,9 +4365,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-INTL-ONECALL-01",
-                          "Document_Type": "Insurance Certificate (goods in transit)",
-                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3654,9 +4378,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc3",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-INTL-ONECALL-01",
-                          "Document_Type": "Lease Contract",
-                          "fileName": "lease-contract.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3667,7 +4391,44 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc4",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Insurance Certificate (goods in transit)",
+                          "fileName": "insurance-certificate-goods-in-transit-.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc5",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Lease Contract",
+                          "fileName": "lease-contract.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc7",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Fleet Declaration",
                           "fileName": "operational-fleet-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3676,9 +4437,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc5",
+                        "referenceId": "Doc8",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operational Standards Self-declaration",
                           "fileName": "operational-standards-self-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3687,9 +4448,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc6",
+                        "referenceId": "Doc9",
                         "body": {
-                          "applicationId__c": "APP-CEP30-GEN-INTL-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence / Initial Name Approval",
                           "fileName": "trade-licence-initial-name-approval.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -3701,7 +4462,7 @@
                   }
                 },
                 "FOODMED": {
-                  "summary": "Food and Medicine Delivery (fee 500, 4 documents)",
+                  "summary": "Food and Medicine Delivery (fee 500, 7 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -3771,10 +4532,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-FOODMED-ONECALL-01",
                           "Product_Code": "FOODMED",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "Specialised",
                           "Declared_Scope__c": "Domestic",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -3812,7 +4573,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-FOODMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3823,9 +4584,9 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-FOODMED-ONECALL-01",
-                          "Document_Type": "Municipal Food Safety Clearance",
-                          "fileName": "municipal-food-safety-clearance.pdf",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
                           "Valid_From__c": "2026-01-01",
                           "Valid_To__c": "2027-12-31"
@@ -3836,7 +4597,44 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc3",
                         "body": {
-                          "applicationId__c": "APP-FOODMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc4",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc5",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Municipal Food Safety Clearance",
+                          "fileName": "municipal-food-safety-clearance.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Storage Premises Declaration",
                           "fileName": "storage-premises-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3845,9 +4643,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc4",
+                        "referenceId": "Doc7",
                         "body": {
-                          "applicationId__c": "APP-FOODMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence",
                           "fileName": "trade-licence.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -3859,7 +4657,7 @@
                   }
                 },
                 "INTERMED": {
-                  "summary": "Intermediation and Electronic Platform Services (fee 5000, 5 documents)",
+                  "summary": "Intermediation and Electronic Platform Services (fee 5000, 8 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -3929,10 +4727,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-INTERMED-ONECALL-01",
                           "Product_Code": "INTERMED",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "General",
                           "Declared_Scope__c": "Domestic",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -3969,7 +4767,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-INTERMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3980,7 +4778,33 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-INTERMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc3",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc4",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Data Handling Declaration",
                           "fileName": "data-handling-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -3989,9 +4813,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc3",
+                        "referenceId": "Doc5",
                         "body": {
-                          "applicationId__c": "APP-INTERMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Intermediation Model Declaration",
                           "fileName": "intermediation-model-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -4000,9 +4824,20 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc4",
+                        "referenceId": "Doc6",
                         "body": {
-                          "applicationId__c": "APP-INTERMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc7",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Operator Contracts (sample)",
                           "fileName": "operator-contracts-sample-.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -4011,9 +4846,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc5",
+                        "referenceId": "Doc8",
                         "body": {
-                          "applicationId__c": "APP-INTERMED-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence",
                           "fileName": "trade-licence.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -4025,7 +4860,7 @@
                   }
                 },
                 "LOCKERS": {
-                  "summary": "Electronic Lockers Service and PUDO (fee 1000, 3 documents)",
+                  "summary": "Electronic Lockers Service and PUDO (fee 1000, 6 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -4095,10 +4930,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-LOCKERS-ONECALL-01",
                           "Product_Code": "LOCKERS",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "General",
                           "Declared_Scope__c": "Domestic",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -4126,7 +4961,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-LOCKERS-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -4137,7 +4972,33 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-LOCKERS-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc3",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc4",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Locker / PUDO Site Locations and Contracts",
                           "fileName": "locker-pudo-site-locations-and-contracts.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -4146,9 +5007,20 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc3",
+                        "referenceId": "Doc5",
                         "body": {
-                          "applicationId__c": "APP-LOCKERS-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence",
                           "fileName": "trade-licence.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -4160,7 +5032,7 @@
                   }
                 },
                 "OUTSOURCE": {
-                  "summary": "Outsourcing Services (fee none, 4 documents)",
+                  "summary": "Outsourcing Services (fee none, 7 documents)",
                   "value": {
                     "allOrNone": true,
                     "compositeRequest": [
@@ -4230,10 +5102,10 @@
                         "url": "/services/data/v60.0/sobjects/EPG_License_Request__c",
                         "referenceId": "NewLicenseRequest",
                         "body": {
-                          "applicationId__c": "APP-OUTSOURCE-ONECALL-01",
                           "Product_Code": "OUTSOURCE",
                           "Signatory_UAE_PASS_Id": "UAEPASS-SIG-0001",
                           "EPG_Account__c": "@{NewAccount.id}",
+                          "isAgent_Request__c": false,
                           "Declared_Tier__c": "General",
                           "Declared_Scope__c": "Domestic",
                           "Declarations_Accepted_On__c": "2026-10-13T09:00:00.000Z",
@@ -4257,7 +5129,7 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc1",
                         "body": {
-                          "applicationId__c": "APP-OUTSOURCE-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Beneficial Ownership Declaration",
                           "fileName": "beneficial-ownership-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -4268,7 +5140,33 @@
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
                         "referenceId": "Doc2",
                         "body": {
-                          "applicationId__c": "APP-OUTSOURCE-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Emirates ID",
+                          "fileName": "copy-of-emirates-id.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc3",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Copy of Passport",
+                          "fileName": "copy-of-passport.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc4",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Liability and Indemnity Declaration",
                           "fileName": "liability-and-indemnity-declaration.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -4277,9 +5175,20 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc3",
+                        "referenceId": "Doc5",
                         "body": {
-                          "applicationId__c": "APP-OUTSOURCE-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
+                          "Document_Type": "Memorandum of Association",
+                          "fileName": "memorandum-of-association.pdf",
+                          "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
+                        }
+                      },
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc6",
+                        "body": {
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Principal Licensee Contract",
                           "fileName": "principal-licensee-contract.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K"
@@ -4288,9 +5197,9 @@
                       {
                         "method": "POST",
                         "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                        "referenceId": "Doc4",
+                        "referenceId": "Doc7",
                         "body": {
-                          "applicationId__c": "APP-OUTSOURCE-ONECALL-01",
+                          "EPG_License_Request__c": "@{NewLicenseRequest.id}",
                           "Document_Type": "Trade Licence",
                           "fileName": "trade-licence.pdf",
                           "content": "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+PgplbmRvYmoKdHJhaWxlcgo8PC9Sb290IDEgMCBSPj4K",
@@ -4318,6 +5227,121 @@
           },
           "500": {
             "description": "Unhandled error (for example a malformed envelope)"
+          }
+        }
+      }
+    },
+    "/services/apexrest/payment/pricing": {
+      "post": {
+        "tags": [
+          "Pricing"
+        ],
+        "summary": "Quote an application from the licence catalogue (step 3)",
+        "description": "Existing pricing endpoint, extended: for a new-regulation application it answers from Draft onwards with the quote the Fee Calculator derives from the catalogue, one item per fee line (base fee, per-site / per-locker / per-vehicle components, discounts). While the application is still editable and unpaid (Draft, Pending Payment) the quote is recalculated on each call, so a fee changed on the licence product is reflected before payment; once paid the quote is frozen. The amount to pay is the sum of items[].totalAmount. 404 when the application id is unknown or the application is closed (rejected, revoked, closed). Legacy applications keep the previous behaviour of this endpoint.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingRequest"
+              },
+              "examples": {
+                "byApplicationId": {
+                  "summary": "Quote by the applicationId the create response returned (expected per product: CEP30-UAE-SME-DOM 1000 AED; CEP30-UAE-SME-INTL 2000 AED; CEP30-NONUAE-SME-DOM 5000 AED; CEP30-NONUAE-SME-INTL 10000 AED; CEP30-GEN-DOM 20000 AED; CEP30-GEN-INTL 40000 AED; FOODMED 500 AED; INTERMED 5000 AED; LOCKERS 1000 AED; OUTSOURCE no fee)",
+                  "value": {
+                    "entityId": "EPG Portal",
+                    "quotationRequest": {
+                      "requestOn": "2026-10-13T09:00:00.000Z",
+                      "appIdentifier": {
+                        "applicationId": "LR-53330",
+                        "serviceId": "LICENSING",
+                        "serviceVersion": "1.0",
+                        "serviceName": {
+                          "en": "Licence application",
+                          "ar": "طلب رخصة"
+                        },
+                        "serviceType": {
+                          "code": "NEWREG",
+                          "en": "New regulation licence",
+                          "ar": "رخصة"
+                        },
+                        "requestType": "New"
+                      },
+                      "payType": "PayToSubmit",
+                      "infos": []
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or closed application",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRefused"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/services/apexrest/getApplicationStatus": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Status of an application (step 5)",
+        "description": "The external system may call this at any time with the application id. For a new-regulation application the answer carries its three statuses: requestStatus (the working status staff see), applicantStatus (the status the applicant may see, bilingual) and paymentStatus (Unpaid or Paid), with the current step, the team holding it, the pre-check result, any open information request with what was asked, the document slots and their validation, the fee quote and payment advice, the decision once taken and the licence once issued. The legacy envelope and decision node are kept; legacy applications keep the previous behaviour.",
+        "parameters": [
+          {
+            "name": "applicationId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The applicationId returned by the create response (LR-xxxxx)",
+            "example": "LR-53330"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing applicationId"
+          },
+          "404": {
+            "description": "Unknown application id (body: status 404 with a bilingual reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -4695,6 +5719,10 @@
                       "type": "string",
                       "description": "Salesforce id of the created/updated record"
                     },
+                    "applicationId": {
+                      "type": "string",
+                      "description": "On the application item only: the application id Salesforce issued (LR-xxxxx). Use it for documents, pricing, status, information request and licence retrieval."
+                    },
                     "success": {
                       "type": "boolean"
                     },
@@ -4911,9 +5939,8 @@
       },
       "LicenseRequestItem": {
         "type": "object",
-        "description": "The application. Product_Code selects the product; the server creates it in Draft, quotes the fee and creates the document slots. applicationId__c is unique per company: re-sending it updates, sending it for another company is refused.",
+        "description": "The application. Product_Code selects the product; the server creates it in Draft, quotes the fee, creates the document slots and issues the application id (the LR number), returned as body.applicationId on this item in the response. Do not send applicationId__c on a create: an id Salesforce did not issue is refused. Send it only to update an application already created. A create re-sent for a company and product that already have an open application (Draft / Pending Payment) returns that application instead of a second one.",
         "required": [
-          "applicationId__c",
           "Product_Code",
           "Signatory_UAE_PASS_Id",
           "EPG_Account__c"
@@ -4921,7 +5948,11 @@
         "properties": {
           "applicationId__c": {
             "type": "string",
-            "description": "Portal application id"
+            "description": "Only on an update: the applicationId returned by the create response (LR-xxxxx)"
+          },
+          "isAgent_Request__c": {
+            "type": "boolean",
+            "description": "true when the submission comes through the agent / assistant channel (audit trail, returned as agentRequest in the status)"
           },
           "Product_Code": {
             "type": "string",
@@ -5118,17 +6149,18 @@
       },
       "DocumentItem": {
         "type": "object",
-        "description": "A file for one slot of the application, placed after the application item. Refused when Document_Type is not expected; format, size and expiry validated against the catalogue rules.",
+        "description": "A file for one slot of the application. In the same call as the application item, reference it with EPG_License_Request__c = @{NewLicenseRequest.id}; in a later call send applicationId__c = the applicationId from the create response. Refused when Document_Type is not expected; format, size and expiry validated against the catalogue rules. Send either content (base64, files up to about 4 MB) or EPG_File_Id__c (a file uploaded first through POST /services/data/v60.0/sobjects/ContentVersion, any size).",
         "required": [
-          "applicationId__c",
-          "Document_Type",
-          "fileName",
-          "content"
+          "Document_Type"
         ],
         "properties": {
+          "EPG_License_Request__c": {
+            "type": "string",
+            "description": "@{NewLicenseRequest.id} when sent in the same call as the application item"
+          },
           "applicationId__c": {
             "type": "string",
-            "description": "Same value as on the application item"
+            "description": "The applicationId returned by the create response, when sent in a later call"
           },
           "Document_Type": {
             "type": "string",
@@ -5140,7 +6172,7 @@
           },
           "content": {
             "type": "string",
-            "description": "Base64 file content",
+            "description": "Base64 file content (small files)",
             "format": "byte"
           },
           "Valid_From__c": {
@@ -5154,7 +6186,556 @@
           },
           "EPG_File_Id__c": {
             "type": "string",
-            "description": "Optional external file id"
+            "description": "Id returned by the ContentVersion upload (068...) or its ContentDocumentId (069...): the file is linked to the slot and validated by its real size and extension; no content needed"
+          }
+        }
+      },
+      "PricingRequest": {
+        "type": "object",
+        "required": [
+          "quotationRequest"
+        ],
+        "description": "Legacy quotation envelope. Only quotationRequest.appIdentifier.applicationId is needed for a new-regulation application; the other fields are stored for audit.",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Caller, e.g. \"EPG Portal\""
+          },
+          "quotationRequest": {
+            "type": "object",
+            "required": [
+              "appIdentifier"
+            ],
+            "properties": {
+              "requestOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "appIdentifier": {
+                "type": "object",
+                "required": [
+                  "applicationId"
+                ],
+                "properties": {
+                  "applicationId": {
+                    "type": "string",
+                    "description": "The applicationId returned by the create response (LR-xxxxx, issued by Salesforce)"
+                  },
+                  "serviceId": {
+                    "type": "string"
+                  },
+                  "serviceVersion": {
+                    "type": "string"
+                  },
+                  "serviceName": {
+                    "type": "object",
+                    "properties": {
+                      "en": {
+                        "type": "string"
+                      },
+                      "ar": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "serviceType": {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "en": {
+                        "type": "string"
+                      },
+                      "ar": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "requestType": {
+                    "type": "string"
+                  }
+                }
+              },
+              "invoiceId": {
+                "type": "string"
+              },
+              "payType": {
+                "type": "string",
+                "description": "e.g. PayToSubmit"
+              },
+              "dulNumber": {
+                "type": "string"
+              },
+              "subjectIdentifier": {
+                "type": "string"
+              },
+              "subjectType": {
+                "type": "string"
+              },
+              "legalEntityId": {
+                "type": "string"
+              },
+              "infos": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "infoKey": {
+                      "type": "string"
+                    },
+                    "infoValue": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "PricingResponse": {
+        "type": "object",
+        "description": "Same shape as the legacy pricing response. For a new-regulation application every item is one fee line of the catalogue quote.",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "desc": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            }
+          },
+          "quotationResponse": {
+            "type": "object",
+            "properties": {
+              "invoiceId": {
+                "type": "string",
+                "description": "Payment advice id once raised (Pending Payment), else null"
+              },
+              "refInvoiceId": {
+                "type": "string",
+                "description": "Payment advice number"
+              },
+              "applicationId": {
+                "type": "string"
+              },
+              "pricedBy": {
+                "type": "string"
+              },
+              "quotedOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expiredOn": {
+                "type": "string",
+                "format": "date-time",
+                "description": "quotedOn + Fee_Quote_Validity_Days (parameter, default 30)"
+              },
+              "quotationStatus": {
+                "type": "string",
+                "enum": [
+                  "Approved",
+                  "Paid"
+                ],
+                "description": "Approved = ready to pay; Paid = already settled"
+              },
+              "items": {
+                "type": "array",
+                "description": "One per fee line; the sum of totalAmount is the amount to pay. Empty when the product has no application fee.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "itemId": {
+                      "type": "string",
+                      "description": "Id of the fee line (EPG_Request_Item__c), stable across calls while the quote is unchanged"
+                    },
+                    "itemName": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string"
+                        },
+                        "ar": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "beneficiaryId": {
+                      "type": "string"
+                    },
+                    "beneficiaryName": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string"
+                        },
+                        "ar": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "description": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string"
+                        },
+                        "ar": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "amount": {
+                      "type": "number",
+                      "description": "Unit amount"
+                    },
+                    "quantity": {
+                      "type": "integer"
+                    },
+                    "totalAmount": {
+                      "type": "number"
+                    },
+                    "currency": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string"
+                        },
+                        "ar": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "PricingRefused": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "desc": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "description": "Legacy envelope plus the \"application\" node for new-regulation applications.",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "description": "200, or 404 when the application id is unknown (the HTTP status is 404 as well)"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "desc": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            }
+          },
+          "decision": {
+            "type": "object",
+            "description": "Legacy node: code 0 in progress, 1 approved/issued, 2 information requested, 3 rejected; status = applicant status",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "status": {
+                "type": "object",
+                "properties": {
+                  "en": {
+                    "type": "string"
+                  },
+                  "ar": {
+                    "type": "string"
+                  }
+                }
+              },
+              "remarks": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "application": {
+            "$ref": "#/components/schemas/ApplicationStatus"
+          }
+        }
+      },
+      "ApplicationStatus": {
+        "type": "object",
+        "description": "The three statuses and the facts the portal shows next to them. Internal reviewer identities are never returned (BRD 4.8).",
+        "properties": {
+          "applicationId": {
+            "type": "string",
+            "description": "The id Salesforce issued at creation (LR-xxxxx), returned by the create response"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Salesforce application number (same value for new-regulation applications)"
+          },
+          "productCode": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "requestStatus": {
+            "type": "string",
+            "description": "Working status staff see",
+            "enum": [
+              "Draft",
+              "Pending Payment",
+              "Submitted",
+              "Under document review",
+              "Under Technical Review",
+              "Under Financial Review",
+              "Under Legal Review",
+              "Request for more documents",
+              "Submitted for Approval",
+              "Approved",
+              "Under License Issuance",
+              "License generated",
+              "Conditionally Issued",
+              "Under Post-Issuance Verification",
+              "Closed",
+              "Rejected",
+              "Revoked"
+            ]
+          },
+          "currentStep": {
+            "type": "string",
+            "description": "Name of the current milestone"
+          },
+          "handledBy": {
+            "type": "string",
+            "description": "Role whose turn it is (Customer, Licence Intake Officer, Technical Reviewer, Financial Reviewer, Legal Reviewer, Sign-off Authority)"
+          },
+          "agentRequest": {
+            "type": "boolean",
+            "description": "true when the application came through the agent / assistant channel (isAgent_Request__c on the create)"
+          },
+          "applicantStatus": {
+            "type": "object",
+            "properties": {
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            },
+            "description": "What the applicant may see (BRD 4.8): Draft | Submitted | Under Review | Information Requested | Approved | Conditional Issuance | Issued | Rejected"
+          },
+          "paymentStatus": {
+            "type": "object",
+            "properties": {
+              "en": {
+                "type": "string"
+              },
+              "ar": {
+                "type": "string"
+              }
+            },
+            "description": "Unpaid | Paid"
+          },
+          "precheckResult": {
+            "type": "string",
+            "description": "Filled at submission"
+          },
+          "informationRequest": {
+            "type": "object",
+            "properties": {
+              "open": {
+                "type": "boolean"
+              },
+              "requestedOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "details": {
+                "type": "string",
+                "description": "The reviewing officer's comment (null when the officer left it blank, or when no request is open)"
+              },
+              "documentsToReupload": {
+                "type": "array",
+                "description": "While open: the rejected documents with the reviewer's reason (reviewComment), the same list as /licensing/informationRequest",
+                "items": {
+                  "$ref": "#/components/schemas/StatusDocument"
+                }
+              }
+            }
+          },
+          "submittedOn": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operationalSlaDue": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "statutorySlaDue": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUpdatedOn": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fees": {
+            "type": "object",
+            "properties": {
+              "quoteTotal": {
+                "type": "number"
+              },
+              "currencyCode": {
+                "type": "string"
+              },
+              "paidOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "paymentReference": {
+                "type": "string"
+              },
+              "adviceNumber": {
+                "type": "string"
+              },
+              "adviceStatus": {
+                "type": "string"
+              }
+            }
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusDocument"
+            }
+          },
+          "decision": {
+            "type": "object",
+            "description": "Present once a final decision exists",
+            "properties": {
+              "outcome": {
+                "type": "string",
+                "description": "Approve | Reject"
+              },
+              "decisionType": {
+                "type": "string",
+                "description": "Auto | Manual"
+              },
+              "decidedOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "grounds": {
+                "type": "string"
+              }
+            }
+          },
+          "licence": {
+            "type": "object",
+            "description": "Present once a licence is issued",
+            "properties": {
+              "licenceNumber": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "validFrom": {
+                "type": "string",
+                "format": "date"
+              },
+              "validTo": {
+                "type": "string",
+                "format": "date"
+              },
+              "conditional": {
+                "type": "boolean"
+              },
+              "documentEnId": {
+                "type": "string"
+              },
+              "documentArId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "StatusDocument": {
+        "type": "object",
+        "properties": {
+          "documentType": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "uploaded": {
+            "type": "boolean"
+          },
+          "validationStatus": {
+            "type": "string",
+            "description": "Pending | Passed | Failed"
+          },
+          "validTo": {
+            "type": "string",
+            "format": "date"
+          },
+          "reviewStatus": {
+            "type": "string",
+            "description": "null | Accepted | Rejected | Re-uploaded"
+          },
+          "reviewComment": {
+            "type": "string",
+            "description": "The reviewer's reason when Rejected / Re-uploaded"
           }
         }
       }

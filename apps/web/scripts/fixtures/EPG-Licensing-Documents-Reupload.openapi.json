@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "EPG Licensing - Documents Re-upload API",
-    "version": "1.1.0",
-    "description": "Documents to re-upload after a reviewer's information request, with reasons. Generated from the NewLaw sandbox on 2026-10-13T10:18:15Z."
+    "title": "EPG Licensing - Documents API (re-upload and large files)",
+    "version": "1.2.0",
+    "description": "Documents to re-upload after a reviewer's information request, with reasons, and the two-step path for large files. Generated from the NewLaw sandbox on 2026-10-21T08:25:45Z."
   },
   "servers": [
     {
@@ -53,12 +53,12 @@
                   "client_id": {
                     "type": "string",
                     "description": "Consumer key of the External Client App",
-                    "example": "<<EPGL_NEWLAW_CLIENT_ID>>"
+                    "example": "EPGL_NEWLAW_CLIENT_ID (read from the environment)"
                   },
                   "client_secret": {
                     "type": "string",
                     "description": "Consumer secret of the External Client App",
-                    "example": "<<EPGL_NEWLAW_CLIENT_SECRET>>"
+                    "example": "EPGL_NEWLAW_CLIENT_SECRET (read from the environment)"
                   }
                 }
               }
@@ -106,7 +106,8 @@
             "schema": {
               "type": "string"
             },
-            "example": "APP-CEP30-UAE-SME-DOM-ONECALL-01"
+            "description": "The applicationId returned by the create response",
+            "example": "LR-53330"
           }
         ],
         "responses": {
@@ -129,12 +130,77 @@
         }
       }
     },
+    "/services/data/v60.0/sobjects/ContentVersion": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Upload a large file first (standard Salesforce file endpoint, multipart)",
+        "description": "For files that cannot travel as base64 inside the composite (above about 4 MB: MOAs up to 25 MB, photos of Emirates IDs and passports). Standard Salesforce REST, same bearer token, multipart/form-data with two parts: entity_content (JSON with Title and PathOnClient, whose extension is checked against the catalogue formats) and VersionData (the bytes). The response id (068...) is then sent as EPG_File_Id__c in the document call, without content.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "entity_content",
+                  "VersionData"
+                ],
+                "properties": {
+                  "entity_content": {
+                    "type": "string",
+                    "description": "JSON part, e.g. {\"Title\":\"Memorandum of Association\",\"PathOnClient\":\"moa.pdf\"}"
+                  },
+                  "VersionData": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The file"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "ContentVersion id (068...) to send as EPG_File_Id__c"
+                    },
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed multipart"
+          }
+        }
+      }
+    },
     "/services/apexrest/CompositeHandler": {
       "post": {
         "tags": [
           "Documents"
         ],
-        "summary": "Re-upload a rejected document (existing document call)",
+        "summary": "Re-upload a rejected document, or attach an uploaded file (existing document call)",
+        "description": "applicationId__c = the id returned by the create response. Either content (base64) or EPG_File_Id__c (id returned by the ContentVersion upload).",
         "requestBody": {
           "required": true,
           "content": {
@@ -142,23 +208,46 @@
               "schema": {
                 "$ref": "#/components/schemas/CompositeRequest"
               },
-              "example": {
-                "allOrNone": false,
-                "compositeRequest": [
-                  {
-                    "method": "POST",
-                    "url": "/services/data/v60.0/sobjects/EPG_Document__c",
-                    "referenceId": "Doc1",
-                    "body": {
-                      "applicationId__c": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
-                      "Document_Type": "Lease Contract",
-                      "fileName": "corrected.pdf",
-                      "content": "<base64>",
-                      "Valid_From__c": "2026-01-01",
-                      "Valid_To__c": "2027-12-31"
-                    }
+              "examples": {
+                "reupload": {
+                  "summary": "Re-upload a rejected document as base64",
+                  "value": {
+                    "allOrNone": false,
+                    "compositeRequest": [
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc1",
+                        "body": {
+                          "applicationId__c": "LR-53330",
+                          "Document_Type": "Lease Contract",
+                          "fileName": "corrected.pdf",
+                          "content": "<base64>",
+                          "Valid_From__c": "2026-01-01",
+                          "Valid_To__c": "2027-12-31"
+                        }
+                      }
+                    ]
                   }
-                ]
+                },
+                "attachUploaded": {
+                  "summary": "Attach a file uploaded through ContentVersion",
+                  "value": {
+                    "allOrNone": false,
+                    "compositeRequest": [
+                      {
+                        "method": "POST",
+                        "url": "/services/data/v60.0/sobjects/EPG_Document__c",
+                        "referenceId": "Doc1",
+                        "body": {
+                          "applicationId__c": "LR-53330",
+                          "Document_Type": "Memorandum of Association",
+                          "EPG_File_Id__c": "068XXXXXXXXXXXXXXX"
+                        }
+                      }
+                    ]
+                  }
+                }
               }
             }
           }
@@ -366,6 +455,10 @@
                       "type": "string",
                       "description": "Salesforce id of the created/updated record"
                     },
+                    "applicationId": {
+                      "type": "string",
+                      "description": "On the application item only: the application id Salesforce issued (LR-xxxxx). Use it for documents, pricing, status, information request and licence retrieval."
+                    },
                     "success": {
                       "type": "boolean"
                     },
@@ -385,17 +478,18 @@
       },
       "DocumentItem": {
         "type": "object",
-        "description": "A file for one slot of the application, placed after the application item. Refused when Document_Type is not expected; format, size and expiry validated against the catalogue rules.",
+        "description": "A file for one slot of the application. In the same call as the application item, reference it with EPG_License_Request__c = @{NewLicenseRequest.id}; in a later call send applicationId__c = the applicationId from the create response. Refused when Document_Type is not expected; format, size and expiry validated against the catalogue rules. Send either content (base64, files up to about 4 MB) or EPG_File_Id__c (a file uploaded first through POST /services/data/v60.0/sobjects/ContentVersion, any size).",
         "required": [
-          "applicationId__c",
-          "Document_Type",
-          "fileName",
-          "content"
+          "Document_Type"
         ],
         "properties": {
+          "EPG_License_Request__c": {
+            "type": "string",
+            "description": "@{NewLicenseRequest.id} when sent in the same call as the application item"
+          },
           "applicationId__c": {
             "type": "string",
-            "description": "Same value as on the application item"
+            "description": "The applicationId returned by the create response, when sent in a later call"
           },
           "Document_Type": {
             "type": "string",
@@ -407,7 +501,7 @@
           },
           "content": {
             "type": "string",
-            "description": "Base64 file content",
+            "description": "Base64 file content (small files)",
             "format": "byte"
           },
           "Valid_From__c": {
@@ -421,7 +515,7 @@
           },
           "EPG_File_Id__c": {
             "type": "string",
-            "description": "Optional external file id"
+            "description": "Id returned by the ContentVersion upload (068...) or its ContentDocumentId (069...): the file is linked to the slot and validated by its real size and extension; no content needed"
           }
         }
       },
@@ -638,9 +732,8 @@
       },
       "LicenseRequestItem": {
         "type": "object",
-        "description": "The application. Product_Code selects the product; the server creates it in Draft, quotes the fee and creates the document slots. applicationId__c is unique per company: re-sending it updates, sending it for another company is refused.",
+        "description": "The application. Product_Code selects the product; the server creates it in Draft, quotes the fee, creates the document slots and issues the application id (the LR number), returned as body.applicationId on this item in the response. Do not send applicationId__c on a create: an id Salesforce did not issue is refused. Send it only to update an application already created. A create re-sent for a company and product that already have an open application (Draft / Pending Payment) returns that application instead of a second one.",
         "required": [
-          "applicationId__c",
           "Product_Code",
           "Signatory_UAE_PASS_Id",
           "EPG_Account__c"
@@ -648,7 +741,11 @@
         "properties": {
           "applicationId__c": {
             "type": "string",
-            "description": "Portal application id"
+            "description": "Only on an update: the applicationId returned by the create response (LR-xxxxx)"
+          },
+          "isAgent_Request__c": {
+            "type": "boolean",
+            "description": "true when the submission comes through the agent / assistant channel (audit trail, returned as agentRequest in the status)"
           },
           "Product_Code": {
             "type": "string",

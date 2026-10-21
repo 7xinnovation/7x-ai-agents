@@ -6,6 +6,12 @@ import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
 import { recordApiCall, trackedFetch } from "./apiCallLog";
+import {
+  isEpglCompositeTool,
+  withEpglDocumentFiles,
+  contentVersionMultipart,
+  type EpglCaseFile,
+} from "./epglComposite";
 
 /** Who a hand-written call belongs to, for the admin's API Logs page. */
 type LogCtx = { agentId?: string; conversationId?: string; environment?: string };
@@ -1299,6 +1305,15 @@ export async function buildApiTools(
      */
     rentalAttachments?: () => Promise<{ key: string; fileName: string; fileFormat: string; base64: string }[]>;
     /**
+     * The case's uploaded files, raw, for EPGL's New Regulation composite.
+     *
+     * Raw rather than base64 because the size decides the route: under about
+     * 4 MB the bytes go inside the composite, over it they are uploaded first
+     * and referenced by id, and a base64 string has already lost the one fact
+     * that choice turns on. See lib/epglComposite.
+     */
+    epglDocuments?: () => Promise<EpglCaseFile[]>;
+    /**
      * The rental duration the customer actually chose, from the case.
      *
      * 4 Sep: they picked "2 Years — expires 03-09-2028, AED 670", the case
@@ -1686,6 +1701,9 @@ export async function buildApiTools(
   const exec = async (toolName: string, input: Record<string, unknown>) => {
     const entry = map.get(toolName);
     if (!entry) return { result: `Unknown integration tool ${toolName}.`, isError: true };
+
+    /** Set when a document slot could not be filled; appended to the result below. */
+    let documentNote: string | null = null;
 
     // A BOX YOU DO NOT HOLD IS NOT YOURS TO MANAGE.
     //
@@ -2711,6 +2729,59 @@ export async function buildApiTools(
             `If the customer genuinely wants to change something on the application, send the UPDATE shape instead: Account.Id plus the licence request's own Name.`,
           isError: true,
         };
+      }
+    }
+
+    /**
+     * EPGL 2.0: the customer's files into the New Regulation composite.
+     *
+     * The 1.x branch below STRIPS documents, because their API 5 takes each
+     * file on its own call. The New Regulation composite is the opposite — the
+     * documents belong inside it — so this fills them rather than removing
+     * them, and the two must not be confused: they are different tools on
+     * different contracts, which is why each is gated on its own name.
+     *
+     * A file too big for the request goes up through ContentVersion first and
+     * comes back as an id. That upload is a real outbound call and is logged
+     * like every other one, so a failure is visible on the API Logs page
+     * rather than inferred from a document that never arrived.
+     */
+    if (isEpglCompositeTool(toolName) && opts.epglDocuments) {
+      const files = await opts.epglDocuments().catch(() => [] as EpglCaseFile[]);
+      if (files.length) {
+        const token =
+          entry.spec.authType === "oauth2_cc"
+            ? await getClientCredentialsToken(entry.spec).catch(() => null)
+            : runtimeToken();
+        const filled = await withEpglDocumentFiles(input, files, async (f) => {
+          if (!token) return null;
+          const { body: mp, contentType } = contentVersionMultipart(f, f.fileName);
+          const res = await trackedFetch(
+            `${entry.spec.baseUrl}/services/data/v60.0/sobjects/ContentVersion`,
+            { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": contentType }, body: mp as unknown as BodyInit },
+            { agentId, conversationId: opts.conversationId, integration: entry.integration, tool: `${toolName}:ContentVersion` }
+          );
+          if (!res.ok) return null;
+          const j = (await res.json().catch(() => null)) as { id?: string } | null;
+          return typeof j?.id === "string" ? j.id : null;
+        });
+        input = filled.input ?? input;
+        if (filled.uploaded.length || filled.inlined.length || filled.unmatched.length || filled.failed.length) {
+          console.log(
+            `[epgl-2.0] documents: ${filled.inlined.length} inline, ${filled.uploaded.length} uploaded` +
+              `${filled.unmatched.length ? `, unmatched ${filled.unmatched.join("/")}` : ""}` +
+              `${filled.failed.length ? `, FAILED ${filled.failed.join("/")}` : ""}`
+          );
+        }
+        // A slot we could not fill was dropped rather than sent hollow. Say so,
+        // so the model asks for it again instead of telling the customer it is
+        // on file.
+        if (filled.failed.length || filled.unmatched.length) {
+          documentNote =
+            `NOT EVERY DOCUMENT WENT WITH THIS APPLICATION. These slots had no file behind them and were left off rather than filed empty: ` +
+            `${[...filled.failed, ...filled.unmatched].join(", ")}. Everything else was submitted. Ask the customer to upload the missing ` +
+            `one(s) and send them again — do NOT tell them the whole application failed.`;
+        }
       }
     }
 
@@ -4755,6 +4826,15 @@ export async function buildApiTools(
         /* diagnostics must never take down the call they are describing */
       });
     }
+    /**
+     * A document that could not be filled is reported WITH the success.
+     *
+     * The application itself went; one slot did not. Returning an error would
+     * have the model tell the customer the submission failed and ask them to do
+     * it all again, which is the 2 September failure in reverse — so the result
+     * stands and the gap is named next to it.
+     */
+    if (documentNote && !res.isError) res = { ...res, result: `${res.result}\n\n${documentNote}` };
     return res;
   };
 

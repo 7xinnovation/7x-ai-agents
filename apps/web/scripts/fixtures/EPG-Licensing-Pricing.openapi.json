@@ -3,7 +3,7 @@
   "info": {
     "title": "EPG Licensing - Pricing API (step 3)",
     "version": "1.1.0",
-    "description": "Fee calculation for the delivery-activities regulation. The existing pricing endpoint answers a new-regulation application with the quote the Fee Calculator derives from the licence catalogue: one item per fee line (base fee, per-site / per-locker / per-vehicle components, discounts), available from Draft onwards, re-quoted on every call until the fee is paid, frozen afterwards. Legacy applications keep the previous behaviour. Generated from the NewLaw sandbox catalogue on 2026-10-13T10:18:15Z."
+    "description": "Fee calculation for the delivery-activities regulation. The existing pricing endpoint answers a new-regulation application with the quote the Fee Calculator derives from the licence catalogue: one item per fee line (base fee, per-site / per-locker / per-vehicle components, discounts), available from Draft onwards, re-quoted on every call until the fee is paid, frozen afterwards. Legacy applications keep the previous behaviour. Generated from the NewLaw sandbox catalogue on 2026-10-21T08:25:45Z."
   },
   "servers": [
     {
@@ -50,12 +50,12 @@
                   "client_id": {
                     "type": "string",
                     "description": "Consumer key of the External Client App",
-                    "example": "<<EPGL_NEWLAW_CLIENT_ID>>"
+                    "example": "EPGL_NEWLAW_CLIENT_ID (read from the environment)"
                   },
                   "client_secret": {
                     "type": "string",
                     "description": "Consumer secret of the External Client App",
-                    "example": "<<EPGL_NEWLAW_CLIENT_SECRET>>"
+                    "example": "EPGL_NEWLAW_CLIENT_SECRET (read from the environment)"
                   }
                 }
               }
@@ -103,248 +103,14 @@
                 "$ref": "#/components/schemas/PricingRequest"
               },
               "examples": {
-                "CEP30-UAE-SME-DOM": {
-                  "summary": "CEP Licence (≤30 kg) — UAE-national-owned SME — Domestic (expected 1000 AED)",
+                "byApplicationId": {
+                  "summary": "Quote by the applicationId the create response returned (expected per product: CEP30-UAE-SME-DOM 1000 AED; CEP30-UAE-SME-INTL 2000 AED; CEP30-NONUAE-SME-DOM 5000 AED; CEP30-NONUAE-SME-INTL 10000 AED; CEP30-GEN-DOM 20000 AED; CEP30-GEN-INTL 40000 AED; FOODMED 500 AED; INTERMED 5000 AED; LOCKERS 1000 AED; OUTSOURCE no fee)",
                   "value": {
                     "entityId": "EPG Portal",
                     "quotationRequest": {
                       "requestOn": "2026-10-13T09:00:00.000Z",
                       "appIdentifier": {
-                        "applicationId": "APP-CEP30-UAE-SME-DOM-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "CEP30-UAE-SME-INTL": {
-                  "summary": "CEP Licence (≤30 kg) — UAE-national-owned SME — Domestic and International (expected 2000 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-CEP30-UAE-SME-INTL-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "CEP30-NONUAE-SME-DOM": {
-                  "summary": "CEP Licence (≤30 kg) — Non-UAE-national-owned SME — Domestic (expected 5000 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-CEP30-NONUAE-SME-DOM-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "CEP30-NONUAE-SME-INTL": {
-                  "summary": "CEP Licence (≤30 kg) — Non-UAE-national-owned SME — Domestic and International (expected 10000 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-CEP30-NONUAE-SME-INTL-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "CEP30-GEN-DOM": {
-                  "summary": "CEP Licence (≤30 kg) — General — Domestic (expected 20000 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-CEP30-GEN-DOM-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "CEP30-GEN-INTL": {
-                  "summary": "CEP Licence (≤30 kg) — General — Domestic and International (expected 40000 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-CEP30-GEN-INTL-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "FOODMED": {
-                  "summary": "Food and Medicine Delivery (expected 500 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-FOODMED-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "INTERMED": {
-                  "summary": "Intermediation and Electronic Platform Services (expected 5000 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-INTERMED-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "LOCKERS": {
-                  "summary": "Electronic Lockers Service and PUDO (expected 1000 AED)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-LOCKERS-ONECALL-01",
-                        "serviceId": "LICENSING",
-                        "serviceVersion": "1.0",
-                        "serviceName": {
-                          "en": "Licence application",
-                          "ar": "طلب رخصة"
-                        },
-                        "serviceType": {
-                          "code": "NEWREG",
-                          "en": "New regulation licence",
-                          "ar": "رخصة"
-                        },
-                        "requestType": "New"
-                      },
-                      "payType": "PayToSubmit",
-                      "infos": []
-                    }
-                  }
-                },
-                "OUTSOURCE": {
-                  "summary": "Outsourcing Services (expected no application fee)",
-                  "value": {
-                    "entityId": "EPG Portal",
-                    "quotationRequest": {
-                      "requestOn": "2026-10-13T09:00:00.000Z",
-                      "appIdentifier": {
-                        "applicationId": "APP-OUTSOURCE-ONECALL-01",
+                        "applicationId": "LR-53330",
                         "serviceId": "LICENSING",
                         "serviceVersion": "1.0",
                         "serviceName": {
@@ -430,7 +196,7 @@
                 "properties": {
                   "applicationId": {
                     "type": "string",
-                    "description": "applicationId__c of the application"
+                    "description": "The applicationId returned by the create response (LR-xxxxx, issued by Salesforce)"
                   },
                   "serviceId": {
                     "type": "string"

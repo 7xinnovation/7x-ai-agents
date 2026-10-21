@@ -48,7 +48,7 @@ const APPLY = process.argv.includes("--apply");
 const catArg = process.argv.indexOf("--catalogue");
 const CATALOGUE = catArg !== -1 && process.argv[catArg + 1]
   ? resolve(process.argv[catArg + 1]!)
-  : resolve(here, "fixtures/epgl-catalogue-2026-10-19.json");
+  : resolve(here, "fixtures/epgl-catalogue-2026-10-21.json");
 
 const SLUG = "epgl-dialog";
 const JOURNEY = "new_license";

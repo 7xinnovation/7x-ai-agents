@@ -1,0 +1,295 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EPG Licensing - Licence Retrieval API (step 6)",
+    "version": "1.1.0",
+    "description": "Issued licence and its e-sealed document. Generated from the NewLaw sandbox on 2026-10-21T08:25:45Z."
+  },
+  "servers": [
+    {
+      "url": "https://epro--newlaw.sandbox.my.salesforce.com",
+      "description": "NewLaw sandbox"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication"
+    },
+    {
+      "name": "Licence"
+    }
+  ],
+  "paths": {
+    "/services/oauth2/token": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get an access token (client credentials)",
+        "security": [],
+        "description": "Send grant_type=client_credentials with the client id and secret of the External Client App. Use access_token as Bearer token on every other call. Tokens expire after about two hours.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "grant_type",
+                  "client_id",
+                  "client_secret"
+                ],
+                "properties": {
+                  "grant_type": {
+                    "type": "string",
+                    "enum": [
+                      "client_credentials"
+                    ],
+                    "example": "client_credentials"
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "description": "Consumer key of the External Client App",
+                    "example": "EPGL_NEWLAW_CLIENT_ID (read from the environment)"
+                  },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Consumer secret of the External Client App",
+                    "example": "EPGL_NEWLAW_CLIENT_SECRET (read from the environment)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "instance_url": {
+                      "type": "string"
+                    },
+                    "token_type": {
+                      "type": "string",
+                      "description": "Bearer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/services/apexrest/licensing/licence": {
+      "get": {
+        "tags": [
+          "Licence"
+        ],
+        "summary": "Retrieve an issued licence and its document (step 6)",
+        "description": "Send one of applicationId, licenceNumber or tradeLicence. Returns the licence record(s): number, product, tier, validity, conditional state and company, plus the licence document produced by the existing DocuSign generation and e-seal (the same artefact as legacy licences). includeDocument=true embeds the PDF as base64. generate=true asks for generation when no document exists yet (asynchronous; poll again). Read-only otherwise.",
+        "parameters": [
+          {
+            "name": "applicationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "APP-HAPPY-02"
+          },
+          {
+            "name": "licenceNumber",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "4"
+          },
+          {
+            "name": "tradeLicence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "TL-SAMPLE-0001"
+          },
+          {
+            "name": "includeDocument",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "generate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Licence(s)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No search parameter sent"
+          },
+          "404": {
+            "description": "No application or licence found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "access_token from /services/oauth2/token"
+      }
+    },
+    "schemas": {
+      "LicenceResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "licences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Licence"
+            }
+          }
+        }
+      },
+      "Licence": {
+        "type": "object",
+        "properties": {
+          "licenceNumber": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Salesforce licence record name"
+          },
+          "applicationId": {
+            "type": "string"
+          },
+          "applicationReference": {
+            "type": "string"
+          },
+          "productCode": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "activityCode": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "Active | Conditional | Revoked | Expired | Cancelled"
+          },
+          "validFrom": {
+            "type": "string",
+            "format": "date"
+          },
+          "validTo": {
+            "type": "string",
+            "format": "date"
+          },
+          "conditional": {
+            "type": "boolean"
+          },
+          "conditionalUntil": {
+            "type": "string",
+            "format": "date"
+          },
+          "inspectionDue": {
+            "type": "string",
+            "format": "date"
+          },
+          "issuedOn": {
+            "type": "string",
+            "format": "date"
+          },
+          "company": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "tradeLicenceNumber": {
+                "type": "string"
+              }
+            }
+          },
+          "document": {
+            "type": "object",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "description": "Available | Not generated yet | Generation requested"
+              },
+              "fileName": {
+                "type": "string"
+              },
+              "contentDocumentId": {
+                "type": "string"
+              },
+              "generatedOn": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "sizeBytes": {
+                "type": "integer"
+              },
+              "base64": {
+                "type": "string",
+                "format": "byte",
+                "description": "Only with includeDocument=true"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
