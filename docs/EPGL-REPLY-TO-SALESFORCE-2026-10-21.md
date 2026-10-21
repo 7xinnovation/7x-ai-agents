@@ -85,12 +85,30 @@ will be verifying against:
 Send the test event whenever you are ready and we will verify the signature
 together.
 
-**Still to confirm from our side**, because both need a write and we did not
-want to create applications in your sandbox without saying so first: the
-two-step `ContentVersion` upload for files over 4 MB (3), and that re-sending a
-create after a timeout returns the same application rather than a second one
-(1). Tell us if you would rather we ran those against a particular company, or
-we will use a clearly-marked test one.
+**Large files (3) and the retry (1) — both confirmed.** We ran these against a
+company named `7X TEST - DO NOT PROCESS - 20261021A`, which you may want to
+clear down:
+
+- A create re-sent with an identical body returned **the same application**,
+  `LR-54039`, and the same record id — not a second one. Exactly as you said.
+- A **6.27 MB** PDF went up through `ContentVersion` and attached to its
+  Memorandum of Association slot via `EPG_File_Id__c`. The status call shows it
+  as `uploaded: true, validationStatus: "Passed"`.
+
+One note from that, in case it saves somebody a morning. Posting the multipart
+with a standard `FormData` is rejected:
+
+```
+400 INVALID_MULTIPART_REQUEST
+"Cannot include more than one binary part"
+```
+
+The `entity_content` part must carry **no filename**, and most HTTP clients add
+one automatically when the part is a file or blob object. Building the body by
+hand with `Content-Disposition: form-data; name="entity_content"` and nothing
+else on that line works. Worth a line in the Documents collection's
+description — the Postman request itself is fine, it is only hand-written
+clients that trip.
 
 Thanks again — this moves us a long way forward.
 
