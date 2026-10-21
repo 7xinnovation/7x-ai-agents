@@ -39,6 +39,21 @@ Delete the branch once it is in both.
   later merge between the branches a conflict resolution against itself.
 - **Do not branch a fix off `staging`.** See rule 1.
 
+## The NXN callback work, which was already on staging before the merge
+
+`41632af` (the browser CAPTCHA token) and its three doc commits landed on
+`staging` **before** EPGL 2.0 did, so they sit below the merge in the history.
+They do not need any of the above: promoting them is still a clean
+fast-forward, because `c50bfef` is the last commit before the 2.0 merge.
+
+```
+git checkout main && git merge c50bfef --ff-only && git push origin main
+```
+
+`git log --oneline main..c50bfef` first — it should list the four callback
+commits and nothing else. This is what to run when Emirates Post add our
+domains to their Turnstile site key and the callback is ready to go live.
+
 ## When EPGL 2.0 does go to production
 
 Merge `staging` into `main` normally. The fixes that travelled the route above
