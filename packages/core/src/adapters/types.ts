@@ -51,6 +51,18 @@ export interface CRMAdapter {
        * everything again. See handoverContext.
        */
       context?: HandoverContext;
+      /**
+       * What their CRM wants on the case besides a name and a sentence: the
+       * case type picklist their queue routes on, and the emirate, PO Box and
+       * tracking number an officer would otherwise ring back to ask for. Read
+       * from the customer's own words and the journey — see caseIntakeFrom.
+       */
+      intake?: {
+        caseType?: string;
+        emirateCode?: string;
+        poBoxNumber?: string;
+        trackingNumber?: string;
+      };
     }
   ): Promise<{ reference: string }>;
   /** Detect an existing active request for the same entity (duplicate guard). */

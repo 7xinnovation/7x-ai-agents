@@ -1,3 +1,4 @@
+import { caseIntakeFrom } from "./caseIntake";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tr, type AgentDefinition, type CaseState, type Journey, type LocalizedString, type Locale } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
@@ -1017,6 +1018,22 @@ export async function dispatchTool(
           reason: String(input.reason ?? ""),
           userRef: ctx.userRef,
           journeyKey: state.journeyKey,
+          /**
+           * WHAT KIND OF CASE THIS IS, AND WHAT WE ALREADY KNOW.
+           *
+           * Their CRM routes on a case type picklist and carries the emirate,
+           * PO Box and tracking number. All four were going across empty with
+           * the type hardcoded to Inquiry, so a complaint about a lost parcel
+           * reached their queue looking like a question about opening hours.
+           *
+           * Read from the customer's own words — their stated reason and what
+           * they just said — and from the journey, which already holds a box
+           * number nobody should be asked for twice.
+           */
+          intake: caseIntakeFrom(
+            [String(input.reason ?? ""), ctx.userMessage ?? ""].join(" \n "),
+            state.data as Record<string, unknown>
+          ),
           // THE CONTEXT GOES WITH IT. The artefact asks that the request, its
           // context and the actions already taken transfer to the officer; what
           // transferred was a name, a number and the customer's own sentence,

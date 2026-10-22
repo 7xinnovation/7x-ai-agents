@@ -41,10 +41,18 @@ export interface EpCaseInput {
   mobile: string;
   email?: string;
   message: string;
+  /**
+   * Their picklist, which their queue routes and reports on. Anything outside
+   * the four values is dropped rather than sent — a case type they do not know
+   * fails the whole request, and the customer loses a callback over a word.
+   */
+  caseType?: string;
   emirateCode?: string;
   poBoxNumber?: string;
   trackingNumber?: string;
 }
+
+const CASE_TYPES = ["Inquiry", "Complaint", "Feedback", "Compliment"];
 
 export type EpCaseResult =
   | { ok: true; caseNumber: string }
@@ -161,9 +169,10 @@ export async function raiseEpCase(
     return { ok: false, reason: "rejected", detail: "their CRM requires a valid email address on the case, and this callback has none" };
   }
 
+  const caseType = CASE_TYPES.find((t) => t.toLowerCase() === String(input.caseType ?? "").trim().toLowerCase()) ?? "Inquiry";
   const body = {
     origin: "Web-EP",
-    caseType: "Inquiry",
+    caseType,
     firstName: input.firstName,
     lastName: input.lastName,
     mobilePhone: mobile,
@@ -196,12 +205,37 @@ export async function raiseEpCase(
   try {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (!crm) headers["x-turnstile-token"] = token;
-    const res = await trackedFetch(
-      crm ? crm.url : `${base}/nextApi/case`,
-      { method: "POST", headers, body: JSON.stringify(body), signal: ctl.signal },
-      { ...ctx, integration: "Emirates Post enquiries", tool: "ep_raise_case" }
-    );
-    const text = await res.text();
+    const url = crm ? crm.url : `${base}/nextApi/case`;
+    const post = (b: typeof body) =>
+      trackedFetch(
+        url,
+        { method: "POST", headers, body: JSON.stringify(b), signal: ctl.signal },
+        { ...ctx, integration: "Emirates Post enquiries", tool: "ep_raise_case" }
+      );
+    let res = await post(body);
+    let text = await res.text();
+
+    /**
+     * A FIELD WE INFERRED MUST NEVER COST THE CALLBACK.
+     *
+     * The emirate, PO Box and tracking number are read out of what the customer
+     * said. That is worth doing — an officer who has them does not ring back to
+     * ask — but it means we are sending values their validator has never seen
+     * from us before, and we do not have their list of accepted emirate codes.
+     *
+     * So a 400 with any of them set is retried ONCE without them. The customer
+     * gets their case either way, and the log says which field their validator
+     * objected to, which is how the list gets filled in properly.
+     */
+    const inferred = [body.emirateCode, body.poBoxNumber, body.trackingNumber].some(Boolean);
+    if (res.status === 400 && inferred) {
+      log.warn("ep_case_retry_without_inferred", {
+        detail: text.slice(0, 300),
+        sent: { emirateCode: body.emirateCode, poBoxNumber: body.poBoxNumber, trackingNumber: body.trackingNumber },
+      });
+      res = await post({ ...body, emirateCode: "", poBoxNumber: "", trackingNumber: "" });
+      text = await res.text();
+    }
     if (!crm && (res.status === 403 || /captcha/i.test(text))) {
       return { ok: false, reason: "captcha", detail: text.slice(0, 200) };
     }
