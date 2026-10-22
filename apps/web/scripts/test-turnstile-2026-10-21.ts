@@ -91,6 +91,12 @@ withTurnstileToken("", () => {
 
 // --------------------------------------------------------------- raiseEpCase
 {
+  // The keyed CRM route, added 22 October, takes precedence over everything
+  // below; this file is about the fallback, so it is cleared for the duration.
+  const savedCrmBase = process.env.NXN_CRM_BASE_URL;
+  const savedCrmKey = process.env.NXN_CRM_API_KEY;
+  delete process.env.NXN_CRM_BASE_URL;
+  delete process.env.NXN_CRM_API_KEY;
   const savedBase = process.env.NXN_CASE_API_BASE_URL;
   const savedTok = process.env.NXN_CASE_TURNSTILE_TOKEN;
   delete process.env.NXN_CASE_TURNSTILE_TOKEN;
@@ -144,6 +150,8 @@ withTurnstileToken("", () => {
   server.close();
   if (savedBase) process.env.NXN_CASE_API_BASE_URL = savedBase; else delete process.env.NXN_CASE_API_BASE_URL;
   if (savedTok) process.env.NXN_CASE_TURNSTILE_TOKEN = savedTok; else delete process.env.NXN_CASE_TURNSTILE_TOKEN;
+  if (savedCrmBase) process.env.NXN_CRM_BASE_URL = savedCrmBase;
+  if (savedCrmKey) process.env.NXN_CRM_API_KEY = savedCrmKey;
 }
 
 // ------------------------------------------------------------- the wiring

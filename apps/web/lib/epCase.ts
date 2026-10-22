@@ -21,8 +21,14 @@
  * as a manual override for probing their endpoint by hand; it cannot serve real
  * traffic, because the second request would replay a burnt token.
  *
- * When no token reaches us the caller still falls back to the ops mailbox rather
- * than losing the callback.
+ * SUPERSEDED, 22 October. Emirates Post gave us a DIRECT CRM ENDPOINT — the
+ * same case create, authenticated with an API key instead of a CAPTCHA, which a
+ * server can call. When NXN_CRM_BASE_URL and NXN_CRM_API_KEY are set that is the
+ * route taken and no browser token is involved at all. Everything above is kept
+ * as the fallback for an environment that has not been given the key yet.
+ *
+ * When neither route is configured the caller still falls back to the ops
+ * mailbox rather than losing the callback.
  */
 import { log } from "./logger";
 import { trackedFetch } from "./apiCallLog";
@@ -57,23 +63,52 @@ export function epMobile(raw: string | undefined): string {
   return /^971\d{9,}$/.test(national) ? `00${national}` : "";
 }
 
+/**
+ * The direct CRM endpoint, when we have been given one.
+ *
+ * Supplied 22 October (Michael, via Hussein) as a Postman collection: the same
+ * body as the contact form, on their CRM rather than behind the website, keyed
+ * rather than CAPTCHA-gated. It is route 3 of the four in
+ * docs/NXN-CALLBACK-BLOCKED-2026-09-03.md — the one we asked for in September.
+ *
+ * THE KEY TRAVELS AS A QUERY PARAMETER. That is their design. It is masked by
+ * name in the API log (`maskUrl` in lib/apiCallLog), so it does not reach our
+ * database or the admin console; do not move it into the path, where it would.
+ */
+export function crmEndpoint(): { url: string } | null {
+  const base = (process.env.NXN_CRM_BASE_URL ?? "").replace(/\/$/, "");
+  const key = (process.env.NXN_CRM_API_KEY ?? "").trim();
+  if (!base || !key) return null;
+  return { url: `${base}/Case?X-API-KEY=${encodeURIComponent(key)}` };
+}
+
 export async function raiseEpCase(
   input: EpCaseInput,
   /** Who it belongs to, for the admin's API Logs page. */
   ctx: { agentId?: string; conversationId?: string } = {}
 ): Promise<EpCaseResult> {
+  // The keyed CRM route first. It needs no browser token, so the customer's
+  // Turnstile token is left unspent rather than burnt on a call that ignores it.
+  const crm = crmEndpoint();
   const base = (process.env.NXN_CASE_API_BASE_URL ?? "").replace(/\/$/, "");
-  // The browser's token first; the env var is the by-hand override (see above).
-  const token = takeTurnstileToken() ?? process.env.NXN_CASE_TURNSTILE_TOKEN ?? "";
-  if (!base) return { ok: false, reason: "not_configured", detail: "NXN_CASE_API_BASE_URL is not set" };
-  if (!token) {
-    return {
-      ok: false,
-      reason: "not_configured",
-      detail:
-        "no x-turnstile-token — /nextApi/case rejects every request without one, and this turn carried none " +
-        "(is NXN_CASE_TURNSTILE_SITE_KEY set, and did the widget load in the customer's browser?)",
-    };
+  const token = crm ? "" : (takeTurnstileToken() ?? process.env.NXN_CASE_TURNSTILE_TOKEN ?? "");
+  if (!crm) {
+    if (!base) {
+      return {
+        ok: false,
+        reason: "not_configured",
+        detail: "neither NXN_CRM_BASE_URL + NXN_CRM_API_KEY nor NXN_CASE_API_BASE_URL is set",
+      };
+    }
+    if (!token) {
+      return {
+        ok: false,
+        reason: "not_configured",
+        detail:
+          "no x-turnstile-token — /nextApi/case rejects every request without one, and this turn carried none " +
+          "(is NXN_CASE_TURNSTILE_SITE_KEY set, and did the widget load in the customer's browser?)",
+      };
+    }
   }
   const mobile = epMobile(input.mobile);
   if (!mobile) return { ok: false, reason: "rejected", detail: `mobile ${input.mobile} is not a UAE number their form accepts` };
@@ -95,19 +130,21 @@ export async function raiseEpCase(
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 15000);
   try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (!crm) headers["x-turnstile-token"] = token;
     const res = await trackedFetch(
-      `${base}/nextApi/case`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-turnstile-token": token },
-        body: JSON.stringify(body),
-        signal: ctl.signal,
-      },
+      crm ? crm.url : `${base}/nextApi/case`,
+      { method: "POST", headers, body: JSON.stringify(body), signal: ctl.signal },
       { ...ctx, integration: "Emirates Post enquiries", tool: "ep_raise_case" }
     );
     const text = await res.text();
-    if (res.status === 403 || /captcha/i.test(text)) {
+    if (!crm && (res.status === 403 || /captcha/i.test(text))) {
       return { ok: false, reason: "captcha", detail: text.slice(0, 200) };
+    }
+    // On the keyed route a 401/403 means the API KEY, not a challenge. Say so,
+    // rather than sending whoever reads the log back to the Turnstile thread.
+    if (crm && (res.status === 401 || res.status === 403)) {
+      return { ok: false, reason: "rejected", detail: `HTTP ${res.status} — NXN_CRM_API_KEY rejected: ${text.slice(0, 160)}` };
     }
     if (!res.ok) return { ok: false, reason: "rejected", detail: `HTTP ${res.status} ${text.slice(0, 200)}` };
     let parsed: Record<string, unknown> = {};

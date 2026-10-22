@@ -109,6 +109,47 @@ The second unknown, which only a live attempt answers: whether their
 `/nextApi/case` handler passes the token to `siteverify` with an expected
 hostname of its own. If it does, our domain has to be acceptable there too.
 
+## RESOLVED, 22 October 2026 — they gave us the direct CRM endpoint
+
+Michael's call, relayed by Hussein: rather than whitelisting our hostnames on
+the Turnstile key, Emirates Post shared a **CRM case-create API** keyed with an
+`X-API-KEY`. That is **route 1/3 below — the one we asked for in September** —
+and it removes the CAPTCHA from the path entirely, because a server can call it.
+
+```http
+POST https://crm-stg.epservices.ae/api/CRM/Case?X-API-KEY=<key>
+Content-Type: application/json
+```
+
+| | base URL |
+|---|---|
+| staging | `https://crm-stg.epservices.ae/api/CRM` |
+| production | `https://crm.epservices.ae/api/CRM` |
+
+**The body is the one we already send** — the same flat payload taken from their
+contact form in September, `origin: "Web-EP"` and the `00971…` mobile included.
+Nothing about the request shape changed. `caseType` is
+`Inquiry | Complaint | Feedback | Compliment`, and attachments keep the
+`{ body, name, contentType }` shape.
+
+**Two things to know about the key.** It is **one key for both environments**,
+and it travels as a **query parameter**, which is their design. Every one of our
+outbound calls is written to the API log the admin console shows, so the key is
+masked there by name (`maskUrl` in `lib/apiCallLog`) and asserted to stay masked
+in `scripts/test-ep-crm-2026-10-22.ts`. It must never move into the path, where
+it would not be.
+
+**The Turnstile work is now the fallback, not the plan.** `raiseEpCase` takes
+the keyed route whenever `NXN_CRM_BASE_URL` and `NXN_CRM_API_KEY` are both set,
+and leaves the customer's browser token unspent. Without them it behaves exactly
+as before. So the hostname-whitelist request below (`agent.7x.ae`,
+`7xagents.7x-lab.com`) is **no longer blocking** — worth leaving with them only
+if they would rather the public form's route be the one we use.
+
+Still to do: file one test case against **staging** to confirm the response
+shape (we have no sample response from them), then set the two variables on
+staging, then production.
+
 ## What would unblock it — any one of these
 
 1. **An API key or service credential** that bypasses Turnstile for our
@@ -138,10 +179,12 @@ because a call without one can only ever 403.
 
 Configuration, as it stands on 21 October:
 
-| | `NXN_CASE_API_BASE_URL` | `NXN_CASE_TURNSTILE_SITE_KEY` |
-|---|---|---|
-| staging | `https://www-stg.emiratespost.ae` | set |
-| production | *unset* | *unset* |
+| | `NXN_CRM_BASE_URL` | `NXN_CRM_API_KEY` | `NXN_CASE_API_BASE_URL` | `NXN_CASE_TURNSTILE_SITE_KEY` |
+|---|---|---|---|---|
+| staging | *to set* | *to set* | `https://www-stg.emiratespost.ae` | set |
+| production | *to set* | *to set* | *unset* | *unset* |
+
+The first two take precedence; the last two are the fallback described above.
 
 Staging points at **their** staging site, which is why it is the right place to
 try this: a case filed there lands in their test environment, not in the queue
