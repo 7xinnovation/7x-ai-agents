@@ -177,7 +177,30 @@ The exact field name their response carries was not captured — the reader in
 `caseNumberFrom` accepts every plausible spelling rather than pinning one, so
 it does not need to be. Do not narrow it without a sample response from them.
 
-Still to do: set the two variables on staging, then production.
+### Live on staging, end to end, 22 October
+
+`NXN_CRM_BASE_URL` and `NXN_CRM_API_KEY` are set on `app-7xil-agents-stg`, and
+the journey was driven through the chat as a customer would:
+
+| what the customer does | what they get |
+|---|---|
+| asks for a callback, gives name + mobile | asked for an email, once |
+| gives an email | **case `01246848`** — a real reference their team can look up |
+| says they have no email | `ENQ-…` and the request still goes to the team |
+
+**The email is the thing nobody knew about.** Their CRM refuses a case without
+one — `HTTP 400 {"errors":{"Email":["Email should not be empty.","Email should
+be a valid email address."]}}` — and the journey had only ever asked for a name
+and a mobile. Every real callback was being refused and quietly diverted. It
+had never shown itself because until 21 October every request died at the
+CAPTCHA before their validator saw it.
+
+Worth saying plainly: testing `raiseEpCase` directly proved nothing about this,
+because the probe passed an address the journey never collects. Only driving
+the actual conversation found it.
+
+Production is deliberately still unset. Three test cases for Emirates Post to
+clear down: `01246847`, `01246848`, and the timed-out first attempt.
 
 ## What would unblock it — any one of these
 
