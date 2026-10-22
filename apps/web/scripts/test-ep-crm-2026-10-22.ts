@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
-import { crmEndpoint, raiseEpCase, epMobile } from "@/lib/epCase";
+import { crmEndpoint, raiseEpCase, epMobile, caseNumberFrom } from "@/lib/epCase";
 import { maskUrl } from "@/lib/apiCallLog";
 import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
 
@@ -48,7 +48,7 @@ async function main() {
   process.env.NXN_CRM_BASE_URL = "https://crm-stg.epservices.ae/api/CRM/";
   const ep = crmEndpoint();
   check("both set gives an endpoint", ep !== null);
-  check("built as /Case with the key as a query parameter", ep?.url.startsWith("https://crm-stg.epservices.ae/api/CRM/Case?X-API-KEY="), ep?.url);
+  check("built as /Case with the key as a query parameter", !!ep?.url.startsWith("https://crm-stg.epservices.ae/api/CRM/Case?X-API-KEY="), ep?.url);
   check("a trailing slash on the base does not double up", !ep?.url.includes("CRM//Case"), ep?.url);
   check("the colon in their key is encoded, not sent raw", ep!.url.includes("%3A"), ep?.url);
 
@@ -123,6 +123,26 @@ async function main() {
   check("without the key we fall back to the CAPTCHA route", old.ok && old.caseNumber === "00055555", old);
   check("which does send the browser's token", sawTurnstile === "browser-token-xyz", sawTurnstile);
   check("and posts to /nextApi/case", sawUrl.startsWith("/nextApi/case"), sawUrl);
+
+  // -------------------------------- the case number, whatever they call it
+  // Their keyed endpoint came with NO sample response, so this is the one
+  // thing in the integration still taken on trust. It is kept wide rather
+  // than guessed narrow — and an unrecognised body still fails loudly.
+  const cn = (o: unknown) => caseNumberFrom(JSON.stringify(o));
+  check("caseNumbering — the one shape confirmed first-hand", cn({ caseNumbering: "00012345" }) === "00012345");
+  check("caseNumber", cn({ caseNumber: "00012345" }) === "00012345");
+  check("CaseNumber, as Salesforce spells it", cn({ CaseNumber: "00012345" }) === "00012345");
+  check("case_number", cn({ case_number: "00012345" }) === "00012345");
+  check("caseNo", cn({ caseNo: "00012345" }) === "00012345");
+  check("a number, not a string", cn({ caseNumber: 12345 }) === "12345");
+  check("inside a data envelope", cn({ data: { caseNumber: "00012345" } }) === "00012345");
+  check("inside a result envelope", cn({ result: { CaseNumber: "00012345" } }) === "00012345");
+  check("whitespace trimmed", cn({ caseNumber: "  00012345 " }) === "00012345");
+  check("an empty value is not a case number", cn({ caseNumber: "   " }) === "");
+  check("a message is not a case number", cn({ message: "ok", status: "success" }) === "");
+  check("nor is an unrelated id we might be tempted by", cn({ id: "5003X00001abcde" }) === "");
+  check("a non-JSON body yields nothing rather than throwing", caseNumberFrom("<html>502</html>") === "");
+  check("an empty body yields nothing", caseNumberFrom("") === "");
 
   // ------------------------------------------------------------ unchanged bits
   check("mobile normalisation is untouched", epMobile("+971 55 370 8434") === "00971553708434");

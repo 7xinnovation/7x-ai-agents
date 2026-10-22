@@ -82,6 +82,43 @@ export function crmEndpoint(): { url: string } | null {
   return { url: `${base}/Case?X-API-KEY=${encodeURIComponent(key)}` };
 }
 
+/**
+ * The case number out of their response, whatever they call it.
+ *
+ * `caseNumbering` is what the website's contact form reads, and that is the
+ * only shape confirmed first-hand. The keyed CRM endpoint arrived on 22 October
+ * WITHOUT A SAMPLE RESPONSE — the Postman collection they sent saves none — so
+ * the exact field name there is still unknown.
+ *
+ * Rather than guess one, this accepts any of the handful of spellings the same
+ * value plausibly carries, matched case-insensitively, and looks one level into
+ * a `data`/`result`/`response` envelope. A number we do not recognise is NOT
+ * invented: the caller logs the body and falls back to the ops mailbox, which
+ * is the honest outcome and leaves a trace to read.
+ */
+export function caseNumberFrom(text: string): string {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return ""; }
+  const NAME = /^(case ?number(ing)?|case ?no|caseid|ticket ?number|reference ?number)$/i;
+  const pick = (o: unknown): string => {
+    if (!o || typeof o !== "object") return "";
+    for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+      if (!NAME.test(k.replace(/[_-]/g, " "))) continue;
+      const val = typeof v === "number" ? String(v) : typeof v === "string" ? v.trim() : "";
+      if (val) return val;
+    }
+    return "";
+  };
+  const top = pick(parsed);
+  if (top) return top;
+  for (const key of ["data", "result", "response", "case"]) {
+    const nested = (parsed as Record<string, unknown>)?.[key];
+    const found = pick(nested);
+    if (found) return found;
+  }
+  return "";
+}
+
 export async function raiseEpCase(
   input: EpCaseInput,
   /** Who it belongs to, for the admin's API Logs page. */
@@ -147,12 +184,7 @@ export async function raiseEpCase(
       return { ok: false, reason: "rejected", detail: `HTTP ${res.status} — NXN_CRM_API_KEY rejected: ${text.slice(0, 160)}` };
     }
     if (!res.ok) return { ok: false, reason: "rejected", detail: `HTTP ${res.status} ${text.slice(0, 200)}` };
-    let parsed: Record<string, unknown> = {};
-    try { parsed = JSON.parse(text) as Record<string, unknown>; } catch { /* a 200 with no body is still a 200 */ }
-    const caseNumber =
-      (typeof parsed.caseNumbering === "string" && parsed.caseNumbering) ||
-      (typeof parsed.caseNumber === "string" && parsed.caseNumber) ||
-      "";
+    const caseNumber = caseNumberFrom(text);
     if (!caseNumber) {
       log.warn("ep_case_no_number", { body: text.slice(0, 200) });
       return { ok: false, reason: "rejected", detail: "accepted but returned no case number" };
