@@ -146,9 +146,38 @@ as before. So the hostname-whitelist request below (`agent.7x.ae`,
 `7xagents.7x-lab.com`) is **no longer blocking** — worth leaving with them only
 if they would rather the public form's route be the one we use.
 
-Still to do: file one test case against **staging** to confirm the response
-shape (we have no sample response from them), then set the two variables on
-staging, then production.
+### Tested end to end, 22 October
+
+One case raised against their **staging** CRM through our own `raiseEpCase`,
+with Emre's go-ahead:
+
+```
+POST https://crm-stg.epservices.ae/api/CRM/Case?X-API-KEY=***
+→ { ok: true, caseNumber: "01246847" }   in 6.3s
+```
+
+**The key works, the route works, and we get a case number back** — eight
+digits, the same shape their contact form returns. That is the whole thing the
+September document asked for.
+
+**Their response time varies a lot, and that matters.** A wrong key is refused
+in under a second, but an accepted create took **more than 15 seconds on the
+first attempt and 6.3 on the second**. Fifteen seconds was our limit, set in
+September for an endpoint that only ever returned 403 instantly, so the first
+attempt aborted our side having most likely been created on theirs. The keyed
+route now allows 45s (`NXN_CRM_TIMEOUT_MS` overrides) and an abort is reported
+as `timeout`, not `unreachable` — "we do not know" rather than "it did not
+happen", so nobody retries it into a duplicate.
+
+**Two test cases to clear down**, not one: `01246847`, and whatever the first
+timed-out attempt created a few minutes earlier (both named
+`7X TEST / DO NOT PROCESS`).
+
+The exact field name their response carries was not captured — the reader in
+`caseNumberFrom` accepts every plausible spelling rather than pinning one, so
+it does not need to be. Do not narrow it without a sample response from them.
+
+Still to do: set the two variables on staging, then production.
 
 ## What would unblock it — any one of these
 
