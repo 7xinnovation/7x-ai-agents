@@ -239,6 +239,44 @@ export function saysNonResident(message: string | undefined): boolean {
   );
 }
 
+/**
+ * Did the customer express ANY preference about how the key reaches them?
+ *
+ * Reported 21 October. The customer pressed "Skip to payment", was never shown
+ * the key-collection options, and the order summary came out reading
+ * "Key collection: Branch pickup (free)". Branch pickup is free, so nobody was
+ * overcharged — they were simply never asked, about the one remaining choice on
+ * the rental with a price attached to the other side of it. A summary that
+ * states a choice back to somebody who never made it is the part that matters.
+ *
+ * Deliberately self-contained rather than borrowing the web app's
+ * `choseKeyDelivery`: core does not depend on the app, and the two answer
+ * different questions — that one asks whether they picked the COURIER, this one
+ * whether they picked at all. Generous about how they say it, strict about
+ * whether they did. "Skip to payment" is not an answer to an unasked question.
+ */
+export function saidKeyPreference(message: string | undefined): boolean {
+  const t = String(message ?? "")
+    .toLowerCase()
+    .replace(/[\u2019']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  return (
+    // Collect it themselves.
+    /\bcollect\b[^.?!]{0,25}\b(branch|it|key|keys|myself)\b/.test(t) ||
+    /\bbranch\b[^.?!]{0,25}\b(pick ?up|collection|collect)\b/.test(t) ||
+    /\bpick ?(it |them )?up\b/.test(t) ||
+    /من الفرع|الاستلام من|أستلم|استلام من/.test(t) ||
+    // Or have it brought to them.
+    /\bdeliver(ed|y)?\b[^.?!]{0,30}\b(to )?(my |the |your )?address\b/.test(t) ||
+    /\bhave it delivered\b/.test(t) ||
+    /\b(deliver|courier|delivery)\b[^.?!]{0,25}\b(key|keys)\b/.test(t) ||
+    /\b(key|keys)\b[^.?!]{0,25}\b(deliver|delivered|courier|delivery|posted|sent)\b/.test(t) ||
+    /(توصيل|التوصيل)[^.؟!]{0,25}(مفتاح|المفتاح|عنوان|العنوان)/.test(t)
+  );
+}
+
 export interface DispatchInput {
   agent: AgentDefinition;
   state: CaseState;
@@ -686,6 +724,38 @@ export async function dispatchTool(
             result:
               "NOT RECORDED. Only the customer can say a partner lives outside the UAE — a foreign passport does not make somebody a non-resident, and most UAE residents hold one. " +
               "Ask them, once, with three choices: upload the Emirates ID, type the number, or \"this partner lives outside the UAE\". Record this only after they have chosen the third.",
+            state,
+            events,
+            isError: true,
+          };
+        }
+      }
+      /**
+       * HOW THE KEY REACHES THEM IS THE CUSTOMER'S CHOICE, NOT A DEFAULT.
+       *
+       * Reported 21 October. The customer pressed "Skip to payment" — offered
+       * as the alternative to adding an authorised agent — and the assistant
+       * took it as leave to settle the key question too, recording branch
+       * pickup and printing it in the order summary as though they had picked
+       * it. They had not been shown the options at all.
+       *
+       * The field is optional in the journey, which is why nothing stopped it:
+       * the readiness bar reached 100% without it and the summary happily
+       * stated it. Optional means the JOURNEY can finish without the customer
+       * volunteering one; it does not mean the assistant may answer it for
+       * them. One side of this choice costs AED 30.
+       *
+       * Re-recording a value already on the case is allowed, so a correction
+       * later in the same conversation does not trip over this.
+       */
+      if (/^key_delivery(_option)?$/.test(fieldKey)) {
+        const already = String(state.data[fieldKey] ?? "").trim() !== "";
+        if (!already && !saidKeyPreference(ctx.userMessage)) {
+          return {
+            result:
+              "NOT RECORDED. The customer has not said how they want the key, and this is not a choice to make for them — one side of it costs AED 30. " +
+              "Ask them, with both options and their prices: collect from the branch (free), or have it couriered to an address (AED 30). " +
+              "Record it once they have answered. Do not put a key-collection line in a summary or an order until then.",
             state,
             events,
             isError: true,

@@ -258,6 +258,96 @@ const ACK =
   /\b(noted|got it|understood|confirmed|perfect|great|excellent|sure|okay|ok|thanks|thank you)\b|^\s*(?:\u062a\u0645|\u062d\u0633\u0646\u0627\u064b?|\u0645\u0645\u062a\u0627\u0632|\u0639\u0644\u0645\u062a)\b/iu;
 
 /** Does this sentence acknowledge a term that is not the one just chosen? */
+/**
+ * The customer NAMED a duration, inside a sentence of their own.
+ *
+ * `durationChosen` above is deliberately strict: it answers "did they tap the
+ * 2 Years chip", so the whole message has to be the term and nothing else. That
+ * is right for what it does and useless for what was reported on 21 October —
+ * "Mira, can I change the subscription period to two years?" answered with the
+ * full menu of five durations, and the tester replying "I asked to change the
+ * subscription period to two years. Why did you show all the options when my
+ * request was clear?"
+ *
+ * So this is the loose sibling: a duration named as an INSTRUCTION. It wants a
+ * verb or a preposition that makes it a choice rather than a mention, and it
+ * refuses when the customer is plainly asking to SEE the options — "see other
+ * durations" is a button in the widget, and collapsing the menu for somebody
+ * who pressed it would be the same discourtesy pointing the other way.
+ *
+ * Two different terms in one message is a comparison, not a choice, and gets
+ * nothing: "how much for 2 and 3 years" wants the menu it asked for.
+ */
+export function durationRequested(message: string): number | null {
+  const t = String(message ?? "")
+    .toLowerCase()
+    .replace(/[\u2019']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return null;
+
+  // Asking to see what is available is not choosing one of them.
+  if (/\b(what|which|show|see|list|all|other|another|compare|different)\b[^.?!]{0,24}\b(option|options|duration|durations|period|periods|plan|plans|term|terms)\b/.test(t)) return null;
+  if (/\b(option|options|duration|durations|period|periods)\b[^.?!]{0,16}\b(available|do you have|are there)\b/.test(t)) return null;
+  if (/خيارات|المدد المتاحة/.test(t)) return null;
+
+  /**
+   * Arabic says "two years" in one word.
+   *
+   * سنتين and عامين are duals: the number and the noun are the same token, so
+   * the <number><year-word> shape every other branch here looks for never
+   * appears. Handled separately rather than by loosening that shape, which
+   * other guards depend on.
+   */
+  const dual = /(سنتين|عامين)/.exec(t);
+  if (dual) {
+    const instruction = /(أريد|اريد|غير|غيّر|اجعلها|خلها|بدل|تمديد|لمدة|إلى|الى)/.test(t);
+    return instruction ? 2 : null;
+  }
+
+  // A comparison names more than one.
+  const every = [...t.matchAll(new RegExp(`\\b(\\d{1,2}|${Object.keys(SPELLED).join("|")})\\s*[-\u2011\u2013 ]?\\s*${YEAR_WORD}`, "giu"))];
+  const named = new Set(
+    every.map((m) => {
+      const raw = m[1]!;
+      return /^\d+$/.test(raw) ? Number(raw) : (SPELLED[raw] ?? NaN);
+    })
+  );
+  if (named.size !== 1) return null;
+  const years = [...named][0]!;
+  if (!Number.isFinite(years) || years < 1 || years > 30) return null;
+
+  // And it has to read as an instruction, not a passing mention.
+  const Y = `(?:\\d{1,2}|${Object.keys(SPELLED).join("|")})\\s*[-\u2011\u2013 ]?\\s*${YEAR_WORD}`;
+  const asks =
+    new RegExp(`\\b(change|switch|make|set|update|move|extend|upgrade|downgrade|amend|convert)\\b[^.?!]{0,40}\\b${Y}`, "iu").test(t) ||
+    new RegExp(`\\b(want|like|prefer|choose|pick|take|need|go with|continue with|stick with|rent|subscribe)\\b[^.?!]{0,30}\\b${Y}`, "iu").test(t) ||
+    new RegExp(`\\b(to|for)\\s+${Y}`, "iu").test(t) ||
+    new RegExp(`^${Y}\\b`, "iu").test(t) ||
+    new RegExp(`${Y}\\s*(please|instead|then)\\b`, "iu").test(t) ||
+    /(أريد|اريد|غير|غيّر|اجعلها|خلها)/.test(t);
+  return asks ? years : null;
+}
+
+/**
+ * A sentence that asks the customer to pick a duration they have just picked.
+ *
+ * The menu is collapsed to the term they named (see lib/durationCards); this is
+ * the sentence underneath it that would otherwise still say "Which duration
+ * would you like?" over a single card.
+ */
+export function asksToPickDuration(sentence: string): boolean {
+  const t = String(sentence ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  return (
+    /\b(which|what)\b[^.?!]{0,30}\b(duration|period|term|plan|option)s?\b[^.?!]{0,30}\b(would|do|will|like|prefer|choose|want|suit)\b/.test(t) ||
+    /\bhere are\b[^.?!]{0,20}\b(duration|period|term|option)s?\b/.test(t) ||
+    /\b(choose|pick|select)\b[^.?!]{0,20}\b(a |your |the )?(duration|period|term)\b/.test(t) ||
+    /\bأي\b[^.؟!]{0,20}(مدة|المدة)/.test(t) ||
+    /إليك (خيارات|المدد)/.test(t)
+  );
+}
+
 export function contradictsChosenDuration(sentence: string, chosen: number | null): boolean {
   if (!chosen) return false;
   const s = sentence.trim();
@@ -267,7 +357,7 @@ export function contradictsChosenDuration(sentence: string, chosen: number | nul
   return named !== null && named !== chosen;
 }
 
-export function narrationGuard(opts?: { chosenDuration?: () => number | null }) {
+export function narrationGuard(opts?: { chosenDuration?: () => number | null; requestedDuration?: () => number | null }) {
   let buf = "";
   let inFence = false;
 
@@ -291,7 +381,12 @@ export function narrationGuard(opts?: { chosenDuration?: () => number | null }) 
         const sentence = m[1]!;
         // The words may go; the line break they sat on does not. See keptSeparator.
         // The words may go; the line break they sat on does not. See keptSeparator.
-        const drop = isInternalNarration(sentence) || contradictsChosenDuration(sentence, opts?.chosenDuration?.() ?? null);
+        const drop =
+          isInternalNarration(sentence) ||
+          contradictsChosenDuration(sentence, opts?.chosenDuration?.() ?? null) ||
+          // The menu above it has been collapsed to the term they named, so the
+          // question underneath has already been answered (21 October).
+          ((opts?.requestedDuration?.() ?? null) !== null && asksToPickDuration(sentence));
         out += drop ? keptSeparator(m[2]!) : sentence + m[2];
         buf = buf.slice(m[0].length);
         continue;

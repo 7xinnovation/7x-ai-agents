@@ -29,7 +29,7 @@ import { MOCK_PERSONA_SUB, MOCK_PERSONA_EID, MOCK_PERSONA_NAME, MOCK_PERSONA_CON
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
-import { normaliseCompanyKey, buildApiTools } from "@/lib/integrations";
+import { normaliseCompanyKey, buildApiTools, holdTermMismatch } from "@/lib/integrations";
 import {
   companyByEmiratesId,
   companyByAccountId,
@@ -67,7 +67,7 @@ import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
 import { findBlocked, type BlockedMatch } from "@/lib/blocklist";
 import { promisesMapWithout, locateBlock, addressAlreadyKnown, mapOfferGuard, linkGuard, arabicLinks } from "@/lib/locateGuard";
 import { messageLocale, historyLocale } from "@/lib/replyLocale";
-import { narrationGuard, durationChosen } from "@/lib/narrationGuard";
+import { narrationGuard, durationChosen, durationRequested } from "@/lib/narrationGuard";
 import { echoGuard } from "@/lib/echoGuard";
 import { identityGuard, identityValues } from "@/lib/identityGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
@@ -1383,7 +1383,23 @@ export async function POST(req: NextRequest) {
    * been told. Seeing it named in a card is being told.
    */
   let courierSeen = false;
+  /**
+   * The reservation is for a term the customer has since changed (21 Oct).
+   *
+   * Everything authoritative is computed from the hold, so while it disagrees
+   * with the chosen duration there is no figure worth stating: AED 400 printed
+   * under line items reading 600 + 70 + 30 is worse than no total at all.
+   */
+  const staleHold = () => {
+    const hold = apiTools.getLastHold();
+    const d = liveState.data as Record<string, unknown>;
+    return holdTermMismatch(hold?.expiryDate ?? null, str(d.duration) ?? str(d.rental_duration) ?? null);
+  };
+
   const authoritativeAmount = (extras?: { keyDelivery?: boolean }) => {
+    // A hold for the wrong term cannot price this rental. Saying nothing sends
+    // the model back to Rental/Select, which is the only thing that fixes it.
+    if (staleHold()) return null;
     const hold = apiTools.getLastHold();
     // A renewal has no hold; its authoritative figure is the last price Emirates
     // Post quoted for the chosen term and bundle (2026-10-11), so a Noqodi
@@ -3254,7 +3270,10 @@ export async function POST(req: NextRequest) {
         // the duration it acknowledges held to the one the customer just
         // picked, because on 20 October a reply to "1 Year" opened with "Three
         // years, noted."
-        const narration = narrationGuard({ chosenDuration: () => durationChosen(body.userMessage) });
+        const narration = narrationGuard({
+          chosenDuration: () => durationChosen(body.userMessage),
+          requestedDuration: () => durationRequested(body.userMessage),
+        });
         // The model saying the same thing twice in one reply — what a tool round
         // does to a paragraph it started before the round and finished after it.
         // Downstream of the narration guard on purpose: a preamble that guard
@@ -3466,7 +3485,13 @@ export async function POST(req: NextRequest) {
         // And the duration cards, held to the ladder the tool actually priced:
         // a term Emirates Post has never charged for gets no figure rather than
         // the annual rate multiplied out.
-        const durationGuard = durationCardGuard(() => apiTools.getDurationPrices()?.terms ?? null);
+        // A customer who names a term gets that term, not the menu again
+        // (21 October). Collapsed here rather than asked for in the prompt:
+        // the model had already been told, and showed five cards anyway.
+        const durationGuard = durationCardGuard(
+          () => apiTools.getDurationPrices()?.terms ?? null,
+          () => durationRequested(body.userMessage)
+        );
         const totalGuard = proseTotalGuard(() => (apiTools.getLastHold() ? authoritativeAmount() : null));
         let citedThisTurn = false;
         let submittedRef: string | null = null;
