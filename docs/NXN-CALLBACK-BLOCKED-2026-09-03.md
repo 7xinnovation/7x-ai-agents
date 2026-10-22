@@ -199,8 +199,35 @@ Worth saying plainly: testing `raiseEpCase` directly proved nothing about this,
 because the probe passed an address the journey never collects. Only driving
 the actual conversation found it.
 
-Production is deliberately still unset. Three test cases for Emirates Post to
-clear down: `01246847`, `01246848`, and the timed-out first attempt.
+### The rest of the case, 22 October
+
+Their payload carries more than a name and a sentence, and all of it was going
+across empty with `caseType` hardcoded to `Inquiry` — so a lost parcel reached
+their queue looking like a question about opening hours.
+
+| field | where it now comes from |
+|---|---|
+| `caseType` | the customer's own words — Inquiry / Complaint / Feedback / Compliment |
+| `emirateCode` | the journey's emirate, else one named in the conversation |
+| `poBoxNumber` | the journey's box number, else one the customer states |
+| `trackingNumber` | an `EP123456789AE`-shaped reference in what they said |
+
+Inquiry is the default and silence means Inquiry. A complaint wrapped in praise
+is a complaint; a polite thank-you is not a Compliment case.
+
+**We do not have their list of accepted `emirateCode` values.** `DXB` is
+confirmed working and `AUH` is in their own sample; the rest (`SHJ`, `AJM`,
+`UAQ`, `RAK`, `FUJ`) are inferred. So a 400 with any inferred field set is
+retried ONCE without them — the customer gets their case either way, and
+`ep_case_retry_without_inferred` in the log names what their validator
+objected to. **Worth asking them for the real list.**
+
+Verified on staging: a complaint with a tracking number and a box number
+raised case `01246853`.
+
+Production is deliberately still unset. Four test cases for Emirates Post to
+clear down: `01246847`, `01246848`, `01246853`, and the timed-out first
+attempt.
 
 ## What would unblock it — any one of these
 
