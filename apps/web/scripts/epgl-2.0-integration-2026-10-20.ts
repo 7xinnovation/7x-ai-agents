@@ -84,12 +84,20 @@ async function main() {
   const spec = {
     specUrl: "",                       // emailed, not hosted: the fixtures are the source
     baseUrl: SANDBOX,
-    authType: "oauth2_client_credentials",
+    // "oauth2_cc" is the ONLY spelling the runtime knows (AuthType in
+    // lib/integrations). Written as "oauth2_client_credentials" this row looks
+    // complete, logs nothing, and sends no bearer at all — every call comes
+    // back 401 INVALID_SESSION_ID from Salesforce, which reads like expired
+    // credentials rather than an integration that was never authenticating.
+    authType: "oauth2_cc",
     oauthTokenUrl: `${SANDBOX}/services/oauth2/token`,
     oauthClientId: clientId,
-    apiKey: encryptSecret(clientSecret),
+    // THE SECRET BELONGS IN authValue. `apiKey` is a gateway key the runtime
+    // puts in a HEADER on every single request, so the client secret went to
+    // Salesforce on each call and the token grant had nothing to sign with.
+    authValue: encryptSecret(clientSecret),
+    apiKey: null,
     authHeader: "Authorization",
-    authValue: "",
     operations: ops,
   };
 
