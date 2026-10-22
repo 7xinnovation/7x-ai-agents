@@ -48,7 +48,7 @@ export interface EpCaseInput {
 
 export type EpCaseResult =
   | { ok: true; caseNumber: string }
-  | { ok: false; reason: "not_configured" | "captcha" | "rejected" | "unreachable"; detail: string };
+  | { ok: false; reason: "not_configured" | "captcha" | "rejected" | "unreachable" | "timeout"; detail: string };
 
 /**
  * "+971 55 370 8434" -> "00971553708434".
@@ -164,8 +164,24 @@ export async function raiseEpCase(
     attachments: [] as unknown[],
   };
 
+  /**
+   * THEIR CRM IS SLOW, AND A TIMEOUT HERE IS NOT A FAILED CALL.
+   *
+   * Measured 22 October: a wrong key is refused in under a second, but an
+   * ACCEPTED create had not answered after 15 seconds — the old limit — so the
+   * first test case timed out on our side having very likely been created on
+   * theirs. A customer would have got the mailbox fallback and Emirates Post a
+   * case nobody was tracking, and a retry would have made two.
+   *
+   * So the keyed route gets a limit that matches what it actually does, and an
+   * abort is reported as `timeout` rather than `unreachable`: the difference is
+   * "we do not know" versus "it did not happen", and only the first warrants
+   * telling whoever reads the mailbox not to raise it again.
+   */
+  const limitMs = Number(process.env.NXN_CRM_TIMEOUT_MS ?? "") || (crm ? 45000 : 15000);
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 15000);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, limitMs);
   try {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (!crm) headers["x-turnstile-token"] = token;
@@ -191,6 +207,16 @@ export async function raiseEpCase(
     }
     return { ok: true, caseNumber };
   } catch (e) {
+    if (timedOut) {
+      log.warn("ep_case_timeout", { limitMs, route: crm ? "crm" : "nextApi", hint: "the case MAY have been created — do not retry blindly" });
+      return {
+        ok: false,
+        reason: "timeout",
+        detail:
+          `no answer in ${limitMs}ms — THE CASE MAY HAVE BEEN CREATED on their side. ` +
+          "Check their queue before raising another; do not retry automatically.",
+      };
+    }
     return { ok: false, reason: "unreachable", detail: e instanceof Error ? e.message : String(e) };
   } finally {
     clearTimeout(timer);

@@ -124,6 +124,28 @@ async function main() {
   check("which does send the browser's token", sawTurnstile === "browser-token-xyz", sawTurnstile);
   check("and posts to /nextApi/case", sawUrl.startsWith("/nextApi/case"), sawUrl);
 
+  // ------------------------------------------------------------ the timeout
+  // Measured against their staging CRM on 22 October: a wrong key is refused
+  // in under a second, an accepted create had not answered in 15. A timeout
+  // must therefore not read as "it did not happen".
+  {
+    const slow = createServer((_req, res) => { setTimeout(() => { res.writeHead(200); res.end("{}"); }, 5000); });
+    await new Promise<void>((r) => slow.listen(0, "127.0.0.1", r));
+    const sp = (slow.address() as { port: number }).port;
+    process.env.NXN_CRM_BASE_URL = `http://127.0.0.1:${sp}/api/CRM`;
+    process.env.NXN_CRM_API_KEY = KEY;
+    process.env.NXN_CRM_TIMEOUT_MS = "300";
+    const t0 = Date.now();
+    const slowR = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" });
+    check("a slow create times out rather than hanging the turn", Date.now() - t0 < 3000, Date.now() - t0);
+    check("and is reported as a timeout, not as unreachable", !slowR.ok && slowR.reason === "timeout", slowR);
+    check("the detail warns the case MAY exist", !slowR.ok && /MAY HAVE BEEN CREATED/.test(slowR.detail), slowR);
+    check("and says not to retry automatically", !slowR.ok && /do not retry/i.test(slowR.detail), slowR);
+    delete process.env.NXN_CRM_TIMEOUT_MS;
+    slow.close();
+    slow.closeAllConnections?.();
+  }
+
   // -------------------------------- the case number, whatever they call it
   // Their keyed endpoint came with NO sample response, so this is the one
   // thing in the integration still taken on trust. It is kept wide rather
