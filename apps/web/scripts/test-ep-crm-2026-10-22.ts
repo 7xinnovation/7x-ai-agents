@@ -28,6 +28,7 @@ config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env")
 import { crmEndpoint, raiseEpCase, epMobile, caseNumberFrom } from "@/lib/epCase";
 import { maskUrl } from "@/lib/apiCallLog";
 import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
+import { saidNoEmail } from "@dialog/core";
 
 let pass = 0, fail = 0;
 const check = (l: string, ok: boolean, extra?: unknown) => { console.log(ok ? `PASS ${l}` : `FAIL ${l}`, ok ? "" : extra ?? ""); ok ? pass++ : fail++; };
@@ -61,7 +62,7 @@ async function main() {
   // --------------------------------------------------------- nothing set
   clear();
   delete process.env.NXN_CASE_API_BASE_URL;
-  const none = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" });
+  const none = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" });
   check("with neither route configured nothing is called", !none.ok && none.reason === "not_configured", none);
   check("and the message names both routes", !none.ok && /NXN_CRM_BASE_URL/.test(none.detail) && /NXN_CASE_API_BASE_URL/.test(none.detail), none);
 
@@ -82,7 +83,7 @@ async function main() {
   process.env.NXN_CRM_BASE_URL = `http://127.0.0.1:${port}/api/CRM`;
   process.env.NXN_CRM_API_KEY = KEY;
 
-  const ok = await raiseEpCase({ firstName: "Aisha", lastName: "Al Mansoori", mobile: "0553708434", message: "please call me back", emirateCode: "DXB", poBoxNumber: "50500" });
+  const ok = await raiseEpCase({ firstName: "Aisha", lastName: "Al Mansoori", mobile: "0553708434", message: "please call me back", email: "aisha@example.ae", emirateCode: "DXB", poBoxNumber: "50500" });
   check("the keyed route raises the case", ok.ok && ok.caseNumber === "00012345", ok);
   check("it posts to /api/CRM/Case", sawUrl.startsWith("/api/CRM/Case?"), sawUrl);
   check("with the key on the query string", sawUrl.includes("X-API-KEY="), sawUrl);
@@ -93,23 +94,23 @@ async function main() {
 
   // ------------------------------------------ the customer's token is not spent
   await withTurnstileToken("browser-token-abc", async () => {
-    const r = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" });
+    const r = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" });
     check("the keyed route is taken while a browser token is in hand", r.ok, r);
     check("and the token is LEFT UNSPENT for the fallback", hasTurnstileToken(), "token was burnt");
   });
 
   // --------------------------------------------------- a bad key reads as a bad key
   status = 403; reply = JSON.stringify({ message: "Invalid API key" });
-  const bad = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" });
+  const bad = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" });
   check("a 403 on the keyed route is not reported as a CAPTCHA", !bad.ok && bad.reason !== "captcha", bad);
   check("it names the key, so nobody reopens the Turnstile thread", !bad.ok && /NXN_CRM_API_KEY/.test(bad.detail), bad);
   status = 401;
-  const unauth = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" });
+  const unauth = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" });
   check("a 401 reads the same way", !unauth.ok && /NXN_CRM_API_KEY/.test(unauth.detail), unauth);
 
   // -------------------------------------------- accepted but no case number
   status = 200; reply = JSON.stringify({ message: "ok" });
-  const noNum = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" });
+  const noNum = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" });
   check("a 200 with no case number is a failure, not a silent success", !noNum.ok, noNum);
 
   // --------------------------------------- the old route still works untouched
@@ -118,11 +119,50 @@ async function main() {
   process.env.NXN_CASE_API_BASE_URL = `http://127.0.0.1:${port}`;
   sawTurnstile = null;
   const old = await withTurnstileToken("browser-token-xyz", () =>
-    raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" })
+    raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" })
   );
   check("without the key we fall back to the CAPTCHA route", old.ok && old.caseNumber === "00055555", old);
   check("which does send the browser's token", sawTurnstile === "browser-token-xyz", sawTurnstile);
   check("and posts to /nextApi/case", sawUrl.startsWith("/nextApi/case"), sawUrl);
+
+  // -------------------------------------------------------------- the email
+  // HTTP 400 from their CRM, 22 October: "Email should not be empty. Email
+  // should be a valid email address." Every real callback was failing on this,
+  // because the journey only ever asked for a name and a mobile.
+  {
+    process.env.NXN_CRM_BASE_URL = `http://127.0.0.1:${port}/api/CRM`;
+    process.env.NXN_CRM_API_KEY = KEY;
+    sawUrl = "";
+    const noEmail = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe-no-email" });
+    check("no email does not reach their validator", !noEmail.ok && sawUrl === "", noEmail);
+    check("and says why in our words, not theirs", !noEmail.ok && /requires a valid email/.test(noEmail.detail), noEmail);
+    const badEmail = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "not-an-address" });
+    check("nor does a malformed one", !badEmail.ok && sawUrl === "", badEmail);
+    const good = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" });
+    check("a real address goes through", good.ok, good);
+
+    // The CAPTCHA route never validated email, so it must not start now.
+    clear();
+    process.env.NXN_CASE_API_BASE_URL = `http://127.0.0.1:${port}`;
+    const fallbackNoEmail = await withTurnstileToken("t", () =>
+      raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe-no-email" })
+    );
+    check("the fallback route is unchanged by any of this", fallbackNoEmail.ok, fallbackNoEmail);
+    delete process.env.NXN_CASE_API_BASE_URL;
+    process.env.NXN_CRM_BASE_URL = `http://127.0.0.1:${port}/api/CRM`;
+    process.env.NXN_CRM_API_KEY = KEY;
+  }
+
+  // ------------------------------------------- the customer who has no email
+  check("plain 'no' to the email question", saidNoEmail("no, I don't have an email"));
+  check("'I dont have an email address'", saidNoEmail("I dont have an email address"));
+  check("'rather not give my email'", saidNoEmail("I'd rather not give my email"));
+  check("'just call me'", saidNoEmail("just call me please"));
+  check("'skip the email'", saidNoEmail("skip the email"));
+  check("Arabic — no email", saidNoEmail("ليس لدي بريد إلكتروني"));
+  check("someone GIVING an email is not refusing", !saidNoEmail("my email is ahmed@example.ae"));
+  check("nor is an unrelated no", !saidNoEmail("no, that is not my box number"));
+  check("nor is silence", !saidNoEmail(undefined));
 
   // ------------------------------------------------------------ the timeout
   // Measured against their staging CRM on 22 October: a wrong key is refused
@@ -136,7 +176,7 @@ async function main() {
     process.env.NXN_CRM_API_KEY = KEY;
     process.env.NXN_CRM_TIMEOUT_MS = "300";
     const t0 = Date.now();
-    const slowR = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe" });
+    const slowR = await raiseEpCase({ firstName: "T", lastName: "U", mobile: "0553708434", message: "probe", email: "someone@example.ae" });
     check("a slow create times out rather than hanging the turn", Date.now() - t0 < 3000, Date.now() - t0);
     check("and is reported as a timeout, not as unreachable", !slowR.ok && slowR.reason === "timeout", slowR);
     check("the detail warns the case MAY exist", !slowR.ok && /MAY HAVE BEEN CREATED/.test(slowR.detail), slowR);

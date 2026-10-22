@@ -149,6 +149,17 @@ export async function raiseEpCase(
   }
   const mobile = epMobile(input.mobile);
   if (!mobile) return { ok: false, reason: "rejected", detail: `mobile ${input.mobile} is not a UAE number their form accepts` };
+  /**
+   * Their CRM validates the email and refuses the case without one:
+   * HTTP 400 {"errors":{"Email":["Email should not be empty.",
+   * "Email should be a valid email address."]}}, 22 October.
+   *
+   * Checked here so a callback with no email costs a sentence rather than a
+   * round trip, and so the log says why instead of quoting their validator.
+   */
+  if (crm && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(input.email ?? "").trim())) {
+    return { ok: false, reason: "rejected", detail: "their CRM requires a valid email address on the case, and this callback has none" };
+  }
 
   const body = {
     origin: "Web-EP",
