@@ -252,6 +252,13 @@ export function ensureAdapters() {
         mobile: String(input.phone ?? ""),
         email: input.email,
         message: `${String(input.reason ?? "")}${context}`,
+        // Read from what the customer said and what the journey holds, so the
+        // case lands in the right queue with the details already on it rather
+        // than as a generic Inquiry an officer has to ring back about.
+        caseType: input.intake?.caseType,
+        emirateCode: input.intake?.emirateCode,
+        poBoxNumber: input.intake?.poBoxNumber,
+        trackingNumber: input.intake?.trackingNumber,
       },
         { agentId: agent?.id }
       ).catch((e) => ({ ok: false as const, reason: "unreachable" as const, detail: String(e) }));

@@ -5357,3 +5357,17 @@ body {
   font-size: 12.5px;
   color: var(--muted);
 }
+
+/**
+ * Cloudflare Turnstile, inside the composer.
+ *
+ * Invisible on the overwhelming majority of turns: `interaction-only` renders
+ * nothing at all until Cloudflare decides this visitor should tick a box, so the
+ * container collapses to nothing and the composer is unchanged. When a challenge
+ * does appear it needs room, hence the margin rather than a fixed height.
+ */
+.dlg-turnstile:not(:empty) {
+  margin: 0 0 8px;
+  display: flex;
+  justify-content: center;
+}

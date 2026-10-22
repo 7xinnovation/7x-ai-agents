@@ -38,6 +38,7 @@ import { Microphone } from "@phosphor-icons/react";
 import { docSignature } from "@/lib/caseDocs";
 import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
+import { useTurnstile } from "./useTurnstile";
 import type { PublicAgent } from "./types";
 import { showSurvey } from "./customerPulse";
 import { maskForDisplay } from "@/lib/maskIdentity";
@@ -2263,6 +2264,16 @@ export function Experience({
   }, [storageKey, locale]);
 
 
+  /**
+   * The CAPTCHA token Emirates Post's case endpoint insists on.
+   *
+   * Only ever rendered when the server supplied a site key, which it does for
+   * the postal agent alone. The token rides along with every message because
+   * the turn that files a callback is not knowable in advance — it is the model
+   * that decides, mid-turn, that a human should ring the customer back.
+   */
+  const turnstile = useTurnstile(agent.turnstileSiteKey);
+
   const send = useCallback(async (override?: string, opts?: { proactive?: boolean; paymentSettled?: boolean; documentUploaded?: boolean }) => {
     const proactive = opts?.proactive ?? false;
     const paymentSettled = opts?.paymentSettled ?? false;
@@ -2331,6 +2342,11 @@ export function Experience({
       });
     };
 
+    // Costs nothing when no site key is configured, and nothing again while a
+    // token is already in hand — only a first send, or one after the last token
+    // was spent or went stale, waits on Cloudflare at all.
+    const turnstileToken = await turnstile.get();
+
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -2351,6 +2367,7 @@ export function Experience({
           // Tester opt-in (?mock=1): let the server simulate the EP ops that can't
           // run in the demo (honoured only when the server allows mock).
           mock: typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mock") === "1",
+          turnstileToken,
         }),
       });
       if (!res.body) throw new Error("no stream");
@@ -2360,6 +2377,12 @@ export function Experience({
       let buffer = "";
 
       const apply = (ev: any) => {
+        if (ev.type === "turnstile_spent") {
+          // Emirates Post verified it, so it is burnt. Start the next one now
+          // rather than leaving the following message to wait for it.
+          turnstile.spent();
+          return;
+        }
         if (ev.type === "session") {
           convId.current = ev.conversationId;
           /**
@@ -2537,7 +2560,7 @@ export function Experience({
       setToolEvent(null);
       setQuiet(false);
     }
-  }, [input, streaming, agent.slug, locale, authenticated, storageKey]);
+  }, [input, streaming, agent.slug, locale, authenticated, storageKey, turnstile]);
 
   /** Stop the agent mid-reply — aborts the in-flight turn (see abortRef in send). */
   const stopStreaming = useCallback(() => {
@@ -3210,6 +3233,10 @@ export function Experience({
           ) : null}
 
           <div className="dlg-input-wrap">
+            {/* Invisible for the ordinary visitor (appearance: interaction-only).
+                It sits in the flow rather than being hidden so that, on the rare
+                turn Cloudflare wants a checkbox, there is somewhere to tick it. */}
+            {agent.turnstileSiteKey ? <div className="dlg-turnstile" ref={turnstile.mount} /> : null}
             {voice.active ? (
               <div className={`dlg-voice-bar${voice.error ? " is-error" : voice.speaking ? " is-speaking" : voice.listening ? " is-listening" : ""}`}>
                 <span className="dlg-voice-bar-dot" />

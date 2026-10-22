@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getAgentBySlug } from "@/lib/agents";
 import { uaePassConfigured, uaePassDirectSignInUsable } from "@/lib/uaepass";
+import { turnstileSiteKey } from "@/lib/turnstile";
 import { Experience } from "./Experience";
 import type { PublicAgent } from "./types";
 
@@ -58,6 +59,9 @@ export default async function EmbedPage({
     uaePassEnabled: uaePassConfigured(),
     uaePassDirect: uaePassConfigured() && uaePassDirectSignInUsable(),
     voiceEnabled: Boolean(process.env.AZURE_REALTIME_KEY && process.env.AZURE_REALTIME_ENDPOINT),
+    // Only the postal side files on /nextApi/case; EPGL callbacks are Salesforce
+    // cases and need no CAPTCHA, so they never load Cloudflare's script.
+    turnstileSiteKey: d.tenantSlug === "epgl" ? undefined : turnstileSiteKey() || undefined,
   };
 
   const initialLocale = (locale === "ar" || locale === "en" ? locale : d.locales[0]) ?? "en";

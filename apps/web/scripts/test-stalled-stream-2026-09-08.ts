@@ -51,7 +51,9 @@ check("the stream closes BEFORE the deferred work drains", route.indexOf("contro
 check("a deferred failure is logged, not surfaced", /deferred_job_failed/.test(route));
 
 console.log("\nAn escalation that cannot be arranged is a sentence, not a dead turn");
-check("createCallback is caught", /createCallback\(actx[\s\S]{0,900}?\} catch \(e\) \{/.test(tools));
+// The window is generous on purpose: what matters is that the call sits
+// inside a try/catch, not how many lines of argument it takes to get there.
+check("createCallback is caught", /createCallback\(actx[\s\S]{0,2500}?\} catch \(e\) \{/.test(tools));
 check("createCase is caught too", /createCase\(actx[\s\S]{0,300}?\} catch \(e\) \{/.test(tools));
 check("no reference is invented for a request nobody got", /Do NOT give the customer a reference/.test(tools));
 // The number itself moved into supportRoute() so a tenant without one is not

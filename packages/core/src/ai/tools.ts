@@ -1,3 +1,4 @@
+import { caseIntakeFrom } from "./caseIntake";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tr, type AgentDefinition, type CaseState, type Journey, type LocalizedString, type Locale } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
@@ -388,6 +389,37 @@ function payerDetails(state: CaseState): { name?: string; emiratesId?: string; m
  * needs stops the submission, and the rest stop the step they belong to. Stated
  * in the customer's terms, because the consent log is read by people.
  */
+/**
+ * Did the customer just say they have no email, or will not give one?
+ *
+ * Emirates Post's CRM REQUIRES an email on a case — "Email should not be empty.
+ * Email should be a valid email address.", HTTP 400, confirmed against their
+ * staging endpoint on 22 October. Until then it had never come up: every call
+ * died at the CAPTCHA before their validator saw it, so a callback raised
+ * without one simply fell through to the ops mailbox and nobody noticed.
+ *
+ * Asking for it is right. Holding a callback hostage to it is not — some people
+ * do not have an email address and some will not hand one over to a chat
+ * window. So the question is asked once, and a customer who says no gets their
+ * callback anyway, by the route that does not need one.
+ */
+export function saidNoEmail(message: string | undefined): boolean {
+  const t = String(message ?? "")
+    .toLowerCase()
+    .replace(/[\u2019']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  return (
+    /\b(no|dont have|do not have|havent got|have not got|without)\b[^.?!]{0,20}\b(e ?mail|email address)\b/.test(t) ||
+    /\b(e ?mail|email address)\b[^.?!]{0,20}\b(no|none|nope|dont have|do not have)\b/.test(t) ||
+    /\b(rather|prefer) not\b[^.?!]{0,30}\b(e ?mail|share|give)\b/.test(t) ||
+    /\bskip (the )?(e ?mail|that)\b/.test(t) ||
+    /\bjust (call|phone|ring) me\b/.test(t) ||
+    /ليس لدي.{0,15}(بريد|ايميل|إيميل)|لا يوجد.{0,15}(بريد|ايميل|إيميل)|بدون.{0,10}(بريد|ايميل|إيميل)/.test(t)
+  );
+}
+
 export function haltedBy(agent: AgentDefinition, state: CaseState, fieldKey: string): string {
   const journey = findJourney(agent, state.journeyKey);
   const sub = journey?.submission;
@@ -1004,6 +1036,35 @@ export async function dispatchTool(
           };
         }
       }
+      /**
+       * THEIR CASE SYSTEM WILL NOT TAKE A CALLBACK WITHOUT AN EMAIL.
+       *
+       * HTTP 400, "Email should not be empty", from Emirates Post's CRM on 22
+       * October — the first day a request of ours got far enough to be
+       * validated at all. The model asks for a name and a mobile, which is what
+       * the journey has always asked for, so every real callback was being
+       * refused and quietly diverted to the ops mailbox while the customer was
+       * handed an ENQ- reference that no officer can look up.
+       *
+       * Asked for here rather than in the prompt, because a prompt that is
+       * followed four times in five still loses one customer's callback.
+       */
+      const givenEmail = String(input.email ?? "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(givenEmail) && !saidNoEmail(ctx.userMessage)) {
+        return {
+          result:
+            "NOT RAISED — NOTHING FAILED. Emirates Post's case system will not accept a callback without a valid email " +
+            "address, so asking for one is what stands between this customer and a case number their team can look up. " +
+            "Ask for their email address, once, and say plainly that it is what lets you give them a reference. " +
+            "If they say they do not have one or would rather not give it, say that is fine, call this again without it, " +
+            "and their request still reaches the team. Do NOT invent an address, do NOT use one from anywhere else in " +
+            "this conversation, and do NOT tell them anything has been raised yet.",
+          state,
+          events,
+          isError: true,
+        };
+      }
+
       const actx = adapterContext(agent, agent.integrations.crm);
       /**
        * A CALLBACK THAT CANNOT BE ARRANGED IS A SENTENCE, NOT A DEAD CHAT.
@@ -1027,6 +1088,22 @@ export async function dispatchTool(
           reason: String(input.reason ?? ""),
           userRef: ctx.userRef,
           journeyKey: state.journeyKey,
+          /**
+           * WHAT KIND OF CASE THIS IS, AND WHAT WE ALREADY KNOW.
+           *
+           * Their CRM routes on a case type picklist and carries the emirate,
+           * PO Box and tracking number. All four were going across empty with
+           * the type hardcoded to Inquiry, so a complaint about a lost parcel
+           * reached their queue looking like a question about opening hours.
+           *
+           * Read from the customer's own words — their stated reason and what
+           * they just said — and from the journey, which already holds a box
+           * number nobody should be asked for twice.
+           */
+          intake: caseIntakeFrom(
+            [String(input.reason ?? ""), ctx.userMessage ?? ""].join(" \n "),
+            state.data as Record<string, unknown>
+          ),
           // THE CONTEXT GOES WITH IT. The artefact asks that the request, its
           // context and the actions already taken transfer to the officer; what
           // transferred was a name, a number and the customer's own sentence,
