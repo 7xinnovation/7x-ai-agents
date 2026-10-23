@@ -944,6 +944,20 @@ interface OptionCard {
   disabled?: boolean;
   attrs: { label: string; value: string }[];
 }
+/**
+ * Should this attribute value sit on its own line rather than beside its label?
+ *
+ * Two cases, and the second is the one that was rendering badly: a long phrase
+ * (which crowds the label), and a long SINGLE TOKEN with no spaces — a product
+ * code, a reference, an IBAN — which cannot wrap at all and so gets broken
+ * mid-word into "CEP30-UAE-SME-" / "DOM".
+ */
+export function isOwnLineValue(value: string): boolean {
+  const v = String(value ?? "").trim();
+  if (v.length > 32) return true;
+  return v.length > 12 && !/\s/.test(v);
+}
+
 function parseCards(body: string[]): OptionCard[] {
   const cards: OptionCard[] = [];
   let cur: OptionCard | null = null;
@@ -1351,7 +1365,12 @@ export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { 
                         {c.attrs.map((a, ai) => (
                           <span className="dlg-card-opt-attr" key={ai}>
                             <span className="k">{a.label}</span>
-                            <span className={`v${a.value.length > 32 ? " long" : ""}`}>{renderInline(a.value)}</span>
+                            {/* A value that cannot share the line with its label goes under
+                                it. Length alone was the wrong test: a product code like
+                                CEP30-NONUAE-SME-INTL is 21 characters of UNBREAKABLE token,
+                                so it was squeezed against "key" and chopped mid-word, while
+                                a 30-character phrase of short words wraps perfectly well. */}
+                            <span className={`v${isOwnLineValue(a.value) ? " long" : ""}`}>{renderInline(a.value)}</span>
                           </span>
                         ))}
                       </div>

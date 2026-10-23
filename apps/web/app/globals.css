@@ -928,10 +928,15 @@ body {
   line-height: 1.45;
   color: var(--c-text-muted);
 }
+/* Attributes sit at the BOTTOM of the card, like the price below them. Cards in
+   a row are as tall as the tallest title, and without this the "key" line
+   floated at a different height in every card — six product cards, six
+   different positions, which is what made the row look broken. */
 .dlg-card-opt-attrs {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  margin-top: auto;
 }
 .dlg-card-opt-attr {
   display: flex;
@@ -949,7 +954,11 @@ body {
   min-width: 0;
   font-weight: 600;
   text-align: end;
-  overflow-wrap: anywhere;
+  /* `anywhere` breaks inside a word even when wrapping at a space was possible,
+     which turned CEP30-UAE-SME-DOM into two lines split mid-token. `break-word`
+     breaks only a word that genuinely cannot fit, and anything long enough to
+     be at risk is stacked onto its own line by isOwnLineValue first. */
+  overflow-wrap: break-word;
   color: color-mix(in srgb, var(--c-text) 90%, var(--c-primary));
 }
 /* A long value (e.g. a feature list) stacks under its label instead of
@@ -961,6 +970,12 @@ body {
 .dlg-card-opt-attr .v.long {
   text-align: start;
   font-weight: 500;
+}
+/* A code on its own line reads as a code: tabular figures, a touch of tracking,
+   and no ambiguity between O and 0 in something an applicant may have to quote. */
+.dlg-card-opt-attr .v.long:not(:has(*)) {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
 }
 /* Price sits in its own zone, pinned to the bottom (so prices line up across a
    row) and set off by a hairline — a clean product-card money hierarchy. */
