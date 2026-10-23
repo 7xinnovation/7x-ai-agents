@@ -20,7 +20,7 @@ import {
   readsAsAnotherBranch,
   readsAsBarePush,
 } from "@/lib/hallNotice";
-import { getOrCreateSession, appendMessage, saveCase, audit, mutateCase, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, rememberVerifiedEmiratesId, rememberVerifiedAccountId, VERIFIED_EID_KEY, VERIFIED_ACCOUNT_KEY } from "@/lib/conversation";
+import { getOrCreateSession, appendMessage, audit, mutateCase, withMidTurnWrites, saveSessionToken, knownCustomerFacts, knownEpglProfile, markAuthenticated, rememberVerifiedEmiratesId, rememberVerifiedAccountId, VERIFIED_EID_KEY, VERIFIED_ACCOUNT_KEY } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { sendEmail, textToHtml, emailConfigured } from "@/lib/email";
 import { notifyOpsForSubmission, notifyVibanRequest } from "@/lib/opsNotify";
@@ -4741,7 +4741,16 @@ export async function POST(req: NextRequest) {
           finalState = { ...finalState, data: { ...finalState.data, key_delivery: "courier" } };
         }
         if (mockAutoRenew) finalState = { ...finalState, data: { ...finalState.data, __mock_auto_renew: mockAutoRenew } };
-        await saveCase(session.caseId, finalState);
+        /**
+         * The last write of the turn MERGES rather than overwrites.
+         *
+         * finalState was built from the state the engine loaded before the turn
+         * ran, so a plain saveCase here erases whatever mutateCase wrote during
+         * it — see MID_TURN_DATA_KEYS. That is not hypothetical: it is why
+         * LR-54052 had no application id and every one of Salesforce's status
+         * pushes for it came back unknown_application.
+         */
+        await mutateCase(session.caseId, (fresh) => withMidTurnWrites(fresh, finalState));
         // Persist a BACKEND session token minted this turn (e.g. OTP login) for later
         // turns. Never overwrite a stored UAE PASS identity token with it: the two
         // serve different integrations (uaepass_live needs the identity token), and

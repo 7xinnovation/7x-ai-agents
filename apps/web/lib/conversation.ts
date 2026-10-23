@@ -665,6 +665,48 @@ export async function saveCase(caseId: string, state: CaseState) {
 }
 
 /**
+ * Case data keys written DURING a turn by something that is not the engine.
+ *
+ * A turn ends with ONE blind write of the whole jsonb blob, built from the
+ * state the engine loaded before the turn ran. Anything mutateCase wrote in
+ * between is in the row and NOT in that blob, so the save silently erases it.
+ * The row lock below cannot help: there is no concurrent writer to queue
+ * behind. An older snapshot simply lands on top a second later.
+ *
+ * That is how LR-54052 was lost on 22 October. The application id came back on
+ * Salesforce's composite response and was written at 12:11:53 — the
+ * epgl_application_id audit row proves it ran — then the turn ended and took it
+ * away again. Their seven status pushes for that application all answered
+ * unknown_application, because the endpoint keys on the id the case no longer
+ * carried, and the applicant was never told their licence had been issued.
+ *
+ * These keys are facts about the outside world: an id Salesforce minted, an
+ * email that has gone, documents already pushed. The engine never sets them and
+ * so has no opinion to overwrite them with — restoring them cannot lose a
+ * deliberate change, only an accidental erasure.
+ */
+export const MID_TURN_DATA_KEYS = [
+  "application_id",
+  "__viban_finance_notified_at",
+  "__sf_documents_sent",
+] as const;
+
+/**
+ * `next` as the turn built it, with any mid-turn facts the row has and it lacks.
+ *
+ * Only ever ADDS: a key the turn carries wins, so a value the engine genuinely
+ * updated is still the one that is saved.
+ */
+export function withMidTurnWrites(fresh: CaseState, next: CaseState): CaseState {
+  const restored: Record<string, unknown> = {};
+  for (const k of MID_TURN_DATA_KEYS) {
+    if (next.data?.[k] === undefined && fresh.data?.[k] !== undefined) restored[k] = fresh.data[k];
+  }
+  if (!Object.keys(restored).length) return next;
+  return { ...next, data: { ...next.data, ...restored } };
+}
+
+/**
  * Read-modify-write the case under a row lock.
  *
  * A plain getCase() → mutate → saveCase() loses concurrent work: the case is one
