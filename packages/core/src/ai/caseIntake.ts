@@ -22,7 +22,8 @@
  *     the wrong parcel, or the wrong emirate.
  */
 
-export type EpCaseType = "Inquiry" | "Complaint" | "Feedback" | "Compliment";
+export const CASE_TYPES = ["Inquiry", "Complaint", "Feedback", "Compliment"] as const;
+export type EpCaseType = (typeof CASE_TYPES)[number];
 
 /** Emirate codes as their contact form spells them. */
 const EMIRATES: Array<[RegExp, string]> = [
@@ -139,9 +140,29 @@ export interface EpCaseIntake {
 }
 
 /** Everything above, read once from the customer's words and the journey. */
-export function caseIntakeFrom(text: string | undefined, data?: Record<string, unknown>): EpCaseIntake {
+export function caseIntakeFrom(
+  text: string | undefined,
+  data?: Record<string, unknown>,
+  /**
+   * What the assistant says this is, which beats reading the sentence.
+   *
+   * The classifier only ever sees the customer's reason and their last
+   * message. A tester who went through the COMPLAINT flow and then typed
+   * "Testing - 0544043558 -Farah -6005 ajm" has written nothing a classifier
+   * can call a complaint, and it duly went to Emirates Post as an Inquiry —
+   * 26 October, their case INQ-01267121, raised from a conversation that had
+   * just said "Your complaint has been raised".
+   *
+   * The model has the whole conversation and the flow the customer chose, so
+   * when it names a type that is the better answer. Rule 1 still holds for
+   * everything else: an unrecognised value falls back to reading the words,
+   * which falls back to Inquiry.
+   */
+  stated?: string
+): EpCaseIntake {
+  const named = CASE_TYPES.find((t) => t.toLowerCase() === String(stated ?? "").trim().toLowerCase());
   return {
-    caseType: caseTypeFrom(text),
+    caseType: named ?? caseTypeFrom(text),
     emirateCode: emirateCodeFrom(text, data),
     poBoxNumber: poBoxNumberFrom(text, data),
     trackingNumber: trackingNumberFrom(text),
