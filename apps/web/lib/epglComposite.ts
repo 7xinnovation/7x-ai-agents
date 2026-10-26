@@ -34,6 +34,8 @@ export interface EpglCaseFile {
   salesforceType?: string;
   /** The expiry printed on this file, ISO YYYY-MM-DD, when it has one. */
   validTo?: string;
+  /** EPGL refuse this slot without a Valid_To__c. */
+  validityRequired?: boolean;
 }
 
 export interface CompositeItem {
@@ -187,7 +189,23 @@ export function withEpglDocumentItems(
   if (!request?.referenceId) return none;
   const ref = request.referenceId;
 
-  const sendable = files.filter((f) => !!f.salesforceType);
+  /**
+   * A DOCUMENT MAY NOT COST THE APPLICATION.
+   *
+   * This body runs allOrNone=true -- it has to, since the Account, the owners,
+   * the Contact and the licence request must stand or fall together. A document
+   * item inside it is therefore not free: on 26 October an insurance
+   * certificate and a lease contract whose PDFs printed no readable expiry came
+   * back "Valid_To__c is required for this document" and rolled back the whole
+   * submission, Account and all. The applicant had answered every question and
+   * uploaded sixteen files to be told nothing was created.
+   *
+   * So a slot that EPGL will refuse for want of a date we do not have stays out
+   * of the create and goes on the follow-up call instead, where allOrNone is
+   * false and a refusal costs only that slot. Everything that can pass still
+   * travels with the application, which is the point of the one-call shape.
+   */
+  const sendable = files.filter((f) => !!f.salesforceType && !(f.validityRequired && !f.validTo));
   if (!sendable.length) return none;
 
   const docs: CompositeItem[] = sendable.map((f, i) => ({

@@ -760,8 +760,8 @@ async function epglDocumentRows(
   if (!wanted.length) return [];
   // EPGL's own name for each slot, so both the one-call items and the
   // follow-up call name a document the same way and neither invents one.
-  const slotType = new Map<string, string | undefined>(
-    definition.journeys.flatMap((j) => j.steps).flatMap((st) => st.documents).map((d) => [d.key, d.salesforceType] as const)
+  const slots = new Map(
+    definition.journeys.flatMap((j) => j.steps).flatMap((st) => st.documents).map((d) => [d.key, d] as const)
   );
   const sctx = adapterContext(definition, definition.integrations.storage);
   const out: EpglCaseFile[] = [];
@@ -779,8 +779,9 @@ async function epglDocumentRows(
         fileName: row.fileName || d.fileName || `${d.key}.pdf`,
         bytes: stored.bytes,
         contentType: stored.contentType,
-        salesforceType: slotType.get(d.key),
+        salesforceType: slots.get(d.key)?.salesforceType,
         validTo: epglValidTo(d, caseData),
+        validityRequired: slots.get(d.key)?.validityRequired,
       });
     } catch {
       // One unreadable file must not cost the customer the rest of them.

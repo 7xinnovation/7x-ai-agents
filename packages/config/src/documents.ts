@@ -28,6 +28,17 @@ export const DocumentRequirement = z.object({
    * application`, 26 October, on LR-54066.
    */
   salesforceType: z.string().optional(),
+  /**
+   * EPGL refuse this document without a Valid_To__c (`validityRequired` in
+   * their catalogue).
+   *
+   * It decides whether a document may travel inside the CREATE call, which
+   * runs allOrNone=true: a slot that needs a date we do not have would roll
+   * back the Account, the owners and the application with it. On 26 October it
+   * did exactly that -- an insurance certificate and a lease contract whose
+   * PDFs printed no readable expiry took the whole submission down.
+   */
+  validityRequired: z.boolean().optional(),
 });
 export type DocumentRequirement = z.infer<typeof DocumentRequirement>;
 

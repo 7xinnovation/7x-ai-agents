@@ -154,6 +154,21 @@ const FILES: EpglCaseFile[] = [
   { key: "copy_of_passport", fileName: "c.pdf", bytes: new Uint8Array(8), contentType: "application/pdf", salesforceType: "Copy of Passport", validTo: "2034-01-01" },
 ];
 
+// A slot EPGL will refuse for want of a date must not ride in an allOrNone
+// create -- on 26 October two such documents rolled back a whole submission.
+const NEEDS_DATE: EpglCaseFile = {
+  key: "insurance_certificate_goods_in_transit", fileName: "i.pdf", bytes: new Uint8Array(8),
+  salesforceType: "Insurance Certificate (goods in transit)", validityRequired: true,
+};
+check("a slot owing an expiry we do not have stays out of the create",
+  withEpglDocumentItems(CREATE(), [NEEDS_DATE]).added.length === 0);
+check("...and goes in once the date is known",
+  withEpglDocumentItems(CREATE(), [{ ...NEEDS_DATE, validTo: "2027-12-31" }]).added.length === 1);
+check("a slot that owes no date rides without one",
+  withEpglDocumentItems(CREATE(), [{ key: "memorandum_of_association", fileName: "m.pdf", bytes: new Uint8Array(8), salesforceType: "Memorandum of Association" }]).added.length === 1);
+check("the follow-up call still takes it, since a refusal there costs only the slot",
+  sendableDocumentKeys([{ key: NEEDS_DATE.key, salesforceType: NEEDS_DATE.salesforceType }]).length === 1);
+
 const one = withEpglDocumentItems(CREATE(), FILES);
 const oneItems = (one.input as { body: { compositeRequest: { referenceId: string; url: string; body: Record<string, string> }[] } }).body.compositeRequest;
 check("the documents are added to the create", one.added.length === 2);
@@ -240,6 +255,10 @@ check("the 1.x push still requires a Salesforce record id",
 const schema = readFileSync(resolve(here, "../../../packages/config/src/documents.ts"), "utf8");
 check("salesforceType is on the DocumentRequirement schema, so zod keeps it",
   /salesforceType: z\.string\(\)\.optional\(\)/.test(schema));
+check("...and so is validityRequired, which gates the create",
+  /validityRequired: z\.boolean\(\)\.optional\(\)/.test(schema));
+check("the generator carries it off the catalogue",
+  /validityRequired: Boolean\(e\.doc\.validityRequired\)/.test(read("scripts/epgl-2.0-journey-2026-10-20.ts")));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

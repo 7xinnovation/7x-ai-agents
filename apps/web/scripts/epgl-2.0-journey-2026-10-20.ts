@@ -242,6 +242,7 @@ function build(catalogue: any) {
     acceptedFormats: String(e.doc.acceptedFormats ?? "pdf").split(/[,;\s]+/).filter(Boolean),
     maxSizeMb: e.doc.maxSizeMb ?? catalogue.parameters?.documentMaxSizeMb ?? 10,
     salesforceType: type,
+    validityRequired: Boolean(e.doc.validityRequired),
   };
   });
 
