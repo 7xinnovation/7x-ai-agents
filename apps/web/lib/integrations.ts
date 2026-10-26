@@ -2888,6 +2888,33 @@ export async function buildApiTools(
       }
     }
 
+    /**
+     * EPGL'S PRICING ENDPOINT DIES WITHOUT AN EMPTY ARRAY.
+     *
+     * `quotationRequest.infos` is optional in their spec — which says outright
+     * that "only quotationRequest.appIdentifier.applicationId is needed for a
+     * new-regulation application" — and their Apex dereferences it anyway:
+     *
+     *   400 {"status":400,"message":"Attempt to de-reference a null object"}
+     *
+     * Narrowed field by field against their sandbox on 26 October. Omitting it
+     * fails, sending null fails, sending `[]` succeeds; nothing else in their
+     * example envelope matters. Reported to them, and sent regardless so the
+     * applicant is not waiting on a fix to somebody else's null check.
+     *
+     * It is not cosmetic. Every pricing call has been failing, so the agent has
+     * been quoting a fallback figure: AED 2,000 against a real catalogue fee of
+     * AED 1,000, and AED 101,000 before that. Applicants were told to pay twice
+     * what EPGL charge.
+     */
+    if (/post_services_apexrest_payment_pricing$/i.test(toolName)) {
+      const b = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      const q = b.quotationRequest;
+      if (q && typeof q === "object" && !Array.isArray((q as Record<string, unknown>).infos)) {
+        input = { ...input, body: { ...b, quotationRequest: { ...(q as Record<string, unknown>), infos: [] } } };
+      }
+    }
+
     if (/submitlicenserequest$/i.test(toolName)) {
       // Documents are API 5's, one call per file, and no longer travel here.
       input = withoutEpglDocuments(input) ?? input;
