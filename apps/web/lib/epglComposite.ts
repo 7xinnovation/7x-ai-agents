@@ -216,27 +216,6 @@ export function applicationIdFrom(raw: string | undefined): string | null {
 }
 
 /**
- * The catalogue's name for a slot, or null if this is not a catalogue slot.
- *
- * Two things have to hold, and the round-trip proves both at once. The slot
- * keys for 2.0 ARE the slug of the catalogue's document name, so a label that
- * slugs back to its key is a slot EPGL's checklist knows — and it is also the
- * only shape `withEpglDocumentFiles` can match a file to, since it finds files
- * by slugging Document_Type.
- *
- * Our own older slots fail it and are meant to: `moa`, `trade_license` and
- * `partner_1_passport` are internal, there to read fields off a document, and
- * each has a catalogue twin holding the same file (see the duplicate-slot
- * note). Sending them would file a second copy under a Document_Type their
- * picklist has never heard of. A name is never invented here — a slot we
- * cannot name is a slot we do not send.
- */
-export function documentTypeForKey(key: string, catalogueName?: string): string | null {
-  if (!catalogueName) return null;
-  return slugOfDocumentType(catalogueName) === key ? catalogueName : null;
-}
-
-/**
  * The documents, as their own composite, after the application exists.
  *
  * THE MODEL NEVER EMITS THESE. The 2.0 composite is composed by the model and
@@ -250,60 +229,91 @@ export function documentTypeForKey(key: string, catalogueName?: string): string 
  * `applicationId__c` — the LR- reference, NOT the Salesforce record id — and
  * `allOrNone: false`, so one bad slot cannot roll back the rest.
  *
+ * ONLY SLOTS THEIR CHECKLIST KNOWS. `salesforceType` is set on a slot generated
+ * from their catalogue and on no other, which makes its absence the test. Our
+ * own slots — `moa`, `trade_license`, `partner_1_passport` — are there to read
+ * fields off a document, each has a catalogue twin holding the same file, and
+ * their API refuses them by name: `Document_Type "Partner 1 - Emirates ID" is
+ * not required for this application`.
+ *
  * The bytes are not put in here. This returns the skeleton and the exec layer
  * fills each item exactly as it would one the model wrote, which is what keeps
  * the >3 MB ContentVersion path working for both.
  */
+export interface EpglDocumentSlot {
+  key: string;
+  /** EPGL's name for the slot. Absent on our own slots, which are not sent. */
+  salesforceType?: string;
+  /** Their Valid_To__c, where the case knows it. */
+  validTo?: string;
+}
+
 export function documentCompositeBody(
   applicationId: string,
-  keys: string[],
-  catalogueNameOf: (key: string) => string | undefined
+  slots: EpglDocumentSlot[]
 ): Record<string, unknown> | null {
   if (!applicationId) return null;
-  const items = keys
-    .map((key) => ({ key, type: documentTypeForKey(key, catalogueNameOf(key)) }))
-    .filter((x): x is { key: string; type: string } => x.type !== null);
-  if (!items.length) return null;
+  const sendable = slots.filter((s) => !!s.salesforceType);
+  if (!sendable.length) return null;
   return {
     allOrNone: false,
-    compositeRequest: items.map((x, i) => ({
+    compositeRequest: sendable.map((s, i) => ({
       method: "POST",
       url: "/services/data/v60.0/sobjects/EPG_Document__c",
       referenceId: `Doc${i + 1}`,
-      body: { applicationId__c: applicationId, Document_Type: x.type },
+      body: {
+        applicationId__c: applicationId,
+        Document_Type: s.salesforceType,
+        ...(s.validTo ? { Valid_To__c: s.validTo } : {}),
+      },
     })),
   };
 }
 
-/** The slots `documentCompositeBody` will actually send, in the order it sends them. */
-export function sendableDocumentKeys(keys: string[], catalogueNameOf: (key: string) => string | undefined): string[] {
-  return keys.filter((k) => documentTypeForKey(k, catalogueNameOf(k)) !== null);
+/** The slots `documentCompositeBody` will send, in the order it sends them. */
+export function sendableDocumentKeys(slots: EpglDocumentSlot[]): string[] {
+  return slots.filter((s) => !!s.salesforceType).map((s) => s.key);
 }
 
-/** Slots their composite answered for, so a later turn does not send them again. */
-export function acceptedDocumentKeys(raw: string | undefined, keysInOrder: string[]): string[] {
-  if (!raw) return [];
+/**
+ * What their composite did with each slot.
+ *
+ * Refusals are returned as well as successes, and both are recorded, because
+ * `allOrNone: false` means a refusal is final for that slot and retrying it
+ * next turn re-posts the same base64 to the same rejection. Six slots on
+ * CEP30-UAE-SME-DOM are marked `validityRequired` in their catalogue and we
+ * collect an expiry date for exactly one of them, so without this the push
+ * would hammer their API once per turn for the rest of the conversation.
+ */
+export function documentOutcomes(
+  raw: string | undefined,
+  keysInOrder: string[]
+): { sent: string[]; refused: { key: string; reason: string }[] } {
+  const out = { sent: [] as string[], refused: [] as { key: string; reason: string }[] };
+  if (!raw) return out;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     const brace = raw.indexOf("{");
-    if (brace === -1) return [];
+    if (brace === -1) return out;
     try {
       parsed = JSON.parse(raw.slice(brace));
     } catch {
-      return [];
+      return out;
     }
   }
-  const items = (parsed as { compositeResponse?: { referenceId?: string; httpStatusCode?: number; body?: { success?: boolean } }[] })
-    ?.compositeResponse;
-  if (!Array.isArray(items)) return [];
-  const ok: string[] = [];
+  const items = (parsed as {
+    compositeResponse?: { referenceId?: string; httpStatusCode?: number; body?: { success?: boolean; errors?: unknown[] } }[];
+  })?.compositeResponse;
+  if (!Array.isArray(items)) return out;
   for (const item of items) {
     const n = Number(String(item?.referenceId ?? "").replace(/^Doc/, ""));
     if (!Number.isInteger(n) || n < 1 || n > keysInOrder.length) continue;
+    const key = keysInOrder[n - 1]!;
     const good = item?.body?.success === true || (item?.httpStatusCode ?? 0) < 300;
-    if (good) ok.push(keysInOrder[n - 1]!);
+    if (good) out.sent.push(key);
+    else out.refused.push({ key, reason: String(item?.body?.errors?.[0] ?? `HTTP ${item?.httpStatusCode ?? "?"}`) });
   }
-  return ok;
+  return out;
 }

@@ -76,7 +76,7 @@ import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/custome
 import { log } from "@/lib/logger";
 import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
 import type { EpglCaseFile } from "@/lib/epglComposite";
-import { isEpglCompositeTool, documentCompositeBody, acceptedDocumentKeys, sendableDocumentKeys } from "@/lib/epglComposite";
+import { isEpglCompositeTool, documentCompositeBody, documentOutcomes, sendableDocumentKeys, type EpglDocumentSlot } from "@/lib/epglComposite";
 
 export const runtime = "nodejs";
 // Multi-tool turns (e.g. a renewal: details + pricing + payment) can run well past
@@ -410,6 +410,32 @@ function isTrue(v: unknown): boolean {
 /** Declared once: the customerContext above names it before the tool list is built. */
 /** Document keys already pushed to Salesforce, so a retry sends only the rest. */
 const SF_DOCS_SENT_KEY = "__sf_documents_sent";
+/**
+ * Slots EPGL's own API refused, with the reason, so they are not re-sent.
+ *
+ * Six of the ten slots on CEP30-UAE-SME-DOM are `validityRequired` in their
+ * catalogue and the journey collects an expiry date for exactly one of them
+ * (the trade licence), so the rest come back `Valid_To__c is required for this
+ * document` and will until the journey asks for those dates. Without a record
+ * of the refusal the deferred push re-posts every one of those files, as
+ * base64, on every remaining turn of the conversation.
+ */
+const EPGL_DOCS_REFUSED_KEY = "__epgl_documents_refused";
+
+/**
+ * Their Valid_To__c for a slot, where the case actually knows it.
+ *
+ * Only the trade licence has an expiry on the journey today. Guessing one for
+ * a passport or an Emirates ID would put a date we invented on a regulator's
+ * record, so a slot we cannot answer for is sent without the field and their
+ * refusal is recorded as the honest outcome.
+ */
+function epglValidTo(key: string, data: Record<string, unknown>): string | undefined {
+  if (key === "trade_licence_initial_name_approval" || key === "trade_licence") {
+    return str(data.license_expiry_date) ?? undefined;
+  }
+  return undefined;
+}
 
 const MOE_TOOL_NAME = "epgl_licences_for_customer";
 /** Named up here for the same reason as the one above: the signed-in customer
@@ -4503,31 +4529,42 @@ export async function POST(req: NextRequest) {
         ) {
           const appId = epglApplicationId;
           const tool = epglCompositeTool;
-          const pending = finalState.documents
-            .filter((d) => (d.status === "uploaded" || d.status === "accepted") && !alreadySent.has(d.key))
-            .map((d) => d.key);
-          if (pending.length) {
-            // The catalogue's own name when it slugs back to the slot key, so
-            // the exec layer finds the file again; see documentTypeForKey.
-            const nameOf = (key: string) => docLabels.get(key);
-            // The order the body goes out in, so Doc1..DocN line up with the
-            // keys when the answer is read back.
-            const sending = sendableDocumentKeys(pending, nameOf);
+          // A slot their API has already refused is not tried again: allOrNone
+          // is false, so the refusal is final for that slot, and the file would
+          // go back up as base64 on every remaining turn to be refused again.
+          const refusedAlready = new Set(
+            Object.keys((finalState.data[EPGL_DOCS_REFUSED_KEY] as Record<string, unknown>) ?? {})
+          );
+          const byKey = new Map(journeyDocs.map((d) => [d.key, d] as const));
+          const slots: EpglDocumentSlot[] = finalState.documents
+            .filter(
+              (d) =>
+                (d.status === "uploaded" || d.status === "accepted") &&
+                !alreadySent.has(d.key) &&
+                !refusedAlready.has(d.key)
+            )
+            .map((d) => ({
+              key: d.key,
+              salesforceType: byKey.get(d.key)?.salesforceType,
+              validTo: epglValidTo(d.key, finalState.data),
+            }));
+          const sending = sendableDocumentKeys(slots);
+          if (sending.length) {
             deferred.push(async () => {
               try {
-                const payload = documentCompositeBody(appId, sending, nameOf);
+                const payload = documentCompositeBody(appId, slots);
                 if (!payload) return;
                 const res = await execIntegration(tool, { body: payload });
-                const sent = res.isError
-                  ? []
-                  : acceptedDocumentKeys((res as { raw?: string }).raw ?? res.result, sending);
+                const { sent, refused } = res.isError
+                  ? { sent: [] as string[], refused: [] as { key: string; reason: string }[] }
+                  : documentOutcomes((res as { raw?: string }).raw ?? res.result, sending);
                 await audit({
                   ...a,
                   actor: "system",
                   action: sent.length ? "epgl_documents_attached" : "epgl_documents_failed",
-                  payload: { applicationId: appId, attempted: sending, sent },
+                  payload: { applicationId: appId, attempted: sending, sent, refused },
                 });
-                if (!sent.length) return;
+                if (!sent.length && !refused.length) return;
                 await mutateCase(session.caseId, (fresh) => ({
                   ...fresh,
                   data: {
@@ -4538,6 +4575,10 @@ export async function POST(req: NextRequest) {
                         ...sent,
                       ]),
                     ],
+                    [EPGL_DOCS_REFUSED_KEY]: {
+                      ...((fresh.data[EPGL_DOCS_REFUSED_KEY] as Record<string, unknown>) ?? {}),
+                      ...Object.fromEntries(refused.map((r) => [r.key, r.reason])),
+                    },
                   },
                 }));
               } catch (e) {

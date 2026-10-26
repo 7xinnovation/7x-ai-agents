@@ -10,14 +10,19 @@
  * `data.application_id`, as `LR-54066`. Their getApplicationStatus for that
  * application reported all ten slots `uploaded: false`.
  *
- * So the files now go in a second composite we compose ourselves. The two
- * things most worth pinning down:
+ * So the files go in a second composite we compose ourselves. Three things are
+ * worth pinning down, and the first run against their sandbox taught two of
+ * them the hard way:
  *
  *   - it is keyed on `applicationId__c`, the LR- reference. Their re-upload
  *     example is explicit about it, and it is NOT the Salesforce record id;
- *   - Document_Type must slug back to the slot key, because that is how the
- *     filler finds the bytes. A slot we cannot name from the catalogue is left
- *     out rather than sent under an invented type.
+ *   - only slots their checklist knows are sent. The first attempt also sent
+ *     `partner_1_emirates_id` and was told `Document_Type "Partner 1 — Emirates
+ *     ID" is not required for this application`. `salesforceType` is set on a
+ *     catalogue-generated slot and on no other, so its absence is the test;
+ *   - a refusal is final — allOrNone is false — so it is recorded and never
+ *     retried. Six slots want a Valid_To__c the journey does not collect, and
+ *     without this they would be re-posted as base64 on every later turn.
  *
  * Run from apps/web:  npx tsx scripts/test-epgl-2.0-documents-2026-10-26.ts
  */
@@ -25,13 +30,13 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  documentTypeForKey,
   documentCompositeBody,
   sendableDocumentKeys,
-  acceptedDocumentKeys,
+  documentOutcomes,
   slugOfDocumentType,
   withEpglDocumentFiles,
   documentItemsOf,
+  type EpglDocumentSlot,
   type EpglCaseFile,
 } from "@/lib/epglComposite";
 
@@ -40,89 +45,96 @@ const check = (l: string, ok: boolean, extra?: unknown) => { console.log(ok ? `P
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p: string) => readFileSync(resolve(here, "..", p), "utf8");
 
-/** The real slot labels, as the staging definition carries them. */
-const LABELS: Record<string, string> = {
-  memorandum_of_association: "Memorandum of Association",
-  copy_of_passport: "Copy of Passport",
-  sme_licence_federal_or_local_government: "SME Licence (federal or local government)",
-  insurance_certificate_goods_in_transit: "Insurance Certificate (goods in transit)",
-  // Our own older slots, which hold the same files under hand-made keys.
-  moa: "Memorandum of Association (MOA)",
-  partner_1_passport: "Partner 1 — passport copy",
-  trade_license: "Trade License / Initial Approval",
-};
-const nameOf = (k: string) => LABELS[k];
+/**
+ * The real slots, as the staging definition carries them. The catalogue-made
+ * ones have a salesforceType; ours do not, and that is the whole distinction.
+ */
+const SLOTS: EpglDocumentSlot[] = [
+  { key: "moa" },
+  { key: "partner_1_emirates_id" },
+  { key: "trade_license" },
+  { key: "memorandum_of_association", salesforceType: "Memorandum of Association" },
+  { key: "copy_of_passport", salesforceType: "Copy of Passport" },
+  { key: "trade_licence_initial_name_approval", salesforceType: "Trade Licence / Initial Name Approval", validTo: "2027-12-31" },
+];
 
-// ---- naming -----------------------------------------------------------------
-check("a catalogue slot is named by the catalogue",
-  documentTypeForKey("memorandum_of_association", LABELS.memorandum_of_association) === "Memorandum of Association");
-check("brackets and casing survive the round trip",
-  documentTypeForKey("sme_licence_federal_or_local_government", LABELS.sme_licence_federal_or_local_government) ===
-    "SME Licence (federal or local government)");
-check("one of our own slots is NOT named — it has a catalogue twin", documentTypeForKey("moa", LABELS.moa) === null);
-check("...and neither is a partner passport", documentTypeForKey("partner_1_passport", LABELS.partner_1_passport) === null);
-check("a slot with no label at all is never invented a name", documentTypeForKey("mystery_slot", undefined) === null);
+// ---- what goes, and what does not -------------------------------------------
+const sending = sendableDocumentKeys(SLOTS);
+check("only slots EPGL's checklist knows are sent",
+  JSON.stringify(sending) === JSON.stringify(["memorandum_of_association", "copy_of_passport", "trade_licence_initial_name_approval"]), sending);
+check("our own MOA slot is held back — it has a catalogue twin", !sending.includes("moa"));
+check("and the partner Emirates ID their API refused by name is too",
+  !sending.includes("partner_1_emirates_id"));
 
-// ---- the body ---------------------------------------------------------------
-const KEYS = ["moa", "memorandum_of_association", "partner_1_passport", "copy_of_passport", "trade_license"];
-const sending = sendableDocumentKeys(KEYS, nameOf);
-check("only the catalogue slots are sent",
-  JSON.stringify(sending) === JSON.stringify(["memorandum_of_association", "copy_of_passport"]), sending);
-
-const body = documentCompositeBody("LR-54066", sending, nameOf) as {
+const body = documentCompositeBody("LR-54066", SLOTS) as {
   allOrNone: boolean;
   compositeRequest: { method: string; url: string; referenceId: string; body: Record<string, string> }[];
 };
 check("the body exists", !!body);
-check("allOrNone is false — one bad slot must not roll back the rest", body.allOrNone === false);
-check("one item per sendable slot", body.compositeRequest.length === 2);
+check("allOrNone is false — one refused slot must not roll back the rest", body.allOrNone === false);
+check("one item per sendable slot, and no more", body.compositeRequest.length === 3);
 check("each item creates an EPG_Document__c",
   body.compositeRequest.every((i) => i.url === "/services/data/v60.0/sobjects/EPG_Document__c" && i.method === "POST"));
 
 // THE KEY THEIR CONTRACT USES. Not the record id.
 check("keyed on applicationId__c, the LR- reference",
   body.compositeRequest.every((i) => i.body.applicationId__c === "LR-54066"));
-check("...and the Salesforce record id appears nowhere in it",
-  !JSON.stringify(body).includes("a11FW000vLNqvIWYQZ") && !/EPG_License_Request__c/.test(JSON.stringify(body)));
+check("...and no Salesforce record id appears anywhere in it",
+  !/EPG_License_Request__c|a11FW000/.test(JSON.stringify(body)));
+check("Document_Type is the catalogue's name verbatim",
+  body.compositeRequest[0]!.body.Document_Type === "Memorandum of Association");
 
 // THE OTHER HALF: the filler finds a file by slugging Document_Type back.
-check("every Document_Type slugs back to its slot key",
+check("every Document_Type still slugs back to its slot key",
   body.compositeRequest.every((i, n) => slugOfDocumentType(i.body.Document_Type!) === sending[n]!));
 check("referenceIds are Doc1..DocN in the order sent",
-  body.compositeRequest.map((i) => i.referenceId).join(",") === "Doc1,Doc2");
+  body.compositeRequest.map((i) => i.referenceId).join(",") === "Doc1,Doc2,Doc3");
 
-check("no application id, no body", documentCompositeBody("", sending, nameOf) === null);
-check("no sendable slot, no body", documentCompositeBody("LR-1", ["moa", "trade_license"], nameOf) === null);
-check("no slots at all, no body", documentCompositeBody("LR-1", [], nameOf) === null);
+// ---- Valid_To__c ------------------------------------------------------------
+check("a validity date the case knows is sent",
+  body.compositeRequest[2]!.body.Valid_To__c === "2027-12-31");
+check("...and a date we do NOT know is never invented",
+  !("Valid_To__c" in body.compositeRequest[1]!.body));
+
+check("no application id, no body", documentCompositeBody("", SLOTS) === null);
+check("no sendable slot, no body", documentCompositeBody("LR-1", [{ key: "moa" }]) === null);
+check("no slots at all, no body", documentCompositeBody("LR-1", []) === null);
 
 // ---- the bytes actually go in ----------------------------------------------
-const files: EpglCaseFile[] = [
-  { key: "memorandum_of_association", fileName: "moa.pdf", bytes: new Uint8Array(1024).fill(65), contentType: "application/pdf" },
-  { key: "copy_of_passport", fileName: "pp.pdf", bytes: new Uint8Array(2048).fill(66), contentType: "application/pdf" },
-];
+const files: EpglCaseFile[] = sending.map((k) => ({
+  key: k, fileName: `${k}.pdf`, bytes: new Uint8Array(1024).fill(65), contentType: "application/pdf",
+}));
 const filled = await withEpglDocumentFiles({ body }, files, async () => null);
 const items = documentItemsOf((filled.input as { body: Record<string, unknown> }).body);
-check("the filler recognises what we composed", items.length === 2);
+check("the filler recognises what we composed", items.length === 3);
 check("...and puts the bytes in", items.every((i) => typeof (i.body as { content?: string }).content === "string"));
 check("nothing is left unmatched", filled.unmatched.length === 0, filled.unmatched);
-check("both slots went inline", filled.inlined.length === 2, filled.inlined);
 
-// ---- reading the answer back ------------------------------------------------
+// ---- reading the answer back, successes AND refusals ------------------------
+// Their real answer on LR-54066, 26 October.
 const answer = JSON.stringify({
   compositeResponse: [
-    { referenceId: "Doc1", httpStatusCode: 201, body: { success: true, id: "a2xFW0001", errors: [] } },
-    { referenceId: "Doc2", httpStatusCode: 400, body: { success: false, errors: ["bad"] } },
+    { referenceId: "Doc1", httpStatusCode: 200, body: { success: true, id: "a0vFW008KYiKZxQYYW", errors: [] } },
+    { referenceId: "Doc2", httpStatusCode: 400, body: { success: false, errors: ["Valid_To__c is required for this document"] } },
+    { referenceId: "Doc3", httpStatusCode: 400, body: { success: false, errors: ['Document_Type "x" is not required for this application'] } },
   ],
 });
-check("a slot their composite accepted is recorded",
-  JSON.stringify(acceptedDocumentKeys(answer, sending)) === JSON.stringify(["memorandum_of_association"]));
-check("a slot it refused is NOT recorded, so a later turn retries it",
-  !acceptedDocumentKeys(answer, sending).includes("copy_of_passport"));
-check("behind an HTTP status line it still reads", acceptedDocumentKeys(`HTTP 200\n${answer}`, sending).length === 1);
-check("nonsense gives nothing rather than throwing", acceptedDocumentKeys("not json", sending).length === 0);
-check("an empty result gives nothing", acceptedDocumentKeys(undefined, sending).length === 0);
+const outcome = documentOutcomes(answer, sending);
+check("a slot their composite accepted is recorded as sent",
+  JSON.stringify(outcome.sent) === JSON.stringify(["memorandum_of_association"]));
+check("a refused slot is recorded as refused, not silently dropped", outcome.refused.length === 2);
+check("...with their reason, verbatim",
+  outcome.refused[0]!.reason === "Valid_To__c is required for this document", outcome.refused);
+check("a refused slot is NOT counted as sent",
+  !outcome.sent.includes("copy_of_passport"));
+check("behind an HTTP status line it still reads", documentOutcomes(`HTTP 200\n${answer}`, sending).sent.length === 1);
+check("nonsense gives nothing rather than throwing", documentOutcomes("not json", sending).sent.length === 0);
+check("an empty result gives nothing", documentOutcomes(undefined, sending).refused.length === 0);
 check("a referenceId outside the batch is ignored",
-  acceptedDocumentKeys(JSON.stringify({ compositeResponse: [{ referenceId: "Doc9", body: { success: true } }] }), sending).length === 0);
+  documentOutcomes(JSON.stringify({ compositeResponse: [{ referenceId: "Doc9", body: { success: true } }] }), sending).sent.length === 0);
+check("a refusal with no message still names the slot",
+  documentOutcomes(JSON.stringify({ compositeResponse: [{ referenceId: "Doc1", httpStatusCode: 500, body: {} }] }), sending).refused[0]?.key ===
+    "memorandum_of_association");
 
 // ---- the route is wired -----------------------------------------------------
 const route = read("app/api/chat/route.ts");
@@ -131,17 +143,30 @@ check("the push is gated on the application id, not on a record id",
 check("...and only for EPGL", /agent\.definition\.tenantSlug === "epgl" &&\s*\n\s*epglApplicationId/.test(route));
 check("it goes through the New Regulation composite",
   /allApiTools\.find\(\(t\) => isEpglCompositeTool\(t\.name\)\)/.test(route));
+check("the slot's EPGL name comes from the journey definition",
+  /salesforceType: byKey\.get\(d\.key\)\?\.salesforceType/.test(route));
 check("it skips what has already gone", /!alreadySent\.has\(d\.key\)/.test(route));
+check("and what their API already refused", /!refusedAlready\.has\(d\.key\)/.test(route));
+check("a refusal is written to the case with its reason",
+  /\[EPGL_DOCS_REFUSED_KEY\]: \{/.test(route));
 check("what went is written to the case so a later turn does not resend it",
   /\[SF_DOCS_SENT_KEY\]: \[/.test(route));
-check("the order sent is the order read back", /acceptedDocumentKeys\(\(res as \{ raw\?: string \}\)\.raw \?\? res\.result, sending\)/.test(route));
+check("the order sent is the order read back",
+  /documentOutcomes\(\(res as \{ raw\?: string \}\)\.raw \?\? res\.result, sending\)/.test(route));
 check("it is deferred, like the 1.x push", /deferred\.push\(async \(\) => \{[\s\S]{0,400}documentCompositeBody/.test(route));
 check("an outcome either way is auditable",
   /action: sent\.length \? "epgl_documents_attached" : "epgl_documents_failed"/.test(route));
+check("only the trade licence has an expiry to give",
+  /key === "trade_licence_initial_name_approval" \|\| key === "trade_licence"/.test(route));
 
-// The 1.x path must be left exactly as it was — a different org entirely.
+// The 1.x path must be left exactly as it was — a different Salesforce org.
 check("the 1.x push still requires a Salesforce record id",
-  /submittedReference\) && \/\^\[a-zA-Z0-9\]\{15,18\}\$\/\.test\(submittedReference\)|\/\^\[a-zA-Z0-9\]\{15,18\}\$\/\.test\(submittedReference\)/.test(route));
+  /\/\^\[a-zA-Z0-9\]\{15,18\}\$\/\.test\(submittedReference\)/.test(route));
+
+// And the slot field has to survive config parsing, or every slot looks like ours.
+const schema = readFileSync(resolve(here, "../../../packages/config/src/documents.ts"), "utf8");
+check("salesforceType is on the DocumentRequirement schema, so zod keeps it",
+  /salesforceType: z\.string\(\)\.optional\(\)/.test(schema));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
