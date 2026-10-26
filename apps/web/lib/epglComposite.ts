@@ -214,3 +214,96 @@ export function applicationIdFrom(raw: string | undefined): string | null {
     .filter((v): v is string => typeof v === "string" && /^LR-\w+$/i.test(v));
   return ids[0] ?? null;
 }
+
+/**
+ * The catalogue's name for a slot, or null if this is not a catalogue slot.
+ *
+ * Two things have to hold, and the round-trip proves both at once. The slot
+ * keys for 2.0 ARE the slug of the catalogue's document name, so a label that
+ * slugs back to its key is a slot EPGL's checklist knows — and it is also the
+ * only shape `withEpglDocumentFiles` can match a file to, since it finds files
+ * by slugging Document_Type.
+ *
+ * Our own older slots fail it and are meant to: `moa`, `trade_license` and
+ * `partner_1_passport` are internal, there to read fields off a document, and
+ * each has a catalogue twin holding the same file (see the duplicate-slot
+ * note). Sending them would file a second copy under a Document_Type their
+ * picklist has never heard of. A name is never invented here — a slot we
+ * cannot name is a slot we do not send.
+ */
+export function documentTypeForKey(key: string, catalogueName?: string): string | null {
+  if (!catalogueName) return null;
+  return slugOfDocumentType(catalogueName) === key ? catalogueName : null;
+}
+
+/**
+ * The documents, as their own composite, after the application exists.
+ *
+ * THE MODEL NEVER EMITS THESE. The 2.0 composite is composed by the model and
+ * every one it has sent carries exactly Account, the owners, the Contact and
+ * the licence request — so `withEpglDocumentFiles` has had nothing to fill, and
+ * on 26 October their getApplicationStatus for LR-54066 reported all ten slots
+ * `uploaded: false`. Their reviewers have been reading empty applications.
+ *
+ * So the files go in a SECOND call that we compose, once the application has an
+ * id. That is their documented re-upload shape: EPG_Document__c keyed on
+ * `applicationId__c` — the LR- reference, NOT the Salesforce record id — and
+ * `allOrNone: false`, so one bad slot cannot roll back the rest.
+ *
+ * The bytes are not put in here. This returns the skeleton and the exec layer
+ * fills each item exactly as it would one the model wrote, which is what keeps
+ * the >3 MB ContentVersion path working for both.
+ */
+export function documentCompositeBody(
+  applicationId: string,
+  keys: string[],
+  catalogueNameOf: (key: string) => string | undefined
+): Record<string, unknown> | null {
+  if (!applicationId) return null;
+  const items = keys
+    .map((key) => ({ key, type: documentTypeForKey(key, catalogueNameOf(key)) }))
+    .filter((x): x is { key: string; type: string } => x.type !== null);
+  if (!items.length) return null;
+  return {
+    allOrNone: false,
+    compositeRequest: items.map((x, i) => ({
+      method: "POST",
+      url: "/services/data/v60.0/sobjects/EPG_Document__c",
+      referenceId: `Doc${i + 1}`,
+      body: { applicationId__c: applicationId, Document_Type: x.type },
+    })),
+  };
+}
+
+/** The slots `documentCompositeBody` will actually send, in the order it sends them. */
+export function sendableDocumentKeys(keys: string[], catalogueNameOf: (key: string) => string | undefined): string[] {
+  return keys.filter((k) => documentTypeForKey(k, catalogueNameOf(k)) !== null);
+}
+
+/** Slots their composite answered for, so a later turn does not send them again. */
+export function acceptedDocumentKeys(raw: string | undefined, keysInOrder: string[]): string[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const brace = raw.indexOf("{");
+    if (brace === -1) return [];
+    try {
+      parsed = JSON.parse(raw.slice(brace));
+    } catch {
+      return [];
+    }
+  }
+  const items = (parsed as { compositeResponse?: { referenceId?: string; httpStatusCode?: number; body?: { success?: boolean } }[] })
+    ?.compositeResponse;
+  if (!Array.isArray(items)) return [];
+  const ok: string[] = [];
+  for (const item of items) {
+    const n = Number(String(item?.referenceId ?? "").replace(/^Doc/, ""));
+    if (!Number.isInteger(n) || n < 1 || n > keysInOrder.length) continue;
+    const good = item?.body?.success === true || (item?.httpStatusCode ?? 0) < 300;
+    if (good) ok.push(keysInOrder[n - 1]!);
+  }
+  return ok;
+}

@@ -76,6 +76,7 @@ import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/custome
 import { log } from "@/lib/logger";
 import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
 import type { EpglCaseFile } from "@/lib/epglComposite";
+import { isEpglCompositeTool, documentCompositeBody, acceptedDocumentKeys, sendableDocumentKeys } from "@/lib/epglComposite";
 
 export const runtime = "nodejs";
 // Multi-tool turns (e.g. a renewal: details + pricing + payment) can run well past
@@ -4467,6 +4468,83 @@ export async function POST(req: NextRequest) {
               }
             }
           });
+        }
+
+        /**
+         * THE SAME GAP, ON 2.0, WHERE THE BLOCK ABOVE CANNOT REACH IT.
+         *
+         * The push above is 1.x: it is gated on the case reading
+         * `status: "submitted"` with a 15-18 character Salesforce record id in
+         * `reference`, and it sends through `uploadDocument` -- which belongs to
+         * the "EPGL Salesforce" integration, a DIFFERENT Salesforce org from the
+         * NewLaw sandbox 2.0 submits to. A 2.0 application satisfies none of it:
+         * it is submitted by the model calling CompositeHandler, which emits no
+         * `submitted` event, so the case stays `ready` with `reference: null`
+         * and its id lands only in `data.application_id` as `LR-54066` -- eight
+         * characters with a hyphen, which would fail that regex anyway.
+         *
+         * So every document stayed on our side. Their getApplicationStatus for
+         * LR-54066 on 26 October reported all ten slots `uploaded: false`, and
+         * no attach was ever ATTEMPTED -- no sf_document_* row exists for any
+         * 2.0 run, which is why nothing showed as broken anywhere.
+         *
+         * Keyed on the application id, per their documented shape, and run on
+         * every later turn for whatever has not gone yet, exactly like 1.x --
+         * the deferred work still dies with the turn, and a submission the
+         * applicant has already been thanked for must not depend on it.
+         */
+        const epglApplicationId = str(finalState.data.application_id);
+        const epglCompositeTool = allApiTools.find((t) => isEpglCompositeTool(t.name))?.name;
+        if (
+          agent.definition.tenantSlug === "epgl" &&
+          epglApplicationId &&
+          /^LR-\w+$/i.test(epglApplicationId) &&
+          epglCompositeTool
+        ) {
+          const appId = epglApplicationId;
+          const tool = epglCompositeTool;
+          const pending = finalState.documents
+            .filter((d) => (d.status === "uploaded" || d.status === "accepted") && !alreadySent.has(d.key))
+            .map((d) => d.key);
+          if (pending.length) {
+            // The catalogue's own name when it slugs back to the slot key, so
+            // the exec layer finds the file again; see documentTypeForKey.
+            const nameOf = (key: string) => docLabels.get(key);
+            // The order the body goes out in, so Doc1..DocN line up with the
+            // keys when the answer is read back.
+            const sending = sendableDocumentKeys(pending, nameOf);
+            deferred.push(async () => {
+              try {
+                const payload = documentCompositeBody(appId, sending, nameOf);
+                if (!payload) return;
+                const res = await execIntegration(tool, { body: payload });
+                const sent = res.isError
+                  ? []
+                  : acceptedDocumentKeys((res as { raw?: string }).raw ?? res.result, sending);
+                await audit({
+                  ...a,
+                  actor: "system",
+                  action: sent.length ? "epgl_documents_attached" : "epgl_documents_failed",
+                  payload: { applicationId: appId, attempted: sending, sent },
+                });
+                if (!sent.length) return;
+                await mutateCase(session.caseId, (fresh) => ({
+                  ...fresh,
+                  data: {
+                    ...fresh.data,
+                    [SF_DOCS_SENT_KEY]: [
+                      ...new Set([
+                        ...(Array.isArray(fresh.data[SF_DOCS_SENT_KEY]) ? (fresh.data[SF_DOCS_SENT_KEY] as unknown[]).map(String) : []),
+                        ...sent,
+                      ]),
+                    ],
+                  },
+                }));
+              } catch (e) {
+                log.error("epgl_document_push_failed", e, { agentId: agent.id, applicationId: appId });
+              }
+            });
+          }
         }
 
         const cust = (authenticated ? "authenticated" : "guest") as "authenticated" | "guest";
