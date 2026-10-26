@@ -9,6 +9,8 @@ import { recordApiCall, trackedFetch } from "./apiCallLog";
 import {
   isEpglCompositeTool,
   withEpglDocumentFiles,
+  withEpglDocumentItems,
+  documentOutcomes,
   contentVersionMultipart,
   applicationIdFrom,
   type EpglCaseFile,
@@ -1356,6 +1358,17 @@ export async function buildApiTools(
      */
     rememberEpglApplicationId?: (applicationId: string) => void | Promise<void>;
     /**
+     * What EPGL said about each document the create call carried.
+     *
+     * The one-call body attaches the documents to the application as it is
+     * created, so by the time the turn ends they have already been answered
+     * for. Without this the follow-up push would re-post every one of them.
+     */
+    rememberEpglDocuments?: (outcome: {
+      sent: string[];
+      refused: { key: string; reason: string }[];
+    }) => void | Promise<void>;
+    /**
      * The rental duration the customer actually chose, from the case.
      *
      * 4 Sep: they picked "2 Years — expires 03-09-2028, AED 670", the case
@@ -1746,6 +1759,8 @@ export async function buildApiTools(
 
     /** Set when a document slot could not be filled; appended to the result below. */
     let documentNote: string | null = null;
+    /** Slots put into THIS create call, in the order their Doc1..DocN sit in it. */
+    let epglDocumentsInCreate: string[] = [];
 
     // A BOX YOU DO NOT HOLD IS NOT YOURS TO MANAGE.
     //
@@ -2827,6 +2842,17 @@ export async function buildApiTools(
     if (isEpglCompositeTool(toolName) && opts.epglDocuments) {
       const files = await opts.epglDocuments().catch(() => [] as EpglCaseFile[]);
       if (files.length) {
+        /**
+         * THE DOCUMENTS TRAVEL WITH THE CREATE, when this is the create.
+         *
+         * Put in before the filler runs, so the items added here and any the
+         * model wrote are filled by the same code. Only on a composite that
+         * creates the licence request and carries no documents of its own —
+         * a follow-up document call has neither, and is left alone.
+         */
+        const injected = withEpglDocumentItems(input, files);
+        input = injected.input ?? input;
+        epglDocumentsInCreate = injected.added;
         const token =
           entry.spec.authType === "oauth2_cc"
             ? await getClientCredentialsToken(entry.spec).catch(() => null)
@@ -4913,6 +4939,25 @@ export async function buildApiTools(
      * stands and the gap is named next to it.
      */
     if (documentNote && !res.isError) res = { ...res, result: `${res.result}\n\n${documentNote}` };
+
+    /**
+     * What their composite did with the documents it carried.
+     *
+     * Recorded so the follow-up push does not immediately re-send everything
+     * that has just gone. Their items answer per document, and a refusal is
+     * final for that slot under allOrNone: false, so both halves are kept --
+     * exactly as the follow-up call keeps them.
+     */
+    if (!res.isError && epglDocumentsInCreate.length && opts.rememberEpglDocuments) {
+      const outcome = documentOutcomes((res as { raw?: string }).raw ?? res.result, epglDocumentsInCreate);
+      if (outcome.sent.length || outcome.refused.length) {
+        try {
+          await opts.rememberEpglDocuments(outcome);
+        } catch {
+          // Losing the record costs a redundant re-send, never the submission.
+        }
+      }
+    }
 
     // The id their status push will be keyed on, written down while we have it.
     if (!res.isError && isEpglCompositeTool(toolName) && opts.rememberEpglApplicationId) {

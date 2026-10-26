@@ -749,7 +749,8 @@ function formatEpglProfileContext(p: Record<string, string>): string | undefined
  */
 async function epglDocumentRows(
   caseId: string,
-  stateDocs: { key: string; status: string; fileName?: string }[],
+  stateDocs: { key: string; status: string; fileName?: string; validTo?: string }[],
+  caseData: Record<string, unknown>,
   definition: AgentDefinition,
   adapters: ReturnType<typeof resolveAdapters>
 ): Promise<EpglCaseFile[]> {
@@ -757,6 +758,11 @@ async function epglDocumentRows(
   if (!get) return [];
   const wanted = stateDocs.filter((d) => d.status === "uploaded" || d.status === "accepted");
   if (!wanted.length) return [];
+  // EPGL's own name for each slot, so both the one-call items and the
+  // follow-up call name a document the same way and neither invents one.
+  const slotType = new Map<string, string | undefined>(
+    definition.journeys.flatMap((j) => j.steps).flatMap((st) => st.documents).map((d) => [d.key, d.salesforceType] as const)
+  );
   const sctx = adapterContext(definition, definition.integrations.storage);
   const out: EpglCaseFile[] = [];
   for (const d of wanted) {
@@ -773,6 +779,8 @@ async function epglDocumentRows(
         fileName: row.fileName || d.fileName || `${d.key}.pdf`,
         bytes: stored.bytes,
         contentType: stored.contentType,
+        salesforceType: slotType.get(d.key),
+        validTo: epglValidTo(d, caseData),
       });
     } catch {
       // One unreadable file must not cost the customer the rest of them.
@@ -1349,7 +1357,7 @@ export async function POST(req: NextRequest) {
     // own call.
     epglDocuments:
       agent.definition.tenantSlug === "epgl"
-        ? () => epglDocumentRows(session.caseId, session.state.documents, agent.definition, adapters)
+        ? () => epglDocumentRows(session.caseId, liveState.documents, liveState.data, agent.definition, adapters)
         : undefined,
     /**
      * The application id onto the case, the moment Salesforce issue it.
@@ -1372,6 +1380,45 @@ export async function POST(req: NextRequest) {
               actor: "system",
               action: "epgl_application_id",
               payload: { applicationId },
+            });
+          }
+        : undefined,
+    /**
+     * What EPGL said about the documents the create call carried.
+     *
+     * Kept on the case in the same two places the follow-up push uses, so the
+     * two paths cannot disagree about what has gone: whichever ran, the other
+     * skips what it already answered for. Also held in memory for this turn,
+     * because the deferred push is composed from a state snapshot taken before
+     * the submission happened.
+     */
+    rememberEpglDocuments:
+      agent.definition.tenantSlug === "epgl"
+        ? async (outcome: { sent: string[]; refused: { key: string; reason: string }[] }) => {
+            epglDocumentsHandled.sent.push(...outcome.sent);
+            for (const r of outcome.refused) epglDocumentsHandled.refused.set(r.key, r.reason);
+            await mutateCase(session.caseId, (st) => ({
+              ...st,
+              data: {
+                ...st.data,
+                [SF_DOCS_SENT_KEY]: [
+                  ...new Set([
+                    ...(Array.isArray(st.data[SF_DOCS_SENT_KEY]) ? (st.data[SF_DOCS_SENT_KEY] as unknown[]).map(String) : []),
+                    ...outcome.sent,
+                  ]),
+                ],
+                [EPGL_DOCS_REFUSED_KEY]: {
+                  ...((st.data[EPGL_DOCS_REFUSED_KEY] as Record<string, unknown>) ?? {}),
+                  ...Object.fromEntries(outcome.refused.map((r) => [r.key, r.reason])),
+                },
+              },
+            }));
+            await audit({
+              agentId: agent.id,
+              conversationId: session.conversationId,
+              actor: "system",
+              action: outcome.sent.length ? "epgl_documents_attached" : "epgl_documents_failed",
+              payload: { via: "create", sent: outcome.sent, refused: outcome.refused },
             });
           }
         : undefined,
@@ -1912,6 +1959,8 @@ export async function POST(req: NextRequest) {
    * simply not sent.
    */
   const epglAccountId: { value: string | null } = { value: null };
+  /** Documents the create call already answered for, this turn. */
+  const epglDocumentsHandled = { sent: [] as string[], refused: new Map<string, string>() };
   /**
    * THE GATE EPGL'S OWN RENEWAL MAP PUTS HERE.
    *
@@ -4539,15 +4588,17 @@ export async function POST(req: NextRequest) {
           // A slot their API has already refused is not tried again: allOrNone
           // is false, so the refusal is final for that slot, and the file would
           // go back up as base64 on every remaining turn to be refused again.
-          const refusedAlready = new Set(
-            Object.keys((finalState.data[EPGL_DOCS_REFUSED_KEY] as Record<string, unknown>) ?? {})
-          );
+          const refusedAlready = new Set([
+            ...Object.keys((finalState.data[EPGL_DOCS_REFUSED_KEY] as Record<string, unknown>) ?? {}),
+            ...epglDocumentsHandled.refused.keys(),
+          ]);
           const byKey = new Map(journeyDocs.map((d) => [d.key, d] as const));
           const slots: EpglDocumentSlot[] = finalState.documents
             .filter(
               (d) =>
                 (d.status === "uploaded" || d.status === "accepted") &&
                 !alreadySent.has(d.key) &&
+                !epglDocumentsHandled.sent.includes(d.key) &&
                 !refusedAlready.has(d.key)
             )
             .map((d) => ({

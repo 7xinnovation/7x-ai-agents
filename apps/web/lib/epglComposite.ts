@@ -30,6 +30,10 @@ export interface EpglCaseFile {
   fileName: string;
   bytes: Uint8Array;
   contentType?: string;
+  /** EPGL's name for the slot. Absent on our own slots, which are never sent. */
+  salesforceType?: string;
+  /** The expiry printed on this file, ISO YYYY-MM-DD, when it has one. */
+  validTo?: string;
 }
 
 export interface CompositeItem {
@@ -144,6 +148,64 @@ export async function withEpglDocumentFiles(
   body.compositeRequest = next;
   res.input = { ...input, body };
   return res;
+}
+
+/**
+ * The documents INTO the create call, against the application being created.
+ *
+ * Hussein, 26 October: "If you want the documents on the same application as
+ * the create, include the document items after the application item in the
+ * one-call body, referencing it with EPG_License_Request__c:
+ * \"@{NewLicenseRequest.id}\"."
+ *
+ * Worth doing even though the follow-up call works, because of what happened
+ * to LR-54056: by the time its documents were asked for, the application had
+ * already moved on and they went to a later one. A document that travels with
+ * the create cannot miss its application.
+ *
+ * The model has never emitted a document item in two weeks of runs, so they
+ * are put in here rather than asked for. If it ever does emit one, this leaves
+ * the composite alone — it is not ours to second-guess.
+ *
+ * Only slots EPGL's checklist knows, by the same rule as the follow-up call:
+ * `salesforceType` is set on a catalogue-generated slot and on no other. The
+ * bytes are not put in here; `withEpglDocumentFiles` does that next, to the
+ * items added here and the model's alike.
+ */
+export function withEpglDocumentItems(
+  input: Record<string, unknown> | undefined,
+  files: EpglCaseFile[]
+): { input: Record<string, unknown> | undefined; added: string[] } {
+  const none = { input, added: [] as string[] };
+  const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+  const items = Array.isArray(body.compositeRequest) ? ([...body.compositeRequest] as CompositeItem[]) : [];
+  if (!items.length) return none;
+  // Already carries documents: the model composed them, so leave it be.
+  if (items.some((i) => /sobjects\/EPG_Document__c$/i.test(String(i?.url ?? "")))) return none;
+
+  const request = items.find((i) => /sobjects\/EPG_License_Request__c$/i.test(String(i?.url ?? "")));
+  if (!request?.referenceId) return none;
+  const ref = request.referenceId;
+
+  const sendable = files.filter((f) => !!f.salesforceType);
+  if (!sendable.length) return none;
+
+  const docs: CompositeItem[] = sendable.map((f, i) => ({
+    method: "POST",
+    url: "/services/data/v60.0/sobjects/EPG_Document__c",
+    referenceId: `Doc${i + 1}`,
+    body: {
+      // Their reference syntax, resolved by Salesforce inside the one call.
+      EPG_License_Request__c: `@{${ref}.id}`,
+      Document_Type: f.salesforceType!,
+      ...(f.validTo ? { Valid_To__c: f.validTo } : {}),
+    },
+  }));
+
+  // After the application item, as their example has it.
+  const at = items.indexOf(request) + 1;
+  body.compositeRequest = [...items.slice(0, at), ...docs, ...items.slice(at)];
+  return { input: { ...input, body }, added: sendable.map((f) => f.key) };
 }
 
 /**

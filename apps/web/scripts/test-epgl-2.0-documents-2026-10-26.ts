@@ -30,6 +30,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  withEpglDocumentItems,
   documentCompositeBody,
   sendableDocumentKeys,
   documentOutcomes,
@@ -136,6 +137,62 @@ check("a refusal with no message still names the slot",
   documentOutcomes(JSON.stringify({ compositeResponse: [{ referenceId: "Doc1", httpStatusCode: 500, body: {} }] }), sending).refused[0]?.key ===
     "memorandum_of_association");
 
+// ---- the one-call body: documents travel WITH the create --------------------
+const CREATE = () => ({
+  body: {
+    allOrNone: true,
+    compositeRequest: [
+      { method: "POST", url: "/services/data/v60.0/sobjects/Account", referenceId: "NewAccount", body: { Name: "X" } },
+      { method: "POST", url: "/services/data/v60.0/sobjects/EPG_License_Request__c", referenceId: "NewLicenseRequest", body: { Product_Code: "CEP30-UAE-SME-DOM" } },
+      { method: "POST", url: "/services/data/v60.0/sobjects/Application_Item__c", referenceId: "Item1", body: { License_Request__c: "@{NewLicenseRequest.id}" } },
+    ],
+  },
+});
+const FILES: EpglCaseFile[] = [
+  { key: "moa", fileName: "a.pdf", bytes: new Uint8Array(8), contentType: "application/pdf" },
+  { key: "memorandum_of_association", fileName: "b.pdf", bytes: new Uint8Array(8), contentType: "application/pdf", salesforceType: "Memorandum of Association" },
+  { key: "copy_of_passport", fileName: "c.pdf", bytes: new Uint8Array(8), contentType: "application/pdf", salesforceType: "Copy of Passport", validTo: "2034-01-01" },
+];
+
+const one = withEpglDocumentItems(CREATE(), FILES);
+const oneItems = (one.input as { body: { compositeRequest: { referenceId: string; url: string; body: Record<string, string> }[] } }).body.compositeRequest;
+check("the documents are added to the create", one.added.length === 2);
+check("our own slots are left out here too", !one.added.includes("moa"));
+check("they reference the application being created, by its referenceId",
+  oneItems.filter((i) => /EPG_Document__c$/.test(i.url)).every((i) => i.body.EPG_License_Request__c === "@{NewLicenseRequest.id}"));
+check("...which is their documented reference syntax",
+  JSON.stringify(one.input).includes('"@{NewLicenseRequest.id}"'));
+check("and NOT the follow-up call's applicationId__c",
+  !JSON.stringify(oneItems.filter((i) => /EPG_Document__c$/.test(i.url))).includes("applicationId__c"));
+check("they sit AFTER the application item, as their example has it",
+  oneItems.findIndex((i) => i.referenceId === "NewLicenseRequest") < oneItems.findIndex((i) => /EPG_Document__c$/.test(i.url)));
+check("the expiry rides along", oneItems.find((i) => i.referenceId === "Doc2")?.body.Valid_To__c === "2034-01-01");
+check("nothing else in the create is disturbed",
+  oneItems.filter((i) => !/EPG_Document__c$/.test(i.url)).map((i) => i.referenceId).join(",") === "NewAccount,NewLicenseRequest,Item1");
+
+// The bytes still go in, to the items we added.
+const oneFilled = await withEpglDocumentFiles(one.input, FILES, async () => null);
+check("the filler fills what we injected", oneFilled.inlined.length === 2, oneFilled);
+check("...and leaves nothing unmatched", oneFilled.unmatched.length === 0, oneFilled.unmatched);
+
+// Guards.
+check("a composite the model already put documents in is left alone", (() => {
+  const withDocs = CREATE();
+  withDocs.body.compositeRequest.push({ method: "POST", url: "/services/data/v60.0/sobjects/EPG_Document__c", referenceId: "Doc1", body: {} } as never);
+  return withEpglDocumentItems(withDocs, FILES).added.length === 0;
+})());
+check("a composite that creates no application is left alone", (() => {
+  const noReq = { body: { allOrNone: true, compositeRequest: [{ method: "POST", url: "/services/data/v60.0/sobjects/Account", referenceId: "A", body: {} }] } };
+  return withEpglDocumentItems(noReq, FILES).added.length === 0;
+})());
+check("no catalogue slot, nothing added", withEpglDocumentItems(CREATE(), [FILES[0]!]).added.length === 0);
+check("an empty composite is left alone", withEpglDocumentItems({ body: {} }, FILES).added.length === 0);
+check("a renamed application item is still referenced correctly", (() => {
+  const renamed = CREATE();
+  renamed.body.compositeRequest[1]!.referenceId = "TheApplication";
+  return JSON.stringify(withEpglDocumentItems(renamed, FILES).input).includes("@{TheApplication.id}");
+})());
+
 // ---- the route is wired -----------------------------------------------------
 const route = read("app/api/chat/route.ts");
 check("the push is gated on the application id, not on a record id",
@@ -170,6 +227,12 @@ const caseSchema = readFileSync(resolve(here, "../../../packages/config/src/case
 check("validTo survives config parsing", /validTo: z\.string\(\)\.optional\(\)/.test(caseSchema));
 
 // The 1.x path must be left exactly as it was — a different Salesforce org.
+check("the create call carries the documents", /withEpglDocumentItems\(input, files\)/.test(read("lib/integrations.ts")));
+check("...and what EPGL said about them is kept",
+  /rememberEpglDocuments/.test(read("lib/integrations.ts")) && /rememberEpglDocuments:/.test(route));
+check("so the follow-up push does not re-send them",
+  /!epglDocumentsHandled\.sent\.includes\(d\.key\)/.test(route));
+
 check("the 1.x push still requires a Salesforce record id",
   /\/\^\[a-zA-Z0-9\]\{15,18\}\$\/\.test\(submittedReference\)/.test(route));
 
