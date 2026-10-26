@@ -135,7 +135,7 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
   {
     name: "request_escalation",
     description:
-      "Raise the customer's enquiry, complaint or callback request with the team FROM INSIDE THIS CONVERSATION — never send them to a website, page or form to do it themselves (FB-1803). Pass reason in their own words (what it is about; for a complaint, what happened and the box or reference it concerns), plus name, phone and email when you have them. Returns the reference the customer quotes.",
+      "Raise the customer's enquiry, complaint or callback request with the team FROM INSIDE THIS CONVERSATION — never send them to a website, page or form to do it themselves (FB-1803). Pass reason in their own words (what it is about; for a complaint, what happened and the box or reference it concerns), plus name, phone and email when you have them. Set case_type to what this actually is — their CRM routes, reports and numbers the case on it. Returns the reference the customer quotes.",
     input_schema: {
       type: "object",
       properties: {
@@ -143,6 +143,23 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
         phone: { type: "string" },
         email: { type: "string" },
         reason: { type: "string" },
+        /**
+         * WHAT KIND OF CASE THIS IS, FROM THE CONVERSATION RATHER THAN ONE
+         * SENTENCE.
+         *
+         * It used to be inferred from the customer's words alone. On
+         * 26 October a tester went through the complaint flow, was told "Your
+         * complaint has been raised", and wrote only "Testing - 0544043558
+         * -Farah -6005 ajm" — no complaint word in it, so it went across as an
+         * Inquiry and their console numbered it INQ-. The model knew it was a
+         * complaint; it had no way to say so.
+         */
+        case_type: {
+          type: "string",
+          enum: ["Inquiry", "Complaint", "Feedback", "Compliment"],
+          description:
+            "Complaint when something went wrong for them — a lost, late or damaged item, money taken wrongly, being ignored, or any dissatisfaction, INCLUDING when they reached here through a complaint flow and then described it flatly. Compliment for praise. Feedback for a suggestion about how things could work. Inquiry for a question or a request for help with no dissatisfaction in it. If the customer chose what this was earlier in the conversation, that choice decides it.",
+        },
       },
       required: ["reason"],
     },
@@ -1102,7 +1119,11 @@ export async function dispatchTool(
            */
           intake: caseIntakeFrom(
             [String(input.reason ?? ""), ctx.userMessage ?? ""].join(" \n "),
-            state.data as Record<string, unknown>
+            state.data as Record<string, unknown>,
+            // What the model says this is, which outranks reading the sentence:
+            // it has the whole conversation, including the flow the customer
+            // picked, and the words alone lose that.
+            input.case_type as string | undefined
           ),
           // THE CONTEXT GOES WITH IT. The artefact asks that the request, its
           // context and the actions already taken transfer to the officer; what

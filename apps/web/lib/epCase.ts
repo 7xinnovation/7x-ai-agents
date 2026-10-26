@@ -96,34 +96,49 @@ export function crmEndpoint(): { url: string } | null {
  * `caseNumbering` is what the website's contact form reads, and that is the
  * only shape confirmed first-hand. The keyed CRM endpoint arrived on 22 October
  * WITHOUT A SAMPLE RESPONSE — the Postman collection they sent saves none — so
- * the exact field name there is still unknown.
+ * the exact field name there was unknown and this took whichever spelling it
+ * found.
  *
- * Rather than guess one, this accepts any of the handful of spellings the same
- * value plausibly carries, matched case-insensitively, and looks one level into
- * a `data`/`result`/`response` envelope. A number we do not recognise is NOT
+ * IT FOUND THE WRONG ONE. Their CRM answers with BOTH, and they are not
+ * interchangeable:
+ *
+ *   {"customCaseNumber":"INQ-00000179","caseNumber":"01246852", ...}
+ *
+ * `customCaseNumber` is what their console shows as "Case Numbering" and what
+ * their agents search on; `caseNumber` is Salesforce's own. We were quoting the
+ * second, so a customer rang up with 01601318 and Emirates Post, looking at
+ * INQ-01267121, could not find it — reported 26 October.
+ *
+ * So the customer-facing one is preferred explicitly, and the rest stay as a
+ * fallback for the website form's shape. A number we do not recognise is NOT
  * invented: the caller logs the body and falls back to the ops mailbox, which
  * is the honest outcome and leaves a trace to read.
  */
 export function caseNumberFrom(text: string): string {
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { return ""; }
-  const NAME = /^(case ?number(ing)?|case ?no|caseid|ticket ?number|reference ?number)$/i;
-  const pick = (o: unknown): string => {
+  // The one their agents can look up, first and by name.
+  const CUSTOMER_FACING = /^(custom ?case ?number(ing)?|display ?case ?number)$/i;
+  // `caseId` is NOT among these. It was, as one of the plausible spellings
+  // guessed before their response was ever seen — and their response shows it
+  // is a different thing entirely: "caseId":"500FV00Lp4AM9LkYEL", a Salesforce
+  // record id. Quoting that to a customer as their reference would be worse
+  // than quoting nothing, which at least falls back to the ops mailbox.
+  const NAME = /^(case ?number(ing)?|case ?no|ticket ?number|reference ?number)$/i;
+  const pick = (o: unknown, match: RegExp): string => {
     if (!o || typeof o !== "object") return "";
     for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
-      if (!NAME.test(k.replace(/[_-]/g, " "))) continue;
+      if (!match.test(k.replace(/[_-]/g, " "))) continue;
       const val = typeof v === "number" ? String(v) : typeof v === "string" ? v.trim() : "";
       if (val) return val;
     }
     return "";
   };
-  const top = pick(parsed);
-  if (top) return top;
-  for (const key of ["data", "result", "response", "case"]) {
-    const nested = (parsed as Record<string, unknown>)?.[key];
-    const found = pick(nested);
-    if (found) return found;
-  }
+  const envelopes = [parsed, ...["data", "result", "response", "case"].map((k) => (parsed as Record<string, unknown>)?.[k])];
+  // Their customer-facing number wins wherever it appears, before any
+  // Salesforce-internal one at the same level.
+  for (const o of envelopes) { const v = pick(o, CUSTOMER_FACING); if (v) return v; }
+  for (const o of envelopes) { const v = pick(o, NAME); if (v) return v; }
   return "";
 }
 
