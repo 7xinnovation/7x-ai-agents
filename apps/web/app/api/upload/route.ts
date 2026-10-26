@@ -541,7 +541,36 @@ export async function POST(req: NextRequest) {
       key,
       status: "uploaded",
       fileName: file.name,
+      // Kept, not just checked. EPGL store it as Valid_To__c and refuse the
+      // document without it on the slots their catalogue marks validityRequired.
+      validTo: extraction.docExpiryDate,
     });
+
+    /**
+     * A REPLACED FILE IS A NEW CHANCE, so forget what happened to the old one.
+     *
+     * Both markers are per-slot: one records what EPGL accepted, the other what
+     * they refused and why, and each exists to stop the push re-sending the
+     * same bytes every turn. Neither should outlive the file it was about —
+     * re-uploading a passport because the first had no expiry date on it must
+     * not leave the slot pinned to "Valid_To__c is required".
+     */
+    const sentKeys = Array.isArray(next.data.__sf_documents_sent)
+      ? (next.data.__sf_documents_sent as unknown[]).map(String).filter((k) => k !== key)
+      : null;
+    const refused = { ...((next.data.__epgl_documents_refused as Record<string, unknown>) ?? {}) };
+    const hadRefusal = key in refused;
+    delete refused[key];
+    if (sentKeys || hadRefusal) {
+      next = {
+        ...next,
+        data: {
+          ...next.data,
+          ...(sentKeys ? { __sf_documents_sent: sentKeys } : {}),
+          ...(hadRefusal ? { __epgl_documents_refused: refused } : {}),
+        },
+      };
+    }
 
     // Re-upload replaces its own data (FB-1442: values from an earlier file in
     // this slot must not survive a replacement — e.g. another company's license).

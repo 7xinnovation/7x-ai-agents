@@ -11,6 +11,19 @@ export const CaseDocument = z.object({
   status: DocumentStatus,
   fileName: z.string().optional(),
   rejectionReason: z.string().optional(),
+  /**
+   * The expiry printed on THIS file, ISO YYYY-MM-DD, when it has one.
+   *
+   * The extractor has always read it — `docExpiryDate`, asked of every upload —
+   * and it was used to refuse an expired Emirates ID and then dropped. EPGL
+   * want it back as `Valid_To__c` on the document they store, and three slots
+   * on LR-54066 were refused for want of it: "Valid_To__c is required for this
+   * document", on Copy of Emirates ID, Copy of Passport and SME Licence.
+   *
+   * A fact about the FILE, like the expiry check that reads it — not a field of
+   * the application, and never typed by anyone.
+   */
+  validTo: z.string().optional(),
 });
 export type CaseDocument = z.infer<typeof CaseDocument>;
 

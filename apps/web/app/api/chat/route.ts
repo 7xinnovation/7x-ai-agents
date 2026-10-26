@@ -423,15 +423,22 @@ const SF_DOCS_SENT_KEY = "__sf_documents_sent";
 const EPGL_DOCS_REFUSED_KEY = "__epgl_documents_refused";
 
 /**
- * Their Valid_To__c for a slot, where the case actually knows it.
+ * Their Valid_To__c for a slot: the expiry printed on the file itself.
  *
- * Only the trade licence has an expiry on the journey today. Guessing one for
- * a passport or an Emirates ID would put a date we invented on a regulator's
- * record, so a slot we cannot answer for is sent without the field and their
- * refusal is recorded as the honest outcome.
+ * Hussein, 26 October: "Send Valid_To__c (YYYY-MM-DD) with them and they will
+ * pass." The date has always been read — the extractor asks every upload for
+ * its printed expiry, which is how an expired Emirates ID is refused — it was
+ * simply never kept. It is now on the case document as `validTo`.
+ *
+ * The trade licence falls back to `license_expiry_date`, the field the model
+ * fills from the licence, for files uploaded before `validTo` was recorded.
+ * Nothing is guessed anywhere: a slot whose file carries no printed expiry is
+ * sent without the field and their refusal is recorded as the honest outcome,
+ * because inventing a date would put it on a regulator's record.
  */
-function epglValidTo(key: string, data: Record<string, unknown>): string | undefined {
-  if (key === "trade_licence_initial_name_approval" || key === "trade_licence") {
+function epglValidTo(doc: { key: string; validTo?: string }, data: Record<string, unknown>): string | undefined {
+  if (doc.validTo) return doc.validTo;
+  if (doc.key === "trade_licence_initial_name_approval" || doc.key === "trade_licence") {
     return str(data.license_expiry_date) ?? undefined;
   }
   return undefined;
@@ -4546,7 +4553,7 @@ export async function POST(req: NextRequest) {
             .map((d) => ({
               key: d.key,
               salesforceType: byKey.get(d.key)?.salesforceType,
-              validTo: epglValidTo(d.key, finalState.data),
+              validTo: epglValidTo(d, finalState.data),
             }));
           const sending = sendableDocumentKeys(slots);
           if (sending.length) {

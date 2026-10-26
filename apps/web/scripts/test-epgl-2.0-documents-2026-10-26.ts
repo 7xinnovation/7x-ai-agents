@@ -156,8 +156,18 @@ check("the order sent is the order read back",
 check("it is deferred, like the 1.x push", /deferred\.push\(async \(\) => \{[\s\S]{0,400}documentCompositeBody/.test(route));
 check("an outcome either way is auditable",
   /action: sent\.length \? "epgl_documents_attached" : "epgl_documents_failed"/.test(route));
-check("only the trade licence has an expiry to give",
-  /key === "trade_licence_initial_name_approval" \|\| key === "trade_licence"/.test(route));
+check("the expiry comes off the file itself", /if \(doc\.validTo\) return doc\.validTo;/.test(route));
+check("...with the trade licence field as a fallback for older uploads",
+  /doc\.key === "trade_licence_initial_name_approval" \|\| doc\.key === "trade_licence"/.test(route));
+
+// The date has to be KEPT at upload, or there is nothing to send.
+const upload = read("app/api/upload/route.ts");
+check("the printed expiry is recorded on the case document",
+  /validTo: extraction\.docExpiryDate/.test(upload));
+check("a replaced file clears what EPGL said about the old one",
+  /__epgl_documents_refused/.test(upload) && /k !== key/.test(upload));
+const caseSchema = readFileSync(resolve(here, "../../../packages/config/src/case.ts"), "utf8");
+check("validTo survives config parsing", /validTo: z\.string\(\)\.optional\(\)/.test(caseSchema));
 
 // The 1.x path must be left exactly as it was — a different Salesforce org.
 check("the 1.x push still requires a Salesforce record id",
