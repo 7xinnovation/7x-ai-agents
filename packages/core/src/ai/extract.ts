@@ -262,7 +262,7 @@ export async function extractFieldsFromDocument(input: {
   const fieldList = fields
     .map((f) => `  "${f.key}": ${f.desc}${f.type === "enum" && f.options ? ` (one of: ${f.options.join(", ")})` : ` (${f.type})`}`)
     .join("\n") +
-    `\n  "${DOC_EXPIRY_KEY}": the expiry date printed on THIS document itself, if it has one (date)` +
+    `\n  "${DOC_EXPIRY_KEY}": the date THIS document stops being valid, if it says (date). Usually labelled Expiry Date, Valid Until or Date of Expiry. A document that prints a PERIOD instead of an expiry — "Contract Period: 01/01/2026 to 31/12/2027", "Period of Insurance", "Valid From ... to ..." — expires at the END of that period, so return that end date. A lease and an insurance certificate normally state a period rather than an expiry, and EPGL refuse both without one` +
     `\n  "${DOC_TYPE_KEY}": what THIS document IS — exactly one of: ${DOC_TYPES.join(", ")}` +
     `\n  "${OWNER_ENTITY_KEY}": only when the document names a primary owner/partner — "individual" if that owner is a person, "corporate" if it is a company/legal entity` +
     `\n  "${HOLDER_NAME_KEY}": on an identity document (Emirates ID, passport, driving licence, family book), the name of the PERSON it was issued to, exactly as printed in Latin script. Always return this for an identity document, whoever they are and whether or not they appear anywhere else in this list. Leave it out for documents that are not about one person (a trade licence, an MOA, a financial statement)`;
