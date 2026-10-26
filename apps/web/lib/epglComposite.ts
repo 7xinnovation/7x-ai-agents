@@ -296,6 +296,73 @@ export function applicationIdFrom(raw: string | undefined): string | null {
 }
 
 /**
+ * Which slot each document item in a composite is for, by its referenceId.
+ *
+ * Read off the REQUEST, so it works whoever composed it. That matters: on
+ * 26 October the model emitted the document items itself — `Doc_TradeLicence`,
+ * `Doc_MOA`, names of its own choosing — all ten passed with the create, and
+ * the follow-up push then sent the same ten again because nothing had recorded
+ * that they had gone. Two of them went the second time WITHOUT the expiry the
+ * model had supplied the first time, and EPGL duly marked two documents that
+ * had just passed as failed.
+ *
+ * A re-send is only safe when it carries at least what the first send did.
+ * Knowing what already went is what makes that moot.
+ */
+export function documentKeysByReference(input: Record<string, unknown> | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  const body = (input?.body ?? {}) as Record<string, unknown>;
+  const items = Array.isArray(body.compositeRequest) ? (body.compositeRequest as CompositeItem[]) : [];
+  for (const i of items) {
+    if (!/sobjects\/EPG_Document__c$/i.test(String(i?.url ?? ""))) continue;
+    const ref = i.referenceId;
+    const type = (i.body as { Document_Type?: unknown } | undefined)?.Document_Type;
+    if (typeof ref === "string" && typeof type === "string" && type) out.set(ref, slugOfDocumentType(type));
+  }
+  return out;
+}
+
+/** The same reading as documentOutcomes, against a referenceId -> slot map. */
+export function documentOutcomesByReference(
+  raw: string | undefined,
+  byRef: Map<string, string>
+): { sent: string[]; refused: { key: string; reason: string }[] } {
+  const refs = [...byRef.keys()];
+  const ordered = refs.map((r) => byRef.get(r)!);
+  const asIndexed = documentOutcomes(raw, ordered);
+  // documentOutcomes keys off Doc<n>; when the names are not ours, map directly.
+  if (asIndexed.sent.length || asIndexed.refused.length) {
+    if (refs.every((r) => /^Doc\d+$/.test(r))) return asIndexed;
+  }
+  const out = { sent: [] as string[], refused: [] as { key: string; reason: string }[] };
+  if (!raw) return out;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const brace = raw.indexOf("{");
+    if (brace === -1) return out;
+    try {
+      parsed = JSON.parse(raw.slice(brace));
+    } catch {
+      return out;
+    }
+  }
+  const items = (parsed as {
+    compositeResponse?: { referenceId?: string; httpStatusCode?: number; body?: { success?: boolean; errors?: unknown[] } }[];
+  })?.compositeResponse;
+  if (!Array.isArray(items)) return out;
+  for (const item of items) {
+    const key = byRef.get(String(item?.referenceId ?? ""));
+    if (!key) continue;
+    const good = item?.body?.success === true || (item?.httpStatusCode ?? 0) < 300;
+    if (good) out.sent.push(key);
+    else out.refused.push({ key, reason: String(item?.body?.errors?.[0] ?? `HTTP ${item?.httpStatusCode ?? "?"}`) });
+  }
+  return out;
+}
+
+/**
  * The documents, as their own composite, after the application exists.
  *
  * THE MODEL NEVER EMITS THESE. The 2.0 composite is composed by the model and

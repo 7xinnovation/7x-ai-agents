@@ -31,6 +31,8 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   withEpglDocumentItems,
+  documentKeysByReference,
+  documentOutcomesByReference,
   documentCompositeBody,
   sendableDocumentKeys,
   documentOutcomes,
@@ -208,6 +210,43 @@ check("a renamed application item is still referenced correctly", (() => {
   return JSON.stringify(withEpglDocumentItems(renamed, FILES).input).includes("@{TheApplication.id}");
 })());
 
+// ---- documents the MODEL composed are recorded too ---------------------------
+// 26 October: the model emitted the items itself with names of its own, all ten
+// passed with the create, and the follow-up then re-sent the same ten because
+// nothing had recorded that they had gone. Two went the second time without the
+// expiry the model had supplied, and EPGL marked two passing documents failed.
+const MODEL_COMPOSED = {
+  body: {
+    allOrNone: true,
+    compositeRequest: [
+      { method: "POST", url: "/services/data/v60.0/sobjects/EPG_License_Request__c", referenceId: "NewLicenseRequest", body: {} },
+      { method: "POST", url: "/services/data/v60.0/sobjects/EPG_Document__c", referenceId: "Doc_MOA", body: { Document_Type: "Memorandum of Association" } },
+      { method: "POST", url: "/services/data/v60.0/sobjects/EPG_Document__c", referenceId: "Doc_LeaseContract", body: { Document_Type: "Lease Contract", Valid_To__c: "2027-12-31" } },
+    ],
+  },
+};
+const byRef = documentKeysByReference(MODEL_COMPOSED);
+check("a model-composed document item is mapped back to its slot",
+  byRef.get("Doc_MOA") === "memorandum_of_association" && byRef.get("Doc_LeaseContract") === "lease_contract");
+check("non-document items are not mapped", !byRef.has("NewLicenseRequest"));
+check("our own injected items map too",
+  documentKeysByReference(withEpglDocumentItems(CREATE(), FILES).input).get("Doc1") === "memorandum_of_association");
+
+const modelAnswer = JSON.stringify({ compositeResponse: [
+  { referenceId: "NewLicenseRequest", httpStatusCode: 200, body: { success: true } },
+  { referenceId: "Doc_MOA", httpStatusCode: 200, body: { success: true } },
+  { referenceId: "Doc_LeaseContract", httpStatusCode: 400, body: { success: false, errors: ["Valid_To__c is required for this document"] } },
+]});
+const modelOutcome = documentOutcomesByReference(modelAnswer, byRef);
+check("what the model's composite attached is recorded",
+  JSON.stringify(modelOutcome.sent) === JSON.stringify(["memorandum_of_association"]));
+check("...and what it refused, with the reason",
+  modelOutcome.refused[0]?.key === "lease_contract");
+check("the application item is not mistaken for a document", modelOutcome.sent.length + modelOutcome.refused.length === 2);
+check("an unknown referenceId is ignored",
+  documentOutcomesByReference(JSON.stringify({ compositeResponse: [{ referenceId: "Nope", body: { success: true } }] }), byRef).sent.length === 0);
+check("no documents in the composite, nothing recorded", documentKeysByReference(CREATE()).size === 0);
+
 // ---- the route is wired -----------------------------------------------------
 const route = read("app/api/chat/route.ts");
 check("the push is gated on the application id, not on a record id",
@@ -245,6 +284,8 @@ check("validTo survives config parsing", /validTo: z\.string\(\)\.optional\(\)/.
 check("the create call carries the documents", /withEpglDocumentItems\(input, files\)/.test(read("lib/integrations.ts")));
 check("...and what EPGL said about them is kept",
   /rememberEpglDocuments/.test(read("lib/integrations.ts")) && /rememberEpglDocuments:/.test(route));
+check("recorded off the request, so a model-composed create counts too",
+  /documentKeysByReference\(input\)/.test(read("lib/integrations.ts")));
 check("so the follow-up push does not re-send them",
   /!epglDocumentsHandled\.sent\.includes\(d\.key\)/.test(route));
 

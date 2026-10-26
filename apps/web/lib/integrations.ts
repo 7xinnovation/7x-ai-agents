@@ -11,6 +11,8 @@ import {
   withEpglDocumentFiles,
   withEpglDocumentItems,
   documentOutcomes,
+  documentKeysByReference,
+  documentOutcomesByReference,
   contentVersionMultipart,
   applicationIdFrom,
   type EpglCaseFile,
@@ -1759,8 +1761,6 @@ export async function buildApiTools(
 
     /** Set when a document slot could not be filled; appended to the result below. */
     let documentNote: string | null = null;
-    /** Slots put into THIS create call, in the order their Doc1..DocN sit in it. */
-    let epglDocumentsInCreate: string[] = [];
 
     // A BOX YOU DO NOT HOLD IS NOT YOURS TO MANAGE.
     //
@@ -2852,7 +2852,6 @@ export async function buildApiTools(
          */
         const injected = withEpglDocumentItems(input, files);
         input = injected.input ?? input;
-        epglDocumentsInCreate = injected.added;
         const token =
           entry.spec.authType === "oauth2_cc"
             ? await getClientCredentialsToken(entry.spec).catch(() => null)
@@ -4948,8 +4947,13 @@ export async function buildApiTools(
      * final for that slot under allOrNone: false, so both halves are kept --
      * exactly as the follow-up call keeps them.
      */
-    if (!res.isError && epglDocumentsInCreate.length && opts.rememberEpglDocuments) {
-      const outcome = documentOutcomes((res as { raw?: string }).raw ?? res.result, epglDocumentsInCreate);
+    if (!res.isError && isEpglCompositeTool(toolName) && opts.rememberEpglDocuments) {
+      // Off the request, so it covers documents the MODEL composed as well as
+      // ones put in here — see documentKeysByReference.
+      const byRef = documentKeysByReference(input);
+      const outcome = byRef.size
+        ? documentOutcomesByReference((res as { raw?: string }).raw ?? res.result, byRef)
+        : { sent: [] as string[], refused: [] as { key: string; reason: string }[] };
       if (outcome.sent.length || outcome.refused.length) {
         try {
           await opts.rememberEpglDocuments(outcome);
