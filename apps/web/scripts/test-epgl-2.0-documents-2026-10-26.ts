@@ -301,5 +301,33 @@ check("...and so is validityRequired, which gates the create",
 check("the generator carries it off the catalogue",
   /validityRequired: Boolean\(e\.doc\.validityRequired\)/.test(read("scripts/epgl-2.0-journey-2026-10-20.ts")));
 
+// ---------------------------------------- the follow-up call filters too
+//
+// The create path has refused to send a validityRequired slot with no expiry
+// since 26 October. The follow-up path did not, and sent them anyway: LR-54066
+// ended at seven of ten that way, and LR-54086's lease contract and insurance
+// certificate were posted to the same certain refusal twice on one turn.
+{
+  const slots = [
+    { key: "moa", salesforceType: "Memorandum of Association" },
+    { key: "lease_contract", salesforceType: "Lease Contract", validityRequired: true },
+    { key: "trade_licence", salesforceType: "Trade Licence", validityRequired: true, validTo: "2027-12-31" },
+    { key: "ours_only", validityRequired: true },
+  ];
+  const keys = sendableDocumentKeys(slots);
+  check("a slot with no expiry their catalogue demands is not sent", !keys.includes("lease_contract"), keys);
+  check("...but the same slot WITH the expiry is", keys.includes("trade_licence"));
+  check("a slot that needs no expiry is unaffected", keys.includes("moa"));
+  check("our own slots are still never sent", !keys.includes("ours_only"));
+  const body = documentCompositeBody("LR-54086", slots) as { compositeRequest: { body: Record<string, unknown> }[] };
+  check("the body carries exactly those slots, in that order",
+    body.compositeRequest.map((i) => i.body.Document_Type).join("|") === "Memorandum of Association|Trade Licence",
+    body.compositeRequest.map((i) => i.body.Document_Type));
+  check("...so the outcome is recorded against the right keys",
+    body.compositeRequest.length === keys.length);
+  check("nothing sendable at all is no call, not an empty one",
+    documentCompositeBody("LR-54086", [{ key: "lease_contract", salesforceType: "Lease Contract", validityRequired: true }]) === null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

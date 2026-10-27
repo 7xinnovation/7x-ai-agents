@@ -393,6 +393,8 @@ export interface EpglDocumentSlot {
   salesforceType?: string;
   /** Their Valid_To__c, where the case knows it. */
   validTo?: string;
+  /** Their catalogue refuses this slot outright without a Valid_To__c. */
+  validityRequired?: boolean;
 }
 
 export function documentCompositeBody(
@@ -400,7 +402,10 @@ export function documentCompositeBody(
   slots: EpglDocumentSlot[]
 ): Record<string, unknown> | null {
   if (!applicationId) return null;
-  const sendable = slots.filter((s) => !!s.salesforceType);
+  // Same filter as sendableDocumentKeys, and it must stay the same filter: the
+  // outcome of this call is recorded against the keys that function returns, so
+  // the two disagreeing would attribute one slot's refusal to another.
+  const sendable = slots.filter((s) => !!s.salesforceType && !(s.validityRequired && !s.validTo));
   if (!sendable.length) return null;
   return {
     allOrNone: false,
@@ -418,8 +423,22 @@ export function documentCompositeBody(
 }
 
 /** The slots `documentCompositeBody` will send, in the order it sends them. */
+/**
+ * The slots worth sending, which is not the same as the slots we hold.
+ *
+ * A slot their catalogue marks `validityRequired` and whose expiry we could not
+ * read is REFUSED, every time, with "Valid_To__c is required for this
+ * document". Sending it anyway posts a megabyte of base64 to a known rejection
+ * and leaves a failure on the applicant's record for a document they uploaded
+ * correctly.
+ *
+ * The create path has filtered on this since 26 October; this one never did,
+ * which is why LR-54066 ended at seven of ten and LR-54086's lease contract and
+ * insurance certificate were refused twice on one turn — once by the deferred
+ * push here and once by a composite the model wrote itself.
+ */
 export function sendableDocumentKeys(slots: EpglDocumentSlot[]): string[] {
-  return slots.filter((s) => !!s.salesforceType).map((s) => s.key);
+  return slots.filter((s) => !!s.salesforceType && !(s.validityRequired && !s.validTo)).map((s) => s.key);
 }
 
 /**

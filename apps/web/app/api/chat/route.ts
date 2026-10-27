@@ -4676,6 +4676,10 @@ export async function POST(req: NextRequest) {
               key: d.key,
               salesforceType: byKey.get(d.key)?.salesforceType,
               validTo: epglValidTo(d, finalState.data),
+              // Carried, or the guard below cannot see it. Omitting it is how
+              // the lease contract and the insurance certificate were posted to
+              // a certain refusal twice on one turn.
+              validityRequired: byKey.get(d.key)?.validityRequired,
             }));
           const sending = sendableDocumentKeys(slots);
           if (sending.length) {
