@@ -98,6 +98,31 @@ ONE WARNING ABOUT THEIR RESPONSE CODES. Their desc.code field reads RTA-S-0000 o
 
 THE LICENCE ITSELF. Once it is issued, ${T}get_services_apexrest_licensing_licence returns it by application id, licence number or trade licence number, with validity dates and whether it was issued conditionally. Add includeDocument=true only when the customer actually wants the PDF — it is a few hundred kilobytes and most questions are answered without it.`;
 
+/**
+ * Swap this agent's 2.0 block for a new one, keeping everything around it.
+ *
+ * AROUND IT, not after it — and that word cost 4,047 characters of live
+ * guidance on 27 October. The 20 and 21 October scripts both wrote
+ * `text.slice(text.indexOf(old))` and kept only what followed the separator,
+ * which is correct exactly while the 2.0 block is the FIRST thing in the text.
+ * It stopped being first on 22 October, when the values block was prepended in
+ * front of it; this script inherited the line, ran, and took the values block
+ * with it — the product codes, the object names, the "do not guess again" rule.
+ * Restored by re-running epgl-2.0-values-2026-10-22.ts, which rebuilds it from
+ * the pinned catalogue, so nothing was lost for good. The lesson is cheaper
+ * than the incident: a replacement keeps BOTH sides.
+ */
+export function replaceBlock(text: string, guidance: string, marker: string, oldMarkers: readonly string[]): string {
+  if (text.includes(marker)) return text;
+  const old = oldMarkers.find((m) => text.includes(m));
+  if (!old) return `${guidance}\n\n---\n\n${text}`;
+  const at = text.indexOf(old);
+  const before = text.slice(0, at);
+  const rest = text.slice(at);
+  const sep = rest.indexOf("\n\n---\n\n");
+  return before + (sep === -1 ? guidance : guidance + rest.slice(sep));
+}
+
 async function main() {
   const db = getDb();
   const [row] = await db.select().from(agents).where(eq(agents.slug, SLUG)).limit(1);
@@ -109,19 +134,7 @@ async function main() {
   const text = String(j.guidance ?? "");
   const current = text.includes(MARKER);
   const old = OLD_MARKERS.find((m) => text.includes(m));
-
-  // Wholesale replacement of whatever 2.0 block is there, keeping everything
-  // after the separator — which is the 1.x guidance the renewals still need.
-  let guidance: string;
-  if (current) {
-    guidance = text;
-  } else if (old) {
-    const rest = text.slice(text.indexOf(old));
-    const sep = rest.indexOf("\n\n---\n\n");
-    guidance = sep === -1 ? GUIDANCE : GUIDANCE + rest.slice(sep);
-  } else {
-    guidance = `${GUIDANCE}\n\n---\n\n${text}`;
-  }
+  const guidance = replaceBlock(text, GUIDANCE, MARKER, OLD_MARKERS);
 
   console.log(
     `guidance: ${current ? "already at 2026-10-27" : old ? `replacing the ${old.slice(-11, -1)} block` : "prepended"}` +
@@ -137,4 +150,14 @@ async function main() {
   await db.update(agents).set({ definition: def as Record<string, unknown> as never }).where(eq(agents.id, row.id));
   console.log("\nwritten");
 }
-main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+/**
+ * Only when it is the thing being run.
+ *
+ * Every one of these scripts calls main() at the top level, which is why the
+ * 20 and 21 October blocks had to be copied into their successors rather than
+ * imported from them — reading one constant would run the whole script. The
+ * test imports replaceBlock from here, so this one does not do that.
+ */
+if (process.argv[1]?.includes("epgl-2.0-payment-2026-10-27")) {
+  main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+}

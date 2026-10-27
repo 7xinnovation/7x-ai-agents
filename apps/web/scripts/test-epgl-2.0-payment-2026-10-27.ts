@@ -222,5 +222,35 @@ const PAID_QUOTE = JSON.stringify({
   check("a blocked payment is not described as a failed one", /That is not a failed payment and it is not the applicant's fault/.test(guidance));
 }
 
+// ------------------------------------------------- replacing the block
+//
+// The 20 and 21 October scripts kept only what followed the 2.0 block, which
+// was right while that block was first in the text. It stopped being first on
+// 22 October. This script inherited the line and took the values block — the
+// product codes, the object names — out of the live guidance with it.
+{
+  const { replaceBlock } = await import("./epgl-2.0-payment-2026-10-27");
+  const NEW = "NEW BLOCK (2026-10-27)";
+  const OLDS = ["OLD BLOCK (2026-10-21)"] as const;
+  const live = `VALUES BLOCK (2026-10-22) body\n\n---\n\nOLD BLOCK (2026-10-21) body\n\n---\n\n1.x text that renewals need`;
+
+  const out = replaceBlock(live, "NEW BLOCK (2026-10-27) body", NEW, OLDS);
+  check("what came BEFORE the old block survives", out.includes("VALUES BLOCK (2026-10-22) body"), out);
+  check("the old block is gone", !out.includes("OLD BLOCK (2026-10-21)"), out);
+  check("the new block is in", out.includes("NEW BLOCK (2026-10-27) body"));
+  check("the 1.x text the renewals need survives", out.includes("1.x text that renewals need"));
+  check("...and in that order",
+    out.indexOf("VALUES BLOCK") < out.indexOf("NEW BLOCK") && out.indexOf("NEW BLOCK") < out.indexOf("1.x text"));
+
+  check("running it twice changes nothing", replaceBlock(out, "NEW BLOCK (2026-10-27) body", NEW, OLDS) === out);
+  const fresh = replaceBlock("just the 1.x text", "NEW body", NEW, OLDS);
+  check("a text with no 2.0 block at all is prepended to, not replaced",
+    fresh === "NEW body\n\n---\n\njust the 1.x text", fresh);
+  // No separator after the old block: there is nothing of ours to keep, but
+  // what came before it is still somebody's.
+  const noSep = replaceBlock("VALUES\n\n---\n\nOLD BLOCK (2026-10-21) and nothing after", "NEW body", NEW, OLDS);
+  check("a missing separator still keeps the prefix", noSep === "VALUES\n\n---\n\nNEW body", noSep);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
