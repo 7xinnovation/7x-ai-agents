@@ -689,6 +689,12 @@ export const MID_TURN_DATA_KEYS = [
   "application_id",
   "__viban_finance_notified_at",
   "__sf_documents_sent",
+  // EPGL_ADVICE_KEY in lib/epgl20Payment — the payment advice Salesforce raised
+  // when the card was opened, written by request_payment and read minutes later
+  // by whichever path sees the money settle. Spelled out rather than imported:
+  // this module is imported by nearly everything, and that one does the
+  // importing. test-epgl-2.0-payment-2026-10-27 holds the two together.
+  "__epgl_payment_advice",
 ] as const;
 
 /**

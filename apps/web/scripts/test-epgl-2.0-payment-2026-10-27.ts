@@ -173,6 +173,13 @@ const PAID_QUOTE = JSON.stringify({
   // settlement path and the two must never drift apart by a typo.
   check("the advice number is written onto the case under the shared key",
     /\[EPGL_ADVICE_KEY\]: advice/.test(route) && /EPGL_ADVICE_KEY/.test(lib) && EPGL_ADVICE_KEY.startsWith("__epgl"));
+  // A turn ends with one blind write of the whole case blob, built from the
+  // state the engine loaded BEFORE the turn ran. An advice number written
+  // mid-turn and not on that list is erased a second later — which is exactly
+  // how LR-54052's application id was lost on 22 October.
+  const conv = read("../lib/conversation.ts");
+  const keys = /export const MID_TURN_DATA_KEYS = \[([\s\S]*?)\] as const;/.exec(conv)?.[1] ?? "";
+  check("the advice number survives the end of the turn", keys.includes(`"${EPGL_ADVICE_KEY}"`), keys);
   check("both outcomes are audited", /epgl_payment_advice_failed/.test(route) && /action: "epgl_payment_advice"/.test(route));
 
   // One choke point for the settlement: webhook, status poll and reconcile
