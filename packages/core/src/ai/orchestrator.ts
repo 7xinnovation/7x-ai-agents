@@ -193,6 +193,8 @@ export interface RunTurnInput {
   holdPresent?: () => boolean;
   /** EPGL 2.0: raise the payment advice before the card opens. See ToolCtx.readyToPay. */
   readyToPay?: DispatchInput["readyToPay"];
+  /** EPGL's application id as it stands right now. See ToolCtx.epglApplicationId. */
+  epglApplicationId?: () => string | null;
 }
 
 export type OrchestratorEvent =
@@ -585,6 +587,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           holdBackedSaveTools: input.holdBackedSaveTools,
           holdPresent: input.holdPresent?.() ?? false,
           readyToPay: input.readyToPay,
+          epglApplicationId: input.epglApplicationId?.() ?? null,
         });
         state = res.state;
         for (const e of res.events) {

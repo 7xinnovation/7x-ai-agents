@@ -370,6 +370,19 @@ export interface DispatchInput {
   readyToPay?: () => Promise<
     { ok: true; amount: number; currency?: string } | { ok: false; reason: string; alreadyPaid?: boolean } | null
   >;
+  /**
+   * EPGL's application id for this case, AS IT STANDS AT THE MOMENT OF THE CALL.
+   *
+   * Not read from `state.data`, and that distinction is the whole point. A 2.0
+   * application is created by the model calling the composite, and the id comes
+   * back on that tool's response: it is written to the case row, which the
+   * engine's own state knows nothing about. Create and pay are steps 3 and 4 of
+   * one numbered flow, so they land in the same turn more often than not — and
+   * for the whole of that turn `state.data.application_id` is empty for an
+   * application Salesforce has already numbered. Resolved in the route, where
+   * the id actually arrives.
+   */
+  epglApplicationId?: string | null;
 }
 
 export interface DispatchResult {
@@ -1305,7 +1318,7 @@ export async function dispatchTool(
       // id arrives as `application_id` (LR-xxxxx) instead. Reading only
       // `reference` here, this gate refused every 2.0 payment there will ever
       // be, for an application Salesforce had already issued a number for.
-      const epglApplicationId = String((state.data as Record<string, unknown>)?.application_id ?? "").trim();
+      const epglApplicationId = String(ctx.epglApplicationId ?? (state.data as Record<string, unknown>)?.application_id ?? "").trim();
       if (sub.apiFlow?.submitBeforePayment && !state.reference && !/^LR-\w+$/i.test(epglApplicationId)) {
         return {
           result:

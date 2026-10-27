@@ -168,10 +168,32 @@ async function main() {
     console.log(`  ${guidance.includes(probe) ? "ok  " : "MISSING"} ${probe}`);
   }
   console.log(`apiFlow : submitBeforePayment ${j.submission?.apiFlow?.submitBeforePayment === true ? "already true" : "FALSE -> true"}`);
+  const fee = (j.submission?.surcharges ?? []).find((x: any) => x?.key === "online_payment_fee");
+  console.log(`fees    : online_payment_fee ${fee ? `present (${fee.amount}) -> removed` : "already gone"}`);
   if (!APPLY) { console.log("\nDry run. Add --apply to write."); return; }
 
   j.guidance = guidance;
-  j.submission = { ...(j.submission ?? {}), apiFlow: { ...(j.submission?.apiFlow ?? {}), submitBeforePayment: true } };
+  j.submission = {
+    ...(j.submission ?? {}),
+    apiFlow: { ...(j.submission?.apiFlow ?? {}), submitBeforePayment: true },
+    /**
+     * THE CARD CHARGES THE INVOICE, SO IT MUST NOT QUOTE ANYTHING ELSE.
+     *
+     * The gateway surcharge is a 1.x arrangement: AED 1,000 on top of the
+     * 100,000 licence fee, disclosed on the payment option and added by
+     * request_payment. On 2.0 the amount comes from the advice Salesforce
+     * raises, which outranks the journey's figure — so the first real run
+     * offered the applicant "Pay with Card — AED 2,000" and would have charged
+     * 1,000. A quote that is not the charge is the bug we have fixed twice
+     * already from the other direction.
+     *
+     * Both halves could be made to agree the other way instead: charge 2,000
+     * and report 2,000, which is what 1.x does against its 100,000 advice. That
+     * is EPGL's call, not ours, and until they make it the applicant is quoted
+     * exactly what Emirates Post have invoiced. One line to put back.
+     */
+    surcharges: (j.submission?.surcharges ?? []).filter((x: any) => x?.key !== "online_payment_fee"),
+  };
   await db.update(agents).set({ definition: def as Record<string, unknown> as never }).where(eq(agents.id, row.id));
   console.log("\nwritten");
 }

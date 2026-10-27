@@ -221,6 +221,16 @@ const PAID_QUOTE = JSON.stringify({
   // payment, and the payment cannot be raised without the application.
   check("the script puts submitBeforePayment back on the journey",
     /apiFlow: \{ \.\.\.\(j\.submission\?\.apiFlow \?\? \{\}\), submitBeforePayment: true \}/.test(guidance));
+  check("the script drops the 1.x gateway surcharge from this journey",
+    /surcharges: \(j\.submission\?\.surcharges \?\? \[\]\)\.filter\(\(x: any\) => x\?\.key !== "online_payment_fee"\)/.test(guidance));
+  // The id arrives on the composite's response and is written to the CASE ROW.
+  // The engine's state knows nothing about it, and create-then-pay is one turn.
+  check("the payment gate reads the id as it stands, not as the turn opened",
+    /String\(ctx\.epglApplicationId \?\? \(state\.data as Record<string, unknown>\)\?\.application_id \?\? ""\)/.test(tools));
+  check("...resolved in the route, where the id actually arrives", /const currentEpglApplicationId = \(\) => epglApplication\.id \|\| null;/.test(route));
+  check("...and updated the moment Salesforce answer the create", /epglApplication\.id = applicationId;/.test(route));
+  check("...seeded from the case for every later turn", /const epglApplication = \{ id: str\(session\.state\.data\.application_id\) \?\? "" \};/.test(route));
+  check("a readyToPay that throws is audited, not only logged", /action: "epgl_payment_advice_failed",[\s\S]{0,160}threw: true/.test(route));
   const prompt = read("../../../packages/core/src/ai/prompt.ts");
   check("...which is what flips the numbered steps to save-then-pay",
     /if \(f\.submitBeforePayment && f\.saveTool\)/.test(prompt));

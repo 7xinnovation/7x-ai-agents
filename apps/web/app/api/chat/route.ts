@@ -1372,6 +1372,14 @@ export async function POST(req: NextRequest) {
     rememberEpglApplicationId:
       agent.definition.tenantSlug === "epgl"
         ? async (applicationId: string) => {
+            // ...and in memory, for the rest of THIS turn. The case row is not
+            // what request_payment reads: the engine carries its own state, and
+            // nothing here writes into it. On the turn that both creates the
+            // application and offers to pay for it -- which is the ordinary
+            // turn, since the two steps are numbered 3 and 4 of the same flow
+            // -- the tool would otherwise see no application id and refuse the
+            // payment for an application Salesforce had just numbered.
+            epglApplication.id = applicationId;
             await mutateCase(session.caseId, (st) => ({
               ...st,
               data: { ...st.data, application_id: applicationId },
@@ -1593,6 +1601,16 @@ export async function POST(req: NextRequest) {
   // blank on the very turn the journey starts.
   const holdBackedSaveTools = ["post_api_Rental_Save"];
   const holdPresent = () => Boolean(apiTools.getLastHold());
+  /**
+   * EPGL's application id as it stands right now, not as the turn opened.
+   *
+   * Seeded from the case and overwritten by rememberEpglApplicationId the
+   * moment Salesforce answer the create. Read as a getter for the same reason
+   * holdPresent is: the answer changes partway through the turn, and both the
+   * payment gate and the advice depend on it.
+   */
+  const epglApplication = { id: str(session.state.data.application_id) ?? "" };
+  const currentEpglApplicationId = () => epglApplication.id || null;
   // The company/Form 9 reads are EPGL's Salesforce org; offering them to another
   // tenant's agent would be meaningless (and lib/epglRead would throw).
   const hasEpglSalesforce = agent.definition.tenantSlug === "epgl";
@@ -3684,6 +3702,7 @@ export async function POST(req: NextRequest) {
           customerContext: withOneTapOpener(withPaymentMethods(customerContext, agent.definition), effectiveMessage, agent.definition, authenticated, session.state),
           extraTools,
           registryNonResidents: () => [...registryNonResidents],
+          epglApplicationId: currentEpglApplicationId,
           /**
            * EPGL 2.0: ask Salesforce to invoice this application, before the
            * card opens. See ToolContext.readyToPay for why it is here and not
@@ -3696,7 +3715,7 @@ export async function POST(req: NextRequest) {
            */
           readyToPay: async () => {
             if (agent.definition.tenantSlug !== "epgl") return null;
-            const applicationId = str(liveState.data.application_id) ?? "";
+            const applicationId = currentEpglApplicationId() ?? "";
             if (!APPLICATION_ID.test(applicationId)) return null;
             const env = agent.definition.activeEnvironment ?? "production";
             const productCode = str(liveState.data.product_code) ?? "";
@@ -3705,6 +3724,15 @@ export async function POST(req: NextRequest) {
               res = await epglReadyToPay(agent.id, env, applicationId, productCode);
             } catch (e) {
               log.error("epgl_ready_to_pay_failed", e, { agentId: agent.id, applicationId });
+              // Audited as well as logged: a payment that could not be prepared
+              // is a thing somebody has to find afterwards, and a log line on a
+              // web app is not where anybody looks for it.
+              await audit({
+                ...a,
+                actor: "system",
+                action: "epgl_payment_advice_failed",
+                payload: { applicationId, reason: e instanceof Error ? e.message : "unknown error", threw: true },
+              });
               return { ok: false as const, reason: "their licensing system could not be reached" };
             }
             if (!res.ok) {
