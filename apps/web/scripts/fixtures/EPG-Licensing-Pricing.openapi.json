@@ -3,7 +3,7 @@
   "info": {
     "title": "EPG Licensing - Pricing API (step 3)",
     "version": "1.1.0",
-    "description": "Fee calculation for the delivery-activities regulation. The existing pricing endpoint answers a new-regulation application with the quote the Fee Calculator derives from the licence catalogue: one item per fee line (base fee, per-site / per-locker / per-vehicle components, discounts), available from Draft onwards, re-quoted on every call until the fee is paid, frozen afterwards. Legacy applications keep the previous behaviour. Generated from the NewLaw sandbox catalogue on 2026-10-21T08:25:45Z."
+    "description": "Fee calculation for the delivery-activities regulation. The existing pricing endpoint answers a new-regulation application with the quote the Fee Calculator derives from the licence catalogue: one item per fee line (base fee, per-site / per-locker / per-vehicle components, discounts), available from Draft onwards, re-quoted on every call until the fee is paid, frozen afterwards. Legacy applications keep the previous behaviour. Generated from the NewLaw sandbox catalogue on 2026-10-22T06:29:51Z."
   },
   "servers": [
     {
@@ -17,6 +17,9 @@
     },
     {
       "name": "Pricing"
+    },
+    {
+      "name": "Payment"
     }
   ],
   "paths": {
@@ -153,6 +156,71 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/services/apexrest/paymentNotification": {
+      "post": {
+        "tags": [
+          "Payment"
+        ],
+        "summary": "Payment notification: the website reports the gateway result (existing endpoint)",
+        "description": "Called by the website after the gateway confirms the payment of the advice returned by pricing (refInvoiceId). Salesforce marks the advice Paid, moves a new-regulation application from Pending Payment to Submitted, runs the pre-checks and pushes payment.updated / status.changed to the portal endpoint. Before this call the website moves the application to \"Pending Payment\" with the update call (composite with applicationId__c and EPG_Request_Status__c), which raises the advice.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentNotificationRequest"
+              },
+              "example": {
+                "entityId": "EPG Portal",
+                "notifyPayment": {
+                  "applicationId": "LR-53330",
+                  "payment": {
+                    "invoiceId": "P14231",
+                    "refInvoiceId": "P14231",
+                    "paymentId": "GW-PAYMENT-ID",
+                    "payOn": "2026-10-27T09:05:00.000Z",
+                    "payBy": "Applicant",
+                    "payThru": "Online",
+                    "paymentMethod": "Card (online)",
+                    "paymentStatus": "Paid",
+                    "transactions": [
+                      {
+                        "transactionId": "GW-TXN-ID",
+                        "refTransactionId": "GW-TXN-ID",
+                        "itemId": "",
+                        "beneficiaryId": "EPG",
+                        "amount": 20000,
+                        "currency": {
+                          "en": "AED",
+                          "ar": "درهم"
+                        }
+                      }
+                    ]
+                  },
+                  "message": {
+                    "code": "0",
+                    "en": "Payment successful",
+                    "ar": "تم الدفع"
+                  },
+                  "infos": []
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted ({ status: 200, desc, message })"
+          },
+          "400": {
+            "description": "Malformed body (payment block must sit inside notifyPayment.payment)"
+          },
+          "404": {
+            "description": "Unknown applicationId"
           }
         }
       }
@@ -423,6 +491,133 @@
               },
               "ar": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "PaymentNotificationRequest": {
+        "type": "object",
+        "required": [
+          "notifyPayment"
+        ],
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "example": "EPG Portal"
+          },
+          "notifyPayment": {
+            "type": "object",
+            "required": [
+              "applicationId",
+              "payment"
+            ],
+            "properties": {
+              "applicationId": {
+                "type": "string",
+                "description": "The id returned by the create response"
+              },
+              "payment": {
+                "type": "object",
+                "required": [
+                  "invoiceId",
+                  "paymentStatus",
+                  "transactions"
+                ],
+                "properties": {
+                  "invoiceId": {
+                    "type": "string",
+                    "description": "Advice number (refInvoiceId from pricing)"
+                  },
+                  "refInvoiceId": {
+                    "type": "string"
+                  },
+                  "paymentId": {
+                    "type": "string",
+                    "description": "Gateway payment id"
+                  },
+                  "payOn": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "payBy": {
+                    "type": "string"
+                  },
+                  "payThru": {
+                    "type": "string"
+                  },
+                  "paymentMethod": {
+                    "type": "string"
+                  },
+                  "paymentStatus": {
+                    "type": "string",
+                    "enum": [
+                      "Paid"
+                    ]
+                  },
+                  "transactions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "transactionId": {
+                          "type": "string"
+                        },
+                        "refTransactionId": {
+                          "type": "string"
+                        },
+                        "itemId": {
+                          "type": "string"
+                        },
+                        "beneficiaryId": {
+                          "type": "string"
+                        },
+                        "amount": {
+                          "type": "number"
+                        },
+                        "currency": {
+                          "type": "object",
+                          "properties": {
+                            "en": {
+                              "type": "string"
+                            },
+                            "ar": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "message": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "en": {
+                    "type": "string"
+                  },
+                  "ar": {
+                    "type": "string"
+                  }
+                }
+              },
+              "infos": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "infoKey": {
+                      "type": "string"
+                    },
+                    "infoValue": {
+                      "type": "string"
+                    }
+                  }
+                }
               }
             }
           }

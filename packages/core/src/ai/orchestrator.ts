@@ -3,7 +3,7 @@ import type { AgentDefinition, CaseState, Locale } from "@dialog/config";
 import type { AdapterBundle } from "../adapters/types";
 import { getAnthropic, resolveModel, fastModel } from "./anthropic";
 import { buildSystemPrompt } from "./prompt";
-import { TOOL_DEFS, dispatchTool } from "./tools";
+import { TOOL_DEFS, dispatchTool, type DispatchInput } from "./tools";
 import { findJourney } from "../case/engine";
 
 /**
@@ -191,6 +191,8 @@ export interface RunTurnInput {
   /** Save tools that need a backend reservation, and whether one exists right now. */
   holdBackedSaveTools?: string[];
   holdPresent?: () => boolean;
+  /** EPGL 2.0: raise the payment advice before the card opens. See ToolCtx.readyToPay. */
+  readyToPay?: DispatchInput["readyToPay"];
 }
 
 export type OrchestratorEvent =
@@ -582,6 +584,7 @@ export async function* runTurn(input: RunTurnInput): AsyncGenerator<Orchestrator
           extraCharge: input.extraCharge?.() ?? null,
           holdBackedSaveTools: input.holdBackedSaveTools,
           holdPresent: input.holdPresent?.() ?? false,
+          readyToPay: input.readyToPay,
         });
         state = res.state;
         for (const e of res.events) {

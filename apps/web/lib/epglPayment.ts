@@ -1,6 +1,12 @@
 import { listIntegrations, type EnvKey, type EnvSpec } from "./integrations";
 import { decryptSecret, isEncrypted } from "./crypto";
 import { trackedFetch } from "./apiCallLog";
+import {
+  APPLICATION_ID,
+  EPGL_ADVICE_KEY,
+  notifyPayment as notifyNewRegulationPayment,
+  priceApplication,
+} from "./epgl20Payment";
 
 /**
  * Tell EPGL's Salesforce that a licence fee has been paid.
@@ -285,6 +291,71 @@ export async function notifyEpglPayment(
  * the payment retried against an order that is already settled. Every outcome is
  * audited, so an unnotified payment is visible rather than silent.
  */
+/**
+ * The same job on the New Regulation contract: tell their org the fee settled.
+ *
+ * The advice number is what the payment is reported against, and it is read
+ * from the case where request_payment left it. If it is not there — a payment
+ * that reached the gateway before this code shipped, a case rebuilt from an
+ * older state — the application is priced again rather than giving up: pricing
+ * returns the advice number for anything that has reached Pending Payment, and
+ * an advice is raised once, so the second read is the same number as the first.
+ *
+ * WITHOUT AN ADVICE THERE IS NOTHING TO MARK. Their class sets `transactions[0]`
+ * of the licence request Paid; with no advice raised there is no transaction and
+ * the call answers 200 having done nothing at all. So the absence is recorded as
+ * a FAILURE here, loudly, rather than passed off as a success — an application
+ * that has been paid for and never submitted is exactly the outcome worth
+ * finding in an audit rather than in a complaint.
+ */
+async function notifyNewRegulation(
+  agentId: string,
+  env: EnvKey,
+  conversationId: string,
+  applicationId: string,
+  reference: string,
+  amount: number,
+  data: Record<string, unknown> | undefined
+): Promise<void> {
+  const { audit } = await import("./conversation");
+  const a = { agentId, conversationId, actor: "system" as const };
+
+  let advice = String(data?.[EPGL_ADVICE_KEY] ?? "").trim();
+  if (!advice) {
+    const quote = await priceApplication(agentId, env, applicationId).catch(() => null);
+    advice = quote?.adviceNumber ?? "";
+  }
+  if (!advice) {
+    await audit({
+      ...a,
+      action: "epgl_payment_notify_failed",
+      payload: {
+        reference,
+        applicationId,
+        reason: "no payment advice exists for this application, so there is nothing to mark paid",
+        retryable: true,
+      },
+    });
+    return;
+  }
+
+  const res = await notifyNewRegulationPayment(agentId, env, {
+    applicationId,
+    adviceNumber: advice,
+    amount,
+    currency: "AED",
+    paymentId: reference,
+  });
+
+  await audit({
+    ...a,
+    action: res.ok ? "epgl_payment_notified" : "epgl_payment_notify_failed",
+    payload: res.ok
+      ? { reference, applicationId, advice, amount }
+      : { reference, applicationId, advice, status: res.status, reason: res.reason, retryable: res.retryable },
+  });
+}
+
 export async function notifyEpglIfLicenceFee(
   agentId: string,
   conversationId: string,
@@ -302,13 +373,33 @@ export async function notifyEpglIfLicenceFee(
     if (await auditSeen(conversationId, "epgl_payment_notified", reference)) return;
 
     const c = await getCase(conversationId);
+    const env = agent.definition.activeEnvironment ?? "production";
+
+    /**
+     * A 2.0 APPLICATION IS NOT NOTIFIED HERE, AND NOT LIKE THIS.
+     *
+     * The New Regulation licences live in a different Salesforce org on a
+     * different contract: their PaymentNotification binds `applicationId`
+     * (LR-xxxxx) where this one binds `salesforceId`, and a 2.0 application
+     * never sets `state.reference` at all — its id lands on the case as
+     * `application_id`. So every branch below would have returned early and the
+     * payment would have gone unreported, exactly as the documents did.
+     *
+     * Routed rather than duplicated: this is the one function all three
+     * settlement paths call — the gateway webhook, the browser's status poll and
+     * the reconcile sweep — so 2.0 gets all three for free.
+     */
+    const applicationId = String((c?.state.data as Record<string, unknown> | undefined)?.application_id ?? "").trim();
+    if (APPLICATION_ID.test(applicationId)) {
+      await notifyNewRegulation(agent.id, env, conversationId, applicationId, reference, amount, c?.state.data);
+      return;
+    }
+
     // The licence request's Salesforce id is the case reference once submitted.
     // Before submission there is nothing to notify against, which is normal:
     // the request always exists first, and request_payment enforces it.
     const licenseRequestId = String(c?.state.reference ?? "").trim();
     if (!licenseRequestId) return;
-
-    const env = agent.definition.activeEnvironment ?? "production";
 
     /**
      * NOTIFY, AND RECORD WHETHER THERE WAS AN ADVICE TO MARK.

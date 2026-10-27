@@ -348,6 +348,28 @@ export interface DispatchInput {
    */
   holdBackedSaveTools?: string[];
   holdPresent?: boolean;
+  /**
+   * EPGL 2.0: raise the payment advice, and come back with what to charge.
+   *
+   * On the New Regulation contract an application has to be moved to "Pending
+   * Payment" before Salesforce will raise an advice for it, and the advice is
+   * what a payment is reported against. Skipping that step does not fail
+   * loudly: the notification afterwards answers 200 having marked nothing, so
+   * the money is ours and their system of record never hears about it.
+   *
+   * It therefore happens HERE, between the gates and the gateway, rather than
+   * as a step the model is asked to remember — and the figure it returns is
+   * read off their quote, so the card charges what Salesforce has invoiced
+   * rather than what anyone typed. A failure refuses the payment outright: a
+   * card opened against an application with no advice is worse than a customer
+   * asked to try again in a minute.
+   *
+   * Returns null for every journey and agent this does not apply to, which is
+   * all of them but one.
+   */
+  readyToPay?: () => Promise<
+    { ok: true; amount: number; currency?: string } | { ok: false; reason: string; alreadyPaid?: boolean } | null
+  >;
 }
 
 export interface DispatchResult {
@@ -1276,7 +1298,15 @@ export async function dispatchTool(
       // nobody had submitted, and AED 1,000 about to settle against it.
       //
       // Prose has now lost this argument twice, so it is decided here.
-      if (sub.apiFlow?.submitBeforePayment && !state.reference) {
+      //
+      // 2.0 PROVES IT A DIFFERENT WAY. A New Regulation application is created
+      // by the model calling the composite, which emits no submission event, so
+      // the case keeps `reference: null` however real the application is — its
+      // id arrives as `application_id` (LR-xxxxx) instead. Reading only
+      // `reference` here, this gate refused every 2.0 payment there will ever
+      // be, for an application Salesforce had already issued a number for.
+      const epglApplicationId = String((state.data as Record<string, unknown>)?.application_id ?? "").trim();
+      if (sub.apiFlow?.submitBeforePayment && !state.reference && !/^LR-\w+$/i.test(epglApplicationId)) {
         return {
           result:
             `PAYMENT BLOCKED: this application has not been submitted yet, so there is nothing for the payment to attach to. ` +
@@ -1373,16 +1403,45 @@ export async function dispatchTool(
           isError: true,
         };
       }
+      /**
+       * THE INVOICE COMES BEFORE THE CARD (EPGL 2.0). See ToolContext.readyToPay.
+       *
+       * Last of the gates and first of the money: everything above can still
+       * refuse without having touched anybody's system, and this is the step
+       * that writes to theirs. A refusal here has taken nothing either — the
+       * application is simply not payable yet — so it is worded as what it is.
+       */
+      const ready = ctx.readyToPay ? await ctx.readyToPay() : null;
+      if (ready && ready.ok === false) {
+        return {
+          result:
+            (ready.alreadyPaid
+              ? `ALREADY PAID: Emirates Post's records show this application's fee as settled, so no payment card has been opened and nothing has been charged. Tell the customer the fee is paid and offer to check the application's status. `
+              : `PAYMENT NOT READY: Emirates Post could not raise the invoice for this application, so no payment card has been opened and NOTHING has been charged. Their reason: ${ready.reason}. `) +
+            `Do NOT tell the customer a payment failed, do NOT offer them a link, and do NOT try to take the fee another way.` +
+            (ready.alreadyPaid ? "" : " Say the fee cannot be taken this minute and offer to try again shortly, or to have someone call them back."),
+          state,
+          events,
+          isError: !ready.alreadyPaid,
+        };
+      }
       const overrideAmount = typeof input.amount === "number" && input.amount > 0 ? input.amount : undefined;
-      const currency = sub.currency ?? "AED";
+      const currency = ready?.ok ? ready.currency ?? sub.currency ?? "AED" : sub.currency ?? "AED";
       // A price the backend has quoted wins outright. The definition's figure is
       // the advertised annual rental (300 for MyBox) and misses the mandatory
       // registration fee, so the customer was charged 300 against a 370 hold —
       // the summary said 370, the card said 300, and the two never met.
+      //
+      // An invoice Salesforce has just raised outranks even that: it is not a
+      // quote any more, it is the figure their finance system will reconcile
+      // against, and a card for any other amount leaves an advice that can
+      // never be settled.
       const backendAmount =
-        typeof ctx.authoritativeAmount === "number" && ctx.authoritativeAmount > 0
-          ? ctx.authoritativeAmount
-          : undefined;
+        ready?.ok && ready.amount > 0
+          ? ready.amount
+          : typeof ctx.authoritativeAmount === "number" && ctx.authoritativeAmount > 0
+            ? ctx.authoritativeAmount
+            : undefined;
       // The base, before any percentage fee. A base remembered from an earlier
       // payment on this same unpaid case wins over the model's figure: once a
       // total has been quoted, the number the model passes next time already

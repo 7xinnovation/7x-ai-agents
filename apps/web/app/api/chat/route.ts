@@ -46,6 +46,7 @@ import {
 import { licencesByEmiratesId, licenceHolderMatch, moeIsMock, MoeNotConfiguredError } from "@/lib/moeLicences";
 import { trackShipment, TrackingNotConfiguredError } from "@/lib/emxTracking";
 import { notifyEpglPayment, paymentAdviceExists } from "@/lib/epglPayment";
+import { APPLICATION_ID, EPGL_ADVICE_KEY, readyToPay as epglReadyToPay } from "@/lib/epgl20Payment";
 import { rentalTotal, agentCountFrom, wantsKeyDelivery, choseKeyDelivery } from "@/lib/rentalTotal";
 import { companiesByAuthority, companyByLicence, listIssuingEntities, ownerMatch, customerPoBoxes, companiesByEmiratesId, resolveIssuingEntityCode, type CustomerPoBox } from "@/lib/gsbLookup";
 import { regionsFor, searchRegions, searchOtherEmirates, EMIRATES } from "@/lib/epRegions";
@@ -3683,6 +3684,47 @@ export async function POST(req: NextRequest) {
           customerContext: withOneTapOpener(withPaymentMethods(customerContext, agent.definition), effectiveMessage, agent.definition, authenticated, session.state),
           extraTools,
           registryNonResidents: () => [...registryNonResidents],
+          /**
+           * EPGL 2.0: ask Salesforce to invoice this application, before the
+           * card opens. See ToolContext.readyToPay for why it is here and not
+           * in the model's instructions.
+           *
+           * The advice number is written onto the case in the same breath,
+           * because the request that settles the payment is a different one —
+           * the gateway's webhook, or the browser's poll, minutes later — and
+           * the number is what the settlement is reported against.
+           */
+          readyToPay: async () => {
+            if (agent.definition.tenantSlug !== "epgl") return null;
+            const applicationId = str(liveState.data.application_id) ?? "";
+            if (!APPLICATION_ID.test(applicationId)) return null;
+            const env = agent.definition.activeEnvironment ?? "production";
+            const productCode = str(liveState.data.product_code) ?? "";
+            let res: Awaited<ReturnType<typeof epglReadyToPay>>;
+            try {
+              res = await epglReadyToPay(agent.id, env, applicationId, productCode);
+            } catch (e) {
+              log.error("epgl_ready_to_pay_failed", e, { agentId: agent.id, applicationId });
+              return { ok: false as const, reason: "their licensing system could not be reached" };
+            }
+            if (!res.ok) {
+              await audit({ ...a, actor: "system", action: "epgl_payment_advice_failed", payload: { applicationId, reason: res.reason } });
+              return res;
+            }
+            const advice = res.quote.adviceNumber;
+            await mutateCase(session.caseId, (fresh) => ({
+              ...fresh,
+              data: { ...fresh.data, [EPGL_ADVICE_KEY]: advice },
+            }));
+            liveState = { ...liveState, data: { ...liveState.data, [EPGL_ADVICE_KEY]: advice } };
+            await audit({
+              ...a,
+              actor: "system",
+              action: "epgl_payment_advice",
+              payload: { applicationId, advice, amount: res.quote.amount, currency: res.quote.currency },
+            });
+            return { ok: true as const, amount: res.quote.amount, currency: res.quote.currency };
+          },
           authoritativeAmount,
           /**
            * The approved penalties, added to the renewal by the server.

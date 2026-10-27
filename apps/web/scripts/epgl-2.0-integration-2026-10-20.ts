@@ -44,8 +44,20 @@ const SLUG = "epgl-dialog";
 export const NAME = "EPGL New Regulation";
 const SANDBOX = "https://epro--newlaw.sandbox.my.salesforce.com";
 
-/** Their token endpoint is in every spec; it is auth, not an operation. */
-const NOT_AN_OPERATION = /\/services\/oauth2\/token$/;
+/**
+ * Not every path in their specs may become a tool.
+ *
+ * The token endpoint is auth, not an operation.
+ *
+ * paymentNotification is a different kind of exclusion, and a deliberate one.
+ * It arrived in the 27 October pack, and it is the call that tells Emirates
+ * Post money has arrived — the one thing in this integration that must never be
+ * reachable by a model that has, on this very agent, invented three API
+ * failures including a fake Apex stack trace. It is taken server-side from the
+ * settled payment instead (lib/epgl20Payment.ts), from the gateway's own
+ * result, so there is nothing here for the model to be wrong about.
+ */
+const NOT_AN_OPERATION = /\/services\/oauth2\/token$|\/services\/apexrest\/paymentNotification$/;
 
 export function operationsFrom(dir: string): { ops: unknown[]; files: string[] } {
   const files = readdirSync(dir).filter((f) => /^EPG-Licensing-.*\.openapi\.json$/.test(f)).sort();

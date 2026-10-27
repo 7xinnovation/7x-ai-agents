@@ -3,7 +3,7 @@
   "info": {
     "title": "EPG Licensing - New Regulation API (one call)",
     "version": "1.1.0",
-    "description": "Catalogue + one-call application API under the delivery-activities regulation. Step 1: GET the catalogue. Step 2: POST one composite call that creates the company, owners, signatory, application, declarations, child items and documents together. Generated from the NewLaw sandbox catalogue on 2026-10-21T08:25:45Z."
+    "description": "Catalogue + one-call application API under the delivery-activities regulation. Step 1: GET the catalogue. Step 2: POST one composite call that creates the company, owners, signatory, application, declarations, child items and documents together. Generated from the NewLaw sandbox catalogue on 2026-10-22T06:29:51Z."
   },
   "servers": [
     {
@@ -173,12 +173,6 @@
                               "description": "Domestic | Domestic and International; defaults to the product scope",
                               "type": "picklist",
                               "name": "Declared_Scope__c"
-                            },
-                            {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
                             },
                             {
                               "required": "no",
@@ -466,12 +460,6 @@
                               "name": "Declared_Scope__c"
                             },
                             {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
-                            },
-                            {
                               "required": "no",
                               "description": "Any licence-specific answers without a dedicated field, kept as JSON",
                               "type": "object",
@@ -755,12 +743,6 @@
                               "description": "Domestic | Domestic and International; defaults to the product scope",
                               "type": "picklist",
                               "name": "Declared_Scope__c"
-                            },
-                            {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
                             },
                             {
                               "required": "no",
@@ -1048,12 +1030,6 @@
                               "name": "Declared_Scope__c"
                             },
                             {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
-                            },
-                            {
                               "required": "no",
                               "description": "Any licence-specific answers without a dedicated field, kept as JSON",
                               "type": "object",
@@ -1339,12 +1315,6 @@
                               "name": "Declared_Scope__c"
                             },
                             {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
-                            },
-                            {
                               "required": "no",
                               "description": "Any licence-specific answers without a dedicated field, kept as JSON",
                               "type": "object",
@@ -1612,12 +1582,6 @@
                               "description": "Domestic | Domestic and International; defaults to the product scope",
                               "type": "picklist",
                               "name": "Declared_Scope__c"
-                            },
-                            {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
                             },
                             {
                               "required": "no",
@@ -1895,12 +1859,6 @@
                               "name": "Declared_Scope__c"
                             },
                             {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
-                            },
-                            {
                               "required": "no",
                               "description": "Any licence-specific answers without a dedicated field, kept as JSON",
                               "type": "object",
@@ -2170,12 +2128,6 @@
                               "name": "Declared_Scope__c"
                             },
                             {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
-                            },
-                            {
                               "required": "no",
                               "description": "Any licence-specific answers without a dedicated field, kept as JSON",
                               "type": "object",
@@ -2424,12 +2376,6 @@
                               "name": "Declared_Scope__c"
                             },
                             {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
-                            },
-                            {
                               "required": "no",
                               "description": "Any licence-specific answers without a dedicated field, kept as JSON",
                               "type": "object",
@@ -2629,12 +2575,6 @@
                               "name": "Declared_Scope__c"
                             },
                             {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
-                            },
-                            {
                               "required": "no",
                               "description": "Any licence-specific answers without a dedicated field, kept as JSON",
                               "type": "object",
@@ -2813,13 +2753,13 @@
                         "statutorySlaWorkingDays": 30,
                         "operationalSlaWorkingDays": 1
                       },
-                      "generatedOn": "2026-10-21T08:25:45Z"
+                      "generatedOn": "2026-10-22T06:29:51Z"
                     }
                   },
                   "oneProduct": {
                     "summary": "One product with ?code=CEP30-UAE-SME-INTL",
                     "value": {
-                      "generatedOn": "2026-10-21T08:25:45Z",
+                      "generatedOn": "2026-10-22T06:29:51Z",
                       "parameters": {
                         "documentMaxSizeMb": 10,
                         "onlinePaymentThresholdAed": 20000,
@@ -2860,12 +2800,6 @@
                               "description": "Domestic | Domestic and International; defaults to the product scope",
                               "type": "picklist",
                               "name": "Declared_Scope__c"
-                            },
-                            {
-                              "required": "yes",
-                              "description": "Portal application id, unique per company; the key for updates, documents, pricing and status",
-                              "type": "string",
-                              "name": "applicationId__c"
                             },
                             {
                               "required": "no",
