@@ -35,6 +35,23 @@
  * replaced the 20th's: two blocks of guidance about one subject is the failure,
  * not the fix.
  *
+ * AND IT PUTS submitBeforePayment BACK, without which none of the above can
+ * run at all. The 21 October script rewrote the journey's apiFlow wholesale and
+ * its replacement omitted the flag, which does two things at once:
+ *
+ *   - The rendered numbered steps flip to "call request_payment, THEN call the
+ *     save tool" — pay first, create the application after. On 2.0 that takes
+ *     the money against no application and therefore no advice, which is the
+ *     exact failure the comment above those lines in prompt.ts was written for.
+ *   - The composite joins `unpaidSaveTools` in the chat route and is refused
+ *     until the case is paid. So the application cannot be created before the
+ *     payment, and the payment cannot be raised without the application. The
+ *     deadlock is described at the top of that filter; this is it, live.
+ *
+ * Neither shows up as an error. The first charges the applicant twice the fee
+ * (the journey's 1,000 plus the gateway surcharge) for an application still in
+ * Draft; the second looks like the assistant refusing to submit.
+ *
  * Idempotent. Dry run by default. Run from apps/web:
  *   npx tsx scripts/epgl-2.0-payment-2026-10-27.ts [--env <file>] [--apply]
  */
@@ -76,7 +93,7 @@ THE PRICE COMES FROM THEM, NEVER FROM YOU. Call ${T}post_services_apexrest_payme
 
 PAYING IS FOUR STEPS AND ONLY ONE OF THEM IS YOURS. When the applicant is ready to pay, call request_payment and nothing else. Behind it the server moves the application to Pending Payment — which is what makes Salesforce raise the payment advice — reads the advice and its amount back from the pricing call, and opens the card for exactly that figure. Do NOT move the status yourself, do NOT send a composite to do it, and do NOT pass an amount you worked out or remembered: the card charges what Emirates Post have just invoiced, and any other number leaves an invoice that can never be settled.
 
-NOTHING IS SUBMITTED AFTER THE PAYMENT. On the new regulation the paid advice submits the application itself and starts the pre-checks — Salesforce does that, not us. So once the payment is confirmed do NOT call the composite again, do NOT call submit_case to "finalise" it, and do not tell the applicant you are now submitting. Confirm the payment, give them their application number, and offer to check the status.
+NOTHING OF YOURS SUBMITS THE APPLICATION TO EMIRATES POST. On the new regulation the paid advice submits it and starts the pre-checks — Salesforce does that by itself, the moment the payment is reported. So after the payment do NOT send another composite, and do not tell the applicant you are now submitting their application: it went to Emirates Post when they paid. Do still call submit_case once the payment reads paid — that closes the case on our side and is where their reference comes from — but it files nothing with Emirates Post and must never be described as if it did.
 
 THE ONLINE PAYMENT FEE NAMED FURTHER DOWN IS NOT THIS LICENCE'S. That gateway surcharge belongs to the previous licensing service. A new-regulation application is charged exactly what the pricing call quotes, with nothing added, so never quote a card total higher than the quoted fee.
 
@@ -113,10 +130,15 @@ THE LICENCE ITSELF. Once it is issued, ${T}get_services_apexrest_licensing_licen
  * than the incident: a replacement keeps BOTH sides.
  */
 export function replaceBlock(text: string, guidance: string, marker: string, oldMarkers: readonly string[]): string {
-  if (text.includes(marker)) return text;
-  const old = oldMarkers.find((m) => text.includes(m));
-  if (!old) return `${guidance}\n\n---\n\n${text}`;
-  const at = text.indexOf(old);
+  // The block THIS script owns is replaced whether it is already under our own
+  // marker or still under a previous one. "Marker present, so nothing to do"
+  // looks idempotent and is not: a correction made to the text on the same day
+  // reports success and writes nothing, which is how the first version of this
+  // paragraph — the one that told the model to skip submit_case and strand the
+  // case — stayed live through a run that said it had been applied.
+  const target = text.includes(marker) ? marker : oldMarkers.find((m) => text.includes(m));
+  if (!target) return `${guidance}\n\n---\n\n${text}`;
+  const at = text.indexOf(target);
   const before = text.slice(0, at);
   const rest = text.slice(at);
   const sep = rest.indexOf("\n\n---\n\n");
@@ -135,18 +157,21 @@ async function main() {
   const current = text.includes(MARKER);
   const old = OLD_MARKERS.find((m) => text.includes(m));
   const guidance = replaceBlock(text, GUIDANCE, MARKER, OLD_MARKERS);
+  const unchanged = guidance === text;
 
   console.log(
-    `guidance: ${current ? "already at 2026-10-27" : old ? `replacing the ${old.slice(-11, -1)} block` : "prepended"}` +
-      ` (${GUIDANCE.length} chars)`
+    `guidance: ${unchanged ? "unchanged" : current ? "updating the 2026-10-27 block in place" : old ? `replacing the ${old.slice(-11, -1)} block` : "prepended"}` +
+      ` (${GUIDANCE.length} chars, text ${text.length} -> ${guidance.length})`
   );
   // The payment paragraphs are the point of this run; say whether they landed.
-  for (const probe of ["PAYING IS FOUR STEPS", "NOTHING IS SUBMITTED AFTER THE PAYMENT", "IF THE FEE CANNOT BE TAKEN"]) {
+  for (const probe of ["PAYING IS FOUR STEPS", "NOTHING OF YOURS SUBMITS THE APPLICATION", "Do still call submit_case", "IF THE FEE CANNOT BE TAKEN"]) {
     console.log(`  ${guidance.includes(probe) ? "ok  " : "MISSING"} ${probe}`);
   }
+  console.log(`apiFlow : submitBeforePayment ${j.submission?.apiFlow?.submitBeforePayment === true ? "already true" : "FALSE -> true"}`);
   if (!APPLY) { console.log("\nDry run. Add --apply to write."); return; }
 
   j.guidance = guidance;
+  j.submission = { ...(j.submission ?? {}), apiFlow: { ...(j.submission?.apiFlow ?? {}), submitBeforePayment: true } };
   await db.update(agents).set({ definition: def as Record<string, unknown> as never }).where(eq(agents.id, row.id));
   console.log("\nwritten");
 }

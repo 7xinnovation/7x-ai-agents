@@ -216,8 +216,24 @@ const PAID_QUOTE = JSON.stringify({
   check("...and the reason is written down", /must never be\s*\n \* reachable by a model/.test(integration));
 
   const guidance = read("./epgl-2.0-payment-2026-10-27.ts");
+  // Without the flag the rendered steps say "pay, THEN save" and the composite
+  // is refused until the case is paid: the application cannot exist before the
+  // payment, and the payment cannot be raised without the application.
+  check("the script puts submitBeforePayment back on the journey",
+    /apiFlow: \{ \.\.\.\(j\.submission\?\.apiFlow \?\? \{\}\), submitBeforePayment: true \}/.test(guidance));
+  const prompt = read("../../../packages/core/src/ai/prompt.ts");
+  check("...which is what flips the numbered steps to save-then-pay",
+    /if \(f\.submitBeforePayment && f\.saveTool\)/.test(prompt));
+  check("...and what keeps the composite out of the unpaid-save gate",
+    /!j\.submission\?\.apiFlow\?\.submitBeforePayment/.test(route));
+  // submit_case closes OUR case and is where the reference comes from; it files
+  // nothing with Emirates Post. Telling the model to skip it strands the journey.
+  check("the model is still told to call submit_case", /Do still call submit_case once the payment reads paid/.test(guidance));
+  check("...and told plainly that it files nothing with Emirates Post",
+    /it files nothing with Emirates Post and must never be described as if it did/.test(guidance));
   check("the model is told to call request_payment and nothing else", /PAYING IS FOUR STEPS AND ONLY ONE OF THEM IS YOURS/.test(guidance));
-  check("...and not to submit anything afterwards", /NOTHING IS SUBMITTED AFTER THE PAYMENT/.test(guidance));
+  check("...and that nothing of ours submits the application", /NOTHING OF YOURS SUBMITS THE APPLICATION TO EMIRATES POST/.test(guidance));
+  check("...and not to send a second composite after paying", /after the payment do NOT send another composite/.test(guidance));
   check("...and that the 1.x gateway surcharge is not this licence's", /THE ONLINE PAYMENT FEE NAMED FURTHER DOWN IS NOT THIS LICENCE'S/.test(guidance));
   check("a blocked payment is not described as a failed one", /That is not a failed payment and it is not the applicant's fault/.test(guidance));
 }
@@ -243,6 +259,13 @@ const PAID_QUOTE = JSON.stringify({
     out.indexOf("VALUES BLOCK") < out.indexOf("NEW BLOCK") && out.indexOf("NEW BLOCK") < out.indexOf("1.x text"));
 
   check("running it twice changes nothing", replaceBlock(out, "NEW BLOCK (2026-10-27) body", NEW, OLDS) === out);
+  // "the marker is there, so nothing to do" is not idempotence: a correction to
+  // the same day's text would report success and write nothing.
+  const corrected = replaceBlock(out, "NEW BLOCK (2026-10-27) corrected body", NEW, OLDS);
+  check("a correction under the SAME marker is written, not skipped",
+    corrected.includes("corrected body") && !corrected.includes("NEW BLOCK (2026-10-27) body\n"), corrected);
+  check("...and it still keeps both sides",
+    corrected.includes("VALUES BLOCK (2026-10-22) body") && corrected.includes("1.x text that renewals need"));
   const fresh = replaceBlock("just the 1.x text", "NEW body", NEW, OLDS);
   check("a text with no 2.0 block at all is prepended to, not replaced",
     fresh === "NEW body\n\n---\n\njust the 1.x text", fresh);
