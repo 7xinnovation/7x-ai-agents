@@ -480,7 +480,7 @@
             "key": "manage_pobox",
             "journey": "manage_po_box",
             "description": {
-              "en": "Manage an existing PO Box: authorized agent, key delivery, auto-renewal, link trade license"
+              "en": "Manage an existing PO Box: representative, key delivery, auto-renewal, link trade license"
             },
             "requiresAuth": true
           },
@@ -943,13 +943,13 @@
                     "options": [
                       {
                         "label": {
-                          "en": "Add authorized agent"
+                          "en": "Add representative"
                         },
                         "value": "ADD_AGENT"
                       },
                       {
                         "label": {
-                          "en": "Remove authorized agent"
+                          "en": "Remove representative"
                         },
                         "value": "REMOVE_AGENT"
                       },
