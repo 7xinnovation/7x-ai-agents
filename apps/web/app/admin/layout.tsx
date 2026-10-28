@@ -14,7 +14,7 @@ const NAV = [
   { href: "/admin", label: "Overview", icon: LayoutGrid, exact: true },
   { href: "/admin/agents", label: "Agents", icon: MessagesSquare, exact: false },
   { href: "/admin/inbox", label: "Inbox", icon: Inbox, exact: false },
-  { href: "/admin/analytics", label: "Analytics", icon: BarChart3, exact: false },
+  { href: "/admin/analytics", label: "Insights", icon: BarChart3, exact: false },
   { href: "/admin/activity", label: "Activity", icon: Activity, exact: true },
   { href: "/admin/api-logs", label: "API Logs", icon: ScrollText, exact: false },
   { href: "/admin/health", label: "Health", icon: HeartPulse, exact: false },
