@@ -68,12 +68,27 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
     if (f.submitBeforePayment && f.saveTool) {
       lines.push(`  3. After the customer confirms, call ${f.saveTool} FIRST to create the record with ${sys}, and keep the reference it returns. NOTHING is charged by this call. It must happen BEFORE any payment: the payment is recorded against this record's id, and until it exists there is nothing for the money to attach to — request_payment will refuse, and that refusal is expected rather than a fault to escalate or apologise for.`);
       lines.push(`  4. THEN call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"}. A secure payment card appears in the chat by itself; never paste a link. WAIT for confirmation.`);
-      lines.push(`  5. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference.`);
+      // AND NOTHING AFTER IT. The record was created in step 3 and the
+      // orchestrator wrote its reference onto the case the moment the save
+      // tool answered, in the same shape submit_case writes. Calling the
+      // internal spine as well files a SECOND request nobody asked for, and
+      // on an agent whose CRM is the ops mailbox it throws outright -- which
+      // is how an applicant whose application AND payment both went through
+      // was told there was "a system issue on our end" and sent to ring
+      // EPGL (LR-54086, 28 October). The trailer below this flow has always
+      // said not to call it; this line said to, and the numbered steps win.
+      lines.push(`  5. Once payment is confirmed (payment status "paid"), tell the customer it is done and quote the reference ${f.saveTool} returned in step 3. Do NOT call submit_case: this journey was filed in step 3 and there is nothing left to file.`);
     } else {
     lines.push(`  3. After the customer confirms, call request_payment with amount = the exact figure from ${f.pricingTool ?? "pricing"} and share the secure link. WAIT for confirmation.`);
     if (f.saveTool)
       lines.push(`  4. Once payment is confirmed (payment status "paid"), call ${f.saveTool} ONCE to record the transaction with ${sys} and give the customer the reference from its response. Do NOT call it before the payment is "paid", and do NOT share any payment URL it returns — the customer has already paid on the internal checkout, and sending them to a second payment page would charge them twice.`);
-    lines.push(`  ${f.saveTool ? 5 : 4}. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. submit_case IS the finalisation for this journey — NEVER tell the customer it is complete, confirmed, or that a receipt link is available until submit_case has returned a reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
+    // Only when nothing else files it -- see the note above. With a saveTool
+    // the record is that call's, and submit_case would mint a second
+    // reference for a request that already has one.
+    if (!f.saveTool)
+      lines.push(`  4. Once payment is confirmed (payment status "paid"), call submit_case ONCE to finalise and give the customer the reference. submit_case IS the finalisation for this journey — NEVER tell the customer it is complete, confirmed, or that a receipt link is available until submit_case has returned a reference. If the user says they paid but payment is not yet "paid", briefly say it's still processing — do NOT restart the journey, re-fetch details, or create a second payment.`);
+    else
+      lines.push(`  5. Once payment is confirmed (payment status "paid"), tell the customer it is done and quote the reference ${f.saveTool} returned in step 4. Do NOT call submit_case: ${f.saveTool} is what records this journey, and calling submit_case as well files a second request against the same payment.`);
     }
     lines.push(`  Keep the case panel live: as soon as you learn each of this journey's fields, call collect_field for it (e.g. the box number, the chosen period) — including values you read from a tool — so the customer's side panel fills in step by step, not all at the end.`);
     if (f.notes) lines.push(`  Field-mapping notes: ${f.notes}`);

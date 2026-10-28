@@ -1563,6 +1563,47 @@ export async function dispatchTool(
         events.push({ type: "auth_required", reason: "Submission requires sign-in." });
         return { result: "User must authenticate before submission.", state, events };
       }
+      /**
+       * A JOURNEY WITH A BACKEND saveTool HAS ALREADY BEEN FILED.
+       *
+       * The orchestrator writes the reference the save tool returned onto the
+       * case the moment it answers, in the same shape this writes -- so by the
+       * time anything reaches here the request exists and has a number. Running
+       * the internal spine as well files a SECOND request against the same
+       * payment, under a reference nobody has.
+       *
+       * On EPGL it does not even get that far: their CRM binding is the ops
+       * mailbox, whose createCase THROWS when no mailbox is configured, and
+       * neither environment has one. On 28 October that threw on LR-54086 --
+       * an application Salesforce had accepted, paid in full, advice P14234
+       * marked Paid, already moved to Under Review -- and the model, reading a
+       * genuine tool error, told the applicant there was "a system issue on our
+       * end", that their submission was not recorded, and to ring EPGL. Every
+       * word of that was wrong, and it was the last thing they were told.
+       *
+       * Prose had said not to call this for such a journey since long before
+       * that run. Prose is not a guarantee; this is.
+       */
+      const apiSaveTool = subJourney?.submission?.apiFlow?.saveTool;
+      if (apiSaveTool) {
+        return state.reference
+          ? {
+              result:
+                `ALREADY FILED — nothing to do, and nothing has gone wrong. ${apiSaveTool} recorded this journey and its reference is ${state.reference}. ` +
+                `Give the customer THAT reference. Do not call submit_case again on this journey, and never describe this as a failure or a system issue.`,
+              state,
+              events,
+            }
+          : {
+              result:
+                `WRONG TOOL: this journey is filed with ${apiSaveTool}, not submit_case, and ${apiSaveTool} has not returned a reference yet. ` +
+                `Call ${apiSaveTool} and use the reference it returns. NOTHING has gone wrong and nothing has been lost — do not tell the customer their submission failed, ` +
+                `do not tell them to contact anyone, and do not offer a callback for this.`,
+              state,
+              events,
+              isError: true,
+            };
+      }
       if (subJourney?.submission?.requiresPayment && state.payment.status !== "paid") {
         return {
           result: `Cannot submit — payment is ${state.payment.status}. Only a confirmed (paid) payment may trigger submission.`,
