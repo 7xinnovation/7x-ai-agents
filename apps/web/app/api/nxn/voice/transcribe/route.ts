@@ -19,7 +19,11 @@ const API_VERSION = process.env.AZURE_TRANSCRIBE_API_VERSION || "2025-01-01-prev
 const DOMAIN_PROMPT =
   "Emirates Post PO Box services in the UAE. Likely phrases: rent a new PO Box, renew my PO Box, " +
   "track a shipment, MyBox, MyHome, MyHome Instant, Basic, Premium, Emirate, Dubai, Abu Dhabi, Sharjah, " +
-  "Ajman, Umm Al Quwain, Ras Al Khaimah, Fujairah, branch, box number, trade license, authorised agent, auto-renewal, Emirates ID.";
+  "Ajman, Umm Al Quwain, Ras Al Khaimah, Fujairah, branch, box number, trade license, representative, " +
+  // Kept alongside the new name because this is a hint about what a CUSTOMER
+  // might say, and a customer who learned the service under the old one still
+  // says it. See the 2026-10-28 rename.
+  "authorised agent, auto-renewal, Emirates ID.";
 
 export async function POST(req: NextRequest) {
   const endpoint = process.env.AZURE_REALTIME_ENDPOINT; // same AI Foundry resource
