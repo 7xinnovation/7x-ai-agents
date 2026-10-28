@@ -227,7 +227,23 @@ export async function createEpglCallback(
    * is read back. If that read fails the id still goes out: a reference that is
    * awkward to quote is a great deal better than losing a case that exists.
    */
-  const caseNumber = await caseNumberOf(auth, created.id).catch(() => null);
+  /**
+   * ASKED TWICE BEFORE GIVING UP.
+   *
+   * The fallback below is the exact thing Emirates Post reported as "excessively
+   * long and not customer friendly" — an 18-character record id read down a
+   * phone. It is the right fallback, because a reference that is awkward to
+   * quote still beats losing a case that exists, but it should be reached only
+   * when the number genuinely cannot be read, not on a blip.
+   *
+   * A single read is one HTTP call away from that outcome, so it gets a second
+   * attempt. `caseNumberOf` already refreshes a 401 of its own; this covers the
+   * rest — a dropped connection, a moment of 503 — and the id only goes out when
+   * two consecutive reads have failed, which is a real fault worth the log line.
+   */
+  const caseNumber =
+    (await caseNumberOf(auth, created.id).catch(() => null)) ??
+    (await caseNumberOf(auth, created.id).catch(() => null));
   if (!caseNumber) log.warn("epgl_callback_no_case_number", { id: created.id });
   return { reference: caseNumber ?? created.id };
 }
