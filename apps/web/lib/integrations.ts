@@ -2885,6 +2885,31 @@ export async function buildApiTools(
             `${[...filled.failed, ...filled.unmatched].join(", ")}. Everything else was submitted. Ask the customer to upload the missing ` +
             `one(s) and send them again — do NOT tell them the whole application failed.`;
         }
+        /**
+         * AND THE SLOTS DROPPED FOR WANT OF A DATE RATHER THAN A FILE.
+         *
+         * The guard above this keeps a document EPGL will refuse out of an
+         * allOrNone create, so one missing expiry cannot roll back the whole
+         * application. The comment on it says such a slot "goes on the
+         * follow-up call instead" — it does not, because the follow-up call
+         * has had the same guard since 27 October. It goes nowhere, and said
+         * nothing about it: on LR-54086 a lease contract and an insurance
+         * certificate were both dropped here while the reply read "All
+         * documents are uploaded".
+         *
+         * Readiness now holds the application back until the dates are in and
+         * the prompt asks the customer for them, so this should be unreachable.
+         * It is here for the turn where it is not.
+         */
+        const undated = files.filter((f) => !!f.salesforceType && f.validityRequired && !f.validTo);
+        if (undated.length) {
+          documentNote =
+            `${documentNote ? `${documentNote} ` : ""}` +
+            `THESE DOCUMENTS DID NOT GO TO EMIRATES POST: ${undated.map((f) => f.key).join(", ")}. ` +
+            `The file is here, but Emirates Post refuse this kind of document without the expiry date printed on it, and that date could not be read from the file. ` +
+            `Tell the customer plainly that this document still has to be sent and you need one thing for it — the date it is valid until — then ask for that date ` +
+            `and record it with record_document_expiry. Do NOT say the document is uploaded, filed, received or complete, and do NOT ask them to upload it again: it is here.`;
+        }
       }
     }
 

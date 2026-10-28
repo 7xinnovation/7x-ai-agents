@@ -136,6 +136,30 @@ export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): 
         (d) => d.key === reqDoc.key && (d.status === "uploaded" || d.status === "accepted")
       );
       if (!uploaded) missing.push({ key: reqDoc.key, kind: "document" });
+      /**
+       * A FILE EPGL WILL REFUSE IS NOT A DOCUMENT THAT IS IN.
+       *
+       * Their catalogue marks some slots validityRequired, and they reject
+       * those outright without a Valid_To__c. The date is read off the file,
+       * and for two of them — a lease contract and a goods-in-transit
+       * insurance certificate — it never is: both state a PERIOD rather than
+       * an expiry and the extractor returns nothing at all for them.
+       *
+       * Until this, that was invisible. The slot counted as satisfied, the
+       * panel ticked it, readiness read complete, and the composite's own
+       * guard quietly dropped the item on the way out. On LR-54086 the
+       * assistant said "All documents are uploaded" with two of them being
+       * withheld from Emirates Post in the same turn, and the applicant was
+       * never told and never asked.
+       *
+       * So the slot is outstanding until the date is there. It is reported as
+       * a document — the panel and the prompt both key on that — and the
+       * prompt says separately which of them are waiting on a date rather
+       * than a file, so nobody is asked to upload something twice.
+       */
+      else if (reqDoc.validityRequired && !uploaded.validTo) {
+        missing.push({ key: reqDoc.key, kind: "document" });
+      }
     }
   }
 
@@ -147,6 +171,38 @@ export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): 
         ? "ready"
         : "draft";
   return { ...state, readiness: { complete, missing }, status };
+}
+
+/**
+ * Slots whose file is in but whose expiry date is not — the ones EPGL will
+ * refuse. Exported because three places need the same answer and must not each
+ * work it out: readiness above, the prompt that asks the customer for the
+ * date, and the tool that records what they say.
+ *
+ * It reads the date off the document and nowhere else. The chat route keeps a
+ * narrower fallback of its own for the trade licence — `epglValidTo` reads
+ * `license_expiry_date` when the slot has none — which exists for files
+ * uploaded before the date was being kept at all. A case old enough to need it
+ * will be asked here for a date the route would have substituted. That is the
+ * safe direction and the population is vanishing, but if the fallback ever
+ * widens, it belongs on the slot (as a field name to read) rather than in two
+ * places that can disagree.
+ */
+export function documentsAwaitingExpiry(agent: AgentDefinition, state: CaseState): string[] {
+  const journey = findJourney(agent, state.journeyKey);
+  if (!journey) return [];
+  const out: string[] = [];
+  for (const step of journey.steps) {
+    for (const reqDoc of step.documents) {
+      if (!reqDoc.validityRequired) continue;
+      if (!evalCondition(reqDoc.condition, state.data)) continue;
+      const uploaded = state.documents.find(
+        (d) => d.key === reqDoc.key && (d.status === "uploaded" || d.status === "accepted")
+      );
+      if (uploaded && !uploaded.validTo && !out.includes(reqDoc.key)) out.push(reqDoc.key);
+    }
+  }
+  return out;
 }
 
 /** Update payment state on the case. */

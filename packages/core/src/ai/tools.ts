@@ -4,7 +4,7 @@ import { tr, type AgentDefinition, type CaseState, type Journey, type LocalizedS
 import type { AdapterBundle } from "../adapters/types";
 import { handoverContext } from "./handover";
 import { adapterContext } from "../adapters/registry";
-import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition } from "../case/engine";
+import { setField, setDocument, setJourney, setPayment, findJourney, evalCondition, documentsAwaitingExpiry } from "../case/engine";
 import { RECORD_IDENTITY } from "./extract";
 
 /**
@@ -91,6 +91,23 @@ export const TOOL_DEFS: Anthropic.Tool[] = [
         rejection_reason: { type: "string" },
       },
       required: ["key", "status"],
+    },
+  },
+  {
+    name: "record_document_expiry",
+    description:
+      "Record the expiry date PRINTED ON a document the customer has already uploaded, when it could not be read from the file. " +
+      "Emirates Post refuse some documents outright without it; the case state names any slot that is waiting on one, and a lease contract " +
+      "and a goods-in-transit insurance certificate are the usual two, because both state a period rather than an expiry. " +
+      "Ask the customer for the date on THEIR copy — a document that runs to the end of a period expires on the last day of it — and pass it as YYYY-MM-DD. " +
+      "Never guess a date, never copy one from a different document, and never pass a date the customer has not given you: it goes on a regulator's record.",
+    input_schema: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "The document slot key, exactly as the case state spells it" },
+        date: { type: "string", description: "The expiry printed on the document, ISO YYYY-MM-DD" },
+      },
+      required: ["key", "date"],
     },
   },
   {
@@ -988,6 +1005,76 @@ export async function dispatchTool(
       }
       events.push({ type: "case", state });
       return { result: `Saved ${fieldKey}. Readiness: ${state.readiness.complete ? "complete" : `missing ${state.readiness.missing.map((m) => m.key).join(", ")}`}.`, state, events };
+    }
+
+    case "record_document_expiry": {
+      /**
+       * THE ONE DATE NOBODY COULD READ.
+       *
+       * Everything else about a document is read off the file. These two are
+       * not: a lease contract and an insurance certificate state a period, the
+       * extractor returns nothing for either, and EPGL refuse both without a
+       * Valid_To__c. Before this there was no way for the customer to supply
+       * what the file would not give up, so the slot was withheld from the
+       * submission while the assistant reported every document as in.
+       *
+       * It takes the date only from the customer, and only onto a file that is
+       * already here. A date invented to clear a gate would be written to a
+       * regulator's record as fact.
+       */
+      const docKey = String(input.key ?? "").trim();
+      const date = String(input.date ?? "").trim();
+      const slot = state.documents.find(
+        (d) => d.key === docKey && (d.status === "uploaded" || d.status === "accepted")
+      );
+      if (!slot) {
+        return {
+          result:
+            `NOT RECORDED: there is no uploaded document under "${docKey}" to attach a date to. ` +
+            `Check the spelling against the case state, and if the file is genuinely not here yet, ask for the file first.`,
+          state,
+          events,
+          isError: true,
+        };
+      }
+      // A real calendar date, not merely a string shaped like one: "2027-02-31"
+      // parses and then rolls into March, which is not what anybody typed.
+      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T00:00:00Z`) : null;
+      if (!parsed || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+        return {
+          result:
+            `NOT RECORDED: "${date}" is not a date this can use. It must be the expiry exactly as ISO YYYY-MM-DD, e.g. "2027-12-31". ` +
+            `If the customer gave it day-first, convert it — do not pass it through.`,
+          state,
+          events,
+          isError: true,
+        };
+      }
+      const todayIso = new Date().toISOString().slice(0, 10);
+      if (date < todayIso) {
+        return {
+          result:
+            `NOT RECORDED: ${date} has already passed, so this document has expired. Recording it would send Emirates Post a document ` +
+            `they will reject and put an expired date on the application. Tell the customer plainly that this copy has expired and ask for a current one, ` +
+            `then re-upload it in place of this file. Nothing else about their application is affected.`,
+          state,
+          events,
+          isError: true,
+        };
+      }
+      state = setDocument(agent, state, { ...slot, validTo: date });
+      events.push({ type: "case", state });
+      const stillWaiting = documentsAwaitingExpiry(agent, state);
+      return {
+        result:
+          `Recorded: ${docKey} expires ${date}. It will now be sent to Emirates Post with the application. ` +
+          (stillWaiting.length
+            ? `Still waiting on a date: ${stillWaiting.join(", ")} — ask for each one the same way.`
+            : `No other document is waiting on a date.`) +
+          ` Readiness: ${state.readiness.complete ? "complete" : `missing ${state.readiness.missing.map((m) => m.key).join(", ")}`}.`,
+        state,
+        events,
+      };
     }
 
     case "record_document": {

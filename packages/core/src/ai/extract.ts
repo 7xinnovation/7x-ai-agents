@@ -70,6 +70,22 @@ export const DOC_TYPES = [
   "audited_financial_statement",
   "acknowledgement_letter",
   "declaration",
+  /**
+   * The two documents the extractor returned NOTHING for.
+   *
+   * Both are validityRequired in EPGL's catalogue, so both are refused without
+   * an expiry, and neither had a name in this list — so the classifier had to
+   * call each one "other", and an "other" with no journey fields to fill
+   * answered {} and dropped the printed date with everything else.
+   *
+   * Naming them does not by itself guarantee a date: the lease and the policy
+   * state a PERIOD, which is why the expiry instruction below spells out that
+   * such a document expires at the end of it. The guarantee is elsewhere — the
+   * customer is now asked, and the slot stays outstanding until they answer.
+   * This is so the classifier has somewhere honest to put them.
+   */
+  "lease_contract",
+  "insurance_certificate",
   "business_card",
   "other",
 ] as const;
@@ -88,6 +104,8 @@ export const DOC_TYPE_LABELS: Record<DocType, { en: string; ar: string }> = {
   audited_financial_statement: { en: "Audited Financial Statements (AFS)", ar: "البيانات المالية المدققة" },
   acknowledgement_letter: { en: "Acknowledgement letter", ar: "خطاب إقرار" },
   declaration: { en: "Declaration / undertaking form", ar: "نموذج إقرار وتعهد" },
+  lease_contract: { en: "Lease contract / Ejari", ar: "عقد إيجار / إيجاري" },
+  insurance_certificate: { en: "Insurance certificate", ar: "شهادة تأمين" },
   business_card: { en: "Business card", ar: "بطاقة أعمال" },
   other: { en: "Unrecognised document", ar: "مستند غير معروف" },
 };

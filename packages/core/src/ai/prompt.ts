@@ -1,6 +1,6 @@
 import type { AgentDefinition, CaseState, Locale } from "@dialog/config";
 import { tr } from "@dialog/config";
-import { findJourney, evalCondition } from "../case/engine";
+import { findJourney, evalCondition, documentsAwaitingExpiry } from "../case/engine";
 
 export interface SystemPrompt {
   /** Large, slow-changing prefix — marked cacheable so the up-to-6 tool rounds
@@ -349,6 +349,7 @@ ${journey?.submission?.apiFlow
   // losing your work.
   const done = state.documents.filter((d) => d.status === "uploaded" || d.status === "accepted");
   const rejected = state.documents.filter((d) => d.status === "rejected");
+  const awaitingExpiry = documentsAwaitingExpiry(agent, state);
   const documentsNote =
     (done.length
       ? `\nALREADY UPLOADED — do NOT ask for these again and do NOT show an upload card for them: ${done
@@ -376,6 +377,31 @@ ${journey?.submission?.apiFlow
       : "") +
     (rejected.length
       ? `\nREJECTED, so these DO still need uploading: ${rejected.map((d) => d.key).join(", ")}.`
+      : "") +
+    /**
+     * THE FILE IS IN AND IT STILL IS NOT DONE.
+     *
+     * Emirates Post refuse some slots without the expiry printed on the file,
+     * and for a lease contract and a goods-in-transit insurance certificate
+     * that date is never read: both state a period rather than an expiry and
+     * the extractor returns nothing at all for them.
+     *
+     * Everything above says these documents are in, because they are. What was
+     * missing is any way for the customer to be ASKED for the one thing the
+     * file would not give up — so the slot was dropped from the submission on
+     * the way out, by a guard doing its job, while the reply said "All
+     * documents are uploaded". LR-54086, 28 October, two of them at once, and
+     * the applicant was never told.
+     *
+     * Listed separately from the uploads for the obvious reason: being asked
+     * to upload a document you have already uploaded is the thing that must
+     * not happen here.
+     */
+    (awaitingExpiry.length
+      ? `\nWAITING ON AN EXPIRY DATE — the file is in, the date is not, and Emirates Post will REFUSE the document without it: ${awaitingExpiry.join(", ")}. ` +
+        `Do NOT ask for these files again and do NOT show an upload card for them. Ask the customer, in their own words, for the date the document is valid until — a lease or an insurance policy that runs to the end of a period expires on the LAST DAY of that period, so "01/01/2026 to 31/12/2027" means 31-12-2027. ` +
+        `Record what they tell you with record_document_expiry. One document per message, like any other ask. ` +
+        `Until it is recorded that document is NOT going to Emirates Post, so never say it is uploaded, complete, received or "all in" — say plainly that you need the date before it can be sent with the application.`
       : "");
 
   // The one figure the customer must be quoted.
