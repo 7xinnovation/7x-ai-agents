@@ -1955,6 +1955,30 @@ export async function POST(req: NextRequest) {
   const FORM9_TOOL = "epgl_form9_history";
   const MOE_TOOL = MOE_TOOL_NAME;
   /**
+   * WHEN WE DO NOT KNOW THE COMPANY, ASK FOR THE LICENCE, NOT THE NUMBER.
+   *
+   * Three separate tool descriptions ended "ask for the trade licence number",
+   * and every one of them was reached at the same moment: the applicant has
+   * just said the company we guessed is not theirs. What followed was "What's
+   * the trade licence number for the company you're applying for?" — a typed
+   * number, from someone holding the document it is printed on.
+   *
+   * The document is strictly better and it is not close. One upload of it
+   * yields fifteen fields on this journey: the company's name in English and
+   * Arabic, the licence number and its expiry, the legal form, the regulator,
+   * the emirate, the region, the street, the PO box, the activity codes, the
+   * owner's name, Emirates ID and nationality, and a contact number. The typed
+   * number yields one, unverified, and every other field is then a question.
+   *
+   * So the fallback is the upload block, every time, and the typed number is
+   * what we fall back TO — not from.
+   */
+  const ASK_FOR_THE_LICENCE_DOCUMENT =
+    "When you do not have the company, do NOT ask the customer to type a trade licence number: ask them to upload the trade licence itself, " +
+    "and emit the upload block for trade_license in that same reply so there is something to press. The document carries the licence number " +
+    "and the registered details with it, so one upload answers what would otherwise be a dozen questions, and it is in their hand already. " +
+    "Only if they say they cannot upload it should you take the number as text.";
+  /**
    * People the registry named as NOT resident, on a licence it names this
    * customer on. Request-scoped on purpose: the case is owned by the turn and
    * writing to it from a tool handler would race the turn's own save.
@@ -2322,7 +2346,7 @@ export async function POST(req: NextRequest) {
         {
           name: COMPANY_BY_EID_TOOL,
           description:
-            "Find the companies a signed-in customer is a contact on, using their EMIRATES ID. Use it as soon as they are signed in and you do not yet have a trade licence number — sign-in gives you their Emirates ID, not a licence. Returns every company they are on: one, confirm it; several, let them pick; none, carry on and ask for the trade licence number as normal.",
+            "Find the companies a signed-in customer is a contact on, using their EMIRATES ID. Use it as soon as they are signed in and you do not yet have a trade licence number — sign-in gives you their Emirates ID, not a licence. Returns every company they are on: one, confirm it; several, let them pick; none, carry on. " + ASK_FOR_THE_LICENCE_DOCUMENT,
           input_schema: {
             type: "object",
             properties: { emiratesId: { type: "string", description: "The customer's Emirates ID, 15 digits, dashed or bare" } },
@@ -2339,9 +2363,11 @@ export async function POST(req: NextRequest) {
           description:
             "THE COMPANY THE SIGNED-IN CUSTOMER'S PORTAL ACCOUNT BELONGS TO. Call this FIRST for a signed-in customer, before asking for a trade licence number and before " +
             COMPANY_TOOL +
-            ": their sign-in tells us which company they are, so asking them to type a licence number is asking for something we already have. It takes NO argument — the account comes from their sign-in, not from you. Returns the same registered details as the other company lookups: names in English and Arabic, licence number and expiry, emirate, regulator, postal licence and status. Show what comes back and ask the customer to CONFIRM it is the company this application is for; if they say it is a different company, ask for that trade licence number and use " +
+            ": their sign-in tells us which company they are, so asking them to type a licence number is asking for something we already have. It takes NO argument — the account comes from their sign-in, not from you. Returns the same registered details as the other company lookups: names in English and Arabic, licence number and expiry, emirate, regulator, postal licence and status. Show what comes back and ask the customer to CONFIRM it is the company this application is for. If they say it is a different company, or an empty answer comes back because their login is not linked to a company record — normal, and not an error — then " +
+            ASK_FOR_THE_LICENCE_DOCUMENT +
+            " Use " +
             COMPANY_TOOL +
-            " instead. An empty answer means their login is not linked to a company record — normal, and not an error: ask for the trade licence number as usual.",
+            " with the number once you have it, whether it came off the document or from them.",
           input_schema: { type: "object", properties: {}, required: [] },
         },
         {
@@ -2349,7 +2375,7 @@ export async function POST(req: NextRequest) {
           description:
             "THE TRADE LICENCES REGISTERED TO A SIGNED-IN CUSTOMER, read from the Ministry of Economy's own registry using their EMIRATES ID. Call this FIRST for a signed-in customer, before " +
             COMPANY_BY_EID_TOOL +
-            " and before asking for a licence number at all — sign-in gives you their Emirates ID, and this turns it into their actual companies with the registered name in English and Arabic, the licence number, and the expiry date. Each one comes back marked as already known to EPGL (so it is a RENEWAL and you have the account) or not (so it is a NEW application, and the details here are what you pre-fill it with). Show what comes back and let the customer pick; never choose for them, and never show a licence this tool did not return. An empty list is a normal answer meaning nothing is registered to that ID — fall back to asking for the trade licence number. This is the registry's own record, so ask the customer to CONFIRM it rather than to type it again.",
+            " and before asking for a licence number at all — sign-in gives you their Emirates ID, and this turns it into their actual companies with the registered name in English and Arabic, the licence number, and the expiry date. Each one comes back marked as already known to EPGL (so it is a RENEWAL and you have the account) or not (so it is a NEW application, and the details here are what you pre-fill it with). Show what comes back and let the customer pick; never choose for them, and never show a licence this tool did not return. An empty list is a normal answer meaning nothing is registered to that ID. " + ASK_FOR_THE_LICENCE_DOCUMENT + " This is the registry's own record, so ask the customer to CONFIRM it rather than to type it again.",
           input_schema: {
             type: "object",
             properties: { emiratesId: { type: "string", description: "The customer's verified Emirates ID, 15 digits, dashed or bare" } },
