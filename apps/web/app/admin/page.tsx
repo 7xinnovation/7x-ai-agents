@@ -90,7 +90,7 @@ export default async function Overview() {
               <span className="text-[12.5px] text-muted">{k.label}</span>
             </div>
           ))}
-          <Link href="/admin/analytics" className="ml-auto inline-flex items-center gap-1 text-[12.5px] font-semibold text-[var(--color-brand)] hover:underline">Full analytics <ArrowRight className="h-3.5 w-3.5" /></Link>
+          <Link href="/admin/analytics" className="ml-auto inline-flex items-center gap-1 text-[12.5px] font-semibold text-[var(--color-brand)] hover:underline">Full insights <ArrowRight className="h-3.5 w-3.5" /></Link>
         </div>
       </section>
 
