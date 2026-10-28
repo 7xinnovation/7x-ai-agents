@@ -153,6 +153,75 @@ function autoBargeIn(): boolean {
   return true;
 }
 
+/**
+ * HOW LONG A PAUSE IS ALLOWED TO BE, and the three limits around it.
+ *
+ * Two seconds is what Emirates Post asked for: "once silence for 2 seconds or
+ * more, we can interrupt and process". It is also about right — long enough to
+ * think of a box number, short enough that the reply does not feel late.
+ */
+const SILENCE_MS = 2000;
+/** Nothing heard at all: close the turn and open a fresh one rather than hang. */
+const NO_SPEECH_MS = 15000;
+/** A ceiling, so a meter that never sees silence cannot record for ever. */
+const MAX_UTTERANCE_MS = 60000;
+/** How often the microphone level is read. */
+const METER_TICK_MS = 50;
+/**
+ * The level a voice has to clear, as RMS of the waveform (0 to 1).
+ *
+ * Absolute, and only ever raised by the room — never lowered to it. A bar
+ * derived from what has been heard is wrong exactly when it matters: a customer
+ * who starts talking the moment the microphone opens would set the bar at their
+ * own voice and never cross it.
+ */
+const SPEECH_RMS = 0.015;
+const NOISE_FLOOR_MIN = 0.0008;
+/** However loud the room is, the bar stops here — well under a speaking voice. */
+const NOISE_FLOOR_MAX = 0.02;
+
+/**
+ * What the meter knows between one reading and the next.
+ *
+ * Pulled out of the hook and exported so the rule Emirates Post asked for can
+ * be TESTED rather than trusted: see scripts/test-voice-endpointing-2026-10-28.
+ * A microphone is not available to a test, and a 50 ms interval that decides
+ * when to cut a customer off is not something to verify by talking at a laptop
+ * and hoping.
+ */
+export interface MeterState {
+  startedAt: number;
+  lastLoudAt: number;
+  floor: number;
+  spoke: boolean;
+}
+
+export function newMeterState(now: number): MeterState {
+  return { startedAt: now, lastLoudAt: 0, floor: NOISE_FLOOR_MAX, spoke: false };
+}
+
+/** Why a turn ended, or null while it is still the customer's. */
+export type MeterEnd = "silence" | "no-speech" | "too-long" | null;
+
+/** One reading of the microphone level, folded into the state. */
+export function meterStep(state: MeterState, rms: number, now: number): { state: MeterState; end: MeterEnd } {
+  const floor = Math.min(state.floor, Math.max(rms, NOISE_FLOOR_MIN));
+  const loud = rms > Math.max(SPEECH_RMS, floor * 2.5);
+  const next: MeterState = {
+    startedAt: state.startedAt,
+    floor,
+    spoke: state.spoke || loud,
+    lastLoudAt: loud ? now : state.lastLoudAt,
+  };
+  const elapsed = now - next.startedAt;
+  // The order matters: a customer who is mid-pause at the ceiling has still
+  // said something, and what they said should be sent rather than discarded.
+  if (next.spoke && next.lastLoudAt && now - next.lastLoudAt >= SILENCE_MS) return { state: next, end: "silence" };
+  if (!next.spoke && elapsed >= NO_SPEECH_MS) return { state: next, end: "no-speech" };
+  if (elapsed >= MAX_UTTERANCE_MS) return { state: next, end: "too-long" };
+  return { state: next, end: null };
+}
+
 function pickMime(): string {
   const MR = typeof window !== "undefined" ? (window as any).MediaRecorder : undefined;
   if (!MR?.isTypeSupported) return "";
@@ -196,6 +265,12 @@ export function useVoiceChat(opts: {
   const bargeRecRef = useRef<any>(null);
   const spokenTextRef = useRef("");
   const warnedRef = useRef(false);
+  // The microphone meter that decides when the customer has finished speaking,
+  // and the one source node the analyser hangs off.
+  const meterStopRef = useRef<(() => void) | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  /** Abandons the utterance being captured, without sending it. */
+  const cancelUtteranceRef = useRef<(() => void) | null>(null);
 
   const supported =
     typeof window !== "undefined" &&
@@ -209,6 +284,9 @@ export function useVoiceChat(opts: {
     ("AudioContext" in window || "webkitAudioContext" in window || "speechSynthesis" in window);
 
   const stopRecognition = useCallback(() => {
+    // Whatever is being captured is abandoned first: the meter, the recorder
+    // and the recogniser belong to one utterance and stop together.
+    cancelUtteranceRef.current?.();
     const rec = recRef.current;
     recRef.current = null;
     busyRef.current = false;
@@ -216,14 +294,106 @@ export function useVoiceChat(opts: {
     setListening(false);
   }, []);
 
-  // One utterance: recognise (for endpointing + fallback) while recording, then
-  // transcribe the recording accurately and send the text.
+  /**
+   * THE METER THAT ENDS THE TURN.
+   *
+   * Reported 28 October: "the voice command seems to be limited to around 5
+   * seconds, I cannot complete my sentence if it is more than that."
+   *
+   * It was not a limit anyone set. The turn ended when the browser's
+   * SpeechRecognition said it had — `continuous = false` means the recogniser
+   * stops at the first endpoint ITS OWN model finds, which is tuned for short
+   * commands and treats the pause in the middle of a sentence as the end of
+   * one. The Web Speech API exposes no way to lengthen that: there is no
+   * silence threshold, no timeout, no setting of any kind. Asking the
+   * recogniser more politely was never going to work.
+   *
+   * So the endpoint is measured here instead, off the microphone itself: an
+   * analyser on the same stream the recorder is using, read every 50 ms, and
+   * the turn ends after {@link SILENCE_MS} of quiet ONCE THE CUSTOMER HAS
+   * ACTUALLY SPOKEN. Pause to think for a second and a half and the turn is
+   * still yours; stop for two and it is sent.
+   *
+   * The threshold is absolute with the room's own noise allowed to raise it,
+   * not the other way round. A floor derived purely from what has been heard
+   * is wrong exactly when it matters — a customer who starts talking the
+   * instant the mic opens would calibrate the floor to their own voice and
+   * never cross it.
+   *
+   * EVERY FAILURE HERE LOSES TIME, NOT WORDS. If the meter never hears speech
+   * the turn still closes at {@link NO_SPEECH_MS} and whatever was recorded is
+   * still transcribed and sent; if the meter cannot be built at all the old
+   * recogniser-driven endpointing is used unchanged. The recording is what
+   * gets transcribed either way — the meter only decides when to stop it.
+   */
+  const startMeter = useCallback((onEnd: () => void): boolean => {
+    const AC: typeof AudioContext | undefined =
+      (window as any).AudioContext || (window as any).webkitAudioContext;
+    const stream = micRef.current;
+    if (!AC || !stream) return false;
+    let ctx = audioCtxRef.current;
+    if (!ctx) {
+      try { ctx = new AC({ sampleRate: 24000 }); }
+      catch { try { ctx = new AC(); } catch { return false; } }
+      audioCtxRef.current = ctx;
+    }
+    try { if (ctx.state === "suspended") void ctx.resume(); } catch { /* ignore */ }
+
+    let analyser: AnalyserNode;
+    try {
+      // One source node per microphone, not per utterance: a stream may only be
+      // tapped so many times before the browser stops handing them out.
+      if (!micSourceRef.current) micSourceRef.current = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0;
+      // Deliberately NOT connected onward to the destination. This is a
+      // measurement, and routing the microphone to the speakers would be
+      // feedback.
+      micSourceRef.current.connect(analyser);
+    } catch { return false; }
+
+    const data = new Uint8Array(analyser.fftSize);
+    let state = newMeterState(Date.now());
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      try { micSourceRef.current?.disconnect(analyser); } catch { /* already gone */ }
+      if (meterStopRef.current === stop) meterStopRef.current = null;
+    };
+
+    timer = setInterval(() => {
+      try { analyser.getByteTimeDomainData(data); } catch { return; }
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) { const v = ((data[i] ?? 128) - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / data.length);
+      const r = meterStep(state, rms, Date.now());
+      state = r.state;
+      if (r.end) { stop(); onEnd(); }
+    }, METER_TICK_MS);
+
+    meterStopRef.current = stop;
+    return true;
+  }, []);
+
+  // One utterance: record it while the recogniser transcribes alongside (as a
+  // fallback), and end it when the meter above hears the customer stop.
   const listenOnce = useCallback(() => {
     if (!activeRef.current || speakingRef.current || streamingRef.current || busyRef.current || !micRef.current) return;
     const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) return;
     busyRef.current = true;
     let fallback = "";
+    /**
+     * The last interim guess, kept only for the case where the recording could
+     * not be transcribed AND the recogniser never promoted anything to final —
+     * which a continuous recognition that is aborted mid-sentence can do, and
+     * the old one-shot could not. Better a rough sentence than silence.
+     */
+    let interim = "";
+    let finished = false;
     let recorder: any = null;
     const chunks: BlobPart[] = [];
     const mime = pickMime();
@@ -233,16 +403,24 @@ export function useVoiceChat(opts: {
       recorder.start();
     } catch { recorder = null; }
 
-    const rec = new SR();
-    recRef.current = rec;
-    rec.lang = locale === "ar" ? "ar-SA" : "en-US";
-    rec.interimResults = false;
-    rec.continuous = false;
-    rec.maxAlternatives = 1;
-    rec.onresult = (e: any) => { fallback = (e?.results?.[0]?.[0]?.transcript ?? "").trim(); };
-    rec.onerror = () => { /* onend follows */ };
-    rec.onend = async () => {
+    /** Everything this utterance owns, stopped without sending anything. */
+    const abandon = () => {
+      if (finished) return;
+      finished = true;
+      meterStopRef.current?.();
+      cancelUtteranceRef.current = null;
+      if (recorder && recorder.state !== "inactive") { try { recorder.stop(); } catch { /* ignore */ } }
+    };
+    cancelUtteranceRef.current = abandon;
+
+    const finish = async () => {
+      if (finished) return;
+      finished = true;
+      meterStopRef.current?.();
+      cancelUtteranceRef.current = null;
+      const rec = recRef.current;
       recRef.current = null;
+      if (rec) { try { rec.onend = null; rec.onresult = null; rec.abort(); } catch { /* ignore */ } }
       setListening(false);
       let blob: Blob | null = null;
       if (recorder && recorder.state !== "inactive") {
@@ -255,15 +433,65 @@ export function useVoiceChat(opts: {
           if (r.ok) text = ((await r.json())?.text ?? "").trim();
         } catch { /* fall back below */ }
       }
-      if (!text) text = fallback; // graceful fallback to on-device recognition
+      // Graceful fallback to on-device recognition: what it finalised, then
+      // what it had merely heard.
+      if (!text) text = fallback || interim;
       busyRef.current = false;
       if (text) sendRef.current(text);
       // If nothing was sent, keep listening; otherwise the effect resumes after the reply.
       if (!text && activeRef.current && !speakingRef.current && !streamingRef.current) listenOnce();
     };
+
+    const metered = startMeter(() => { void finish(); });
+
+    /**
+     * The recogniser, re-armed as often as the browser drops it.
+     *
+     * With the meter in charge it is no longer the clock, only a transcript of
+     * last resort, so it runs `continuous` and is simply started again when
+     * Chromium ends it of its own accord — which it does after every silence,
+     * and which is precisely the behaviour that used to end the customer's
+     * sentence for them. Without a meter it keeps its old job: one shot, and
+     * its ending ends the turn.
+     */
+    const arm = () => {
+      if (finished || !activeRef.current) return;
+      let rec: any;
+      try { rec = new SR(); } catch { return; }
+      recRef.current = rec;
+      rec.lang = locale === "ar" ? "ar-SA" : "en-US";
+      rec.continuous = metered;
+      rec.interimResults = metered;
+      rec.maxAlternatives = 1;
+      rec.onresult = (e: any) => {
+        const results = e?.results ?? [];
+        for (let i = e?.resultIndex ?? 0; i < results.length; i++) {
+          const r = results[i];
+          // Interim results are for the meter's benefit, not the transcript's:
+          // only a final one is kept, and they are joined because a continuous
+          // recognition reports a long answer as several.
+          const said = String(r?.[0]?.transcript ?? "");
+          if (!metered || r?.isFinal) fallback = `${fallback} ${said}`.trim();
+          else if (said.trim()) interim = said.trim();
+        }
+      };
+      rec.onerror = () => { /* onend follows */ };
+      rec.onend = () => {
+        if (recRef.current !== rec) return;
+        recRef.current = null;
+        if (finished) return;
+        if (!metered) { void finish(); return; }
+        // Started from a timeout rather than from inside onend: Chromium
+        // refuses a start() that happens while it is still ending.
+        setTimeout(arm, 120);
+      };
+      try { rec.start(); } catch { recRef.current = null; }
+    };
+
     setListening(true);
-    try { rec.start(); } catch { busyRef.current = false; recRef.current = null; setListening(false); }
-  }, [locale]);
+    arm();
+    if (!recRef.current && !metered) { busyRef.current = false; finished = true; cancelUtteranceRef.current = null; setListening(false); }
+  }, [locale, startMeter]);
 
   const stopRealtimeAudio = useCallback(() => {
     try { ttsAbortRef.current?.abort(); } catch { /* ignore */ }
@@ -474,6 +702,8 @@ export function useVoiceChat(opts: {
     stopRecognition();
     stopBargeListener();
     stopRealtimeAudio();
+    try { micSourceRef.current?.disconnect(); } catch { /* already gone */ }
+    micSourceRef.current = null;
     micRef.current?.getTracks().forEach((t) => t.stop());
     micRef.current = null;
     try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
