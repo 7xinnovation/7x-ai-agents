@@ -7,26 +7,55 @@ import type { ReactNode } from "react";
  * tokens, which is why the page renders on the server with no hydration and why
  * it looks like the rest of the console rather than like a plotting default.
  *
- * COLOUR IS ASSIGNED BY JOB, NOT BY TASTE.
+ * ONE HUE: THE BRAND'S.
  *
- *  - `SERIES` is categorical: identity only, assigned in fixed order and never
- *    cycled. Slot 1 is the 7X brand blue. The order was validated against the
- *    white console surface — worst adjacent colour-vision separation ΔE 9.1,
- *    worst normal-vision ΔE 19.6 — so a reader with deuteranopia or protanopia
- *    can still tell neighbouring journeys apart.
- *  - `RAMP` is ordinal: one hue, light to dark, for the funnel's ordered rungs.
- *    It starts no lighter than step 250 so the top rung still clears 2:1 against
- *    white.
- *  - The status colours are reserved for state and are never spent on a series.
+ * This started as a conventional categorical palette — blue, orange, aqua,
+ * yellow, magenta, violet — which is what the colour method prescribes for
+ * identity, and which made the dashboard look like somebody else's product. 7X
+ * is blue, black and white, so the series wear the brand blue and nothing else.
  *
- * Three categorical slots sit under 3:1 against white, so the relief rule
- * applies: every chart that uses them ships visible labels or a table beside it.
- * Nothing here asks the reader to match a colour alone.
+ * That is a real trade and it is paid for, not waved through. Hue is the channel
+ * that separates categories; giving it up means every chart here has to carry
+ * identity some other way, and each one does:
+ *
+ *   - a legend is always present at two or more series;
+ *   - every bar is labelled with its own value at the tip;
+ *   - every stacked column names each series and its number on hover;
+ *   - the journey table repeats the whole breakdown as text.
+ *
+ * `SERIES` draws from a one-hue ramp of eight steps, validated against the white
+ * console surface: one hue (0° spread), lightness monotone, every adjacent gap
+ * at least 0.06, and the palest step at 2.53:1 so it still reads as a mark
+ * rather than as the page.
+ *
+ * THE ORDER IS NOT THE RAMP'S ORDER. With hue gone, lightness is the only
+ * channel left, so the slots are interleaved — brand, then the palest, then the
+ * deepest, then inward — which takes the smallest gap between two
+ * consecutively-assigned series from 0.066 to 0.132. In the ramp's own order an
+ * eight-journey chart put four deep navies side by side in the legend; this way
+ * each new series lands as far from its neighbour as the ramp allows. (Choosing
+ * the slot order to maximise the minimum adjacent separation is the same move
+ * the method prescribes for hue; only the channel differs.)
+ *
+ * The brand keeps slot 1, so the busiest journey — and every single-series chart
+ * on the page — is 7X blue.
+ *
+ * The status colours below are the exception and stay reserved: they mean good,
+ * warning and critical, never "series 4".
  */
-export const SERIES = ["#0020f5", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"] as const;
+export const SERIES = [
+  "#0020f5", // 7X brand        L 0.454
+  "#76a1fe", // palest          L 0.718
+  "#000176", // deepest         L 0.256
+  "#346dff", //                 L 0.586
+  "#0101a2", //                 L 0.322
+  "#5589ff", //                 L 0.652
+  "#0100d0", //                 L 0.388
+  "#124cfe", //                 L 0.520
+] as const;
 
-/** Ordinal blue, light → dark. Eight steps for the eight funnel rungs. */
-const RAMP: readonly string[] = ["#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95"] as const;
+/** The same hue, light → dark, for the funnel's ordered rungs. */
+const RAMP: readonly string[] = ["#76a1fe", "#5589ff", "#346dff", "#124cfe", "#0020f5", "#0100d0", "#0101a2", "#000176"];
 
 const POS = "#079455";
 const WARN = "#b54708";
@@ -291,6 +320,9 @@ export function StackedDays({
 export function Funnel({ steps }: { steps: { step: string; note: string; now: number; prior: number; loss: number | null }[] }) {
   if (!steps.length) return <Empty />;
   const max = Math.max(1, ...steps.map((s) => Math.max(s.now, s.prior)));
+  // Over all time there IS no prior period, so the comparison bar is absent
+  // rather than drawn as a hairline that reads like a collapse to zero.
+  const hasPrior = steps.some((s) => s.prior > 0);
   const worst = steps.reduce<number | null>((w, s, i) => (s.loss != null && (w == null || (steps[w]?.loss ?? 0) > s.loss) ? i : w), null);
   return (
     <div className="flex flex-col gap-2">
@@ -306,9 +338,11 @@ export function Funnel({ steps }: { steps: { step: string; note: string; now: nu
                 style={{ width: `${Math.max(1.5, (s.now / max) * 100)}%`, background: i === worst ? CRIT : RAMP[i % RAMP.length] }}
               />
             </span>
-            <span className="block h-[3px] w-full">
-              <span className="block h-full rounded-r-[2px]" style={{ width: `${Math.max(0.5, (s.prior / max) * 100)}%`, background: "var(--color-line)" }} />
-            </span>
+            {hasPrior && (
+              <span className="block h-[3px] w-full">
+                <span className="block h-full rounded-r-[2px]" style={{ width: `${Math.max(0.5, (s.prior / max) * 100)}%`, background: "var(--color-line)" }} />
+              </span>
+            )}
           </span>
           <span className="w-16 shrink-0 text-right text-[12.5px] font-semibold tabular-nums text-ink">{s.now.toLocaleString("en-US")}</span>
           <span

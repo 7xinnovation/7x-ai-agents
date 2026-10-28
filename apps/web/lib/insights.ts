@@ -39,6 +39,10 @@ export interface InsightsAgent {
 
 export interface Insights {
   windowDays: number;
+  /** True when the window is "everything we have", which has no prior period. */
+  allTime: boolean;
+  /** Whether the per-day charts are bucketed by day or by week. */
+  grain: "day" | "week";
   agent: InsightsAgent | null;
   headline: {
     conversations: Delta;
@@ -125,6 +129,20 @@ function rateDelta(now: number, prior: number): Delta {
   return { now, prior, pct: Math.round((now - prior) * 10) / 10 };
 }
 
+/** Days back to the first thing this agent ever recorded, floored at a week. */
+async function oldestWindow(agentId: string | null): Promise<number> {
+  const scopedBy = (col: string) => (agentId ? sql`WHERE ${sql.raw(col)} = ${agentId}` : sql``);
+  const r = await rows<{ days: number }>(sql`
+    SELECT ceil(extract(epoch FROM (now() - min(t.at))) / 86400)::int AS days
+    FROM (
+      SELECT min(created_at) AS at FROM conversations ${scopedBy("agent_id")}
+      UNION ALL
+      SELECT min(created_at) AS at FROM analytics_events ${scopedBy("agent_id")}
+    ) t`).catch(() => []);
+  const days = Number(r[0]?.days ?? 0) || 0;
+  return Math.max(7, Math.min(3650, days + 1));
+}
+
 export async function listAgentsForFilter(): Promise<InsightsAgent[]> {
   const all = await rows<InsightsAgent>(sql`SELECT id, slug, name FROM agents ORDER BY name`);
   return withinScope(all, await currentScope());
@@ -181,12 +199,22 @@ async function journeyMeta(agentId: string | null) {
       if (j.intent) intents.add(j.intent);
       for (const step of j.steps ?? []) {
         for (const f of step.fields ?? []) {
-          if (!f?.key || choices.has(f.key)) continue;
+          if (!f?.key) continue;
+          /**
+           * ONE FIELD KEY, SEVERAL JOURNEYS, DIFFERENT OPTION SETS.
+           *
+           * `package` is IN/MYHOME3/MYHOMEF on a personal rental and LI/BR/GO on
+           * a corporate one. Taking the first journey's set and skipping the rest
+           * left `LI` unlabelled on an all-agents chart, sitting beside the three
+           * it did know as if it were a different kind of thing. The sets are
+           * unioned instead: the same key means the same question.
+           */
+          const existing = choices.get(f.key);
           if (f.options?.length) {
-            const options: Record<string, string> = {};
+            const options: Record<string, string> = { ...(existing?.options ?? {}) };
             for (const o of f.options) if (o?.value) options[o.value] = en(o.label) || o.value;
-            choices.set(f.key, { key: f.key, label: en(f.label) || f.key, options });
-          } else if (f.type === "boolean") {
+            choices.set(f.key, { key: f.key, label: existing?.label ?? en(f.label) ?? f.key, options });
+          } else if (f.type === "boolean" && !existing) {
             choices.set(f.key, { key: f.key, label: en(f.label) || f.key, options: { true: "Yes", false: "No" } });
           }
         }
@@ -196,11 +224,41 @@ async function journeyMeta(agentId: string | null) {
   return { label, intents, choices };
 }
 
-export async function loadInsights(windowDays = 30, agentId?: string | null): Promise<Insights> {
-  const d = Math.max(1, Math.min(365, windowDays));
+export type Window = number | "all";
+
+export async function loadInsights(windowDays: Window = "all", agentId?: string | null): Promise<Insights> {
+  const id = agentId ?? null;
+
+  /**
+   * "ALL TIME" IS A MEASURED WINDOW, NOT A BIG NUMBER.
+   *
+   * Asking for ten years and letting the queries find nothing would work, but it
+   * would also label the charts with 3,650 empty days and compare the period
+   * against a decade of nothing. The first thing this agent ever recorded is a
+   * real date, so the window is the distance to it — which keeps the axis honest
+   * and makes the "no prior period" below a statement of fact rather than a
+   * convenience.
+   */
+  const allTime = windowDays === "all";
+  const d = allTime ? await oldestWindow(id) : Math.max(1, Math.min(3650, windowDays as number));
   const from = sql.raw(`now() - interval '${d} days'`);
   const priorFrom = sql.raw(`now() - interval '${d * 2} days'`);
-  const id = agentId ?? null;
+  /**
+   * A HUNDRED COLUMNS IS NOT A CHART. Past about six weeks the per-day bars are
+   * a pixel wide and say nothing, so the buckets become weeks. The axis and the
+   * grouping read the same value, so they can never disagree.
+   */
+  const grain: "day" | "week" = d > 45 ? "week" : "day";
+  /**
+   * Both of these are `sql.raw` because neither position takes a parameter:
+   * `date_trunc` wants a quoted literal, and `interval` is parsed at plan time,
+   * so `interval '1 ' || $1` is a syntax error rather than a slow query. Bound
+   * as a parameter they failed silently into the section guard and the chart
+   * came back with no axis at all. `grain` is one of two values decided here,
+   * never anything a caller supplies.
+   */
+  const bucket = sql.raw(`'${grain}'`);
+  const bucketStep = sql.raw(`interval '1 ${grain}'`);
   // `agent_id` is spelled the same on every table this file reads, so one
   // fragment scopes them all.
   const scoped = id ? sql`AND agent_id = ${id}` : sql``;
@@ -277,19 +335,19 @@ export async function loadInsights(windowDays = 30, agentId?: string | null): Pr
   const dayAxis = await safe<string[]>([], () =>
     rows<{ day: string }>(sql`
       SELECT to_char(g.d, 'Mon DD') AS day
-      FROM generate_series(date_trunc('day', ${from}), date_trunc('day', now()), interval '1 day') AS g(d)
+      FROM generate_series(date_trunc(${bucket}, ${from}), date_trunc(${bucket}, now()), ${bucketStep}) AS g(d)
       ORDER BY g.d`).then((r) => r.map((x) => x.day))
   );
 
   const dailyRows = await safe<{ day: string; journey: string; count: number }[]>([], () =>
     rows(sql`
-      SELECT to_char(date_trunc('day', created_at), 'Mon DD') AS day,
+      SELECT to_char(date_trunc(${bucket}, created_at), 'Mon DD') AS day,
              coalesce(attributes->>'journey', '—') AS journey,
              count(*)::int AS count
       FROM analytics_events
       WHERE type = 'journey.completed' AND created_at >= ${from} ${scoped}
-      GROUP BY date_trunc('day', created_at), 2
-      ORDER BY date_trunc('day', created_at)`)
+      GROUP BY date_trunc(${bucket}, created_at), 2
+      ORDER BY date_trunc(${bucket}, created_at)`)
   );
 
   /* ------------------------------------------------------ journey performance */
@@ -500,30 +558,93 @@ export async function loadInsights(windowDays = 30, agentId?: string | null): Pr
      */
     const YES = new Set(["true", "yes", "y", "1", "accepted"]);
     const NO = new Set(["false", "no", "n", "0"]);
+    /**
+     * THE SAME ANSWER, SPELLED FIVE WAYS.
+     *
+     * Over thirty days this was tidy. Over all time it is not: bundle type alone
+     * comes back as MyBox, MYBOX, MyHome, MYHOME, Standard, standard, LI and
+     * "Premium+ Box" — a mix of stored codes, stored labels, and what earlier
+     * versions of the journey happened to write. They are the same answers and
+     * they belong in the same bar.
+     *
+     * So a value is resolved against the declared codes first, then against the
+     * declared LABELS, both case-insensitively, and only an answer that matches
+     * neither is kept as the customer gave it.
+     */
+    const byLabel = (field: ChoiceField) => {
+      const m = new Map<string, string>();
+      for (const [value, labelText] of Object.entries(field.options)) {
+        m.set(value.trim().toLowerCase(), labelText);
+        m.set(labelText.trim().toLowerCase(), labelText);
+      }
+      return m;
+    };
+    const labelIndex = new Map<string, Map<string, string>>();
     const readable = (field: ChoiceField, raw: string) => {
       const exact = field.options[raw];
       if (exact) return exact;
       const low = raw.trim().toLowerCase();
       if (field.options.true && YES.has(low)) return field.options.true;
       if (field.options.false && NO.has(low)) return field.options.false;
-      return field.options[low] ?? raw;
+      if (!labelIndex.has(field.key)) labelIndex.set(field.key, byLabel(field));
+      return labelIndex.get(field.key)?.get(low) ?? raw;
     };
 
-    const byKey = new Map<string, Map<string, number>>();
+    /**
+     * An answer the journey never declared still only gets ONE bar.
+     *
+     * "Standard" and "standard" both reached the package field from older
+     * versions of the flow; neither is a declared option, so neither is
+     * relabelled — but they are plainly the same answer and were drawing two
+     * bars. Unmatched values are grouped case-insensitively and shown in
+     * whichever spelling was given most often.
+     */
+    const byKey = new Map<string, Map<string, { display: string; count: number }>>();
     for (const r of raw) {
       const field = meta.choices.get(r.key);
       if (!field) continue;
-      const bucket = byKey.get(r.key) ?? new Map<string, number>();
+      const bucket = byKey.get(r.key) ?? new Map<string, { display: string; count: number }>();
       const value = readable(field, r.value);
-      bucket.set(value, (bucket.get(value) ?? 0) + n(r.n));
+      const groupKey = value.trim().toLowerCase();
+      const seen = bucket.get(groupKey);
+      const count = n(r.n);
+      if (!seen) bucket.set(groupKey, { display: value, count });
+      else bucket.set(groupKey, { display: count > seen.count ? value : seen.display, count: seen.count + count });
       byKey.set(r.key, bucket);
     }
-    return [...byKey.entries()]
-      .map(([key, bucket]) => ({
-        key,
-        label: meta.choices.get(key)?.label ?? key,
-        rows: [...bucket.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count),
-      }))
+    /**
+     * A LONG TAIL IS NOT A BREAKDOWN EITHER.
+     *
+     * Sixteen bars, eleven of them ones — including one customer's `^&*#*(&*&#*#`
+     * in the duration field — is a chart nobody can read, and the eleven are not
+     * the story. The top six stand and the rest are summed into "Other", which
+     * keeps the total honest without pretending each stray answer is a category.
+     */
+    const TOP = 6;
+    const fold = (list: { value: string; count: number }[]) => {
+      const sorted = list.sort((a, b) => b.count - a.count);
+      if (sorted.length <= TOP + 1) return sorted;
+      const rest = sorted.slice(TOP).reduce((t, r) => t + r.count, 0);
+      return [...sorted.slice(0, TOP), { value: "Other", count: rest }];
+    };
+
+    const built = [...byKey.entries()].map(([key, bucket]) => ({
+      key,
+      label: meta.choices.get(key)?.label ?? key,
+      rows: fold([...bucket.values()].map((v) => ({ value: v.display, count: v.count }))),
+    }));
+
+    /**
+     * And a field only seven people reached is not worth a card beside one that
+     * four hundred answered. Partner 3's residence status split neatly across
+     * seven applications and outranked every real breakdown on the page.
+     */
+    const total = (f: { rows: { count: number }[] }) => f.rows.reduce((t, r) => t + r.count, 0);
+    const busiest = Math.max(0, ...built.map(total));
+    const floor = Math.max(5, Math.round(busiest * 0.1));
+
+    return built
+      .filter((f) => total(f) >= floor)
       /**
        * A field where everyone gave the same answer is not a breakdown.
        *
@@ -535,7 +656,7 @@ export async function loadInsights(windowDays = 30, agentId?: string | null): Pr
       .sort((a, b) => {
         const split = (f: { rows: unknown[] }) => (f.rows.length > 1 ? 1 : 0);
         if (split(b) !== split(a)) return split(b) - split(a);
-        return b.rows.reduce((t, r) => t + r.count, 0) - a.rows.reduce((t, r) => t + r.count, 0);
+        return total(b) - total(a);
       })
       .slice(0, 6);
   });
@@ -708,9 +829,9 @@ export async function loadInsights(windowDays = 30, agentId?: string | null): Pr
 
   const conversationsRaw = await safe<{ day: string; count: number }[]>([], () =>
     rows<{ day: string; count: number }>(sql`
-      SELECT to_char(date_trunc('day', created_at), 'Mon DD') AS day, count(*)::int AS count
+      SELECT to_char(date_trunc(${bucket}, created_at), 'Mon DD') AS day, count(*)::int AS count
       FROM conversations WHERE created_at >= ${from} ${scoped}
-      GROUP BY date_trunc('day', created_at) ORDER BY date_trunc('day', created_at)`)
+      GROUP BY date_trunc(${bucket}, created_at) ORDER BY date_trunc(${bucket}, created_at)`)
   );
 
   const sla = await safe<Insights["sla"]>({ total: 0, byKind: [] }, async () => {
@@ -763,21 +884,38 @@ export async function loadInsights(windowDays = 30, agentId?: string | null): Pr
   notInstrumented.push("Ask-once rate — we do not record which fields arrived pre-filled from UAE PASS or a document versus typed by the customer.");
   notInstrumented.push("Fields corrected at review — the review edit is applied in place, so the before-value is not kept.");
 
+  /**
+   * NOTHING CAME BEFORE THE BEGINNING.
+   *
+   * Over all time the "prior period" is the same length of time before the first
+   * row, which is empty by definition. Left alone, every delta would read as a
+   * 100% collapse against nothing; the honest answer is that there is no
+   * comparison to make, so the deltas are dropped rather than computed.
+   */
+  const noPrior = <T extends Delta>(x: T): T => (allTime ? { ...x, prior: 0, pct: null } : x);
+
   return {
     windowDays: d,
+    allTime,
+    grain,
     agent: agentRow,
-    headline,
+    headline: {
+      conversations: noPrior(headline.conversations),
+      completed: noPrior(headline.completed),
+      revenueAed: noPrior(headline.revenueAed),
+      completionRate: noPrior(headline.completionRate),
+    },
     journeyKeys,
     journeyLabel,
     daily,
     journeys,
-    funnel,
+    funnel: allTime ? funnel.map((f) => ({ ...f, prior: 0 })) : funnel,
     facets,
     payments,
     intents,
-    unknownRate,
+    unknownRate: noPrior(unknownRate),
     escalations,
-    knowledge,
+    knowledge: noPrior(knowledge),
     quality,
     continuity,
     languages,

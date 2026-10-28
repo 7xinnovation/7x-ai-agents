@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { loadInsights, listAgentsForFilter } from "@/lib/insights";
+import { loadInsights, listAgentsForFilter, type Window } from "@/lib/insights";
 import { AgentFilter } from "../AgentFilter";
 import { currentScope, selectAgent } from "@/lib/scope";
 import { BarList, Empty, Footnote, Funnel, Legend, Panel, SectionHeading, StackedDays, Stat, Table, seriesColor } from "./Charts";
@@ -7,21 +7,38 @@ import { BarList, Empty, Footnote, Funnel, Legend, Panel, SectionHeading, Stacke
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const RANGES = [7, 30, 90];
+/**
+ * ALL TIME IS THE DEFAULT.
+ *
+ * A 30-day default answers "how was last month", which nobody opened this page
+ * to ask. These services run at a few dozen journeys a month, so a month-wide
+ * window puts most of the history off-screen and makes every trend look like a
+ * collapse. The whole record is the useful default; the shorter windows are
+ * there for when somebody wants to narrow to one.
+ */
+const RANGES: { value: Window; label: string }[] = [
+  { value: "all", label: "All time" },
+  { value: 7, label: "7d" },
+  { value: 30, label: "30d" },
+  { value: 90, label: "90d" },
+];
 
 const pretty = (s: string) => s.replace(/[_.]/g, " ").replace(/^./, (c) => c.toUpperCase());
 const aed = (v: number) => `AED ${v.toLocaleString("en-US")}`;
 
 export default async function InsightsPage({ searchParams }: { searchParams: Promise<{ days?: string; agent?: string }> }) {
   const { days, agent } = await searchParams;
-  const windowDays = RANGES.includes(Number(days)) ? Number(days) : 30;
+  const windowDays: Window = RANGES.some((r) => r.value !== "all" && String(r.value) === days) ? Number(days) : "all";
   const agentList = await listAgentsForFilter();
   const scope = await currentScope();
   const selected = selectAgent(agentList, agent, scope);
   const d = await loadInsights(windowDays, selected?.id);
 
   // Preserve the agent scope on the range links.
-  const rangeHref = (r: number) => `/admin/analytics?days=${r}${selected ? `&agent=${selected.slug}` : ""}`;
+  const rangeHref = (r: Window) => `/admin/analytics?days=${r}${selected ? `&agent=${selected.slug}` : ""}`;
+  const selectedRange: Window = windowDays;
+  // "the last 30 days" is wrong for a window that means everything.
+  const period = d.allTime ? "across everything on record" : `in the last ${d.windowDays} days`;
   const label = (k: string) => d.journeyLabel[k] ?? pretty(k);
   const legend = d.journeyKeys.map((k, i) => ({ label: label(k), color: seriesColor(i) }));
 
@@ -39,8 +56,8 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
           <h1 className="text-[26px] font-bold tracking-tight">{selected ? selected.name : "All agents"} — insights</h1>
           <p className="mt-1 max-w-[70ch] text-[14px] text-muted">
             {h.completed.now > 0
-              ? `${h.completed.now.toLocaleString("en-US")} journeys completed and ${aed(h.revenueAed.now)} collected in the last ${windowDays} days; ${h.completionRate.now}% of started journeys reached a confirmed outcome.`
-              : `Nothing has completed in the last ${windowDays} days. ${h.conversations.now.toLocaleString("en-US")} conversations were opened.`}
+              ? `${h.completed.now.toLocaleString("en-US")} journeys completed and ${aed(h.revenueAed.now)} collected ${period}; ${h.completionRate.now}% of started journeys reached a confirmed outcome.`
+              : `Nothing has completed ${period}. ${h.conversations.now.toLocaleString("en-US")} conversations were opened.`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -48,11 +65,11 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
           <div className="flex gap-1 rounded-lg border border-[var(--color-line)] bg-surface p-0.5">
             {RANGES.map((r) => (
               <Link
-                key={r}
-                href={rangeHref(r)}
-                className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${r === windowDays ? "bg-[var(--color-line-soft)] text-ink" : "text-muted hover:text-ink"}`}
+                key={String(r.value)}
+                href={rangeHref(r.value)}
+                className={`rounded-md px-3 py-1.5 text-[13px] font-medium ${r.value === selectedRange ? "bg-[var(--color-line-soft)] text-ink" : "text-muted hover:text-ink"}`}
               >
-                {r}d
+                {r.label}
               </Link>
             ))}
           </div>
@@ -60,7 +77,10 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       </div>
 
       {/* ------------------------------------------ what customers got done */}
-      <SectionHeading title="What customers got done" note={`Last ${windowDays} days vs the ${windowDays} before`} />
+      <SectionHeading
+        title="What customers got done"
+        note={d.allTime ? `Everything on record — ${d.windowDays} days, with nothing before it to compare against` : `Last ${d.windowDays} days vs the ${d.windowDays} before`}
+      />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Journeys completed" value={h.completed.now} delta={h.completed.pct} />
         <Stat label="Revenue collected (AED)" value={h.revenueAed.now} delta={h.revenueAed.pct} />
@@ -73,7 +93,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       </Footnote>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Panel title="Completions per day" desc="Confirmed outcomes, stacked by journey.">
+        <Panel title={d.grain === "week" ? "Completions per week" : "Completions per day"} desc="Confirmed outcomes, stacked by journey.">
           <StackedDays days={d.daily} keys={d.journeyKeys} label={label} />
           <Legend items={legend} />
         </Panel>
@@ -108,7 +128,11 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       <SectionHeading title="Where customers drop off" note="Conversation to confirmed outcome" />
       <Panel
         title="Journey funnel"
-        desc="Thick bar this period, thin bar the period before. The share lost at each step is on the right; the largest loss is red."
+        desc={
+          d.allTime
+            ? "The share lost at each step is on the right; the largest loss is red."
+            : "Thick bar this period, thin bar the period before. The share lost at each step is on the right; the largest loss is red."
+        }
       >
         <Funnel steps={d.funnel} />
         <Footnote>
@@ -173,7 +197,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
             ])}
           />
           <div className="mt-3">
-            <Footnote>{aed(d.payments.revenueAed)} settled in this window.</Footnote>
+            <Footnote>{aed(d.payments.revenueAed)} settled {d.allTime ? "in all" : "in this window"}.</Footnote>
           </div>
         </Panel>
       </div>
@@ -229,7 +253,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       <SectionHeading title="Service quality and human handoff" />
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Panel title="Escalations by reason" desc="Why a conversation needed a person.">
-          <BarList data={d.escalations.byReason.map((r) => ({ label: pretty(r.reason), value: r.count }))} color="#eb6834" />
+          <BarList data={d.escalations.byReason.map((r) => ({ label: pretty(r.reason), value: r.count }))} />
           <div className="mt-4 grid grid-cols-2 gap-3 border-t border-[var(--color-line-soft)] pt-3">
             <Stat label="Callbacks raised" value={d.escalations.total} />
             <Stat label="Escalation rate" value={`${d.escalations.rate}%`} sub="of conversations" tone={d.escalations.rate <= 15 ? "pos" : "warn"} />
@@ -263,7 +287,7 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       {/* ----------------------------------------------- operational monitoring */}
       <SectionHeading title="Operational monitoring" />
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Panel title="Conversations per day" desc="Every chat opened, by day.">
+        <Panel title={d.grain === "week" ? "Conversations per week" : "Conversations per day"} desc={`Every chat opened, by ${d.grain}.`}>
           <StackedDays days={d.conversationsPerDay.map((r) => ({ day: r.day, byJourney: { all: r.count }, total: r.count }))} keys={["all"]} label={() => "Conversations"} />
         </Panel>
 

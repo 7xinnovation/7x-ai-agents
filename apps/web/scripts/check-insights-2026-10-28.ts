@@ -12,7 +12,7 @@ const AGENTS: Record<string, string> = {
 
 async function main() {
   for (const [slug, id] of Object.entries(AGENTS)) {
-    const d = await loadInsights(30, id);
+    const d = await loadInsights("all", id);
     console.log(`\n================ ${slug} (${d.agent?.name}) ================`);
     console.log("headline      ", JSON.stringify(d.headline));
     console.log("journeyKeys   ", d.journeyKeys, d.journeyLabel);
