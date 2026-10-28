@@ -1610,6 +1610,20 @@ export async function POST(req: NextRequest) {
    * payment gate and the advice depend on it.
    */
   const epglApplication = { id: str(session.state.data.application_id) ?? "" };
+  /**
+   * WHAT EMIRATES POST HAVE ACTUALLY INVOICED, for the sentence beside the card.
+   *
+   * The card is stamped with it, the payment row is stamped with it, and on
+   * 28 October LR-54087 still said "Amount: AED 2,000 (licence fee AED 1,000 +
+   * online payment fee AED 1,000)" directly above a card reading 1,000. The
+   * surcharge was 1.x text left under the 2.0 block in this journey's guidance;
+   * that is removed, and this is the guard that does not depend on prose.
+   *
+   * Request-scoped, like the application id beside it: the advice is raised
+   * during the turn that offers the payment, so the figure exists before the
+   * reply claiming it is written.
+   */
+  const epglInvoiced = { amount: 0 };
   const currentEpglApplicationId = () => epglApplication.id || null;
   // The company/Form 9 reads are EPGL's Salesforce org; offering them to another
   // tenant's agent would be meaningless (and lib/epglRead would throw).
@@ -3706,7 +3720,11 @@ export async function POST(req: NextRequest) {
           () => apiTools.getDurationPrices()?.terms ?? null,
           () => durationRequested(body.userMessage)
         );
-        const totalGuard = proseTotalGuard(() => (apiTools.getLastHold() ? authoritativeAmount() : null));
+        // The invoiced figure outranks the rental hold: on EPGL there is no hold,
+        // and until this the guard was armed with null on every EPGL turn.
+        const totalGuard = proseTotalGuard(() =>
+          epglInvoiced.amount > 0 ? epglInvoiced.amount : apiTools.getLastHold() ? authoritativeAmount() : null
+        );
         let citedThisTurn = false;
         let submittedRef: string | null = null;
 
@@ -3777,6 +3795,7 @@ export async function POST(req: NextRequest) {
               action: "epgl_payment_advice",
               payload: { applicationId, advice, amount: res.quote.amount, currency: res.quote.currency },
             });
+            epglInvoiced.amount = res.quote.amount;
             return { ok: true as const, amount: res.quote.amount, currency: res.quote.currency };
           },
           authoritativeAmount,

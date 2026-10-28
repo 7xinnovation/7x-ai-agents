@@ -18,10 +18,18 @@
  * that could still turn into such a phrase.
  */
 
-/** Words that make the number after them a total rather than a line item. */
-const TRIGGER = /\b(total|you will pay|you'll pay|amount to pay|amount due|amount payable|will be charged|charged)\b/gi;
+/**
+ * Words that make the number after them a total rather than a line item.
+ *
+ * `Amount:` is the labelled form, and it is how the claim arrived on EPGL:
+ * "**Amount:** AED 2,000 (licence fee AED 1,000 + online payment fee AED
+ * 1,000)" on the line above a card charging 1,000. A bare "amount" is NOT a
+ * trigger — "the amount of cover", "an amount already paid" — only the label,
+ * through any markdown emphasis around it, is.
+ */
+const TRIGGER = /(?:\b(?:total|you will pay|you'll pay|amount to pay|amount due|amount payable|will be charged|charged)\b|amount\**\s*:)/gi;
 /** The claim itself: a trigger, then an AED figure close behind it. */
-const CLAIM = /\b(?:total|you will pay|you'll pay|amount to pay|amount due|amount payable|will be charged|charged)\b[^\n]{0,60}?AED[  ]*([\d,]+(?:\.\d{1,2})?)/gi;
+const CLAIM = /(?:\b(?:total|you will pay|you'll pay|amount to pay|amount due|amount payable|will be charged|charged)\b|amount\**\s*:)[^\n]{0,60}?AED[  ]*([\d,]+(?:\.\d{1,2})?)/gi;
 /** A trigger plus its window plus the figure: how much must arrive before a
  * claim can be judged complete. */
 const HOLD = 100;
