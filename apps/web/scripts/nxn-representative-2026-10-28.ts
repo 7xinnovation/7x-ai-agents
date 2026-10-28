@@ -27,21 +27,27 @@
  * a bare "agent", which appears inside all of those tokens.
  *
  * Idempotent: a second run finds nothing to replace and reports "already".
- * Run from apps/web:
+ * Run from apps/web, against each environment's own database:
  *   npx tsx scripts/nxn-representative-2026-10-28.ts --env <file> [--dry-run]
+ *   DATABASE_URL='…' npx tsx scripts/nxn-representative-2026-10-28.ts [--dry-run]
+ *
+ * Production's copy of this definition is OLDER than staging's, so expect a
+ * different set of phrases to match there and some to be reported as not
+ * present. The dry run prints exactly which, and the protected-token check
+ * refuses to write either way.
  */
-import { databaseUrlFrom } from "./lib/envFile";
+import { databaseUrlFromArgs } from "./lib/envFile";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { agents } from "@dialog/db";
 import { eq } from "drizzle-orm";
 
-const arg = (n: string) => {
-  const i = process.argv.indexOf(n);
-  return i !== -1 ? process.argv[i + 1] : undefined;
-};
-const ENV = arg("--env");
-if (!ENV) throw new Error("--env <envfile> is required");
+/**
+ * `--env <file>` OR an inherited DATABASE_URL, because production is the second
+ * environment this has to run against and a production URL is a credential.
+ * Piping it in for one command leaves nothing on disk to forget about:
+ *   DATABASE_URL='…' npx tsx scripts/nxn-representative-2026-10-28.ts --dry-run
+ */
 const DRY = process.argv.includes("--dry-run");
 const SLUG = "nxn-dialog";
 const MARKER = "THE WORD IS REPRESENTATIVE (2026-10-28)";
@@ -203,7 +209,7 @@ function walk(node: unknown): unknown {
 }
 
 async function main() {
-  const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
+  const pool = new pg.Pool({ connectionString: databaseUrlFromArgs() });
   const db = drizzle(pool, { schema: { agents } });
   try {
     const [row] = await db.select().from(agents).where(eq(agents.slug, SLUG));
