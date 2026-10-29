@@ -58,6 +58,25 @@ export const DOC_TYPES = [
   "trade_license",
   "initial_approval",
   "postal_license",
+  /**
+   * AN SME LICENCE IS A LICENCE, WHICH IS EXACTLY THE PROBLEM.
+   *
+   * EPGL's four SME products ask for an "SME Licence (federal or local
+   * government)" — the certificate from the Ministry of Economy or an emirate's
+   * SME authority saying the company qualifies as a small or medium enterprise.
+   * It certifies a status, carries a number and an issuing authority and prints
+   * an expiry, so with no name of its own the classifier had two ways to be
+   * wrong and took both. Called "trade_license", its expiry went into
+   * `license_expiry_date` and an out-of-date certificate was refused as though
+   * the company's trade licence had lapsed — naming the wrong document back to
+   * the applicant. Called "other", the slot's own type gate rejected the right
+   * file as an unrecognised document, and there was no way through at all: the
+   * only file that satisfies the slot is the one it refuses.
+   *
+   * Their catalogue marks the slot validityRequired, so the date matters as
+   * much as the name.
+   */
+  "sme_licence",
   "moa",
   "emirates_id",
   "passport",
@@ -96,6 +115,7 @@ export const DOC_TYPE_LABELS: Record<DocType, { en: string; ar: string }> = {
   trade_license: { en: "Trade License", ar: "رخصة تجارية" },
   initial_approval: { en: "Initial Approval", ar: "موافقة مبدئية" },
   postal_license: { en: "Postal License", ar: "رخصة بريدية" },
+  sme_licence: { en: "SME Licence", ar: "رخصة المنشآت الصغيرة والمتوسطة" },
   moa: { en: "Memorandum of Association", ar: "عقد تأسيس" },
   emirates_id: { en: "Emirates ID card", ar: "بطاقة هوية إماراتية" },
   passport: { en: "Passport", ar: "جواز سفر" },
@@ -280,7 +300,7 @@ export async function extractFieldsFromDocument(input: {
   const fieldList = fields
     .map((f) => `  "${f.key}": ${f.desc}${f.type === "enum" && f.options ? ` (one of: ${f.options.join(", ")})` : ` (${f.type})`}`)
     .join("\n") +
-    `\n  "${DOC_EXPIRY_KEY}": the date THIS document stops being valid, if it says (date). Usually labelled Expiry Date, Valid Until or Date of Expiry. A document that prints a PERIOD instead of an expiry — "Contract Period: 01/01/2026 to 31/12/2027", "Period of Insurance", "Valid From ... to ..." — expires at the END of that period, so return that end date. A lease and an insurance certificate normally state a period rather than an expiry, and EPGL refuse both without one` +
+    `\n  "${DOC_EXPIRY_KEY}": the date THIS document stops being valid, if it says (date). Usually labelled Expiry Date, Valid Until or Date of Expiry. A document that prints a PERIOD instead of an expiry — "Contract Period: 01/01/2026 to 31/12/2027", "Period of Insurance", "Valid From ... to ..." — expires at the END of that period, so return that end date. A lease and an insurance certificate normally state a period rather than an expiry, and an SME licence often prints a validity RANGE rather than a single expiry line; EPGL refuse all three without an end date` +
     `\n  "${DOC_TYPE_KEY}": what THIS document IS — exactly one of: ${DOC_TYPES.join(", ")}` +
     `\n  "${OWNER_ENTITY_KEY}": only when the document names a primary owner/partner — "individual" if that owner is a person, "corporate" if it is a company/legal entity` +
     `\n  "${HOLDER_NAME_KEY}": on an identity document (Emirates ID, passport, driving licence, family book), the name of the PERSON it was issued to, exactly as printed in Latin script. Always return this for an identity document, whoever they are and whether or not they appear anywhere else in this list. Leave it out for documents that are not about one person (a trade licence, an MOA, a financial statement)`;
@@ -295,6 +315,7 @@ export async function extractFieldsFromDocument(input: {
     "  • \"acknowledgement_letter\" — a letter acknowledging receipt or completion (e.g. of an audit or submission), usually on letterhead and signed.\n" +
     "  • \"financial_statement\" — an unaudited statement or a plain quarterly trial balance.\n" +
     "  A trade or postal LICENSE grants the right to operate and carries a license number, issuing authority and expiry date. If the document reports figures or acknowledges a submission rather than granting a right to operate, it is NOT a license — classify it as one of the four above.\n" +
+    "  One more runs the other way. An \"sme_licence\" IS a licence, so asking whether the document is one does not separate it from a trade license: it is the SME / small-and-medium-enterprise certificate issued to a company by the Ministry of Economy or an emirate's SME authority (Dubai SME, Khalifa Fund and the like), and it certifies the company's SIZE CLASSIFICATION rather than granting it an activity. A trade license lists licensed ACTIVITIES and a registered address; an SME licence names a classification, category or tier and no activities. When a document carries both words, the classification is what decides it. Classify it \"sme_licence\", never \"trade_license\" and never \"other\".\n" +
     "Step 2 — EXTRACT: return ONLY the fields whose values are VISIBLY PRINTED on this document. Extract these fields (key: description):\n" +
     fieldList +
     "\n\nRules:\n" +

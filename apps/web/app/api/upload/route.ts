@@ -7,7 +7,6 @@ import {
   adapterContext,
   extractFieldsFromDocument,
   DOC_TYPE_LABELS,
-  type DocType,
 } from "@dialog/core";
 import { getDb, documents as documentsTable, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
@@ -15,42 +14,8 @@ import type { DocumentRequirement } from "@dialog/config";
 import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
+import { acceptedDocTypes, expiredForSlot } from "@/lib/documentSlots";
 import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, ownerDocumentCheck, PARTNER_NAMES_KEY, NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
-
-/**
- * Which classified document types are acceptable for a given document slot,
- * inferred from the slot's key + label. Returns null when the slot doesn't map
- * to a known official-document family — then no type gate applies (so agents
- * with custom document kinds are never wrongly blocked).
- */
-function acceptedDocTypes(key: string, label: string): DocType[] | null {
-  const k = `${key} ${label}`.toLowerCase();
-  if (/emirates.?id|eid|هوية/.test(k)) return ["emirates_id"];
-  if (/moa|memorandum|تأسيس/.test(k)) return ["moa"];
-  // The specific revenue documents come BEFORE the generic financial/licence
-  // tests: a Form 9 slot must not fall through to "financial_statement", and a
-  // Form 9 must never satisfy a licence slot (renewal-round feedback).
-  if (/form.?0?9|نموذج.?9/.test(k)) return ["form_9"];
-  if (/audited|afs|مدقق/.test(k)) return ["audited_financial_statement", "financial_statement"];
-  if (/acknowledg|إقرار.?استلام|خطاب/.test(k)) return ["acknowledgement_letter"];
-  /**
-   * A trial balance names neither "financial" nor "statement", so this slot had
-   * no type gate at all and any file whatsoever satisfied it — a passport
-   * dropped into "Trial Balance" would have gone green. It is a financial
-   * statement in the taxonomy's terms ("an unaudited statement or a plain
-   * quarterly trial balance"), so it is gated as one.
-   */
-  if (/trial.?balance|ميزان.?المراجعة/.test(k)) return ["financial_statement", "audited_financial_statement"];
-  if (/financial|statement|مالي/.test(k)) return ["financial_statement", "audited_financial_statement"];
-  if (/declaration|undertaking|commitment|تعهد/.test(k)) return ["declaration"];
-  // Passport slots had NO rule, so any file at all satisfied one -- an Emirates
-  // ID dropped into "Partner 2 — passport copy" was accepted without comment
-  // while the reverse was correctly refused. After the Emirates ID test above,
-  // so a slot naming both still means the card.
-  if (/passport|جواز/.test(k)) return ["passport"];
-  if (/trade|postal|licen[cs]e|approval|رخصة|موافقة/.test(k)) return ["trade_license", "initial_approval", "postal_license"];
-  return null;
-}
 
 /** Case-data bookkeeping key: which fields each document's extraction filled. */
 const DOC_FIELDS_KEY = "__doc_fields";
@@ -529,6 +494,50 @@ export async function POST(req: NextRequest) {
       payload: { key, fileName: file.name, expiry: extraction.docExpiryDate },
     });
     return NextResponse.json({ case: state, rejected: true, reason: expiredReason });
+  }
+
+  /**
+   * ANY document EPGL owe a date for, whose date has already passed.
+   *
+   * The two checks above cover an identity card and a trade licence, each with
+   * its own sentence. Everything else went through with an expiry in the past
+   * and was SENT that way: the push asks whether a `validityRequired` slot has
+   * a Valid_To__c, never whether it is still in the future, so an out-of-date
+   * certificate reached Emirates Post looking current.
+   *
+   * On the SME licence that is the eligibility check itself — the certificate
+   * is what says the company still qualifies as an SME, and an expired one
+   * says it does not. The slot label names the document, because this rule is
+   * general and has no better name for it than the one the customer was asked
+   * for.
+   */
+  const stalePrinted = expiredForSlot({
+    validityRequired: req_.validityRequired,
+    expiry: extraction.docExpiryDate,
+    today,
+  });
+  if (stalePrinted) {
+    const on = formatGulfDate(new Date(`${stalePrinted}T00:00:00Z`));
+    const reason =
+      sessionLocale === "ar"
+        ? `المستند المرفوع لـ "${reqLabel}" منتهي الصلاحية بتاريخ ${on}. ترفض بريد الإمارات المستندات المنتهية — يرجى رفع نسخة سارية المفعول.`
+        : `This "${reqLabel}" expired on ${on}. Emirates Post do not accept an expired document on this application — please upload a copy that is still valid.`;
+    const state = await mutateCase(caseRow.caseId, (fresh) =>
+      setDocument(agent.definition, fresh, {
+        key,
+        status: "rejected",
+        fileName: file.name,
+        rejectionReason: reason,
+      })
+    );
+    await audit({
+      agentId: agent.id,
+      conversationId,
+      actor: "system",
+      action: "document_rejected_expired_validity",
+      payload: { key, fileName: file.name, expiredOn: on, docType: extraction.docType ?? null },
+    });
+    return NextResponse.json({ case: state, rejected: true, reason });
   }
 
   // Everything from here runs against the FRESHEST case state, not the snapshot
