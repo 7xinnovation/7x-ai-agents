@@ -41,6 +41,7 @@ config({
       : resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"),
 });
 import { getDb, agents } from "@dialog/db";
+import { mergeDocumentSlots } from "./lib/epglDocumentPairs";
 import { eq } from "drizzle-orm";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -275,6 +276,19 @@ async function main() {
   const owners = kept.findIndex((s: any) => s.key === "owners_contacts");
   const next = [choice, ...kept.slice(0, owners === -1 ? kept.length : owners), declarations, ...(owners === -1 ? [] : kept.slice(owners))];
   console.log(`steps: ${before}\n    -> ${next.map((s: any) => s.key).join(" -> ")}`);
+
+  /**
+   * A regenerated step must not bring the duplicate cards back.
+   *
+   * Three of the slots built above duplicate one of ours, and the 29 October
+   * merge folded them together. Regenerating from the catalogue would recreate
+   * the twin and the applicant would be asked for their MOA twice again, so
+   * the same fold runs here — see scripts/lib/epglDocumentPairs.
+   */
+  const folded = mergeDocumentSlots({ key: JOURNEY, steps: next });
+  for (const m of folded.merged) console.log(`  merged   ${m}`);
+  for (const d of folded.deduped) console.log(`  deduped  ${d}`);
+  for (const m of folded.missing) console.log(`  ! no slot of ours named ${m} — its catalogue slot is left in place`);
 
   if (!APPLY) { console.log("\nDry run. Add --apply to write."); return; }
   j.steps = next;

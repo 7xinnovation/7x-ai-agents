@@ -65,7 +65,10 @@ const SLOTS: EpglDocumentSlot[] = [
 const sending = sendableDocumentKeys(SLOTS);
 check("only slots EPGL's checklist knows are sent",
   JSON.stringify(sending) === JSON.stringify(["memorandum_of_association", "copy_of_passport", "trade_licence_initial_name_approval"]), sending);
-check("our own MOA slot is held back — it has a catalogue twin", !sending.includes("moa"));
+check("a slot with no catalogue type is held back", !sending.includes("moa"));
+// The real journey's `moa` carries "Memorandum of Association" since the
+// 29 October merge, so this fixture is now a shape rather than a quotation of
+// it. What it pins is the gate, which is unchanged: no type, not sent.
 check("and the partner Emirates ID their API refused by name is too",
   !sending.includes("partner_1_emirates_id"));
 

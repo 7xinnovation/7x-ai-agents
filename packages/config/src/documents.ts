@@ -17,15 +17,20 @@ export const DocumentRequirement = z.object({
   acceptedFormats: z.array(z.string()).default(["pdf", "png", "jpg"]),
   maxSizeMb: z.number().default(10),
   /**
-   * EPGL's own name for this slot, present only on slots generated FROM their
-   * catalogue (see scripts/epgl-2.0-journey-2026-10-20).
+   * EPGL's own name for this slot (see scripts/epgl-2.0-journey-2026-10-20,
+   * which generates them from their catalogue).
    *
-   * It is what their EPG_Document__c.Document_Type must say, and its absence is
-   * meaningful: our hand-made slots -- `moa`, `trade_license`,
-   * `partner_1_passport` -- exist to read fields off a document and have no
-   * place on their checklist. Sending one is refused outright:
+   * It is what their EPG_Document__c.Document_Type must say, and it must be a
+   * name their checklist knows: a made-up one is refused outright --
    * `Document_Type "Partner 1 - Emirates ID" is not required for this
    * application`, 26 October, on LR-54066.
+   *
+   * Its absence is still meaningful -- a slot without one is never pushed --
+   * but it no longer divides generated slots from hand-made ones. Since the
+   * 29 October merge (scripts/lib/epglDocumentPairs) three of ours carry a
+   * catalogue name because they duplicated a catalogue slot and absorbed it:
+   * `moa`, `partner_1_passport` and `partner_1_emirates_id`. `trade_license`
+   * and partners 2-8 still have none, each for a reason recorded there.
    */
   salesforceType: z.string().optional(),
   /**
