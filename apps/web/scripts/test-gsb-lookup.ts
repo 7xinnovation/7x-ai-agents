@@ -9,7 +9,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-gsb-lookup.ts
  */
-import { cleanEntityName, normaliseEmiratesId, ownerMatch, type GsbOwner } from "../lib/gsbLookup";
+import { cleanEntityName, dropEchoedEntityCode, normaliseEmiratesId, ownerMatch, type GsbOwner } from "../lib/gsbLookup";
 
 let failed = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -66,6 +66,30 @@ check("keeps a legitimate parenthetical", cleanEntityName("Abu Dhabi Media Free 
 check("strips DO NOT USE", cleanEntityName("Some Authority DO NOT USE"), "Some Authority");
 check("a name that is only a note becomes undefined", cleanEntityName("TO-BE-REMOVED"), undefined);
 check("non-string", cleanEntityName(null), undefined);
+
+/**
+ * The echoed entityCode, measured on box-stg 2026-10-29: a lookup by Emirates ID
+ * answers `issueEntityCode` = that same Emirates ID, and the corporate journey
+ * would carry it onward as the issuing authority.
+ */
+console.log("\ndropEchoedEntityCode");
+const EID = "784-1999-8392642-1";
+check(
+  "an echoed Emirates ID is not an issuing authority",
+  dropEchoedEntityCode({ tradeLicenseNo: "DED-567428", issuingEntityCode: "784199983926421" }, EID),
+  { tradeLicenseNo: "DED-567428" }
+);
+check(
+  "a real authority code is kept",
+  dropEchoedEntityCode({ tradeLicenseNo: "DED-567428", issuingEntityCode: "3" }, EID),
+  { tradeLicenseNo: "DED-567428", issuingEntityCode: "3" }
+);
+check(
+  "a different person's ID is kept — it is not this call's echo",
+  dropEchoedEntityCode({ issuingEntityCode: "784198012345671" }, EID),
+  { issuingEntityCode: "784198012345671" }
+);
+check("nothing to drop", dropEchoedEntityCode({ nameEn: "Shams Tourist LLC" }, EID), { nameEn: "Shams Tourist LLC" });
 
 console.log(failed ? `\n${failed} check(s) FAILED` : "\nall checks passed");
 process.exit(failed ? 1 : 0);

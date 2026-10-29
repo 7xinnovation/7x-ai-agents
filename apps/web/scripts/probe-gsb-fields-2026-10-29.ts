@@ -131,11 +131,27 @@ async function main() {
   if (LICENCE && AUTHORITY) {
     const byNo = await call("/api/MOE/GetEntitiesByLicenseNo", { entityCode: AUTHORITY, licenseNo: LICENCE });
     if (byNo) {
-      report("GetEntitiesByLicenseNo — the company", byNo, MAPPED_COMPANY);
+      /**
+       * THIS ONE IS AN ENVELOPE, not a row: `{ entityDetails, ownerDetails }`.
+       * The first version of this probe compared its two keys against the
+       * company field list and announced both as dropped, which was the probe
+       * being wrong about the shape — lib/gsbLookup reads the nesting
+       * correctly. Unwrapped here so the report describes the response rather
+       * than the probe's assumption about it.
+       */
+      const details = byNo.map((r) => (r as any).entityDetails).filter(Boolean) as Record<string, unknown>[];
       const owners = byNo.flatMap((r) => {
         const o = (r as any).ownerDetails ?? (r as any).owners ?? [];
         return (Array.isArray(o) ? o : [o]).filter(Boolean) as Record<string, unknown>[];
       });
+      if (!details.length && !owners.length) {
+        console.log(
+          `\n### GetEntitiesByLicenseNo — HTTP 200 with entityDetails: null, ownerDetails: null.\n` +
+          `  Not an error and not an empty list — the call succeeded and found nothing. companyByLicence\n` +
+          `  returns null for this, so the ownership check cannot run on this licence.`
+        );
+      }
+      report("GetEntitiesByLicenseNo — entityDetails", details, MAPPED_COMPANY);
       report("GetEntitiesByLicenseNo — ownerDetails[]", owners, MAPPED_OWNER);
     }
   }

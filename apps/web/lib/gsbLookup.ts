@@ -295,7 +295,38 @@ export async function companiesByEmiratesId(
   const eid = normaliseEmiratesId(emiratesId);
   if (!eid) return [];
   const rows = await get<Record<string, any>>(agentId, env, "/api/MOE/GetEntitiesById", { entityCode: eid }, callerToken);
-  return rows.map(toCompany);
+  return rows.map((r) => withoutEchoedEntityCode(toCompany(r), eid));
+}
+
+/**
+ * `issueEntityCode` IS THE PARAMETER COMING BACK, NOT AN ANSWER.
+ *
+ * Measured against box-stg on 29 October with a live session. Called with an
+ * Emirates ID, every row answers `"issueEntityCode": "784199983926421"`; called
+ * with authority 3, the same three rows answer `"issueEntityCode": "3"`. The
+ * field echoes whatever went in as `entityCode` — it is not the authority that
+ * issued the licence.
+ *
+ * Left alone, a company found by Emirates ID carries the CUSTOMER'S EMIRATES ID
+ * in `issuingEntityCode`, and the corporate journey is built to carry that value
+ * into `companyByLicence` as the authority. Fifteen digits fail ENTITY_CODE
+ * (one to ten), so the customer is told their issuing authority "is not in an
+ * accepted format" — about a value they never typed. Dropping it means the
+ * authority is resolved the way it is resolved everywhere else, by name against
+ * the authority list, instead of being confidently wrong.
+ */
+function withoutEchoedEntityCode(c: GsbCompany, eid: string): GsbCompany {
+  if (c.issuingEntityCode && normaliseEmiratesId(c.issuingEntityCode) === eid) {
+    const { issuingEntityCode: _echoed, ...rest } = c;
+    return rest;
+  }
+  return c;
+}
+
+/** Exported for the test: the rule above, without a network. */
+export function dropEchoedEntityCode(company: GsbCompany, emiratesId: string): GsbCompany {
+  const eid = normaliseEmiratesId(emiratesId);
+  return eid ? withoutEchoedEntityCode(company, eid) : company;
 }
 
 /**
