@@ -2106,9 +2106,32 @@ export function Experience({
      * properly. The reason is gone, so the clause is gone with it — the portal
      * is the only door that comes with an account attached.
      */
+    /**
+     * A TESTER ASKED FOR THE SIMULATED SIGN-IN, SO THE PORTAL IS NOT THE DOOR.
+     *
+     * `?mock=1` has been the tester opt-in since it was added, and on an agent
+     * with a `hostLoginUrl` it was unreachable: the portal branch below returns
+     * before the UAE PASS branch that reads the flag. EPGL's testers could not
+     * use it at all — their only ways in were a console call to set the
+     * localStorage flag below, or sitting through the 90-second portal timeout.
+     *
+     * Skipping the portal for a REAL sign-in is the mistake that cost an
+     * account its boxes, which is what the long note above is about. It does
+     * not apply here, because a mocked sign-in mints no Emirates Post session
+     * either way: the callback stores no token for it (see the mock branch in
+     * api/uaepass/callback), so there is no account to lose by not going
+     * through the portal. The persona is the whole point.
+     *
+     * Still gated on `uaePassDirect`, like every other reason to skip: the
+     * server refuses `mock=1` where it is not permitted, and on production
+     * that flag is off, so this clause cannot route a real customer past the
+     * portal into UAE PASS's error page.
+     */
+    let mockSignIn = false;
+    try { mockSignIn = new URLSearchParams(window.location.search).get("mock") === "1"; } catch { /* no window */ }
     // Skipping the portal is only an option where our own UAE PASS door works
     // (agent.uaePassDirect); elsewhere it leads to UAE PASS's error page.
-    let skipPortal = Boolean(agent.uaePassDirect) && portalSignInFailed.current;
+    let skipPortal = Boolean(agent.uaePassDirect) && (portalSignInFailed.current || mockSignIn);
     try { skipPortal = skipPortal || (Boolean(agent.uaePassDirect) && window.localStorage.getItem(`dlg-skip-portal-${agent.slug}`) === "1"); } catch { /* private mode */ }
     if (skipPortal) switchAccount.current = true;
     const hostLoginUsable = Boolean(agent.hostLoginUrl) && !isNative() && !skipPortal;
