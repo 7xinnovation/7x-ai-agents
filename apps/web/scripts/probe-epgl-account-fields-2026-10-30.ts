@@ -12,7 +12,8 @@
  * GET against the sandbox the staging agent already talks to.
  *
  * Run from apps/web:
- *   SECRETS_KEY=… npx tsx scripts/probe-epgl-account-fields-2026-10-30.ts --env <stg env file>
+ *   SECRETS_KEY=… npx tsx scripts/probe-epgl-account-fields-2026-10-30.ts \\
+ *     --env <stg env file> --org preprod2
  */
 import { databaseUrlFrom } from "./lib/envFile";
 import { decryptSecret } from "../lib/crypto";
@@ -29,6 +30,8 @@ const ENV = arg("--env");
 if (!ENV) throw new Error("--env <envfile> is required");
 const SLUG = arg("--slug") ?? "epgl-dialog";
 const ENVKEY = arg("--environment") ?? "staging";
+/** Which org, when the agent talks to more than one (e.g. "preprod2", "newlaw"). */
+const ORG = arg("--org");
 
 /** What the 30 October change sends, and the two it sits between. */
 const ASKED = [
@@ -45,19 +48,31 @@ const ASKED = [
 async function main() {
   const pool = new pg.Pool({ connectionString: databaseUrlFrom(ENV!) });
   const db = drizzle(pool, { schema: { agents, agentIntegrations } });
+  /**
+   * ONE AGENT, MORE THAN ONE ORG. `epgl-dialog` carries both the 1.x
+   * integration (epro--preprod2, the Account contract) and the 2.0 one
+   * (epro--newlaw, an Apex surface) under the same environment, so "the
+   * Salesforce integration" is not a thing — taking whichever came last
+   * answered the question about the wrong org. --org names which.
+   */
   let spec: any;
+  const found: string[] = [];
   try {
     const [agent] = await db.select().from(agents).where(eq(agents.slug, SLUG));
     if (!agent) throw new Error(`${SLUG} not found`);
     const rows = await db.select().from(agentIntegrations).where(eq(agentIntegrations.agentId, agent.id));
     for (const r of rows) {
       const e = (r as any).environments?.[ENVKEY];
-      if (e?.baseUrl?.includes("salesforce")) spec = e;
+      if (!e?.baseUrl?.includes("salesforce")) continue;
+      found.push(e.baseUrl);
+      if (!ORG || String(e.baseUrl).includes(ORG)) spec = e;
     }
   } finally {
     await pool.end();
   }
-  if (!spec) throw new Error(`no Salesforce integration under environment "${ENVKEY}"`);
+  if (found.length > 1) console.log(`this agent talks to ${found.length} orgs under "${ENVKEY}":\n   ${found.join("\n   ")}\n`);
+  if (!spec) throw new Error(`no Salesforce integration under environment "${ENVKEY}"${ORG ? ` matching "${ORG}"` : ""}`);
+  if (found.length > 1 && !ORG) throw new Error("more than one org — name which with --org <substring of the base URL>");
   console.log(`org:      ${spec.baseUrl}`);
   console.log(`auth:     ${spec.authType}\n`);
 
