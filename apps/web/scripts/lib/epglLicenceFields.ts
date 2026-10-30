@@ -45,12 +45,33 @@ WHAT THE TRADE LICENCE SAYS, ALL OF IT (2026-10-30 — EPGL, LR-39149). Three th
 All of these appear in the pre-submission summary, which is where the customer corrects a misreading. Never change one on your own initiative.`.trim();
 
 const ACCOUNT_FIELDS =
-  " ACCOUNT FIELDS (2026-10-30): the Account carries the company's names and licence dates, and three of them have been going out empty. Send EPG_Trade_Name_in_English__c from trade_name_en and EPG_Trade_Name_in_Arabic__c from trade_name_ar (both of them, even when they repeat Name and EPG_Company_Name_Arabic__c word for word), and EPG_Trade_license_issuance_date__c from license_issue_date as YYYY-MM-DD. EPG_Company_Name_Arabic__c is the Arabic registered name and goes exactly as it was read off the licence. The licence EXPIRY stays where it is — License_Expiry_Date__c on an issuance — and the issuance date is a different field; do not put either in the other. Omit any of these the case does not hold rather than sending an empty string. ONE FALLBACK, AND ONLY THIS ONE: EPG_Trade_Name_in_English__c and EPG_Trade_Name_in_Arabic__c are in the contract's Account schema and are safe to send, but EPG_Trade_license_issuance_date__c appears only in EPGL's read query, so it is not certain the portal may write it. If the composite comes back rejecting THAT FIELD BY NAME (INVALID_FIELD, 'not createable', 'No such column'), send the identical payload once more without it and carry on — allOrNone means nothing was created, so a retry is safe, and an applicant must not lose their licence application over a field Emirates Post may not have opened for writing. Say in the case notes that the issuance date could not be set; never show the applicant a failure for it, and never retry more than once or drop any other field this way.";
+  " ACCOUNT FIELDS (2026-10-30): the Account carries the company's names and licence dates, and three of them have been going out empty. Send EPG_Trade_Name_in_English__c from trade_name_en and EPG_Trade_Name_in_Arabic__c from trade_name_ar (both of them, even when they repeat Name and EPG_Company_Name_Arabic__c word for word), and EPG_Trade_license_issuance_date__c from license_issue_date as YYYY-MM-DD. EPG_Company_Name_Arabic__c is the Arabic registered name and goes exactly as it was read off the licence. The licence EXPIRY stays where it is — License_Expiry_Date__c on an issuance — and the issuance date is a different field; do not put either in the other. Omit any of these the case does not hold rather than sending an empty string. ONE FALLBACK, AND ONLY THIS ONE: EPG_Trade_Name_in_English__c and EPG_Trade_Name_in_Arabic__c are in the contract's Account schema and are safe to send, but EPG_Trade_license_issuance_date__c appears only in EPGL's read query rather than the Account write schema. It was tested on epro--preprod2 on 30 October 2026 and their handler DOES forward it, so expect it to land; the retry below is for the case where production differs, not for the ordinary one. If the composite comes back rejecting THAT FIELD BY NAME (INVALID_FIELD, 'not createable', 'No such column'), send the identical payload once more without it and carry on — allOrNone means nothing was created, so a retry is safe, and an applicant must not lose their licence application over a field Emirates Post may not have opened for writing. Say in the case notes that the issuance date could not be set; never show the applicant a failure for it, and never retry more than once or drop any other field this way.";
 
 /** Every change this makes, as a line each — empty when it was already applied. */
 export function applyLicenceFields(def: Record<string, any>): string[] {
   const changes: string[] = [];
   const note = (s: string) => changes.push(s);
+
+  /**
+   * The sentence this replaces said it was "not certain the portal may write
+   * it". It is certain now — tested against epro--preprod2 on 30 October, and
+   * their handler forwards the field — and an instruction that calls a field
+   * doubtful is an instruction to hesitate over it. Applied as a repair rather
+   * than a re-run, because the block's marker is already in the live notes and
+   * a re-run would leave yesterday's wording there forever.
+   */
+  const STALE = "appears only in EPGL's read query, so it is not certain the portal may write it.";
+  const FRESH =
+    "appears only in EPGL's read query rather than the Account write schema. It was tested on " +
+    "epro--preprod2 on 30 October 2026 and their handler DOES forward it, so expect it to land; " +
+    "the retry below is for the case where production differs, not for the ordinary one.";
+  for (const j of def.journeys ?? []) {
+    const n = String(j.submission?.apiFlow?.notes ?? "");
+    if (n.includes(STALE)) {
+      j.submission.apiFlow.notes = n.replace(STALE, FRESH);
+      note(`${j.key}: apiFlow notes — the issuance date is writable, tested, not doubtful`);
+    }
+  }
 
   for (const j of def.journeys ?? []) {
     const steps: any[] = j.steps ?? [];

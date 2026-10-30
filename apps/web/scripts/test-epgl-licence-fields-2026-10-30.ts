@@ -94,6 +94,8 @@ const journey = (def: any, key: string) => def.journeys.find((j: any) => j.key =
    * the whole application. Hence one retry without it, and no other.
    */
   check("...and say what to do if EPGL will not accept the issuance date", /ONE FALLBACK, AND ONLY THIS ONE/.test(notes));
+  check("...and say it was tested rather than guessed at", /tested on epro--preprod2 on 30 October 2026/.test(notes));
+  check("...and never call the field doubtful again", !/not certain the portal may write it/.test(notes));
   check("...which is to send it again once without that field", /send the identical payload once more without it/.test(notes));
   check("...never more than once, and never any other field", /never retry more than once or drop any other field/.test(notes));
   check("...and never as a failure the applicant sees", /never show the applicant a failure for it/.test(notes));
@@ -125,6 +127,29 @@ const journey = (def: any, key: string) => def.journeys.find((j: any) => j.key =
   check("...nor carry a fallback for a field it never sends", !notes.includes("ONE FALLBACK"), notes.slice(-200));
   check("...and name the renewal's own expiry field", notes.includes("EPG_Trade_license_Expiry_date__c"));
   check("the renewal guidance is left alone", journey(def, "renewal").guidance === "RENEWAL GUIDANCE.");
+}
+
+// ── a definition carrying yesterday's wording is repaired, not left ───────────
+/**
+ * The 30 October block went to production saying the issuance date might not
+ * be writable. It is — tested against epro--preprod2 the same day, their
+ * handler forwards it. The marker is already in those notes, so a plain re-run
+ * would leave the doubt in place forever; this is the repair that doesn't.
+ */
+{
+  const def = behind();
+  const j = journey(def, "new_license");
+  j.submission.apiFlow.notes =
+    "Build ONE atomic composite payload … ACCOUNT FIELDS (2026-10-30): … EPG_Trade_license_issuance_date__c " +
+    "appears only in EPGL's read query, so it is not certain the portal may write it. More text after.";
+  const changes = applyLicenceFields(def);
+  const notes = j.submission.apiFlow.notes;
+  check("the stale sentence is gone", !notes.includes("not certain the portal may write it"), notes);
+  check("...replaced by what was actually measured", /their handler DOES forward it/.test(notes), notes);
+  check("...and the rest of the sentence is untouched", notes.endsWith("More text after."), notes.slice(-40));
+  check("...and the repair is reported", changes.some((c) => /writable, tested, not doubtful/.test(c)), changes);
+  const again = applyLicenceFields(def);
+  check("...and does not repeat itself", !again.some((c) => /writable, tested/.test(c)), again);
 }
 
 // ── and it knows a 2.0 journey when it sees one ───────────────────────────────
