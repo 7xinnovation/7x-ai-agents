@@ -29,7 +29,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const outArg = process.argv.indexOf("--out");
@@ -350,5 +350,5 @@ function main() {
   console.log(`\n${DOCS.length} documents written.`);
 }
 
-if (process.argv[1]?.includes("epgl-test-pack-2026-10-28")) main();
+if (basename(process.argv[1] ?? "") === "epgl-test-pack-2026-10-28.ts") main();
 export { DOCS, html, CO_AR, TRADE_AR, P1_AR, P2_AR };
