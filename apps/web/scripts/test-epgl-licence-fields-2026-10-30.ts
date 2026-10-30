@@ -87,6 +87,16 @@ const journey = (def: any, key: string) => def.journeys.find((j: any) => j.key =
   check("...and say the identical-to-the-company-name case is still sent", /even when they repeat/.test(notes));
   check("...and keep the expiry where it already was", notes.includes("License_Expiry_Date__c"));
   check("...without discarding the notes that were there", notes.startsWith("Build ONE atomic composite payload"));
+  /**
+   * The issuance date is the one field here that is not in the contract's
+   * Account write schema — it appears only in EPGL's read query. The composite
+   * is allOrNone, so a field they have not opened for writing would roll back
+   * the whole application. Hence one retry without it, and no other.
+   */
+  check("...and say what to do if EPGL will not accept the issuance date", /ONE FALLBACK, AND ONLY THIS ONE/.test(notes));
+  check("...which is to send it again once without that field", /send the identical payload once more without it/.test(notes));
+  check("...never more than once, and never any other field", /never retry more than once or drop any other field/.test(notes));
+  check("...and never as a failure the applicant sees", /never show the applicant a failure for it/.test(notes));
 
   const guidance = journey(def, "new_license").guidance;
   check("the guidance tells the agent to read both dates", /Issue Date .* Expiry Date/.test(guidance));
@@ -112,6 +122,7 @@ const journey = (def: any, key: string) => def.journeys.find((j: any) => j.key =
     review.includes("trade_name_en") && review.includes("trade_name_ar"), review);
   const notes = journey(def, "renewal").submission.apiFlow.notes;
   check("and its notes never mention the issuance date field", !notes.includes("EPG_Trade_license_issuance_date__c"), notes.slice(-200));
+  check("...nor carry a fallback for a field it never sends", !notes.includes("ONE FALLBACK"), notes.slice(-200));
   check("...and name the renewal's own expiry field", notes.includes("EPG_Trade_license_Expiry_date__c"));
   check("the renewal guidance is left alone", journey(def, "renewal").guidance === "RENEWAL GUIDANCE.");
 }

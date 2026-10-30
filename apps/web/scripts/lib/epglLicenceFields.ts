@@ -45,7 +45,7 @@ WHAT THE TRADE LICENCE SAYS, ALL OF IT (2026-10-30 — EPGL, LR-39149). Three th
 All of these appear in the pre-submission summary, which is where the customer corrects a misreading. Never change one on your own initiative.`.trim();
 
 const ACCOUNT_FIELDS =
-  " ACCOUNT FIELDS (2026-10-30): the Account carries the company's names and licence dates, and three of them have been going out empty. Send EPG_Trade_Name_in_English__c from trade_name_en and EPG_Trade_Name_in_Arabic__c from trade_name_ar (both of them, even when they repeat Name and EPG_Company_Name_Arabic__c word for word), and EPG_Trade_license_issuance_date__c from license_issue_date as YYYY-MM-DD. EPG_Company_Name_Arabic__c is the Arabic registered name and goes exactly as it was read off the licence. The licence EXPIRY stays where it is — License_Expiry_Date__c on an issuance — and the issuance date is a different field; do not put either in the other. Omit any of these the case does not hold rather than sending an empty string.";
+  " ACCOUNT FIELDS (2026-10-30): the Account carries the company's names and licence dates, and three of them have been going out empty. Send EPG_Trade_Name_in_English__c from trade_name_en and EPG_Trade_Name_in_Arabic__c from trade_name_ar (both of them, even when they repeat Name and EPG_Company_Name_Arabic__c word for word), and EPG_Trade_license_issuance_date__c from license_issue_date as YYYY-MM-DD. EPG_Company_Name_Arabic__c is the Arabic registered name and goes exactly as it was read off the licence. The licence EXPIRY stays where it is — License_Expiry_Date__c on an issuance — and the issuance date is a different field; do not put either in the other. Omit any of these the case does not hold rather than sending an empty string. ONE FALLBACK, AND ONLY THIS ONE: EPG_Trade_Name_in_English__c and EPG_Trade_Name_in_Arabic__c are in the contract's Account schema and are safe to send, but EPG_Trade_license_issuance_date__c appears only in EPGL's read query, so it is not certain the portal may write it. If the composite comes back rejecting THAT FIELD BY NAME (INVALID_FIELD, 'not createable', 'No such column'), send the identical payload once more without it and carry on — allOrNone means nothing was created, so a retry is safe, and an applicant must not lose their licence application over a field Emirates Post may not have opened for writing. Say in the case notes that the issuance date could not be set; never show the applicant a failure for it, and never retry more than once or drop any other field this way.";
 
 /** Every change this makes, as a line each — empty when it was already applied. */
 export function applyLicenceFields(def: Record<string, any>): string[] {
@@ -99,7 +99,7 @@ export function applyLicenceFields(def: Record<string, any>): string[] {
             ).replace(
               " The licence EXPIRY stays where it is — License_Expiry_Date__c on an issuance — and the issuance date is a different field; do not put either in the other.",
               " The licence expiry stays where it is on a renewal: EPG_Trade_license_Expiry_date__c."
-            )
+            ).replace(/ ONE FALLBACK, AND ONLY THIS ONE: .*$/, "")
           : ACCOUNT_FIELDS;
       j.submission.apiFlow.notes = notes.trimEnd() + forJourney;
       note(`${j.key}: apiFlow notes — Account name & date fields`);
