@@ -5,6 +5,52 @@ import { and, eq, desc } from "drizzle-orm";
 import type { ApiOperation } from "./openapi";
 import { encryptSecret, decryptSecret, isEncrypted } from "./crypto";
 import { redactGuestPII } from "./pii";
+
+/**
+ * WHAT A FAILED CALL IS, AND WHAT IT IS NOT.
+ *
+ * EPGL, 30 October 2026. A 2.0 submission failed, a customer asked "what is the
+ * technical issue", and the assistant answered with Emirates Post's internals.
+ *
+ * What Salesforce actually returned, in `api_calls` (09:52:24):
+ *
+ *   Rolled back due to allOrNone=true: Invalid value was provided for
+ *   "UAE PASS Assurance Level". Please send a valid value. | Unhandled
+ *   processing error: No contact found for Signatory_UAE_PASS_Id
+ *   "<the applicant's id>". Send the signatory in a User item first. |
+ *   Class.NewRegulationApiAdapter.enrichRequest: line 88, column 1 …
+ *
+ * What the customer was told: that EPGL's system "requires a UAE PASS assurance
+ * level value to be passed with the application", that assurance levels "are
+ * set when you authenticate" and "confirm the strength of the identity
+ * verification done at sign-in (basic, enhanced, etc.)", and that this was "a
+ * configuration issue between this assistant and EPGL's backend".
+ *
+ * Note what that is and is not. The term was real — it came from Salesforce.
+ * Everything built on top of it did not: where the value comes from, what the
+ * levels mean, their names, and which of the two systems is at fault are
+ * nowhere in that body. One line of a real error became a paragraph of
+ * confident explanation, handed to an applicant who had asked a question none
+ * of it answered.
+ *
+ * So the body still reaches the model, because it is what decides what to DO —
+ * a duplicate, an expired licence, "No License found for this Account" all
+ * change the next move and some of them the customer genuinely needs told. What
+ * changes is that it now arrives labelled: material for the decision, not a
+ * passage to paraphrase, and never a licence to explain a cause it does not
+ * state. Everything is written to `api_calls` in full, which is where a real
+ * diagnosis is made — this one took one query.
+ */
+const FAILURE_PREFACE =
+  "SYSTEM DETAIL — FOR YOUR DECISION, NOT FOR THE CUSTOMER. What follows is Emirates Post's own internal output. " +
+  "Use it to work out what to do and to tell the customer, in ordinary words, what it means for them and what happens next. " +
+  "Do NOT put its mechanics in front of them: no field, parameter or object names, no endpoint or tool name, no status code, " +
+  "no stack trace, and nothing about configuration, integrations, APIs, tokens or which system is at fault. " +
+  "Do NOT explain anything this body does not actually state. A term you recognise is not permission to describe what it means, " +
+  "where it comes from, what its values are or whose fault it is: one line of a real error became a paragraph of invented " +
+  "explanation that way, and it read as authoritative because the rest of it was true. " +
+  "If it says something about THEIR application that they could act on, say that plainly in their own terms. " +
+  "If it does not, say the application could not be submitted, give them the reference, and tell them who picks it up — and stop there.";
 import { recordApiCall, trackedFetch } from "./apiCallLog";
 import {
   isEpglCompositeTool,
@@ -5590,7 +5636,11 @@ export async function executeOperation(
     // response, and anything parsing the trimmed copy gets nothing. The rental save
     // is 4.3KB, so the order number and payment reference were being dropped on the
     // floor by a limit that exists to protect the prompt, not the code.
-    return { result: `HTTP ${res.status} ${res.statusText}\n${trimmed}`, isError: !res.ok, raw: text };
+    return {
+      result: res.ok ? `HTTP ${res.status} ${res.statusText}\n${trimmed}` : `${FAILURE_PREFACE}\nHTTP ${res.status} ${res.statusText}\n${trimmed}`,
+      isError: !res.ok,
+      raw: text,
+    };
   } catch (e) {
     // A write that timed out is not a write that failed. The request reached them
     // and may well have been carried out; we simply stopped listening. Saying it
@@ -5605,6 +5655,11 @@ export async function executeOperation(
         isError: true,
       };
     }
-    return { result: `Integration call failed: ${e instanceof Error ? e.message : "error"}`, isError: true };
+    // A DNS failure or a refused socket is ours, not theirs, and the message
+    // naming the host is the last thing a customer should be handed.
+    return {
+      result: `${FAILURE_PREFACE}\nThe call did not complete: ${e instanceof Error ? e.message : "error"}`,
+      isError: true,
+    };
   }
 }
