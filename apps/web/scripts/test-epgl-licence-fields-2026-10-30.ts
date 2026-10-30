@@ -127,6 +127,36 @@ const journey = (def: any, key: string) => def.journeys.find((j: any) => j.key =
   check("the renewal guidance is left alone", journey(def, "renewal").guidance === "RENEWAL GUIDANCE.");
 }
 
+// ── and it knows a 2.0 journey when it sees one ───────────────────────────────
+/**
+ * EPGL 2.0 posts handler aliases to an Apex CompositeHandler, not an Account.
+ * Writing `EPG_Trade_Name_in_English__c` into those notes would be field names
+ * from the wrong contract, in the one place that builds the payload.
+ */
+{
+  const def = behind();
+  const j = journey(def, "new_license");
+  j.submission.apiFlow = {
+    service: "EPGL New Regulation",
+    saveTool: "epgl_new_regulation__post_services_apexrest_CompositeHandler",
+    notes: "One Apex REST surface. Read the catalogue …",
+  };
+  applyLicenceFields(def);
+  const notes = j.submission.apiFlow.notes;
+  check("a 2.0 journey's notes are not given 1.x Account fields", !notes.includes("EPG_Trade_Name_in_English__c"), notes);
+  check("...and are left exactly as they were", notes === "One Apex REST surface. Read the catalogue …");
+  check("...and the skip is reported rather than silent",
+    applyLicenceFields(behind2()).some((c) => /EPGL 2\.0/.test(c)));
+  // The FIELDS still go in — a 2.0 journey reads a licence the same way.
+  check("but the fields it reads off the licence still go in",
+    fieldsOf(def, "new_license", "company_details").includes("license_issue_date"));
+}
+function behind2() {
+  const d = behind();
+  journey(d, "new_license").submission.apiFlow = { service: "EPGL New Regulation", notes: "x" };
+  return d;
+}
+
 // ── and running it twice does nothing the second time ─────────────────────────
 {
   const def = behind();

@@ -89,8 +89,19 @@ export function applyLicenceFields(def: Record<string, any>): string[] {
     }
 
     /* ── and the Account fields they belong in ─────────────────────────── */
+    /**
+     * 1.x ONLY. EPGL 2.0 does not post Accounts: it posts handler aliases to an
+     * Apex CompositeHandler, and `EPG_Trade_Name_in_English__c` means nothing
+     * there. Running this against the 2.0 definition would write field names
+     * from the wrong contract into the instructions that build the payload, so
+     * a journey already on 2.0 keeps the fields and gets no note.
+     */
     const notes = String(j.submission?.apiFlow?.notes ?? "");
-    if (notes && !notes.includes("ACCOUNT FIELDS (2026-10-30)")) {
+    const isTwoPointZero = /CompositeHandler|licensing_catalogue|New Regulation/i.test(
+      notes + String(j.submission?.apiFlow?.saveTool ?? "") + String(j.submission?.apiFlow?.service ?? "")
+    );
+    if (isTwoPointZero) note(`${j.key}: apiFlow notes left alone — this journey is on EPGL 2.0, not the Account contract`);
+    else if (notes && !notes.includes("ACCOUNT FIELDS (2026-10-30)")) {
       const forJourney =
         j.key === "renewal"
           ? ACCOUNT_FIELDS.replace(
