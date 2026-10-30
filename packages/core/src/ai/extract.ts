@@ -285,8 +285,29 @@ export async function extractFieldsFromDocument(input: {
     "- THE COMPANY NAME IS EVIDENCE, NOT JUST DATA. If the document names the company it belongs to — a Memorandum of Association, a trade licence, a Form 9 and a financial statement all do — ALWAYS return it in the company-name fields, in both scripts where both are printed, EVEN IF you believe the application already has it. It is what proves the document belongs to this company, and one that comes back without a name cannot be checked at all: an out-of-date MOA naming the company under its FORMER name was accepted on 14 September because this extraction returned four passport numbers and no company name. Omit it only when the document genuinely prints none.\n" +
     "- DOCUMENT-NUMBER MAPPING: a trade license number comes ONLY from a trade license; an INITIAL APPROVAL's approval/reference number goes ONLY into an initial-approval field (e.g. initial_approval_number) if one exists — NEVER into a trade license number field. A postal license number goes only into a postal-license field.\n" +
     "- SCRIPT MATCHING: a field asking for an ARABIC name must be filled with the Arabic text printed on the document; a field asking for an English name with the Latin text. Never copy an English value into an Arabic-name field or vice versa, and never transliterate.\n" +
+    /**
+     * THE PDF LIED, AND IT LIED THE SAME WAY EVERY TIME.
+     *
+     * EPGL, LR-39149: the Arabic company name reached Salesforce as
+     * "اي فانغ تايوان فروت للشاي" where the licence shows
+     * "اي فانغ تايوان فروتي للشاي" — one ya short, which is not a typo but a
+     * different company's name. The model did not misread it. `pdftotext` on
+     * the same file returns the same broken string, and the rest of the page
+     * with it: الاسم as السم, الانتهاء as النتهاء, الإصدار as الصدار,
+     * القانوني as القانون. Dubai DET's licence PDF drops the alef out of
+     * every lam-alef pair and the ya off the end of a word — in the TEXT
+     * LAYER only. The glyphs on the page are correct.
+     *
+     * A PDF reaches the model as both, so the right letters are in front of
+     * it; the text layer is simply the easier of the two to copy. This says
+     * which one wins. Nothing else can fix it: the file is what Dubai issues,
+     * and Salesforce receive whatever we send.
+     */
+    "- READ ARABIC OFF THE PAGE, NOT OUT OF THE FILE. A PDF carries two things — the glyphs drawn on the page, and a text layer that claims to say what they are. On UAE trade licences those two disagree, and it is the text layer that is wrong: Dubai's Department of Economy and Tourism drops the alef from every lam-alef pair and the ya from the end of a word, so الاسم التجاري comes through as السم التجاري, تاريخ الإصدار as تاريخ الصدار, and a company called اي فانغ تايوان فروتي للشاي arrives as اي فانغ تايوان فروت للشاي — one letter short, and the name of no company at all. So for EVERY Arabic value — a company name, a trade name, a person's name, an address — transcribe the characters you can SEE RENDERED on the page, letter by letter, and where the rendering and the embedded text disagree the rendering is right. Never tidy an Arabic name, never adjust it to agree with the Latin line beside it, and never drop a word-final ي.\n" +
+    "- THE TRADE NAME IS ITS OWN FIELD, EVEN WHEN IT IS THE SAME WORDS. A UAE trade licence prints the registered name (Company Name / اسم الشركة) and the trade name (Trade Name or BUSINESS NAME / الاسم التجاري) one under the other, each in both scripts, and for most companies the two are identical. Being identical is not a reason to leave the trade-name fields empty — fill the trade-name fields from the Trade Name / Business Name line whatever it says, including when it repeats the company name word for word. On LR-39149 both reached EPGL blank, because the licence was headed \"Business Name\" and the field was called \"Trade name\".\n" +
+    "- A LICENCE CARRIES TWO DATES AND THEY ARE NOT INTERCHANGEABLE. Issue Date / تاريخ الإصدار is when it was granted; Expiry Date / تاريخ الانتهاء is when it runs out. An issuance/issue-date field takes the first and an expiry field the second, and neither ever takes the other's value. A licence issued in 2013 that expires in 2026 is perfectly ordinary: an old issue date is not evidence that anything has lapsed.\n" +
     "- CORPORATE OWNERS: if the primary owner/partner named on the document is a COMPANY (corporate shareholder), set " + OWNER_ENTITY_KEY + " to \"corporate\", return its name in the owner-name field, and OMIT nationality, passport and Emirates ID fields for it — those apply to people only.\n" +
-    "- For dates use ISO format YYYY-MM-DD.\n" +
+    "- For dates use ISO format YYYY-MM-DD, and read UAE documents DAY FIRST: a licence printing 05/11/2013 was issued on 2013-11-05, not 2013-05-11. Where a document prints both a Gregorian and a Hijri date, use the Gregorian one.\n" +
     "- For enum fields, return exactly one of the allowed values.\n" +
     "- Prefer the English value when a field has both English and Arabic (except Arabic-name fields, per the script rule).\n" +
     "- For owner/partner or shareholder details, use the FIRST/primary partner (highest share).\n" +
