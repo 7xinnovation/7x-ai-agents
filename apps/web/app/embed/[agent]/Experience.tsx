@@ -2690,7 +2690,10 @@ export function Experience({
   // Voice mode: speak the assistant's replies and turn the customer's speech into
   // chat messages (see useVoiceChat). Layered on the normal chat, not a separate
   // agent — voice input goes through the same send().
-  const voice = useVoiceChat({ agentSlug: agent.slug, locale, messages, streaming, send: (t) => void send(t), serverStt: agent.voiceEnabled === true });
+  // The tool status is what the page shows while the agent is away at Emirates
+  // Post's systems; voice says it once, so the wait is acknowledged rather than
+  // silent. See the acknowledgement in useVoiceChat.
+  const voice = useVoiceChat({ agentSlug: agent.slug, locale, messages, streaming, send: (t) => void send(t), serverStt: agent.voiceEnabled === true, toolStatus });
 
   // Translate the on-screen transcript when the session language changes: any
   // message written in the other script is sent to /api/translate for the
@@ -3267,7 +3270,7 @@ export function Experience({
                 {/* A way to interrupt that does not depend on the microphone
                     hearing them over the assistant: one tap, the voice stops
                     and the mic opens. The automatic barge-in (useVoiceChat)
-                    runs on desktop only. */}
+                    runs on desktop only, and only on words it is sure of. */}
                 {voice.speaking ? (
                   <button type="button" className="dlg-voice-bar-stop" onClick={voice.interrupt}>{t.voiceInterrupt}</button>
                 ) : null}

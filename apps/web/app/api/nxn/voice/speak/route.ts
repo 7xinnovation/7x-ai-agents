@@ -2,51 +2,58 @@ import { NextRequest } from "next/server";
 import WebSocket from "ws";
 import { log } from "@/lib/logger";
 import { realtimeUrl, sessionUpdate } from "@/lib/realtimeVoice";
+import { speechRequest, speechUrl, voiceFor, type SpeechLocale } from "@/lib/azureSpeech";
 
 export const runtime = "nodejs";
 
 /**
- * Speaks the agent's reply in the natural gpt-realtime voice (not the robotic
- * browser SpeechSynthesis). The client POSTs the assistant's text; we open a
- * WebSocket to the Azure AI Foundry realtime deployment, drive it as a verbatim
- * text-to-speech engine, and STREAM the raw PCM16 (24 kHz mono) audio back as it
- * is generated. The client plays it via the Web Audio API. The real key stays
- * server-side.
+ * Speaks the agent's reply. The client POSTs text (one sentence at a time, as
+ * the reply streams — see useVoiceChat) and gets raw PCM16 at 24 kHz back,
+ * which it plays through the Web Audio API. The real key stays server-side.
  *
- * Why WebSocket and not WebRTC: the AI Foundry realtime resource rejects the
- * ephemeral key at the generic realtimertc endpoint (401), but the WebSocket
- * transport authenticates fine with the resource api-key — verified end to end.
+ * TWO ENGINES, ONE FORMAT (2 November 2026).
  *
- * THE GA PROTOCOL (13 October 2026). Reported: "it replies with 2 words and then
- * disconnects and goes back to listening." The voice had not said two words; it
- * had said none. Azure retired the Realtime PREVIEW protocol (deprecated 30 April
- * 2026) and every session here was being answered with
+ * Reported: "the voice mode is poor — not consistent — it stops midway." The
+ * voice was gpt-realtime, a conversational model, told to read the text aloud.
+ * It read the same reply four different ways on four runs and took 1.5 to 2.5
+ * seconds of WebSocket handshake before its first word. So the default engine
+ * is now Azure Speech — a text-to-speech engine, deterministic, on the same AI
+ * Services resource with the same key and nothing to deploy, measured at
+ * 0.55 s to first byte — and the realtime engine is kept as the fallback for a
+ * resource that does not carry Speech. Both emit the same bytes, so the client
+ * does not know which one spoke. VOICE_TTS_ENGINE chooses ("azure-speech",
+ * the default, or "realtime"); a request may also name one, which the probe
+ * script uses to compare them.
  *
- *   realtime_beta_access_required: The Realtime preview API is no longer
- *   available for this request. Please migrate from the preview API to the v1 API.
+ * Short utterances are cached in memory: the spoken acknowledgements ("Checking
+ * pricing.") recur every turn and should cost nothing the second time.
  *
- * — after which this route closed an EMPTY 200 stream, the client took the
- * silence as "played nothing" and fell back to the device's own voice, and the
- * barge-in detector, hearing that voice through the microphone, cut it off a
- * third of a second in. Hence two words. The GA differences are small and all
- * here: `/openai/v1/realtime?model=<deployment>` with NO api-version, a
- * `session.update` that carries `type: "realtime"` with the voice and format
- * under `audio.output`, and audio arriving as `response.output_audio.delta`.
+ * THE GA REALTIME PROTOCOL (13 October 2026), kept for the fallback. Azure
+ * retired the Realtime PREVIEW protocol and every session was being answered
+ * with `realtime_beta_access_required`, after which this route closed an EMPTY
+ * 200 stream, the client fell back to the device's own voice, and the barge-in
+ * detector cut it off a third of a second in. The GA differences:
+ * `/openai/v1/realtime?model=<deployment>` with NO api-version, a
+ * `session.update` typed "realtime" with the voice and format under
+ * `audio.output`, and audio arriving as `response.output_audio.delta`. The
+ * response is honest: the socket is opened and the FIRST audio chunk awaited
+ * before any status is sent, so a failure is a 502, never a 200 with nothing
+ * in it.
  *
- * The response is also honest now: the socket is opened and the FIRST audio
- * chunk awaited before any status is sent, so a failure is a 502 the client and
- * a curl can both see, never a 200 with nothing in it.
- *
- * If the realtime deployment isn't configured, we return 501 and the client
- * falls back to on-device SpeechSynthesis so voice still works.
+ * If neither engine is configured, 501, and the client falls back to on-device
+ * SpeechSynthesis so voice still works.
  */
 const ENDPOINT = process.env.AZURE_REALTIME_ENDPOINT;
 const KEY = process.env.AZURE_REALTIME_KEY;
 const DEPLOY = process.env.AZURE_REALTIME_DEPLOYMENT || "gpt-realtime-1.5";
 const VOICE = process.env.AZURE_REALTIME_VOICE || "marin";
+type Engine = "azure-speech" | "realtime";
+const ENGINE: Engine = process.env.VOICE_TTS_ENGINE === "realtime" ? "realtime" : "azure-speech";
+const SPEECH_URL = speechUrl(ENDPOINT, process.env.AZURE_SPEECH_ENDPOINT);
+const SPEECH_KEY = process.env.AZURE_SPEECH_KEY || KEY;
 /** How long the first audio may take to arrive before the request is a 502. */
 const FIRST_AUDIO_MS = 15000;
-/** How long a whole utterance may take. */
+/** How long a whole realtime utterance may take. */
 const TOTAL_MS = 45000;
 /**
  * "EXACTLY as written" was doing more work than intended.
@@ -61,21 +68,64 @@ const TTS_INSTRUCTIONS =
   "NEVER SPEAK PUNCTUATION ALOUD. A full stop, an ellipsis, a comma, a dash, an asterisk or a bracket is pacing, not a word: pause for it, never name it. Never say 'dot', 'dot dot dot', 'asterisk', 'dash', 'hyphen' or 'bracket'. If a line contains nothing but punctuation, say nothing for it. " +
   "Speak prices and numbers naturally (e.g. 'AED 695' as 'six hundred ninety-five dirhams'). Read nothing but speech: no markup, no symbols, no sound effects, no tones.";
 
-export async function POST(req: NextRequest) {
-  if (!ENDPOINT || !KEY) {
-    return new Response(JSON.stringify({ error: "not_configured" }), { status: 501 });
-  }
-  let text = "";
-  try {
-    const body = (await req.json()) as { text?: unknown };
-    text = typeof body?.text === "string" ? body.text : "";
-  } catch {
-    /* invalid body */
-  }
-  text = text.trim();
-  if (!text) return new Response(JSON.stringify({ error: "empty" }), { status: 400 });
-  if (text.length > 4000) text = text.slice(0, 4000);
+const AUDIO_HEADERS = {
+  "Content-Type": "application/octet-stream",
+  "Cache-Control": "no-store",
+  "X-Audio-Format": "pcm16;rate=24000;channels=1",
+};
 
+/** Utterances short enough to recur, kept whole. */
+const CACHE_MAX_CHARS = 160;
+const CACHE_MAX_ENTRIES = 64;
+const cache = new Map<string, Uint8Array>();
+function remember(k: string, bytes: Uint8Array) {
+  if (cache.size >= CACHE_MAX_ENTRIES) { const first = cache.keys().next().value; if (first !== undefined) cache.delete(first); }
+  cache.set(k, bytes);
+}
+
+function unavailable(detail: string, status = 502) {
+  return new Response(JSON.stringify({ error: status === 501 ? "not_configured" : "voice_unavailable", detail: detail.slice(0, 200) }), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+}
+
+/**
+ * Azure Speech: one REST call, the audio streamed straight through. The
+ * status is known before a byte is sent, so a failure here is reported as a
+ * reason rather than a stream that ends early.
+ */
+async function speakAzure(text: string, locale: SpeechLocale): Promise<Response | string> {
+  if (!SPEECH_URL || !SPEECH_KEY) return "speech not configured";
+  const voice = voiceFor(locale);
+  const key = `${voice}\u0000${text}`;
+  const hit = text.length <= CACHE_MAX_CHARS ? cache.get(key) : undefined;
+  if (hit) {
+    return new Response(hit.slice(), { headers: { ...AUDIO_HEADERS, "X-Voice-Engine": "azure-speech", "X-Voice-Name": voice, "X-Voice-Cache": "hit" } });
+  }
+  let res: Response;
+  try {
+    res = await fetch(SPEECH_URL, speechRequest(text, locale, voice, SPEECH_KEY));
+  } catch (e) {
+    return `speech: ${e instanceof Error ? e.message : "fetch failed"}`;
+  }
+  if (!res.ok || !res.body) {
+    const detail = (await res.text().catch(() => "")).slice(0, 200);
+    return `speech HTTP ${res.status}${detail ? `: ${detail}` : ""}`;
+  }
+  const headers = { ...AUDIO_HEADERS, "X-Voice-Engine": "azure-speech", "X-Voice-Name": voice };
+  if (text.length <= CACHE_MAX_CHARS) {
+    // Short enough to keep: buffer it, remember it, and send it whole.
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length) remember(key, bytes);
+    return new Response(bytes, { headers });
+  }
+  return new Response(res.body, { headers });
+}
+
+/** The realtime model as a reader — the original engine, now the fallback. */
+async function speakRealtime(text: string): Promise<Response | string> {
+  if (!ENDPOINT || !KEY) return "realtime not configured";
   const ws = new WebSocket(realtimeUrl(ENDPOINT, DEPLOY), { headers: { "api-key": KEY } });
   /** Audio that arrived before the response stream existed to carry it. */
   const pending: Uint8Array[] = [];
@@ -96,7 +146,7 @@ export async function POST(req: NextRequest) {
     if (timeout) clearTimeout(timeout);
     if (err) {
       failure = err;
-      log.error("voice_speak_failed", new Error(err), { deployment: DEPLOY, bytes });
+      log.error("voice_speak_failed", new Error(err), { engine: "realtime", deployment: DEPLOY, bytes });
     }
     try { ws.close(); } catch { /* ignore */ }
     try { controller?.close(); } catch { /* already closed */ }
@@ -132,10 +182,11 @@ export async function POST(req: NextRequest) {
         if (m.delta) push(new Uint8Array(Buffer.from(m.delta, "base64")));
         break;
       case "response.done": {
-        // A response that "completed" with no audio is a failure the model did
-        // not call one; say what it did say, so the next retirement is readable.
+        // A response that did not complete is said, even when some audio came —
+        // a reply cut short by the model is exactly the thing to be able to read.
         const status = m.response?.status;
         if (bytes === 0) finish(`no audio: ${status ?? "?"} ${JSON.stringify(m.response?.status_details ?? {}).slice(0, 200)}`);
+        else if (status && status !== "completed") finish(`${status}: ${JSON.stringify(m.response?.status_details ?? {}).slice(0, 200)}`);
         else finish();
         break;
       }
@@ -154,10 +205,7 @@ export async function POST(req: NextRequest) {
   ]);
   if (!ok) {
     finish(failure ?? "no audio before the deadline");
-    return new Response(JSON.stringify({ error: "voice_unavailable", detail: (failure ?? "").slice(0, 200) }), {
-      status: 502,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-    });
+    return `realtime: ${failure ?? "no audio before the deadline"}`;
   }
 
   const stream = new ReadableStream<Uint8Array>({
@@ -175,11 +223,37 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/octet-stream",
-      "Cache-Control": "no-store",
-      "X-Audio-Format": "pcm16;rate=24000;channels=1",
-    },
-  });
+  return new Response(stream, { headers: { ...AUDIO_HEADERS, "X-Voice-Engine": "realtime", "X-Voice-Name": VOICE } });
+}
+
+export async function POST(req: NextRequest) {
+  if (!ENDPOINT || !KEY) return unavailable("no voice engine configured", 501);
+  let text = "";
+  let locale: SpeechLocale = "en";
+  let asked: Engine | null = null;
+  try {
+    const body = (await req.json()) as { text?: unknown; locale?: unknown; engine?: unknown };
+    text = typeof body?.text === "string" ? body.text : "";
+    if (body?.locale === "ar") locale = "ar";
+    if (body?.engine === "realtime" || body?.engine === "azure-speech") asked = body.engine;
+  } catch {
+    /* invalid body */
+  }
+  text = text.trim();
+  if (!text) return new Response(JSON.stringify({ error: "empty" }), { status: 400 });
+  if (text.length > 4000) text = text.slice(0, 4000);
+
+  const order: Engine[] = (asked ?? ENGINE) === "realtime" ? ["realtime", "azure-speech"] : ["azure-speech", "realtime"];
+  const reasons: string[] = [];
+  for (const engine of order) {
+    const r = engine === "azure-speech" ? await speakAzure(text, locale) : await speakRealtime(text);
+    if (typeof r !== "string") {
+      if (reasons.length) log.warn("voice_speak_fell_back", { to: engine, from: order[0], reason: reasons.join("; ").slice(0, 200) });
+      return r;
+    }
+    reasons.push(r);
+    if (!/not configured/.test(r)) log.error("voice_speak_failed", new Error(r), { engine, locale, chars: text.length });
+  }
+  const detail = reasons.join("; ");
+  return unavailable(detail, reasons.every((r) => /not configured/.test(r)) ? 501 : 502);
 }

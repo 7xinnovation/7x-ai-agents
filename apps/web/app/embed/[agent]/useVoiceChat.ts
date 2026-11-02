@@ -6,20 +6,25 @@ import { nativeVoiceAllowed, nativeVoiceMode, askNativeForMic } from "./nativeBr
 
 /**
  * Voice mode as an I/O layer over the normal text chat (not a separate agent):
- *  - STT: the browser's SpeechRecognition is used only to detect utterance
- *    boundaries (and as a fallback transcript). Each utterance is also recorded
- *    with MediaRecorder and sent to /api/nxn/voice/transcribe (gpt-4o-transcribe)
- *    for an ACCURATE transcript; the text is then sent as a normal chat message,
- *    so the same agent (tools, journeys, case panel) handles it. If the
- *    transcribe endpoint isn't available yet, it gracefully uses the on-device
- *    recognition text instead.
- *  - TTS: each new assistant reply is spoken with the gpt-realtime voice streamed
- *    from /api/nxn/voice/speak (SpeechSynthesis if that is unavailable); the mic
- *    is paused while it streams/speaks (no echo) and resumes after.
+ *  - STT: the browser's SpeechRecognition is used only as a fallback transcript
+ *    and a barge-in detector. Each utterance is recorded with MediaRecorder,
+ *    ended by a microphone meter (see startMeter) and sent to
+ *    /api/nxn/voice/transcribe (gpt-4o-transcribe) for an ACCURATE transcript;
+ *    the text is then sent as a normal chat message, so the same agent (tools,
+ *    journeys, case panel) handles it.
+ *  - TTS: the reply is spoken SENTENCE BY SENTENCE AS IT STREAMS, each sentence
+ *    fetched from /api/nxn/voice/speak (Azure Speech, or the realtime voice as
+ *    its fallback) and scheduled back to back on one audio timeline, so the
+ *    first words are heard while the agent is still writing the rest. The
+ *    device's own SpeechSynthesis is the fallback if the route is unavailable.
+ *    While the agent is away at Emirates Post's systems and has not yet written
+ *    a word, the page's tool status ("Checking pricing…") is spoken once, so
+ *    the wait is acknowledged rather than silent.
  *  - Barge-in: while the assistant speaks, the recogniser listens for the
  *    CUSTOMER — words that are not the assistant's own coming back through the
- *    microphone — and only then stops the voice and hands the turn over. See
- *    heardTheCustomer. A tap on the voice bar interrupts too.
+ *    microphone, nor a mishearing of them — and only then, twice in a row,
+ *    stops the voice and hands the turn over. See heardTheCustomer. A tap on
+ *    the voice bar interrupts too, and on phones it is the only way.
  */
 interface Msg { role: string; content: string; pulse?: boolean }
 
@@ -81,25 +86,96 @@ export function forSpeech(md: string, locale: "en" | "ar" = "en"): string {
 }
 
 /**
- * BARGE-IN IS A QUESTION OF WORDS, NOT VOLUME.
+ * THE REPLY, ONE SENTENCE AT A TIME, WHILE IT IS STILL BEING WRITTEN.
+ *
+ * Reported 2 November: the voice did not feel natural. Part of that was the
+ * silence: nothing was spoken until the agent had finished the whole reply —
+ * eight to sixteen seconds of tool rounds and writing — and then the voice
+ * engine's own start-up was added on top before the first word.
+ *
+ * So the reply is cut into speakable units as it streams, and each unit is
+ * spoken as soon as it is complete. A unit ends at a sentence end followed by
+ * whitespace (so "AED 695.00" and "www.emiratespost.ae" do not split), at a
+ * blank line, or at a fenced block — which is a card, silent, and a boundary.
+ * An OPEN fence is a card still being written and is held back entirely, so
+ * its internals are never voiced. A unit with no letters in it yet ("1.", the
+ * number of a list item) waits for the words that follow it.
+ *
+ * Returns the units ready to speak, already made speakable (forSpeech), and
+ * how many characters of `raw` they consumed; the caller passes the rest next
+ * time. With `final`, whatever remains is a unit too.
+ */
+export function speechUnits(raw: string, final: boolean, locale: "en" | "ar" = "en"): { units: string[]; consumed: number } {
+  const units: string[] = [];
+  const letters = (s: string) => /\p{L}/u.test(s);
+  // An open fence: hold back from where it opens.
+  let safeEnd = raw.length;
+  {
+    let count = 0;
+    let last = -1;
+    let at = raw.indexOf("```");
+    while (at !== -1) { count++; last = at; at = raw.indexOf("```", at + 3); }
+    if (count % 2 === 1) safeEnd = last;
+  }
+  let buf = "";
+  let consumed = 0;
+  const flush = (upTo: number) => {
+    const clean = forSpeech(buf, locale);
+    if (clean && letters(clean)) units.push(clean);
+    buf = "";
+    consumed = upTo;
+  };
+  let i = 0;
+  while (i < safeEnd) {
+    if (raw.startsWith("```", i)) {
+      // A closed fenced block (it is before safeEnd): a card, a boundary.
+      const end = raw.indexOf("```", i + 3) + 3;
+      if (letters(buf)) flush(i); else buf = "";
+      i = end;
+      consumed = end;
+      continue;
+    }
+    const ch = raw[i] as string;
+    buf += ch;
+    i++;
+    if (/[.!?؟۔]/.test(ch)) {
+      const next = raw[i];
+      const boundary = next === undefined ? final && safeEnd === raw.length : /\s/.test(next);
+      if (boundary && letters(buf)) flush(i);
+    } else if (ch === "\n" && raw[i] === "\n") {
+      if (letters(buf)) flush(i);
+    }
+  }
+  if (final) {
+    if (letters(buf)) flush(safeEnd);
+    consumed = raw.length;
+  }
+  return { units, consumed };
+}
+
+/**
+ * BARGE-IN IS A QUESTION OF WORDS, NOT VOLUME — AND NOT OF MISHEARD WORDS.
  *
  * Reported 12 October: "it replies with 2 words and then disconnects and goes
  * back to listening." The interrupt detector was an energy meter on the
  * microphone — any sustained sound above a floor, a third of a second long, was
  * taken for the customer. The assistant's own voice coming out of the speakers
- * is a sustained sound above that floor. Echo cancellation hides most of it
- * when the voice is played through Web Audio, and none of it when the device's
- * own speech engine is speaking (the fallback the retired preview API had
- * forced on everybody), and in a room with a second laptop playing audio it
- * does not matter which: the meter tripped on nearly every reply, a few hundred
- * milliseconds in.
+ * is a sustained sound above that floor. Volume cannot tell the customer from
+ * the assistant. Words can: the recogniser runs while the voice speaks, and
+ * what it hears is compared with what is being said. The assistant's own voice
+ * comes back as its own words; the customer brings words of their own. Numbers
+ * are left out of the comparison, because the voice says "six hundred
+ * ninety-five dirhams" where the text says "AED 695", and so are the little
+ * words every sentence shares.
  *
- * Volume cannot tell the customer from the assistant. Words can: the recogniser
- * runs while the voice speaks, and what it hears is compared with what is being
- * said. The assistant's own voice comes back as its own words; the customer
- * brings words of their own. Numbers are left out of the comparison, because
- * the voice says "six hundred ninety-five dirhams" where the text says "AED
- * 695", and so are the little words every sentence shares.
+ * Reported 2 November: it still stopped midway. The recogniser is an English
+ * one, and the reply is full of names it has never heard — Mansoori comes back
+ * as "man surrey", Fujairah as "fuji ira", and two such mishearings in one
+ * result were two "new" words, which was the customer, which stopped the voice.
+ * So a heard word is also compared by its CONSONANTS with the words being
+ * spoken: "mn" and "fj" are in "Mansoori" and "Fujairah", and a word whose
+ * skeleton is in a word being said is the voice itself, misheard. Only
+ * Latin-script words are tested this way; Arabic is compared whole.
  */
 const SHARED_WORDS = new Set([
   // English function words and the number words the voice turns figures into.
@@ -121,19 +197,37 @@ export function bagOfWords(s: string): Set<string> {
   );
 }
 
+/** A Latin word reduced to its consonants: what survives a recogniser's mishearing. */
+export function consonants(w: string): string {
+  return w.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z]/g, "").replace(/[aeiouyhw]/g, "");
+}
+
+/**
+ * Is this heard word one of the spoken words, misheard? True when its consonant
+ * skeleton sits inside a spoken word's (or, for a longer one, contains it).
+ * Too few consonants to tell is not evidence of a customer either.
+ */
+export function isEcho(word: string, spokenSkeletons: string[]): boolean {
+  if (!/[a-z]/i.test(word)) return false;
+  const k = consonants(word);
+  if (k.length < 2) return true;
+  return spokenSkeletons.some((s) => s.includes(k) || (k.length >= 3 && s.length >= 3 && k.includes(s)));
+}
+
 /**
  * Did the microphone hear the CUSTOMER, or the assistant's own voice coming back?
  *
- * True when what was heard carries at least two content words that are not in
- * what the assistant is saying, and those are at least half of its content
- * words. Short fragments and anything that is mostly the spoken text are the
- * voice itself, and are ignored.
+ * True when what was heard carries at least two content words that are neither
+ * in what the assistant is saying nor a mishearing of it, and those are at
+ * least half of its content words. Short fragments and anything that is mostly
+ * the spoken text are the voice itself, and are ignored.
  */
 export function heardTheCustomer(heard: string, spoken: string): boolean {
   const said = bagOfWords(spoken);
+  const skeletons = [...said].map(consonants).filter((s) => s.length >= 2);
   const words = [...bagOfWords(heard)].filter((w) => w.length >= 3 && !/^\p{N}+$/u.test(w) && !SHARED_WORDS.has(w));
   if (words.length < 2) return false;
-  const novel = words.filter((w) => !said.has(w));
+  const novel = words.filter((w) => !said.has(w) && !isEcho(w, skeletons));
   return novel.length >= 2 && novel.length * 2 >= words.length;
 }
 
@@ -152,6 +246,13 @@ function autoBargeIn(): boolean {
   if (/apple/i.test(navigator.vendor ?? "")) return false;
   return true;
 }
+
+/**
+ * How many times in a row the detector must hear the customer before the voice
+ * stops. A mishearing is a moment; a person interrupting keeps talking, and the
+ * recogniser reports them again a few hundred milliseconds later.
+ */
+const BARGE_CONFIRMATIONS = 2;
 
 /**
  * HOW LONG A PAUSE IS ALLOWED TO BE, and the three limits around it.
@@ -174,8 +275,17 @@ const METER_TICK_MS = 50;
  * derived from what has been heard is wrong exactly when it matters: a customer
  * who starts talking the moment the microphone opens would set the bar at their
  * own voice and never cross it.
+ *
+ * Lowered on 2 November from 0.015: a soft speaker on a phone held at arm's
+ * length sat under the old bar and was only ever heard when the turn gave up
+ * at fifteen seconds. The room still raises the bar — speech must be two and a
+ * half times the quietest thing heard — and a sound has to LAST to count (see
+ * SPEECH_SUSTAIN_TICKS), so a lower bar does not make a keyboard a customer.
  */
-const SPEECH_RMS = 0.015;
+const SPEECH_RMS = 0.008;
+const SPEECH_OVER_FLOOR = 2.5;
+/** Consecutive loud readings before the customer is taken to have spoken: 150 ms. */
+const SPEECH_SUSTAIN_TICKS = 3;
 const NOISE_FLOOR_MIN = 0.0008;
 /** However loud the room is, the bar stops here — well under a speaking voice. */
 const NOISE_FLOOR_MAX = 0.02;
@@ -194,10 +304,12 @@ export interface MeterState {
   lastLoudAt: number;
   floor: number;
   spoke: boolean;
+  /** Consecutive loud readings so far. */
+  loudRun: number;
 }
 
 export function newMeterState(now: number): MeterState {
-  return { startedAt: now, lastLoudAt: 0, floor: NOISE_FLOOR_MAX, spoke: false };
+  return { startedAt: now, lastLoudAt: 0, floor: NOISE_FLOOR_MAX, spoke: false, loudRun: 0 };
 }
 
 /** Why a turn ended, or null while it is still the customer's. */
@@ -206,12 +318,14 @@ export type MeterEnd = "silence" | "no-speech" | "too-long" | null;
 /** One reading of the microphone level, folded into the state. */
 export function meterStep(state: MeterState, rms: number, now: number): { state: MeterState; end: MeterEnd } {
   const floor = Math.min(state.floor, Math.max(rms, NOISE_FLOOR_MIN));
-  const loud = rms > Math.max(SPEECH_RMS, floor * 2.5);
+  const loud = rms > Math.max(SPEECH_RMS, floor * SPEECH_OVER_FLOOR);
+  const loudRun = loud ? state.loudRun + 1 : 0;
   const next: MeterState = {
     startedAt: state.startedAt,
     floor,
-    spoke: state.spoke || loud,
+    spoke: state.spoke || loudRun >= SPEECH_SUSTAIN_TICKS,
     lastLoudAt: loud ? now : state.lastLoudAt,
+    loudRun,
   };
   const elapsed = now - next.startedAt;
   // The order matters: a customer who is mid-pause at the ceiling has still
@@ -290,6 +404,18 @@ export function micUsable(host: {
   return heard && spoken;
 }
 
+/** What the voice knows about the reply it is in the middle of. */
+interface Segmenting {
+  /** Which message. */
+  idx: number;
+  /** How much of its text has been cut into units already. */
+  consumed: number;
+  /** The tool status has been spoken for this reply. */
+  acked: boolean;
+  /** The customer interrupted: the rest of this reply is not spoken. */
+  muted: boolean;
+}
+
 export function useVoiceChat(opts: {
   agentSlug: string;
   locale: Locale;
@@ -302,8 +428,14 @@ export function useVoiceChat(opts: {
    * with no SpeechRecognition of its own; see `supported`.
    */
   serverStt?: boolean;
+  /**
+   * What the page is showing while the agent is away at a tool ("Checking
+   * pricing…"), or null. Spoken once per reply, before any of the reply has
+   * been written, so a long lookup is acknowledged rather than silent.
+   */
+  toolStatus?: string | null;
 }) {
-  const { locale, messages, streaming, send, serverStt = false } = opts;
+  const { locale, messages, streaming, send, serverStt = false, toolStatus = null } = opts;
   const [active, setActive] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -315,6 +447,8 @@ export function useVoiceChat(opts: {
   const streamingRef = useRef(false);
   const speakingRef = useRef(false);
   streamingRef.current = streaming;
+  const localeRef = useRef<Locale>(locale);
+  localeRef.current = locale;
   // The parent hands a fresh `send` closure every render; hold it in a ref so the
   // callback graph (listenOnce, the watchdog interval) stays stable instead of
   // being rebuilt and re-armed on every render.
@@ -324,13 +458,25 @@ export function useVoiceChat(opts: {
   const recRef = useRef<any>(null); // SpeechRecognition, capturing an utterance
   const busyRef = useRef(false); // an utterance is being recognized/transcribed
   const spokenRef = useRef(-1);
-  const audioCtxRef = useRef<AudioContext | null>(null); // playback of gpt-realtime audio
+  const audioCtxRef = useRef<AudioContext | null>(null); // playback of the voice
+  const gainRef = useRef<GainNode | null>(null); // one output node for the context's life
   const ttsAbortRef = useRef<AbortController | null>(null); // in-flight /speak stream
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]); // scheduled audio nodes
-  // Barge-in: a second recogniser that runs only while the assistant speaks, and
-  // the text being spoken, which is what its hearing is compared against.
+  // The sentence queue: what is waiting to be fetched, whether the pump is
+  // draining it, where on the audio timeline the next sound starts, and whether
+  // the reply being spoken has been cut into units to its end.
+  const queueRef = useRef<string[]>([]);
+  const pumpingRef = useRef(false);
+  const cursorRef = useRef(0);
+  const flushedRef = useRef(true);
+  const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const segRef = useRef<Segmenting>({ idx: -1, consumed: 0, acked: false, muted: false });
+  // Barge-in: a second recogniser that runs only while the assistant speaks, the
+  // text being spoken, which is what its hearing is compared against, and how
+  // many times in a row it has heard the customer.
   const bargeRecRef = useRef<any>(null);
   const spokenTextRef = useRef("");
+  const bargeHitsRef = useRef(0);
   const warnedRef = useRef(false);
   // The microphone meter that decides when the customer has finished speaking,
   // and the one source node the analyser hangs off.
@@ -356,6 +502,39 @@ export function useVoiceChat(opts: {
       synthesis: "speechSynthesis" in window,
       serverStt,
     });
+
+  /**
+   * THE AUDIO CONTEXT, OPENED AT 24 kHz AND KEPT RUNNING.
+   *
+   * 24 kHz because that is the rate the voice arrives at: a context at the
+   * device's own 48 kHz would resample each small chunk on its own and the
+   * chunk boundaries would sit under the speech as a periodic tone (Emirates
+   * Post, 13 September). Kept running because iOS does not: a phone call, Siri,
+   * a notification sound or the microphone opening puts the context into an
+   * "interrupted" state Safari invented, in which every scheduled buffer is
+   * silently never played — the reply "stops midway" and the mic opens on the
+   * silence. So the context's own state change asks for it back, and so does
+   * the page coming back into view.
+   */
+  const audioContext = useCallback((): AudioContext | null => {
+    const AC: typeof AudioContext | undefined =
+      (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!AC) return null;
+    let ctx = audioCtxRef.current;
+    if (!ctx) {
+      try { ctx = new AC({ sampleRate: 24000 }); }
+      catch { try { ctx = new AC(); } catch { return null; } }
+      audioCtxRef.current = ctx;
+      const c = ctx;
+      c.onstatechange = () => {
+        if (!activeRef.current) return;
+        const s = c.state as string;
+        if (s !== "running" && s !== "closed") c.resume().catch(() => { /* not ours to resume yet */ });
+      };
+    }
+    if ((ctx.state as string) !== "running") { try { void ctx.resume(); } catch { /* ignore */ } }
+    return ctx;
+  }, []);
 
   const stopRecognition = useCallback(() => {
     // Whatever is being captured is abandoned first: the meter, the recorder
@@ -401,17 +580,10 @@ export function useVoiceChat(opts: {
    * gets transcribed either way — the meter only decides when to stop it.
    */
   const startMeter = useCallback((onEnd: () => void): boolean => {
-    const AC: typeof AudioContext | undefined =
-      (window as any).AudioContext || (window as any).webkitAudioContext;
     const stream = micRef.current;
-    if (!AC || !stream) return false;
-    let ctx = audioCtxRef.current;
-    if (!ctx) {
-      try { ctx = new AC({ sampleRate: 24000 }); }
-      catch { try { ctx = new AC(); } catch { return false; } }
-      audioCtxRef.current = ctx;
-    }
-    try { if (ctx.state === "suspended") void ctx.resume(); } catch { /* ignore */ }
+    if (!stream) return false;
+    const ctx = audioContext();
+    if (!ctx) return false;
 
     let analyser: AnalyserNode;
     try {
@@ -450,7 +622,7 @@ export function useVoiceChat(opts: {
 
     meterStopRef.current = stop;
     return true;
-  }, []);
+  }, [audioContext]);
 
   // One utterance: record it while the recogniser transcribes alongside (as a
   // fallback), and end it when the meter above hears the customer stop.
@@ -568,34 +740,41 @@ export function useVoiceChat(opts: {
     if (!recRef.current && !metered) { busyRef.current = false; finished = true; cancelUtteranceRef.current = null; setListening(false); }
   }, [locale, startMeter]);
 
-  const stopRealtimeAudio = useCallback(() => {
+  /** Whatever is playing or about to: stopped. The queue is the caller's. */
+  const stopPlayback = useCallback(() => {
     try { ttsAbortRef.current?.abort(); } catch { /* ignore */ }
     ttsAbortRef.current = null;
     for (const s of ttsSourcesRef.current) { try { s.stop(); } catch { /* already stopped */ } }
     ttsSourcesRef.current = [];
+    if (finishTimerRef.current) { clearTimeout(finishTimerRef.current); finishTimerRef.current = null; }
   }, []);
 
   /** The barge-in recogniser, off. */
   const stopBargeListener = useCallback(() => {
     const rec = bargeRecRef.current;
     bargeRecRef.current = null;
+    bargeHitsRef.current = 0;
     if (rec) { try { rec.onend = null; rec.onresult = null; rec.onerror = null; rec.abort(); } catch { /* ignore */ } }
   }, []);
 
   /**
    * The customer interrupted — by speaking over the assistant, or by tapping
-   * the voice bar. Silence ourselves and start listening. The in-flight
-   * speak()'s done() then resumes as a harmless no-op.
+   * the voice bar. Silence ourselves, forget the rest of this reply, and start
+   * listening (once the agent has stopped writing, if it has not).
    */
   const interrupt = useCallback(() => {
     if (!speakingRef.current) return;
+    segRef.current.muted = true;
+    queueRef.current = [];
+    flushedRef.current = true;
     stopBargeListener();
-    stopRealtimeAudio();
+    stopPlayback();
     try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     speakingRef.current = false;
     setSpeaking(false);
+    spokenTextRef.current = "";
     if (activeRef.current && !streamingRef.current) listenOnce();
-  }, [stopBargeListener, stopRealtimeAudio, listenOnce]);
+  }, [stopBargeListener, stopPlayback, listenOnce]);
 
   /** The barge-in recogniser, on: it listens for the customer while the assistant speaks. */
   const startBargeListener = useCallback(() => {
@@ -610,9 +789,19 @@ export function useVoiceChat(opts: {
     rec.maxAlternatives = 1;
     rec.onresult = (e: any) => {
       let heard = "";
+      let isFinal = false;
       const results = e?.results ?? [];
-      for (let i = e?.resultIndex ?? 0; i < results.length; i++) heard += " " + (results[i]?.[0]?.transcript ?? "");
-      if (heardTheCustomer(heard, spokenTextRef.current)) interrupt();
+      for (let i = e?.resultIndex ?? 0; i < results.length; i++) {
+        heard += " " + (results[i]?.[0]?.transcript ?? "");
+        if (results[i]?.isFinal) isFinal = true;
+      }
+      if (heardTheCustomer(heard, spokenTextRef.current)) {
+        // Once could be a name misheard; a person keeps going.
+        bargeHitsRef.current += 1;
+        if (isFinal || bargeHitsRef.current >= BARGE_CONFIRMATIONS) interrupt();
+      } else {
+        bargeHitsRef.current = 0;
+      }
     };
     rec.onerror = () => { /* onend follows */ };
     rec.onend = () => {
@@ -626,40 +815,54 @@ export function useVoiceChat(opts: {
     try { rec.start(); } catch { bargeRecRef.current = null; }
   }, [locale, interrupt]);
 
-  // Speak with the natural gpt-realtime voice: stream PCM16 (24 kHz mono) from
-  // /api/nxn/voice/speak and play it via Web Audio, scheduling chunks back to
-  // back. Returns true if audio actually played; false to fall back to on-device
-  // SpeechSynthesis (e.g. the realtime deployment isn't configured).
-  const speakRealtime = useCallback(async (text: string): Promise<boolean> => {
-    const AC: typeof AudioContext | undefined =
-      (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!AC) return false;
-    /**
-     * THE RANDOM TONE.
-     *
-     * Emirates Post, 13 September: "there is a random tone happening during the
-     * audio responses."
-     *
-     * The voice arrives as PCM16 at 24 kHz in small chunks, and each chunk was
-     * turned into its own AudioBuffer declared at 24 kHz and played in a context
-     * running at the device's native rate — 48 kHz on almost everything. The Web
-     * Audio API resamples such a buffer, and it resamples EACH ONE INDEPENDENTLY,
-     * with no knowledge of the samples either side of it. Every chunk boundary
-     * therefore gets a small discontinuity, and the boundaries arrive at a steady
-     * rate, so what should be a click you would never notice becomes a periodic
-     * buzz sitting under the speech. A tone.
-     *
-     * So the context is opened AT the audio's own rate and nothing is resampled.
-     * Browsers that refuse the hint fall back to the old behaviour, which is no
-     * worse than today; `sampleRate` below is read back rather than assumed.
-     */
-    let ctx = audioCtxRef.current;
-    if (!ctx) {
-      try { ctx = new AC({ sampleRate: 24000 }); }
-      catch { ctx = new AC(); }
-      audioCtxRef.current = ctx;
+  /** The reply has been said to its end: the turn is the customer's again. */
+  const done = useCallback(() => {
+    stopBargeListener();
+    speakingRef.current = false;
+    setSpeaking(false);
+    ttsAbortRef.current = null;
+    ttsSourcesRef.current = [];
+    spokenTextRef.current = "";
+    if (activeRef.current && !streamingRef.current) listenOnce();
+  }, [stopBargeListener, listenOnce]);
+
+  /**
+   * Nothing left to fetch, nothing left to cut, and the last scheduled sound
+   * is still playing: wait for the timeline to reach it, then hand over. Every
+   * condition is checked again when the timer fires, because a silent turn
+   * (a payment settling) may have started a new reply in the meantime.
+   */
+  const maybeFinish = useCallback(() => {
+    if (finishTimerRef.current) { clearTimeout(finishTimerRef.current); finishTimerRef.current = null; }
+    const idle = () => speakingRef.current && !pumpingRef.current && queueRef.current.length === 0 && flushedRef.current;
+    if (!idle()) return;
+    const ctx = audioCtxRef.current;
+    const remaining = ctx ? Math.max(0, cursorRef.current - ctx.currentTime) : 0;
+    finishTimerRef.current = setTimeout(() => {
+      finishTimerRef.current = null;
+      if (idle()) done();
+    }, remaining * 1000 + 80);
+  }, [done]);
+
+  /**
+   * One utterance, fetched from /api/nxn/voice/speak as raw PCM16 at 24 kHz and
+   * scheduled on the shared timeline as it arrives, so consecutive sentences
+   * play back to back. The gain node is the context's, not the utterance's:
+   * disconnecting one per sentence would silence the sentence still playing
+   * behind it.
+   *
+   * "played" when audio was scheduled; "unavailable" to fall back to the
+   * device's voice; "aborted" when the customer interrupted.
+   */
+  const playUtterance = useCallback(async (text: string): Promise<"played" | "unavailable" | "aborted"> => {
+    const ctx = audioContext();
+    if (!ctx) return "unavailable";
+    try { if ((ctx.state as string) !== "running") await ctx.resume(); } catch { /* ignore */ }
+    if (!gainRef.current) {
+      gainRef.current = ctx.createGain();
+      gainRef.current.connect(ctx.destination);
     }
-    try { if (ctx.state === "suspended") await ctx.resume(); } catch { /* ignore */ }
+    const gain = gainRef.current;
 
     const controller = new AbortController();
     ttsAbortRef.current = controller;
@@ -668,10 +871,10 @@ export function useVoiceChat(opts: {
       resp = await fetch("/api/nxn/voice/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, locale: localeRef.current === "ar" ? "ar" : "en" }),
         signal: controller.signal,
       });
-    } catch { return false; }
+    } catch { return controller.signal.aborted ? "aborted" : "unavailable"; }
     if (!resp.ok || !resp.body) {
       // Said once per session, so a silent fallback to the device voice is at
       // least visible in the console — the preview API's retirement was not.
@@ -679,19 +882,16 @@ export function useVoiceChat(opts: {
         warnedRef.current = true;
         console.warn(`[voice] the natural voice is unavailable (${resp.status}); using the device's own voice`);
       }
-      return false;
+      return "unavailable";
     }
 
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
     const reader = resp.body.getReader();
-    let scheduled = ctx.currentTime + 0.12;
     let carry: Uint8Array | null = null;
     let played = false;
     try {
       for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const { done: finished, value } = await reader.read();
+        if (finished) break;
         if (!value || !value.length) continue;
         let bytes: Uint8Array = value;
         if (carry) {
@@ -704,8 +904,8 @@ export function useVoiceChat(opts: {
         if (usable <= 0) continue;
         const n = usable / 2;
         // 24 kHz because that is what the bytes ARE. When the context runs at
-        // the same rate -- which is why it is opened that way above -- the
-        // buffer is played sample for sample and nothing is resampled.
+        // the same rate -- which is why it is opened that way -- the buffer is
+        // played sample for sample and nothing is resampled.
         const buf = ctx.createBuffer(1, n, 24000);
         const ch = buf.getChannelData(0);
         const dv = new DataView(bytes.buffer, bytes.byteOffset, usable);
@@ -713,70 +913,81 @@ export function useVoiceChat(opts: {
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(gain);
-        // An underrun -- the network stalling for longer than the audio we have
-        // buffered -- used to butt the next chunk straight onto the playhead,
-        // joining two unrelated waveforms mid-cycle. Restart with the same small
-        // lead the stream opened with instead, so a gap sounds like a gap.
-        const startAt = scheduled >= ctx.currentTime ? scheduled : ctx.currentTime + 0.03;
+        // The first sound of a turn gets a small lead for jitter. An underrun —
+        // the network stalling for longer than the audio in hand — used to butt
+        // the next chunk straight onto the playhead, joining two unrelated
+        // waveforms mid-cycle; restart with a short lead instead, so a gap
+        // sounds like a gap.
+        const now = ctx.currentTime;
+        const startAt = cursorRef.current > now ? cursorRef.current : now + (ttsSourcesRef.current.length ? 0.03 : 0.12);
         try { src.start(startAt); } catch { /* ctx closed */ }
         ttsSourcesRef.current.push(src);
-        scheduled = startAt + buf.duration;
+        src.onended = () => { const i = ttsSourcesRef.current.indexOf(src); if (i >= 0) ttsSourcesRef.current.splice(i, 1); };
+        cursorRef.current = startAt + buf.duration;
         played = true;
       }
     } catch { /* aborted or stream error */ }
-    if (!played) { try { gain.disconnect(); } catch { /* ignore */ } return false; }
-    // Interrupted: the sources are already stopped; do not sit out the rest of
-    // an utterance nobody is hearing.
-    if (controller.signal.aborted) { try { gain.disconnect(); } catch { /* ignore */ } return true; }
-    const remaining = Math.max(0, scheduled - ctx.currentTime);
-    await new Promise((r) => setTimeout(r, remaining * 1000 + 80));
-    // One gain node per reply, and the context outlives the reply.
-    try { gain.disconnect(); } catch { /* ignore */ }
-    return true;
-  }, []);
+    if (controller.signal.aborted) return "aborted";
+    return played ? "played" : "unavailable";
+  }, [audioContext]);
 
-  const speakBrowser = useCallback((text: string, done: () => void) => {
+  /** The device's own voice, as a fallback, one utterance at a time. */
+  const speakBrowser = useCallback((text: string) => new Promise<void>((resolve) => {
     try {
-      if (!("speechSynthesis" in window)) { done(); return; }
+      if (!("speechSynthesis" in window)) { resolve(); return; }
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = locale === "ar" ? "ar-SA" : "en-US";
+      u.lang = localeRef.current === "ar" ? "ar-SA" : "en-US";
       u.rate = 1.03;
-      u.onend = done;
-      u.onerror = done;
-      window.speechSynthesis.cancel();
+      u.onend = () => resolve();
+      u.onerror = () => resolve();
       window.speechSynthesis.speak(u);
-    } catch { done(); }
-  }, [locale]);
+    } catch { resolve(); }
+  }), []);
 
-  const speak = useCallback((text: string) => {
-    const clean = forSpeech(text, locale === "ar" ? "ar" : "en");
-    if (!clean) { listenOnce(); return; }
-    stopRecognition();
-    speakingRef.current = true;
-    setSpeaking(true);
-    spokenTextRef.current = clean;
-    startBargeListener();
-    const done = () => {
-      stopBargeListener();
-      speakingRef.current = false;
-      setSpeaking(false);
-      ttsAbortRef.current = null;
-      ttsSourcesRef.current = [];
-      if (activeRef.current && !streamingRef.current) listenOnce();
-    };
-    void speakRealtime(clean)
-      .then((ok) => {
-        if (ok) { done(); return; }
-        if (activeRef.current) speakBrowser(clean, done);
-        else done();
-      })
-      .catch(() => { if (activeRef.current) speakBrowser(clean, done); else done(); });
-  }, [listenOnce, stopRecognition, startBargeListener, stopBargeListener, speakRealtime, speakBrowser, locale]);
+  /**
+   * Drains the queue, one utterance at a time, in order. Fetching the next
+   * sentence begins the moment the previous one has been received, not when it
+   * has finished playing, so the audio in hand is always ahead of the playhead.
+   */
+  const pump = useCallback(async () => {
+    if (pumpingRef.current) return;
+    pumpingRef.current = true;
+    try {
+      while (activeRef.current && speakingRef.current) {
+        const next = queueRef.current.shift();
+        if (next === undefined) break;
+        const r = await playUtterance(next);
+        if (r === "aborted") break;
+        if (r === "unavailable" && activeRef.current && speakingRef.current) await speakBrowser(next);
+      }
+    } finally {
+      pumpingRef.current = false;
+    }
+    maybeFinish();
+  }, [playUtterance, speakBrowser, maybeFinish]);
+
+  /** One speakable unit, already cleaned, queued; the voice starts if it is not already going. */
+  const enqueue = useCallback((clean: string) => {
+    if (!clean || !activeRef.current) return;
+    queueRef.current.push(clean);
+    spokenTextRef.current = `${spokenTextRef.current} ${clean}`.trim();
+    if (!speakingRef.current) {
+      stopRecognition();
+      speakingRef.current = true;
+      setSpeaking(true);
+      bargeHitsRef.current = 0;
+      cursorRef.current = 0;
+      startBargeListener();
+    }
+    void pump();
+  }, [stopRecognition, startBargeListener, pump]);
 
   const cleanup = useCallback(() => {
     stopRecognition();
     stopBargeListener();
-    stopRealtimeAudio();
+    stopPlayback();
+    queueRef.current = [];
+    flushedRef.current = true;
     try { micSourceRef.current?.disconnect(); } catch { /* already gone */ }
     micSourceRef.current = null;
     micRef.current?.getTracks().forEach((t) => t.stop());
@@ -785,7 +996,7 @@ export function useVoiceChat(opts: {
     speakingRef.current = false;
     setSpeaking(false);
     setListening(false);
-  }, [stopRecognition, stopBargeListener, stopRealtimeAudio]);
+  }, [stopRecognition, stopBargeListener, stopPlayback]);
 
   /** The app has already put the OS dialog in front of this customer. */
   const nativeMicGranted = useRef(false);
@@ -797,21 +1008,10 @@ export function useVoiceChat(opts: {
     setActive(true);
     setError("");
     spokenRef.current = messages.length - 1;
+    segRef.current = { idx: -1, consumed: 0, acked: false, muted: false };
     // Unlock audio output on this user gesture so streamed replies can play.
-    // CRITICAL: open it at 24 kHz — the rate the gpt-realtime PCM actually is.
-    // This context is created HERE, before speakRealtime runs, so if we opened it
-    // at the device default (48 kHz) every 24 kHz chunk would be resampled
-    // independently and the chunk boundaries would sit under the speech as a
-    // periodic beep. Matching the rate means the buffers play sample-for-sample.
-    try {
-      const AC: typeof AudioContext | undefined =
-        (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (AC && !audioCtxRef.current) {
-        try { audioCtxRef.current = new AC({ sampleRate: 24000 }); }
-        catch { audioCtxRef.current = new AC(); }
-      }
-      if (audioCtxRef.current?.state === "suspended") void audioCtxRef.current.resume();
-    } catch { /* ignore */ }
+    // Opened HERE, at 24 kHz, before anything is spoken: see audioContext.
+    audioContext();
     /**
      * ASKING THE APP FIRST.
      *
@@ -837,28 +1037,74 @@ export function useVoiceChat(opts: {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
       micRef.current = mic;
+      // Opening the microphone is one of the things that interrupts the audio
+      // context on iOS; ask for it back before the first reply needs it.
+      audioContext();
       listenOnce();
     } catch {
       setError("Microphone access is needed. Allow it and try again.");
       // keep active so the error stays visible; user taps Turn off
     }
-  }, [supported, messages.length, cleanup, listenOnce, locale]);
+  }, [supported, messages.length, cleanup, listenOnce, locale, audioContext]);
 
-  // Pause the mic while the agent responds; speak each new reply.
+  /**
+   * THE REPLY, SPOKEN AS IT ARRIVES.
+   *
+   * While the agent streams, the newest assistant message is cut into units
+   * (speechUnits) and each complete one is queued the moment it is complete.
+   * Before any of it has been written, the tool status is spoken once, so a
+   * long lookup is acknowledged. When the stream ends, whatever is left is
+   * queued and the voice is told it may finish. A reply interrupted by the
+   * customer stays silent to its end. The account pulse is a long visual
+   * summary — voice speaks only its intro line and leaves the rest to read.
+   */
   useEffect(() => {
     if (!active) return;
-    if (streaming) { stopRecognition(); return; }
+    const lang = locale === "ar" ? "ar" : "en";
     const idx = messages.length - 1;
     const last = messages[idx];
-    if (last && last.role === "assistant" && last.content.trim() && idx > spokenRef.current) {
+    const reply = !!last && last.role === "assistant" && idx > spokenRef.current;
+    if (streaming) {
+      stopRecognition();
+      if (!reply) return;
+      if (segRef.current.idx !== idx) {
+        segRef.current = { idx, consumed: 0, acked: false, muted: false };
+        flushedRef.current = false;
+      }
+      const seg = segRef.current;
+      if (seg.muted || last.pulse) return;
+      if (!last.content.trim()) {
+        if (toolStatus && !seg.acked) {
+          seg.acked = true;
+          enqueue(forSpeech(toolStatus, lang));
+        }
+        return;
+      }
+      const { units, consumed } = speechUnits(last.content.slice(seg.consumed), false, lang);
+      seg.consumed += consumed;
+      for (const u of units) enqueue(u);
+      return;
+    }
+    if (reply && last.content.trim()) {
       spokenRef.current = idx;
-      // The account pulse is a long visual summary — voice speaks only its intro
-      // line ("Here is a snapshot of your account.") and leaves the rest to read.
-      speak(last.pulse ? pulseIntro(last.content) : last.content);
+      if (segRef.current.idx !== idx) segRef.current = { idx, consumed: 0, acked: false, muted: false };
+      const seg = segRef.current;
+      if (!seg.muted) {
+        if (last.pulse) {
+          enqueue(forSpeech(pulseIntro(last.content), lang));
+        } else {
+          const { units } = speechUnits(last.content.slice(seg.consumed), true, lang);
+          seg.consumed = last.content.length;
+          for (const u of units) enqueue(u);
+        }
+      }
+      flushedRef.current = true;
+      if (speakingRef.current) maybeFinish();
+      else if (!busyRef.current && micRef.current) listenOnce();
     } else if (!speakingRef.current && !busyRef.current && micRef.current) {
       listenOnce();
     }
-  }, [active, streaming, messages, speak, listenOnce, stopRecognition]);
+  }, [active, streaming, messages, toolStatus, locale, enqueue, maybeFinish, listenOnce, stopRecognition]);
 
   // Resume watchdog: never leave the mic stranded. If nothing is happening (not
   // speaking, thinking, or capturing), reopen it. A backstop for any missed
@@ -874,9 +1120,24 @@ export function useVoiceChat(opts: {
     return () => clearInterval(id);
   }, [active, listenOnce]);
 
+  // The page coming back into view: the audio context may have been suspended
+  // behind our back (iOS, a backgrounded tab); ask for it back.
+  useEffect(() => {
+    if (!active) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const ctx = audioCtxRef.current;
+      if (ctx && (ctx.state as string) !== "running" && ctx.state !== "closed") ctx.resume().catch(() => { /* ignore */ });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [active]);
+
   useEffect(() => () => {
     activeRef.current = false;
     cleanup();
+    try { gainRef.current?.disconnect(); } catch { /* ignore */ }
+    gainRef.current = null;
     try { audioCtxRef.current?.close(); } catch { /* ignore */ }
     audioCtxRef.current = null;
   }, [cleanup]);

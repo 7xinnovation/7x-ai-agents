@@ -24,13 +24,14 @@ check("the URL is v1 with the model in the query and no api-version", realtimeUr
 const su = sessionUpdate("marin", "read it") as { type: string; session: { type: string; output_modalities: string[]; audio: { output: { voice: string; format: { type: string; rate: number } }; input: { turn_detection: null } } } };
 check("the session is typed realtime, audio out, PCM16 at 24 kHz, no turn detection", su.type === "session.update" && su.session.type === "realtime" && su.session.output_modalities.join() === "audio" && su.session.audio.output.voice === "marin" && su.session.audio.output.format.type === "audio/pcm" && su.session.audio.output.format.rate === 24000 && su.session.audio.input.turn_detection === null);
 check("the route reads the GA audio event and never the preview one", /case "response\.output_audio\.delta"/.test(speak) && !/case "response\.audio\.delta"/.test(speak) && !/api-version=/.test(speak + src("../lib/realtimeVoice.ts")));
-check("a session with no audio is a 502, not an empty 200", /status: 502/.test(speak) && /voice_unavailable/.test(speak) && /FIRST_AUDIO_MS/.test(speak));
+check("a session with no audio is a 502, not an empty 200", /501 : 502|status: 502/.test(speak) && /voice_unavailable/.test(speak) && /FIRST_AUDIO_MS/.test(speak));
 check("the route exports only route fields", !/^export (function|const) (?!runtime)/m.test(speak));
 
 console.log("\nVoice — barge-in is words, not volume");
 const hook = src("../app/embed/[agent]/useVoiceChat.ts");
-check("the energy meter is gone", !/getFloatTimeDomainData|BARGE_RMS|createAnalyser/.test(hook));
-check("a second recogniser runs only while speaking and is stopped when done", /startBargeListener\(\);/.test(hook) && /const done = \(\) => \{\s*stopBargeListener\(\);/.test(hook));
+// The analyser came back on 28 October — as the meter that ENDS THE TURN, not as a barge-in detector. The barge-in is still words.
+check("the energy meter is gone from the barge-in", !/BARGE_RMS|BARGE_SUSTAIN|getFloatTimeDomainData/.test(hook) && /heardTheCustomer\(heard, spokenTextRef\.current\)/.test(hook));
+check("a second recogniser runs only while speaking and is stopped when done", /startBargeListener\(\);/.test(hook) && /const done = useCallback\(\(\) => \{\s*stopBargeListener\(\);/.test(hook));
 check("the hook exposes interrupt", /return \{ supported, active, connecting: false, listening, speaking, error, toggle, interrupt \}/.test(hook));
 check("desktop only: Android and Apple devices interrupt by tap", /android\|iphone\|ipad\|ipod/.test(hook) && /navigator\.vendor/.test(hook));
 check("an interrupted utterance returns at once instead of waiting out the audio", /if \(controller\.signal\.aborted\)/.test(hook));
