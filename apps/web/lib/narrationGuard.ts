@@ -250,6 +250,15 @@ export function durationChosen(userMessage: string): number | null {
     .replace(/^[\s"'\u201c\u2018]+|[\s"'.!\u201d\u2019]+$/g, "");
   if (!bare || bare.length > 24) return null;
   const only = new RegExp(`^(?:\\d{1,2}|${Object.keys(SPELLED).join("|")})\\s*[-\u2011\u2013 ]?\\s*${YEAR_WORD}$`, "iu");
+  /**
+   * "\u0633\u0646\u062a\u064a\u0646" IS the whole answer in Arabic — the dual carries the
+   * number and the noun in one word, so there is no year word after it for the
+   * shape above to find. `yearsNamed` has always known this; `durationChosen`
+   * did not, so an Arabic customer typing two years was not recognised as
+   * having chosen, the menu stayed open underneath them and the
+   * acknowledgement rule could not fire.
+   */
+  if (/^\u0633\u0646\u062a\u064a\u0646$/.test(bare)) return 2;
   return only.test(bare) ? yearsNamed(bare) : null;
 }
 

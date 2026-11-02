@@ -36,6 +36,16 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
 
   // Preserve the agent scope on the range links.
   const rangeHref = (r: Window) => `/admin/analytics?days=${r}${selected ? `&agent=${selected.slug}` : ""}`;
+  /**
+   * A number on this page now opens the rows behind it, carrying the window and
+   * the agent so the list is the same slice the stat counted.
+   */
+  const drill = (path: string, extra?: { status?: string }) => {
+    const p = new URLSearchParams({ days: String(windowDays) });
+    if (extra?.status) p.set("status", extra.status);
+    if (selected) p.set("agent", selected.slug);
+    return `${path}?${p.toString()}`;
+  };
   const selectedRange: Window = windowDays;
   // "the last 30 days" is wrong for a window that means everything.
   const period = d.allTime ? "across everything on record" : `in the last ${d.windowDays} days`;
@@ -82,8 +92,8 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
         note={d.allTime ? `Everything on record — ${d.windowDays} days, with nothing before it to compare against` : `Last ${d.windowDays} days vs the ${d.windowDays} before`}
       />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Journeys completed" value={h.completed.now} delta={h.completed.pct} />
-        <Stat label="Revenue collected (AED)" value={h.revenueAed.now} delta={h.revenueAed.pct} />
+        <Stat label="Journeys completed" value={h.completed.now} delta={h.completed.pct} href={drill("/admin/journeys")} />
+        <Stat label="Revenue collected (AED)" value={h.revenueAed.now} delta={h.revenueAed.pct} href={drill("/admin/payments", { status: "paid" })} />
         <Stat label="Outcome completion" value={`${h.completionRate.now}%`} delta={h.completionRate.pct} deltaUnit=" pts" />
         <Stat label="Conversations" value={h.conversations.now} delta={h.conversations.pct} />
       </div>
@@ -171,10 +181,10 @@ export default async function InsightsPage({ searchParams }: { searchParams: Pro
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Panel title="Payment pipeline" desc="Every payment raised ends settled, declined, or stuck.">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Raised" value={d.payments.initiated} />
-            <Stat label="Settled" value={d.payments.paid} tone="pos" />
-            <Stat label="Declined" value={d.payments.failed} tone={d.payments.failed ? "crit" : undefined} />
-            <Stat label="Stuck" value={d.payments.abandoned} tone={d.payments.abandoned ? "warn" : undefined} />
+            <Stat label="Raised" value={d.payments.initiated} href={drill("/admin/payments")} />
+            <Stat label="Settled" value={d.payments.paid} tone="pos" href={drill("/admin/payments", { status: "paid" })} />
+            <Stat label="Declined" value={d.payments.failed} tone={d.payments.failed ? "crit" : undefined} href={drill("/admin/payments", { status: "failed" })} />
+            <Stat label="Stuck" value={d.payments.abandoned} tone={d.payments.abandoned ? "warn" : undefined} href={drill("/admin/payments", { status: "initiated" })} />
           </div>
           <div className="mt-4 border-t border-[var(--color-line-soft)] pt-3">
             <Footnote>
