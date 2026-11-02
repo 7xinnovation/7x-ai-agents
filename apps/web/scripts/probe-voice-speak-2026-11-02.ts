@@ -21,7 +21,7 @@ const EN_SHORT = "Of course. Your PO Box renewal for one year is AED 695 includi
 const EN_LONG = "Your PO Box number twelve thousand three hundred and forty-five at the Deira Main branch in Dubai expired on the thirtieth of September, and it is currently in its grace period, which means your mail is still being held for you but no new items can be delivered after the fifteenth of November.";
 const AR = "بالتأكيد. رسوم تجديد صندوق البريد لسنة واحدة هي 695 درهماً شاملة ضريبة القيمة المضافة.";
 
-interface Row { label: string; status: number; engine: string; voice: string; cache: string; firstByteMs: number; totalMs: number; seconds: number; error?: string }
+interface Row { label: string; status: number; engine: string; voice: string; cache: string; dialect: string; spoken: string; firstByteMs: number; totalMs: number; seconds: number; error?: string }
 
 async function speak(label: string, text: string, locale: "en" | "ar"): Promise<Row> {
   const t0 = performance.now();
@@ -34,7 +34,7 @@ async function speak(label: string, text: string, locale: "en" | "ar"): Promise<
       signal: AbortSignal.timeout(90000),
     });
   } catch (e) {
-    return { label, status: 0, engine: "", voice: "", cache: "", firstByteMs: 0, totalMs: 0, seconds: 0, error: e instanceof Error ? e.message : String(e) };
+    return { label, status: 0, engine: "", voice: "", cache: "", dialect: "", spoken: "", firstByteMs: 0, totalMs: 0, seconds: 0, error: e instanceof Error ? e.message : String(e) };
   }
   const first = performance.now();
   const row: Row = {
@@ -42,6 +42,8 @@ async function speak(label: string, text: string, locale: "en" | "ar"): Promise<
     engine: res.headers.get("x-voice-engine") ?? "",
     voice: res.headers.get("x-voice-name") ?? "",
     cache: res.headers.get("x-voice-cache") ?? "",
+    dialect: res.headers.get("x-voice-dialect") ?? "",
+    spoken: (() => { try { return decodeURIComponent(res.headers.get("x-voice-spoken") ?? ""); } catch { return ""; } })(),
     firstByteMs: Math.round(first - t0), totalMs: 0, seconds: 0,
   };
   if (!res.ok || !res.body) { row.error = (await res.text().catch(() => "")).slice(0, 160); return row; }
@@ -59,7 +61,8 @@ rows.push(await speak("en short", EN_SHORT, "en"));
 rows.push(await speak("en short again (cache?)", EN_SHORT, "en"));
 rows.push(await speak("en long", EN_LONG, "en"));
 rows.push(await speak("ar", AR, "ar"));
-console.table(rows.map(({ label, status, engine: e, voice, cache, firstByteMs, totalMs, seconds, error }) => ({ label, status, engine: e, voice, cache, firstByteMs, totalMs, seconds, ...(error ? { error } : {}) })));
+console.table(rows.map(({ label, status, engine: e, voice, cache, dialect, firstByteMs, totalMs, seconds, error }) => ({ label, status, engine: e, voice, cache, dialect, firstByteMs, totalMs, seconds, ...(error ? { error } : {}) })));
+for (const r of rows) if (r.spoken) console.log(`\n${r.label} — what was actually said:\n  ${r.spoken}`);
 
 const bad = rows.filter((r) => r.status !== 200 || r.seconds <= 0 || (engine && r.engine !== engine));
 if (bad.length) { console.log(`\n${bad.length} utterance(s) did not come back as expected.`); process.exit(1); }

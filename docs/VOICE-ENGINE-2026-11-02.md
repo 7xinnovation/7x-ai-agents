@@ -40,12 +40,40 @@ which one spoke.
 | `AZURE_SPEECH_ENDPOINT` | derived from `AZURE_REALTIME_ENDPOINT` | Only if Speech is not on the realtime resource: a region name (`swedencentral`) or a full URL. |
 | `AZURE_SPEECH_KEY` | `AZURE_REALTIME_KEY` | |
 | `VOICE_TTS_VOICE_EN` | `en-GB-Sonia:DragonHDLatestNeural` | British English, Dragon HD. |
-| `VOICE_TTS_VOICE_AR` | `ar-AE-FatimaNeural` | Emirati Arabic. Mira is female in both languages by default; `ar-AE-Rashid:DragonHDLatestNeural` is the HD Emirati voice if quality is preferred over that consistency. |
+| `VOICE_TTS_VOICE_AR` | `ar-AE-FatimaNeural` | Only used when Arabic is on Azure Speech (`VOICE_TTS_ENGINE_AR=azure-speech`). `ar-AE-Rashid:DragonHDLatestNeural` is the HD Emirati voice; it is set on prod and staging. |
+| `VOICE_TTS_ENGINE_AR` | `realtime` | The engine for Arabic. See "Arabic: Emirati" below. |
+| `VOICE_TTS_DIALECT_AR` | `emirati` | Rewrite Arabic into Emirati dialect before speaking; `off` to stop. |
+| `VOICE_DIALECT_MODEL` | the main model | `fast` for the classifier model, or a model id. |
 
 Short utterances (under 160 characters) are cached in the server's memory, so the spoken
 acknowledgements below cost nothing the second time.
 
 Protocol: `apps/web/lib/azureSpeech.ts`. Route: `apps/web/app/api/nxn/voice/speak/route.ts`.
+
+### Arabic: Emirati, spoken by the LLM voice (later the same day)
+
+Fourteen Arabic samples — Fatima, Hamdan, Rashid HD, the Gulf neighbours, the previous engine —
+and the verdict was "all of them are robotic". They were all reading Modern Standard Arabic, the
+register of news bulletins, and no voice makes that sound like a person at a counter in Deira.
+So Arabic now takes a different path from English:
+
+- **The engine is the realtime LLM voice** (`VOICE_TTS_ENGINE_AR=realtime`, the default), told to
+  speak with an authentic Emirati accent — never Saudi, Egyptian or Levantine. English stays on
+  Azure Speech. Each is the other's fallback. `lib/voiceEngines.ts`.
+- **Each Arabic sentence is rewritten into Emirati dialect just before it is spoken**
+  (`lib/emiratiDialect.ts`). The customer reads the formal reply and hears an Emirati one. The
+  rewrite is held to the facts — every number, name and Latin word must survive or the original is
+  spoken — and checked against a blocklist of the Saudi, Egyptian and Levantine forms models reach
+  for when asked for "Gulf" Arabic: تبي is Saudi, an Emirati says تبا; وش → شو; أبغى → أبا;
+  كذا → جذي; علشان → عشان. The commonest slips are corrected in place; anything else sends the
+  sentence back to the original. `VOICE_TTS_DIALECT_AR=off` stops the rewrite;
+  `VOICE_DIALECT_MODEL` chooses the model (unset = the main model, `fast` = the classifier model, about a second quicker).
+- The response carries `X-Voice-Dialect` (emirati / none) and `X-Voice-Spoken`, the sentence as
+  actually said, URL-encoded, so the probe can print it.
+- Mira's name in Arabic is ميره, as everywhere else in the product.
+
+The cost is latency: the rewrite (about a second) plus the realtime handshake before the first
+Arabic word of each reply; later sentences are fetched while earlier ones play.
 
 ### The reply, one sentence at a time, while it streams
 

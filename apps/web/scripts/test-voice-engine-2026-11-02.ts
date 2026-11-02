@@ -21,6 +21,9 @@ import {
   newMeterState, meterStep, type MeterEnd, type MeterState,
 } from "../app/embed/[agent]/useVoiceChat";
 import { speechUrl, ssmlFor, voiceFor, speechTimeoutMs, DEFAULT_VOICES, escapeXml } from "../lib/azureSpeech";
+import { engineFor, engineOrder, emiratiDialectOn } from "../lib/voiceEngines";
+import { fixDialect, notEmirati, keepsTheFacts, DIALECT_INSTRUCTION } from "../lib/emiratiDialect";
+import { ttsInstructions } from "../lib/realtimeVoice";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = (p: string) => readFileSync(resolve(here, p), "utf8");
@@ -121,11 +124,29 @@ console.log("\nAzure Speech: the protocol");
   check("a longer sentence is given longer", speechTimeoutMs("a".repeat(300)) > speechTimeoutMs("a") && speechTimeoutMs("") >= 10000);
 }
 
+console.log("\nArabic is Emirati, spoken by the LLM voice");
+{
+  check("Arabic goes to the realtime engine by default, English to Azure Speech", engineFor("ar", {}) === "realtime" && engineFor("en", {}) === "azure-speech");
+  check("the environment may change either", engineFor("ar", { VOICE_TTS_ENGINE_AR: "azure-speech" }) === "azure-speech" && engineFor("en", { VOICE_TTS_ENGINE: "realtime" }) === "realtime");
+  check("each engine is the other's fallback, and a request may name one", engineOrder("ar", null, {}).join(">") === "realtime>azure-speech" && engineOrder("en", null, {}).join(">") === "azure-speech>realtime" && engineOrder("ar", "azure-speech", {}).join(">") === "azure-speech>realtime");
+  check("the Emirati rewrite is on unless switched off", emiratiDialectOn({}) && !emiratiDialectOn({ VOICE_TTS_DIALECT_AR: "off" }));
+  check("تبي is Saudi; an Emirati says تبا — and the clitic is kept", fixDialect("وتبي تجدده الحين؟") === "وتبا تجدده الحين؟");
+  check("وش / أبغى / كذا / علشان are corrected", fixDialect("وش رايك، أبغى كذا علشان") === "شو رايك، أبا جذي عشان");
+  check("a Saudi form is flagged, an Emirati sentence is not", notEmirati("تبي تجدده؟").join() === "تبي" && notEmirati("تبا تجدده الحين؟ هلا وغلا").length === 0);
+  check("a word inside another word is left alone", fixDialect("هكذا") === "هكذا" && notEmirati("مرة ثانية").length === 0);
+  check("the facts must survive: numbers and Latin names", keepsTheFacts("رسوم MyBox هي 695 درهم", "رسوم MyBox ستمية وخمسة وتسعين درهم") === false && keepsTheFacts("رسوم MyBox هي 695 درهم", "رسوم MyBox 695 درهم الحين") === true);
+  check("a rewrite that is not Arabic any more, or has grown into a speech, is refused", keepsTheFacts("رسوم التجديد 695 درهم", "renewal fee 695") === false && keepsTheFacts("زين", "زين ".repeat(40)) === false);
+  check("the prompt names the dialect, the blocklist and the name ميره", /EMIRATI, NOT SAUDI/.test(DIALECT_INSTRUCTION) && /NEVER use: تبي/.test(DIALECT_INSTRUCTION) && /ميره — never ميرا/.test(DIALECT_INSTRUCTION));
+  check("the Arabic voice is told to be Emirati, not Saudi, and verbatim", /EMIRATI accent/.test(ttsInstructions("ar")) && /never Saudi/.test(ttsInstructions("ar")) && /EXACTLY as written/.test(ttsInstructions("ar")));
+  check("the English voice instruction is unchanged in substance", /You are Mira/.test(ttsInstructions("en")) && /NEVER SPEAK PUNCTUATION ALOUD/.test(ttsInstructions("en")) && /six hundred ninety-five dirhams/.test(ttsInstructions("en")));
+}
+
 console.log("\nThe speak route");
 {
   const route = src("../app/api/nxn/voice/speak/route.ts");
-  check("Azure Speech is the default engine and VOICE_TTS_ENGINE may say otherwise", /process\.env\.VOICE_TTS_ENGINE === "realtime" \? "realtime" : "azure-speech"/.test(route));
-  check("the engines fall back to each other", /\["realtime", "azure-speech"\] : \["azure-speech", "realtime"\]/.test(route));
+  check("the engine is chosen per language, and the engines fall back to each other", /engineOrder\(locale, asked\)/.test(route) && /for \(const engine of order\)/.test(route));
+  check("Arabic is rewritten into Emirati before it is spoken, and the response says what was said", /locale === "ar" && emiratiDialectOn\(\)/.test(route) && /await toEmirati\(text\)/.test(route) && /X-Voice-Dialect/.test(route) && /X-Voice-Spoken/.test(route));
+  check("the realtime voice is instructed per language", /sessionUpdate\(VOICE, ttsInstructions\(locale\)\)/.test(route));
   check("the request says which language is being spoken", /body\?\.locale === "ar"/.test(route));
   check("the response says which engine spoke", /"X-Voice-Engine": "azure-speech"/.test(route) && /"X-Voice-Engine": "realtime"/.test(route));
   check("short utterances are cached, so acknowledgements cost nothing the second time", /CACHE_MAX_CHARS/.test(route) && /"X-Voice-Cache": "hit"/.test(route));
