@@ -281,8 +281,22 @@ export async function POST(req: NextRequest) {
   // business card, or an unrecognised file), REJECT the upload with a clear
   // reason and apply none of its data. Classification failures (no docType) are
   // not rejected — extraction stays best-effort and the review team backstops.
+  /**
+   * `other` IS A CLASSIFICATION FAILURE, NOT A VERDICT.
+   *
+   * The line above says classification failures are not rejected, and `other`
+   * is one: it is what the classifier returns when the taxonomy has no name for
+   * the document, not when it has recognised something else. Treating it as a
+   * mismatch produced "This file looks like a Unrecognised document, not the
+   * requested X" — twice now, both times for a correct file the taxonomy simply
+   * does not cover (the SME certificate in October, the Principal Licensee
+   * Contract on 2 November, which stopped the outsourcing permit dead).
+   *
+   * A POSITIVE mismatch still refuses: a passport dropped into the trade licence
+   * slot is classified `passport`, and that is a recognition, not a shrug.
+   */
   const accepted = acceptedDocTypes(key, reqLabel);
-  if (accepted && extraction.docType && !accepted.includes(extraction.docType)) {
+  if (accepted && extraction.docType && extraction.docType !== "other" && !accepted.includes(extraction.docType)) {
     const typeLabel = DOC_TYPE_LABELS[extraction.docType][sessionLocale];
     const mismatchReason =
       sessionLocale === "ar"

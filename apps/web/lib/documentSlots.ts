@@ -63,6 +63,20 @@ export function acceptedDocTypes(key: string, label: string): DocType[] | null {
    * every locale — but the label is what an Arabic session shows.
    */
   if (/(^|[^a-z])sme([^a-z]|$)|الصغيرة\s*والمتوسطة/.test(k)) return ["sme_licence"];
+  /**
+   * A CONTRACT IS NOT A LICENCE, EVEN WHEN IT NAMES ONE.
+   *
+   * The same shape as the SME slot above, found on 2 November by filing the
+   * outsourcing pack: "Principal Licensee Contract" contains "Licensee", so the
+   * licence test below claimed it, the classifier had no name for a contract
+   * and said `other`, and the right file came back as "This file looks like a
+   * Unrecognised document". The permit could not be applied for at all.
+   *
+   * The taxonomy has no type for these contracts, so the honest answer is no
+   * gate rather than the wrong one. A lease is excepted: it has its own type
+   * and its own slot, and both say Ejari.
+   */
+  if (/contract|agreement|عقد|اتفاقية/.test(k) && !/lease|ejari|إيجار/.test(k)) return null;
   if (/trade|postal|licen[cs]e|approval|رخصة|موافقة/.test(k)) return ["trade_license", "initial_approval", "postal_license"];
   return null;
 }

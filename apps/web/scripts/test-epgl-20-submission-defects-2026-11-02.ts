@@ -15,7 +15,7 @@ console.log("\nthe slot the trade licence is asked for under");
 check("the 1.x key is no longer named as the one to use", !NEW_SLOT.includes("key: trade_license"));
 check("the catalogue's keys are", NEW_SLOT.includes("trade_licence") && NEW_SLOT.includes("trade_licence_initial_name_approval"));
 check("and the legacy slot is named as the thing to avoid", NEW_SLOT.includes("legacy trade_license slot"));
-check("the replacement is not the thing it replaces", OLD_SLOT !== NEW_SLOT);
+check("the old sentence is gone from the new one", !NEW_SLOT.includes(OLD_SLOT));
 
 console.log("\nthe document type");
 check("copied from the catalogue, not written", has("A DOCUMENT TYPE IS COPIED, NEVER WRITTEN"));
