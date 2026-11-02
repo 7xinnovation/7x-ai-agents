@@ -145,8 +145,11 @@ console.log("\nThe speak route");
 {
   const route = src("../app/api/nxn/voice/speak/route.ts");
   check("the engine is chosen per language, and the engines fall back to each other", /engineOrder\(locale, asked\)/.test(route) && /for \(const engine of order\)/.test(route));
-  check("Arabic is rewritten into Emirati before it is spoken, and the response says what was said", /locale === "ar" && emiratiDialectOn\(\)/.test(route) && /await toEmirati\(text\)/.test(route) && /X-Voice-Dialect/.test(route) && /X-Voice-Spoken/.test(route));
+  check("Arabic is rewritten into Emirati before it is spoken, and the response says what was said", /locale === "ar" && emiratiDialectOn\(\)/.test(route) && /dialect \? toEmirati\(text\)/.test(route) && /X-Voice-Dialect/.test(route) && /X-Voice-Spoken/.test(route));
   check("the realtime voice is instructed per language", /sessionUpdate\(VOICE, ttsInstructions\(locale\)\)/.test(route));
+  check("the LLM voice is tried twice before the voice is allowed to change mid-reply", /const attempts = engine === "realtime" \? 2 : 1;/.test(route) && /for \(let attempt = 1; attempt <= attempts; attempt\+\+\)/.test(route));
+  check("the realtime handshake overlaps the Emirati rewrite", /speakRealtime\(spokenP\.then\(\(d\) => d\.text\), locale\)/.test(route) && /void textReady\.then\(/.test(route));
+  check("the first-sound deadline starts when the text is sent, and a recovery is reported in a header", /setTimeout\(\(\) => settleFirst\(bytes > 0\), FIRST_AUDIO_MS\)/.test(route) && /X-Voice-Recovered/.test(route));
   check("the request says which language is being spoken", /body\?\.locale === "ar"/.test(route));
   check("the response says which engine spoke", /"X-Voice-Engine": "azure-speech"/.test(route) && /"X-Voice-Engine": "realtime"/.test(route));
   check("short utterances are cached, so acknowledgements cost nothing the second time", /CACHE_MAX_CHARS/.test(route) && /"X-Voice-Cache": "hit"/.test(route));

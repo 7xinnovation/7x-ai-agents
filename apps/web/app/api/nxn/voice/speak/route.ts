@@ -59,8 +59,14 @@ const DEPLOY = process.env.AZURE_REALTIME_DEPLOYMENT || "gpt-realtime-1.5";
 const VOICE = process.env.AZURE_REALTIME_VOICE || "marin";
 const SPEECH_URL = speechUrl(ENDPOINT, process.env.AZURE_SPEECH_ENDPOINT);
 const SPEECH_KEY = process.env.AZURE_SPEECH_KEY || KEY;
-/** How long the first audio may take to arrive before the request is a 502. */
-const FIRST_AUDIO_MS = 15000;
+/**
+ * How long the first audio may take after the text is sent, and how long the
+ * whole handshake may take, before the attempt is given up. Short, because an
+ * attempt that fails is retried once and then handed to the other engine, and
+ * a customer waiting fifteen seconds for the first word has stopped waiting.
+ */
+const FIRST_AUDIO_MS = 8000;
+const HANDSHAKE_MS = 12000;
 /** How long a whole realtime utterance may take. */
 const TOTAL_MS = 45000;
 const AUDIO_HEADERS = {
@@ -118,8 +124,13 @@ async function speakAzure(text: string, locale: SpeechLocale): Promise<Response 
   return new Response(res.body, { headers });
 }
 
-/** The realtime model as a reader — the original engine, now the fallback. */
-async function speakRealtime(text: string, locale: SpeechLocale): Promise<Response | string> {
+/**
+ * The realtime model as a speaker. `textReady` may still be being written —
+ * the Emirati rewrite takes a second or two — so the socket is opened and the
+ * session configured meanwhile, and the text is sent the moment both are
+ * ready. The handshake and the rewrite overlap instead of queueing.
+ */
+async function speakRealtime(textReady: Promise<string>, locale: SpeechLocale): Promise<Response | string> {
   if (!ENDPOINT || !KEY) return "realtime not configured";
   const ws = new WebSocket(realtimeUrl(ENDPOINT, DEPLOY), { headers: { "api-key": KEY } });
   /** Audio that arrived before the response stream existed to carry it. */
@@ -167,11 +178,19 @@ async function speakRealtime(text: string, locale: SpeechLocale): Promise<Respon
         send(sessionUpdate(VOICE, ttsInstructions(locale)));
         break;
       case "session.updated":
-        send({
-          type: "conversation.item.create",
-          item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
-        });
-        send({ type: "response.create" });
+        void textReady.then(
+          (text) => {
+            if (closed) return;
+            send({
+              type: "conversation.item.create",
+              item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+            });
+            send({ type: "response.create" });
+            // The deadline for the first sound starts now, not at connect time.
+            setTimeout(() => settleFirst(bytes > 0), FIRST_AUDIO_MS);
+          },
+          () => finish("text never arrived")
+        );
         break;
       case "response.output_audio.delta":
         if (m.delta) push(new Uint8Array(Buffer.from(m.delta, "base64")));
@@ -196,7 +215,7 @@ async function speakRealtime(text: string, locale: SpeechLocale): Promise<Respon
 
   const ok = await Promise.race([
     first,
-    new Promise<boolean>((r) => setTimeout(() => r(bytes > 0), FIRST_AUDIO_MS)),
+    new Promise<boolean>((r) => setTimeout(() => r(bytes > 0), HANDSHAKE_MS + FIRST_AUDIO_MS)),
   ]);
   if (!ok) {
     finish(failure ?? "no audio before the deadline");
@@ -239,26 +258,39 @@ export async function POST(req: NextRequest) {
   if (text.length > 4000) text = text.slice(0, 4000);
 
   // The customer reads the formal reply; in Arabic they hear an Emirati one.
-  const extra: Record<string, string> = {};
-  if (locale === "ar" && emiratiDialectOn()) {
-    const d = await toEmirati(text);
-    extra["X-Voice-Dialect"] = d.rewritten ? "emirati" : "none";
-    // What was actually said, for the probe and for anyone debugging by ear.
-    extra["X-Voice-Spoken"] = encodeURIComponent(d.text).slice(0, 1800);
-    text = d.text;
-  }
+  // The rewrite is started here and awaited only where it is needed, so the
+  // realtime handshake can run alongside it. It never rejects.
+  const dialect = locale === "ar" && emiratiDialectOn();
+  const spokenP = dialect ? toEmirati(text) : Promise.resolve({ text, rewritten: false });
 
   const order = engineOrder(locale, asked);
   const reasons: string[] = [];
   for (const engine of order) {
-    const r = engine === "azure-speech" ? await speakAzure(text, locale) : await speakRealtime(text, locale);
-    if (typeof r !== "string") {
-      if (reasons.length) log.warn("voice_speak_fell_back", { to: engine, from: order[0], reason: reasons.join("; ").slice(0, 200) });
-      for (const [k, v] of Object.entries(extra)) r.headers.set(k, v);
-      return r;
+    // The LLM voice occasionally produces no audio at all; a second session
+    // almost always does, and costs far less than the voice changing mid-reply.
+    const attempts = engine === "realtime" ? 2 : 1;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const r = engine === "azure-speech"
+        ? await speakAzure((await spokenP).text, locale)
+        : await speakRealtime(spokenP.then((d) => d.text), locale);
+      if (typeof r !== "string") {
+        const spoken = await spokenP;
+        if (dialect) {
+          r.headers.set("X-Voice-Dialect", spoken.rewritten ? "emirati" : "none");
+          // What was actually said, for the probe and for anyone debugging by ear.
+          r.headers.set("X-Voice-Spoken", encodeURIComponent(spoken.text).slice(0, 1800));
+        }
+        if (reasons.length) {
+          log.warn("voice_speak_recovered", { engine, attempt, after: reasons.join("; ").slice(0, 200) });
+          // Said in the response too, so a probe can see a recovery without the server log.
+          r.headers.set("X-Voice-Recovered", encodeURIComponent(reasons.join("; ")).slice(0, 400));
+        }
+        return r;
+      }
+      reasons.push(`${engine}#${attempt}: ${r}`);
+      if (/not configured/.test(r)) break;
+      log.error("voice_speak_failed", new Error(r), { engine, attempt, locale, chars: text.length });
     }
-    reasons.push(r);
-    if (!/not configured/.test(r)) log.error("voice_speak_failed", new Error(r), { engine, locale, chars: text.length });
   }
   const detail = reasons.join("; ");
   return unavailable(detail, reasons.every((r) => /not configured/.test(r)) ? 501 : 502);
