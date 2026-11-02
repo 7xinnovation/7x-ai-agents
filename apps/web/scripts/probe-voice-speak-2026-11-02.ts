@@ -9,6 +9,9 @@
  * Exits 1 if any utterance fails, or if an engine was asked for and a
  * different one answered.
  */
+// Top-level await needs a module; this file imports nothing, so say so.
+export {};
+
 const args = process.argv.slice(2);
 const base = (args.find((a) => /^https?:\/\//.test(a)) ?? "https://7xagents.7x-lab.com").replace(/\/$/, "");
 const engineAt = args.indexOf("--engine");
