@@ -231,14 +231,59 @@ function pickMime(): string {
   return "";
 }
 
+/**
+ * MAY THIS HOST SHOW THE MICROPHONE BUTTON?
+ *
+ * WHY SpeechRecognition IS NOT ON THE LIST.
+ *
+ * The Emirates Post app runs this widget in a WebView, and a WebView is not the
+ * browser the Web Speech API lives in: an Android WebView exposes no
+ * `webkitSpeechRecognition` at all, and a WKWebView exposes the constructor but
+ * never raises the permission prompt behind it, so recognition quietly returns
+ * nothing. Requiring it hid the microphone button on the one host Emirates
+ * Post's customers actually use.
+ *
+ * It was never doing the real work. The turn is ended by the meter reading the
+ * microphone (see startMeter) and the words come from
+ * /api/nxn/voice/transcribe; on-device recognition is a transcript of last
+ * resort and a barge-in detector, and both degrade on their own — a missing
+ * recogniser leaves the tap on the voice bar as the way to interrupt.
+ *
+ * So the button needs a microphone, a recorder, and SOMETHING that can turn
+ * what it captures into words: the device's recogniser, or our server plus an
+ * AudioContext to drive the meter that ends the turn. A mic that records and
+ * sends nothing is worse than no button, so neither half may be assumed.
+ */
+export function micUsable(host: {
+  recognition: boolean;
+  recorder: boolean;
+  microphone: boolean;
+  nativeAllowed: boolean;
+  audioContext: boolean;
+  synthesis: boolean;
+  serverStt: boolean;
+}): boolean {
+  if (!host.recorder || !host.microphone || !host.nativeAllowed) return false;
+  // Something has to hear it, and something has to say the reply back.
+  const heard = host.recognition || (host.serverStt && host.audioContext);
+  const spoken = host.audioContext || host.synthesis;
+  return heard && spoken;
+}
+
 export function useVoiceChat(opts: {
   agentSlug: string;
   locale: Locale;
   messages: Msg[];
   streaming: boolean;
   send: (text: string) => void;
+  /**
+   * The server can turn recorded audio into words — AZURE_REALTIME_* is set, so
+   * /api/nxn/voice/transcribe answers. It is what makes voice possible on a host
+   * with no SpeechRecognition of its own; see `supported`.
+   */
+  serverStt?: boolean;
 }) {
-  const { locale, messages, streaming, send } = opts;
+  const { locale, messages, streaming, send, serverStt = false } = opts;
   const [active, setActive] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -274,14 +319,18 @@ export function useVoiceChat(opts: {
 
   const supported =
     typeof window !== "undefined" &&
-    ("SpeechRecognition" in window || "webkitSpeechRecognition" in window) &&
-    "MediaRecorder" in window &&
-    !!navigator.mediaDevices?.getUserMedia &&
-    // A WebView reports a microphone it may not be permitted to open; asking for
-    // one the app has no usage description for kills the app. See
-    // nativeVoiceAllowed.
-    nativeVoiceAllowed() &&
-    ("AudioContext" in window || "webkitAudioContext" in window || "speechSynthesis" in window);
+    micUsable({
+      recognition: "SpeechRecognition" in window || "webkitSpeechRecognition" in window,
+      recorder: "MediaRecorder" in window,
+      microphone: !!navigator.mediaDevices?.getUserMedia,
+      // A WebView reports a microphone it may not be permitted to open; asking
+      // for one the app has no usage description for kills the app. See
+      // nativeVoiceAllowed.
+      nativeAllowed: nativeVoiceAllowed(),
+      audioContext: "AudioContext" in window || "webkitAudioContext" in window,
+      synthesis: "speechSynthesis" in window,
+      serverStt,
+    });
 
   const stopRecognition = useCallback(() => {
     // Whatever is being captured is abandoned first: the meter, the recorder
@@ -382,8 +431,9 @@ export function useVoiceChat(opts: {
   // fallback), and end it when the meter above hears the customer stop.
   const listenOnce = useCallback(() => {
     if (!activeRef.current || speakingRef.current || streamingRef.current || busyRef.current || !micRef.current) return;
+    // May be undefined — a host without a recogniser still records, still has
+    // its turn ended by the meter, and is still transcribed by the server.
     const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
     busyRef.current = true;
     let fallback = "";
     /**
@@ -455,7 +505,7 @@ export function useVoiceChat(opts: {
      * its ending ends the turn.
      */
     const arm = () => {
-      if (finished || !activeRef.current) return;
+      if (!SR || finished || !activeRef.current) return;
       let rec: any;
       try { rec = new SR(); } catch { return; }
       recRef.current = rec;
