@@ -73,6 +73,15 @@ The bar a voice has to clear was lowered from 0.015 to 0.008 RMS, with the room 
 (speech must be 2.5× the quietest thing heard), and a sound now has to last 150 ms to count. A soft
 speaker on a phone at arm's length is heard; a keyboard click is not.
 
+### A recording nobody spoke in is not sent
+
+Found while verifying production: one second of pure silence, sent to `/api/nxn/voice/transcribe`,
+came back as *"How can I get a PO Box?"*. The transcriber is given the PO Box domain as a hint and,
+handed nothing to hear, hears the hint. A turn the meter closed for no-speech used to be
+transcribed and sent anyway, so a customer who sat quietly for fifteen seconds had a question
+they never asked answered at length. Now, when the meter heard no speech and the device
+recogniser heard no words either, nothing is sent and the microphone simply opens again.
+
 ### iOS
 
 Safari puts the audio context into an "interrupted" state on a phone call, Siri, a notification

@@ -579,7 +579,7 @@ export function useVoiceChat(opts: {
    * recogniser-driven endpointing is used unchanged. The recording is what
    * gets transcribed either way — the meter only decides when to stop it.
    */
-  const startMeter = useCallback((onEnd: () => void): boolean => {
+  const startMeter = useCallback((onEnd: (end: Exclude<MeterEnd, null>) => void): boolean => {
     const stream = micRef.current;
     if (!stream) return false;
     const ctx = audioContext();
@@ -617,7 +617,7 @@ export function useVoiceChat(opts: {
       const rms = Math.sqrt(sum / data.length);
       const r = meterStep(state, rms, Date.now());
       state = r.state;
-      if (r.end) { stop(); onEnd(); }
+      if (r.end) { stop(); onEnd(r.end); }
     }, METER_TICK_MS);
 
     meterStopRef.current = stop;
@@ -660,7 +660,19 @@ export function useVoiceChat(opts: {
     };
     cancelUtteranceRef.current = abandon;
 
-    const finish = async () => {
+    /**
+     * A RECORDING NOBODY SPOKE IN IS NOT SENT.
+     *
+     * Found 2 November, verifying production: one second of pure silence,
+     * transcribed, came back as "How can I get a PO Box?". The transcriber is
+     * given the domain as a hint and, handed nothing to hear, hears the hint.
+     * Until now a turn the meter closed for no-speech was still transcribed
+     * ("loses time, not words") — and so a customer who sat quietly for fifteen
+     * seconds had a question they never asked answered at length. When the
+     * meter heard no speech AND the device recogniser heard no words either,
+     * there is nothing to send; the microphone simply opens again.
+     */
+    const finish = async (end: MeterEnd | "recogniser" = "recogniser") => {
       if (finished) return;
       finished = true;
       meterStopRef.current?.();
@@ -672,6 +684,12 @@ export function useVoiceChat(opts: {
       let blob: Blob | null = null;
       if (recorder && recorder.state !== "inactive") {
         blob = await new Promise<Blob>((res) => { recorder.onstop = () => res(new Blob(chunks, { type: recorder.mimeType || mime || "audio/webm" })); try { recorder.stop(); } catch { res(new Blob(chunks)); } });
+      }
+      const heardNothing = end === "no-speech" && !fallback.trim() && !interim.trim();
+      if (heardNothing) {
+        busyRef.current = false;
+        if (activeRef.current && !speakingRef.current && !streamingRef.current) listenOnce();
+        return;
       }
       let text = "";
       if (blob && blob.size > 1400) {
@@ -689,7 +707,7 @@ export function useVoiceChat(opts: {
       if (!text && activeRef.current && !speakingRef.current && !streamingRef.current) listenOnce();
     };
 
-    const metered = startMeter(() => { void finish(); });
+    const metered = startMeter((end) => { void finish(end); });
 
     /**
      * The recogniser, re-armed as often as the browser drops it.

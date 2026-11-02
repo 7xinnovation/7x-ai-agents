@@ -146,6 +146,9 @@ console.log("\nThe hook");
   check("one gain node for the context's life — never disconnected per sentence", /gainRef\.current = ctx\.createGain\(\)/.test(hook) && !/gain\.disconnect\(\)/.test(hook));
   check("the audio context is asked back when iOS interrupts it, and when the page returns", /onstatechange/.test(hook) && /visibilitychange/.test(hook));
   check("the public API is unchanged", /return \{ supported, active, connecting: false, listening, speaking, error, toggle, interrupt \}/.test(hook));
+  // Found verifying production: a second of silence transcribed as "How can I get a PO Box?".
+  check("a turn the meter closed for no-speech, with no words from the recogniser either, is not transcribed or sent", /end === "no-speech" && !fallback\.trim\(\) && !interim\.trim\(\)/.test(hook) && /if \(heardNothing\) \{\s*busyRef\.current = false;/.test(hook));
+  check("the meter says why the turn ended", /onEnd\(r\.end\)/.test(hook) && /startMeter\(\(end\) => \{ void finish\(end\); \}\)/.test(hook));
   const exp = src("../app/embed/[agent]/Experience.tsx");
   check("the page hands the tool status to the voice", /useVoiceChat\(\{[^}]*toolStatus \}\)/.test(exp));
 }
