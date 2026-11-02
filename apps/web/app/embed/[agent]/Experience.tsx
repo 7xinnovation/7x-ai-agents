@@ -2690,7 +2690,7 @@ export function Experience({
   // Voice mode: speak the assistant's replies and turn the customer's speech into
   // chat messages (see useVoiceChat). Layered on the normal chat, not a separate
   // agent — voice input goes through the same send().
-  const voice = useVoiceChat({ agentSlug: agent.slug, locale, messages, streaming, send: (t) => void send(t) });
+  const voice = useVoiceChat({ agentSlug: agent.slug, locale, messages, streaming, send: (t) => void send(t), serverStt: agent.voiceEnabled === true });
 
   // Translate the on-screen transcript when the session language changes: any
   // message written in the other script is sent to /api/translate for the

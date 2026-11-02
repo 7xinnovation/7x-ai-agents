@@ -4597,6 +4597,53 @@ body {
   font-weight: 550;
 }
 
+/* Transaction tables (2 November 2026) -- seven columns, and the money and the
+   references have to line up to be read down the page. */
+.sa-txn .sa-tr {
+  grid-template-columns: 1.25fr 1fr 1.15fr 1fr 1fr 1.1fr 0.75fr;
+  font-size: 13px;
+}
+.sa-txn .sa-tr > span:last-child {
+  text-align: right;
+}
+.sa-nowrap {
+  white-space: nowrap;
+}
+.sa-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.sa-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  color: var(--muted);
+}
+.sa-tag.ok {
+  color: var(--ok, #067647);
+  border-color: color-mix(in srgb, var(--ok, #067647) 35%, transparent);
+  background: color-mix(in srgb, var(--ok, #067647) 8%, transparent);
+}
+.sa-tag.bad {
+  color: var(--danger, #d92d20);
+  border-color: color-mix(in srgb, var(--danger, #d92d20) 35%, transparent);
+  background: color-mix(in srgb, var(--danger, #d92d20) 8%, transparent);
+}
+@media (max-width: 900px) {
+  .sa-txn .sa-tr {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 4px;
+  }
+  .sa-txn .sa-th {
+    display: none;
+  }
+}
+
 /* Tabs */
 .sa-tabs {
   display: flex;

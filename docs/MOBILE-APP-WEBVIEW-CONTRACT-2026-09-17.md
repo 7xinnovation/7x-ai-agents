@@ -89,8 +89,8 @@ with no `NSMicrophoneUsageDescription` in its `Info.plist`.
 app around it is permitted to record, so the feature test the mic button used
 could not tell the difference — the page found out by taking the app down.
 
-**The mic is now off inside a native host by default.** To turn it on, once the
-app has both the usage description and a WebView delegate that grants the
+**The mic is off inside a native host by default.** To turn it on, once the app
+has both the usage description and a WebView delegate that grants the
 permission:
 
 ```js
@@ -99,6 +99,43 @@ window.__dialogNativeVoice = true;   // before the page's scripts run
 
 Until then the button is simply not there, which is better than a button that
 ends the session.
+
+### What the app needs before it sets that (2026-11-02)
+
+Asked for again — Emirates Post want customers to be able to speak to the agent
+in the app. Our half is done; this is the app's half, and it is the whole of it:
+
+**iOS**
+- `NSMicrophoneUsageDescription` in `Info.plist`. Without it the OS kills the
+  process, which is the crash above.
+- Grant the WebView's request:
+  `webView(_:requestMediaCapturePermissionFor:initiatedByFrame:type:decisionHandler:)`
+  → `.grant` (iOS 15+). Unanswered, the page simply never gets a microphone.
+
+**Android**
+- `RECORD_AUDIO` in the manifest *and* requested at runtime.
+- `WebChromeClient.onPermissionRequest` → `request.grant(request.getResources())`
+  for `RESOURCE_AUDIO_CAPTURE`. An Android WebView denies it by default and
+  reports nothing, so this is not optional.
+
+Then `window.__dialogNativeVoice = true` before the page's scripts run, the same
+place the sign-in token is set. Nothing is needed from us to switch it on, and
+nothing in a browser changes.
+
+### The other reason it was missing — fixed on our side
+
+The button also required the browser's own `SpeechRecognition`, and a WebView is
+not the browser that API lives in: an **Android WebView exposes none at all**, and
+a **WKWebView exposes the constructor but never raises the prompt behind it**, so
+recognition quietly returns nothing. The button would have stayed hidden on
+Android even with the permission granted and the global set.
+
+That requirement is gone. It was never doing the work: the turn is ended by a
+meter reading the microphone level, the words come back from our server
+(`/api/nxn/voice/transcribe`), and on-device recognition was only a transcript of
+last resort plus the barge-in detector. Where there is no recogniser, speaking
+over the assistant no longer interrupts it — **a tap on the voice bar still
+does**, and that is the only difference a customer can see.
 
 ---
 
