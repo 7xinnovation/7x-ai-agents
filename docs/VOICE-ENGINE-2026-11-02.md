@@ -101,6 +101,28 @@ The bar a voice has to clear was lowered from 0.015 to 0.008 RMS, with the room 
 (speech must be 2.5× the quietest thing heard), and a sound now has to last 150 ms to count. A soft
 speaker on a phone at arm's length is heard; a keyboard click is not.
 
+### Noise in the room (evening)
+
+"Sometimes if there was noise in the room it stops talking." Two gates, both pure functions with
+tests (`scripts/test-voice-noise-2026-11-02.ts`):
+
+- **The interrupt needs a speaker near the microphone, not just words.** While Mira speaks the
+  microphone level is read as well; her words are interrupted only if the recogniser hears words
+  that are not hers AND the level says the speaker is close — four times the quietest level heard
+  while she speaks, never under 0.03, on six of the last twenty readings. Chatter across the
+  office, a cough, and what echo cancellation leaves of her own voice do not clear it. The tap
+  always does. Automatic gain control is now off (it lifted a quiet room to speaking level) and
+  voice isolation is requested where the platform offers it.
+- **Noise is not a message.** The transcriber is asked for token confidences. Measured: real
+  speech averages about -0.01; silence, hiss and hum score -0.3 to -1.7 and come back as the hint's
+  own phrases. A transcript under the bar, a short unsure one, or one made only of the hint's
+  vocabulary with middling confidence is returned as empty text with `X-Transcribe-Rejected`; the
+  scores ride in `X-Transcribe-Confidence` either way so the bar can be tuned from real
+  customers. The hint is now a vocabulary of names and terms in the conversation's language
+  (`?lang=ar|en`), not sentences the model can echo.
+- The turn meter's bar rose from 0.008 to 0.012 with a 250 ms sustain, and the microphone reopens
+  300 ms after Mira's last word rather than at once.
+
 ### A recording nobody spoke in is not sent
 
 Found while verifying production: one second of pure silence, sent to `/api/nxn/voice/transcribe`,

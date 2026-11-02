@@ -282,10 +282,10 @@ const METER_TICK_MS = 50;
  * half times the quietest thing heard — and a sound has to LAST to count (see
  * SPEECH_SUSTAIN_TICKS), so a lower bar does not make a keyboard a customer.
  */
-const SPEECH_RMS = 0.008;
+const SPEECH_RMS = 0.012;
 const SPEECH_OVER_FLOOR = 2.5;
-/** Consecutive loud readings before the customer is taken to have spoken: 150 ms. */
-const SPEECH_SUSTAIN_TICKS = 3;
+/** Consecutive loud readings before the customer is taken to have spoken: 250 ms. */
+const SPEECH_SUSTAIN_TICKS = 5;
 const NOISE_FLOOR_MIN = 0.0008;
 /** However loud the room is, the bar stops here — well under a speaking voice. */
 const NOISE_FLOOR_MAX = 0.02;
@@ -335,6 +335,46 @@ export function meterStep(state: MeterState, rms: number, now: number): { state:
   if (elapsed >= MAX_UTTERANCE_MS) return { state: next, end: "too-long" };
   return { state: next, end: null };
 }
+
+/**
+ * NOISE IN THE ROOM IS NOT THE CUSTOMER.
+ *
+ * Reported 2 November: "sometimes if there was noise in the room it stops
+ * talking." The interrupt detector compares WORDS — what the recogniser hears
+ * against what Mira is saying — and a colleague talking across the office
+ * brings words of their own. Words alone cannot tell near from far. Level can:
+ * a customer talking to the microphone is many times louder at it than anyone
+ * across the room, and than whatever of Mira's own voice echo cancellation
+ * leaves behind. So while Mira speaks the microphone level is read as well,
+ * and the words count only if the level says the speaker is close.
+ *
+ * The bar is the quietest level heard while she speaks, times four, and
+ * never under NEAR_RMS; it has to be cleared on six of the last twenty
+ * readings (a second) — a cough clears one. Pure, and tested without a
+ * microphone: see test-voice-noise-2026-11-02.
+ */
+export const NEAR_RMS = 0.03;
+export const NEAR_OVER_FLOOR = 4;
+export const NEAR_WINDOW = 20;
+export const NEAR_NEEDED = 6;
+
+export interface NearState { floor: number; recent: boolean[] }
+
+export function newNearState(): NearState {
+  return { floor: NOISE_FLOOR_MAX, recent: [] };
+}
+
+/** One reading of the microphone level while Mira speaks: is someone close by talking? */
+export function nearStep(state: NearState, rms: number): { state: NearState; near: boolean } {
+  const floor = Math.min(state.floor, Math.max(rms, NOISE_FLOOR_MIN));
+  const loud = rms > Math.max(NEAR_RMS, floor * NEAR_OVER_FLOOR);
+  const recent = [...state.recent, loud].slice(-NEAR_WINDOW);
+  const near = recent.filter(Boolean).length >= NEAR_NEEDED;
+  return { state: { floor, recent }, near };
+}
+
+/** How long after Mira's last word the microphone opens: her tail is not the customer. */
+const REOPEN_MS = 300;
 
 function pickMime(): string {
   const MR = typeof window !== "undefined" ? (window as any).MediaRecorder : undefined;
@@ -477,6 +517,10 @@ export function useVoiceChat(opts: {
   const bargeRecRef = useRef<any>(null);
   const spokenTextRef = useRef("");
   const bargeHitsRef = useRef(0);
+  // The near-field gate: whether someone close to the microphone is talking
+  // right now, read while Mira speaks, and how to stop reading it.
+  const nearRef = useRef<(() => boolean) | null>(null);
+  const nearStopRef = useRef<(() => void) | null>(null);
   const warnedRef = useRef(false);
   // The microphone meter that decides when the customer has finished speaking,
   // and the one source node the analyser hangs off.
@@ -624,6 +668,40 @@ export function useVoiceChat(opts: {
     return true;
   }, [audioContext]);
 
+  /** The microphone level while Mira speaks, for the barge-in's near-field gate. */
+  const startNearMeter = useCallback(() => {
+    nearStopRef.current?.();
+    const stream = micRef.current;
+    const ctx = stream ? audioContext() : null;
+    if (!ctx || !stream) { nearRef.current = null; return; }
+    let analyser: AnalyserNode;
+    try {
+      if (!micSourceRef.current) micSourceRef.current = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0;
+      micSourceRef.current.connect(analyser);
+    } catch { nearRef.current = null; return; }
+    const data = new Uint8Array(analyser.fftSize);
+    let state = newNearState();
+    let near = false;
+    const timer = setInterval(() => {
+      try { analyser.getByteTimeDomainData(data); } catch { return; }
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) { const v = ((data[i] ?? 128) - 128) / 128; sum += v * v; }
+      const r = nearStep(state, Math.sqrt(sum / data.length));
+      state = r.state;
+      near = r.near;
+    }, METER_TICK_MS);
+    nearRef.current = () => near;
+    nearStopRef.current = () => {
+      clearInterval(timer);
+      try { micSourceRef.current?.disconnect(analyser); } catch { /* already gone */ }
+      nearRef.current = null;
+      nearStopRef.current = null;
+    };
+  }, [audioContext]);
+
   // One utterance: record it while the recogniser transcribes alongside (as a
   // fallback), and end it when the meter above hears the customer stop.
   const listenOnce = useCallback(() => {
@@ -694,7 +772,7 @@ export function useVoiceChat(opts: {
       let text = "";
       if (blob && blob.size > 1400) {
         try {
-          const r = await fetch("/api/nxn/voice/transcribe", { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
+          const r = await fetch(`/api/nxn/voice/transcribe?lang=${localeRef.current === "ar" ? "ar" : "en"}`, { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
           if (r.ok) text = ((await r.json())?.text ?? "").trim();
         } catch { /* fall back below */ }
       }
@@ -769,6 +847,7 @@ export function useVoiceChat(opts: {
 
   /** The barge-in recogniser, off. */
   const stopBargeListener = useCallback(() => {
+    nearStopRef.current?.();
     const rec = bargeRecRef.current;
     bargeRecRef.current = null;
     bargeHitsRef.current = 0;
@@ -813,7 +892,9 @@ export function useVoiceChat(opts: {
         heard += " " + (results[i]?.[0]?.transcript ?? "");
         if (results[i]?.isFinal) isFinal = true;
       }
-      if (heardTheCustomer(heard, spokenTextRef.current)) {
+      // Words that are not Mira's, from someone close to the microphone. The
+      // level gate is skipped only where it could not be built at all.
+      if (heardTheCustomer(heard, spokenTextRef.current) && (nearRef.current ? nearRef.current() : true)) {
         // Once could be a name misheard; a person keeps going.
         bargeHitsRef.current += 1;
         if (isFinal || bargeHitsRef.current >= BARGE_CONFIRMATIONS) interrupt();
@@ -841,7 +922,7 @@ export function useVoiceChat(opts: {
     ttsAbortRef.current = null;
     ttsSourcesRef.current = [];
     spokenTextRef.current = "";
-    if (activeRef.current && !streamingRef.current) listenOnce();
+    if (activeRef.current && !streamingRef.current) setTimeout(listenOnce, REOPEN_MS);
   }, [stopBargeListener, listenOnce]);
 
   /**
@@ -995,10 +1076,11 @@ export function useVoiceChat(opts: {
       setSpeaking(true);
       bargeHitsRef.current = 0;
       cursorRef.current = 0;
+      if (autoBargeIn()) startNearMeter();
       startBargeListener();
     }
     void pump();
-  }, [stopRecognition, startBargeListener, pump]);
+  }, [stopRecognition, startBargeListener, startNearMeter, pump]);
 
   const cleanup = useCallback(() => {
     stopRecognition();
@@ -1052,7 +1134,13 @@ export function useVoiceChat(opts: {
       setHostRefusal(null);
     }
     try {
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      // Echo cancellation and noise suppression on; automatic gain OFF, because
+      // a gain that lifts a quiet room to speaking level is exactly what makes
+      // chatter across the office look like a customer at the microphone;
+      // voice isolation where the platform offers it (ignored where it does not).
+      const mic = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, voiceIsolation: true } as MediaTrackConstraints,
+      });
       if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
       micRef.current = mic;
       // Opening the microphone is one of the things that interrupts the audio

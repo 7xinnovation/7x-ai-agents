@@ -98,15 +98,15 @@ console.log("\nThe meter: a soft speaker is heard, a click is not");
     }
     return { endedAt: null, reason: null };
   };
-  const soft = run([[0.004, 300], [0.012, 3000], [0.004, 3000]]);
+  const soft = run([[0.004, 300], [0.018, 3000], [0.004, 3000]]);
   check("a soft speaker in a quiet room is speech", soft.reason === "silence", soft);
   check("and the turn ends 2s after they stop", soft.endedAt !== null && Math.abs(soft.endedAt - 5300) <= 100, soft);
   const noisy = run([[0.012, 20000]]);
   check("the same level with no quiet under it is a noisy room, not speech", noisy.reason === "no-speech", noisy);
   const click = run([[0.004, 300], [0.09, 100], [0.004, 20000]]);
   check("a 100 ms click is not speech", click.reason === "no-speech" && click.endedAt === 15000, click);
-  const word = run([[0.004, 300], [0.09, 200], [0.004, 5000]]);
-  check("200 ms of voice is", word.reason === "silence", word);
+  const word = run([[0.004, 300], [0.09, 300], [0.004, 5000]]);
+  check("300 ms of voice is", word.reason === "silence", word);
 }
 
 console.log("\nAzure Speech: the protocol");
