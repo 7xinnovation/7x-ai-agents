@@ -41,10 +41,19 @@ export interface NativeEvent {
    * "handoff"  — a fresh sign-in code, carrying `handoff`. Sent unprompted when
    *              the app has one, or in answer to our "signin-needed".
    * "voice-allowed" / "voice-denied" — the answer to "mic-permission", once the
-   *              customer has seen the OS dialog. See askNativeForMic.
+   *              customer has seen the OS dialog. A denial may carry `reason`,
+   *              which decides what the customer is told. See askNativeForMic.
    */
   action: string;
   url?: string;
+  /**
+   * Why a "voice-denied" was denied, from the host (2 November, their mobile
+   * developer): "denied" is a no right now, "blocked" is turned off in the OS
+   * settings and only changeable there, "unavailable" is no microphone at all.
+   * The three are three different sentences to a customer, and the last one is
+   * the only one where asking again is pointless.
+   */
+  reason?: "denied" | "blocked" | "unavailable";
   /** A short-lived sign-in code, on a "handoff" event. */
   handoff?: string;
 }
@@ -187,25 +196,33 @@ export function nativeVoiceMode(): NativeVoiceMode {
  * refusal, because the alternative is reaching for a microphone on a maybe,
  * and on iOS a maybe is a crash.
  */
-export function askNativeForMic(timeoutMs = 30000): Promise<boolean> {
-  if (typeof window === "undefined") return Promise.resolve(false);
-  if (nativeVoiceMode() !== "ask") return Promise.resolve(nativeVoiceMode() === "on");
-  return new Promise<boolean>((resolve) => {
+export interface MicAnswer {
+  granted: boolean;
+  /** Only on a refusal; "denied" when the host did not say. */
+  reason?: "denied" | "blocked" | "unavailable";
+}
+
+export function askNativeForMic(timeoutMs = 30000): Promise<MicAnswer> {
+  if (typeof window === "undefined") return Promise.resolve({ granted: false, reason: "denied" });
+  const mode = nativeVoiceMode();
+  if (mode !== "ask") return Promise.resolve(mode === "on" ? { granted: true } : { granted: false, reason: "denied" });
+  return new Promise<MicAnswer>((resolve) => {
     let settled = false;
-    const done = (ok: boolean) => {
+    const done = (answer: MicAnswer) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
       window.removeEventListener("dialog-native", listener);
-      resolve(ok);
+      resolve(answer);
     };
     const listener = (e: Event) => {
       const detail = (e as CustomEvent).detail as NativeEvent | undefined;
-      if (detail?.action === "voice-allowed") done(true);
-      else if (detail?.action === "voice-denied") done(false);
+      if (detail?.action === "voice-allowed") done({ granted: true });
+      else if (detail?.action === "voice-denied") done({ granted: false, reason: detail.reason ?? "denied" });
     };
     window.addEventListener("dialog-native", listener);
-    const timer = window.setTimeout(() => done(false), timeoutMs);
+    // A host that never answers is a refusal, not a maybe — see above.
+    const timer = window.setTimeout(() => done({ granted: false, reason: "denied" }), timeoutMs);
     postNative({ action: "mic-permission" });
   });
 }

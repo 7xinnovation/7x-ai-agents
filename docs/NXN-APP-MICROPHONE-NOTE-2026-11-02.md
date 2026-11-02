@@ -115,10 +115,27 @@ webView.injectJavaScript(`window.dispatchEvent(new CustomEvent('dialog-native',
   { detail: { action: 'voice-allowed' } }));`);   // or 'voice-denied'
 ```
 
-The microphone is not touched until that arrives. No answer within 30 seconds is
-read as a no — the page says "Microphone access is needed" rather than reaching
-for a mic on a maybe, which on iOS is the crash above. Once granted, it is not
-asked again for the rest of that chat.
+A denial may say why, and it changes what the customer reads:
+
+```js
+{ action: 'voice-denied', reason: 'denied' | 'blocked' | 'unavailable' }
+```
+
+- `denied` — a no right now. "Microphone access is needed. Allow it and try again."
+- `blocked` — turned off in the OS settings. The customer is pointed at Settings
+  rather than invited to try again, because the OS will not ask twice.
+- `unavailable` — no microphone at all. The button is withdrawn for the rest of
+  the session; there is nothing to grant.
+
+A `voice-denied` with no reason is read as `denied`.
+
+**The order is guaranteed.** In `"ask"` mode the page does not call
+`getUserMedia` until `voice-allowed` arrives, so the WebView's own permission
+request can be granted silently and the customer sees ONE prompt — yours. The
+microphone is not touched until that arrives, and no answer within 30 seconds is
+read as a no, which on iOS is the difference between a message and a crash. Once
+granted, it is not asked again for the rest of that chat — but answer every
+`mic-permission` you do receive, since a reloaded chat starts again.
 
 With neither value set the button is simply not there, which is better than a
 button that ends the session.

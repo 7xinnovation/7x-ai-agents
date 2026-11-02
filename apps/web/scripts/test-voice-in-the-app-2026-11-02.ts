@@ -17,7 +17,7 @@
  *
  * Run from apps/web:  npx tsx scripts/test-voice-in-the-app-2026-11-02.ts
  */
-import { micUsable } from "../app/embed/[agent]/useVoiceChat";
+import { micUsable, micRefusal } from "../app/embed/[agent]/useVoiceChat";
 import { voiceMode } from "../app/embed/[agent]/nativeBridge";
 
 let pass = 0, fail = 0;
@@ -64,6 +64,16 @@ check("\"ask\" shows the button and waits for the tap to be answered", voiceMode
 check("a half-written flag is not a yes", voiceMode(true, "yes") === "off");
 check("and neither is a truthy object", voiceMode(true, {}) === "off");
 check("both ways show the button", micUsable({ ...androidWebView, nativeAllowed: voiceMode(true, "ask") !== "off" }) === true);
+
+console.log("\nwhat a refusal says (their developer's three reasons)");
+check("a no right now invites another try", /try again/i.test(micRefusal("denied", "en")));
+check("turned off in Settings does NOT, because the OS will not ask again",
+  /settings/i.test(micRefusal("blocked", "en")) && !/try again/i.test(micRefusal("blocked", "en")));
+check("no microphone at all says so", /no microphone/i.test(micRefusal("unavailable", "en")));
+check("and all three are said in Arabic too",
+  ["denied", "blocked", "unavailable"].every((r) => /[\u0600-\u06FF]/.test(micRefusal(r as "denied", "ar"))));
+check("the three are three different sentences",
+  new Set(["denied", "blocked", "unavailable"].map((r) => micRefusal(r as "denied", "en"))).size === 3);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

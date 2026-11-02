@@ -232,6 +232,26 @@ function pickMime(): string {
 }
 
 /**
+ * WHAT A REFUSED MICROPHONE IS TOLD TO THE CUSTOMER.
+ *
+ * Their mobile developer asked whether a denial should carry a reason, and it
+ * should: these are three different situations and only one of them is worth
+ * trying again in the same breath. "blocked" is the one that matters — the OS
+ * will not ask again, so a customer told to "allow it and try again" is being
+ * sent to a dialog that will never appear.
+ */
+export function micRefusal(reason: "denied" | "blocked" | "unavailable", locale: Locale): string {
+  if (locale === "ar") {
+    if (reason === "blocked") return "الوصول إلى الميكروفون موقوف لهذا التطبيق. يمكن تفعيله من إعدادات الجهاز.";
+    if (reason === "unavailable") return "لا يتوفر ميكروفون على هذا الجهاز.";
+    return "نحتاج إذن الميكروفون. يرجى السماح به والمحاولة مرة أخرى.";
+  }
+  if (reason === "blocked") return "Microphone access is turned off for this app. You can turn it on in your device settings.";
+  if (reason === "unavailable") return "There is no microphone available on this device.";
+  return "Microphone access is needed. Allow it and try again.";
+}
+
+/**
  * MAY THIS HOST SHOW THE MICROPHONE BUTTON?
  *
  * WHY SpeechRecognition IS NOT ON THE LIST.
@@ -288,6 +308,8 @@ export function useVoiceChat(opts: {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState("");
+  /** The host's last refusal, when it gave one. */
+  const [hostRefusal, setHostRefusal] = useState<"denied" | "blocked" | "unavailable" | null>(null);
 
   const activeRef = useRef(false);
   const streamingRef = useRef(false);
@@ -319,6 +341,9 @@ export function useVoiceChat(opts: {
 
   const supported =
     typeof window !== "undefined" &&
+    // "unavailable" from the host is final for this session: there is no
+    // microphone to grant, so the button has nothing to open.
+    hostRefusal !== "unavailable" &&
     micUsable({
       recognition: "SpeechRecognition" in window || "webkitSpeechRecognition" in window,
       recorder: "MediaRecorder" in window,
@@ -797,13 +822,16 @@ export function useVoiceChat(opts: {
      * maybe is the crash this whole gate exists for.
      */
     if (nativeVoiceMode() === "ask" && !nativeMicGranted.current) {
-      const granted = await askNativeForMic();
+      const answer = await askNativeForMic();
       if (!activeRef.current) return;
-      if (!granted) {
-        setError("Microphone access is needed. Allow it and try again.");
+      if (!answer.granted) {
+        const why = answer.reason ?? "denied";
+        setHostRefusal(why);
+        setError(micRefusal(why, locale));
         return;
       }
       nativeMicGranted.current = true;
+      setHostRefusal(null);
     }
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
@@ -814,7 +842,7 @@ export function useVoiceChat(opts: {
       setError("Microphone access is needed. Allow it and try again.");
       // keep active so the error stays visible; user taps Turn off
     }
-  }, [supported, messages.length, cleanup, listenOnce]);
+  }, [supported, messages.length, cleanup, listenOnce, locale]);
 
   // Pause the mic while the agent responds; speak each new reply.
   useEffect(() => {
