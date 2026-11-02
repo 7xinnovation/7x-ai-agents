@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 /**
@@ -121,6 +122,7 @@ export function Stat({
   deltaUnit = "%",
   upIsGood = true,
   tone,
+  href,
 }: {
   label: string;
   value: string | number;
@@ -130,12 +132,21 @@ export function Stat({
   deltaUnit?: "%" | " pts";
   upIsGood?: boolean;
   tone?: "pos" | "warn" | "crit";
+  /**
+   * Where the rows behind this number live. A count with nowhere to go is the
+   * thing Emirates Post reported on 2 November — "39 journeys completed with no
+   * information about any of them" — so a stat that HAS a list says so.
+   */
+  href?: string;
 }) {
   const shown = typeof value === "number" ? compact(value) : value;
   const good = delta == null ? null : delta === 0 ? null : delta > 0 === upIsGood;
-  return (
-    <div className="rounded-xl border border-[var(--color-line)] bg-surface p-4 shadow-[var(--shadow-xs)]">
-      <div className="text-[12px] font-medium text-muted">{label}</div>
+  const card = (
+    <>
+      <div className="text-[12px] font-medium text-muted">
+        {label}
+        {href ? <span className="ml-1 text-ink-2">→</span> : null}
+      </div>
       <div
         className="mt-1 text-[26px] font-bold tracking-tight"
         style={{ color: tone === "pos" ? POS : tone === "warn" ? WARN : tone === "crit" ? CRIT : "var(--color-ink)" }}
@@ -150,7 +161,15 @@ export function Stat({
         </div>
       )}
       {sub && <div className="mt-0.5 text-[12px] text-muted">{sub}</div>}
-    </div>
+    </>
+  );
+  const box = "rounded-xl border border-[var(--color-line)] bg-surface p-4 shadow-[var(--shadow-xs)]";
+  return href ? (
+    <Link href={href} className={`${box} block transition-colors hover:border-[var(--color-ink-3,var(--color-line))]`}>
+      {card}
+    </Link>
+  ) : (
+    <div className={box}>{card}</div>
   );
 }
 
