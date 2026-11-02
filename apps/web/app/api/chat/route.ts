@@ -71,6 +71,7 @@ import { messageLocale, historyLocale } from "@/lib/replyLocale";
 import { narrationGuard, durationChosen, durationRequested } from "@/lib/narrationGuard";
 import { echoGuard } from "@/lib/echoGuard";
 import { identityGuard, identityValues } from "@/lib/identityGuard";
+import { internalsGuard } from "@/lib/internalsGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -3516,6 +3517,13 @@ export async function POST(req: NextRequest) {
          * when the document is read, and the same reply then mentions it.
          */
         const idMask = identityGuard(() => identityValues((liveState ?? session.state)?.data as Record<string, unknown>));
+        /**
+         * The last thing between the model and the customer: a sentence that
+         * names a field, an Apex class or the shape of our own request is
+         * withheld whole. Outermost on purpose — it judges the text every other
+         * guard has finished with, which is the text that would be on screen.
+         */
+        const internals = internalsGuard();
         // An Arabic reply links to the Arabic pages, whatever the model reached for.
         // THE WIDGET'S OWN WORDS FOLLOW THE CONVERSATION.
         //
@@ -3851,13 +3859,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped))))))))))));
+            const out = internals.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))))))));
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
+            const held = internals.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -3866,7 +3874,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            ))))))) + idMask.flush();
+            ))))))) + idMask.flush());
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -3999,7 +4007,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
+          const rest = internals.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -4007,8 +4015,14 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush();
+          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush()) + internals.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
+          // A withheld sentence is a rule the model did not keep, and the only
+          // way we would ever know is here: the customer never sees it and the
+          // transcript never holds it.
+          if (internals.dropped()) {
+            log.warn("internals_withheld", { agentId: agent.id, conversationId: session.conversationId, sentences: internals.dropped() });
+          }
         }
         if (!finalText.trim() && doneMessage) finalText = doneMessage;
         // What this turn actually did, for a machine caller; the widget ignores it.
