@@ -77,17 +77,51 @@ is needed from us.
   An Android WebView denies this by default and reports nothing back to the
   page, so it is not optional.
 
-### 3. The switch
+### 3. The switch — and when you ask for the permission
 
-Once both of the above are in the build, set this global **before the page's
+> *"The mic permission needs to be requested before use, the best way to trigger
+> this request is when the mic button is clicked. The simplest way is to request
+> it before opening the chat."* — 2 November
+
+Both work, and the difference is one value. Set this global **before the page's
 scripts run** — the same place the app already sets the sign-in token:
 
+**A — you ask at launch (the simple one).** Request the permission before
+opening the chat; if the customer grants it:
+
 ```js
-window.__dialogNativeVoice = true;
+window.__dialogNativeVoice = true;   // permission already granted
 ```
 
-The microphone button then appears in the chat composer. Until it is set, the
-button is simply not there, which is better than a button that ends the session.
+The page then opens the microphone itself, exactly as it does in a browser.
+
+**B — you ask on the tap (the one you prefer).**
+
+```js
+window.__dialogNativeVoice = "ask";  // I will ask when they tap
+```
+
+The button is shown, and on the tap the page sends you
+
+```json
+{ "source": "dialog-native", "action": "mic-permission" }
+```
+
+through `window.ReactNativeWebView.postMessage` — the same channel as
+`signin-needed`. Put the OS dialog up, then tell the page what happened:
+
+```js
+webView.injectJavaScript(`window.dispatchEvent(new CustomEvent('dialog-native',
+  { detail: { action: 'voice-allowed' } }));`);   // or 'voice-denied'
+```
+
+The microphone is not touched until that arrives. No answer within 30 seconds is
+read as a no — the page says "Microphone access is needed" rather than reaching
+for a mic on a maybe, which on iOS is the crash above. Once granted, it is not
+asked again for the rest of that chat.
+
+With neither value set the button is simply not there, which is better than a
+button that ends the session.
 
 ---
 

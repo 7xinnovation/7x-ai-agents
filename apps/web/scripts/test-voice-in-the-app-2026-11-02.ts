@@ -18,6 +18,7 @@
  * Run from apps/web:  npx tsx scripts/test-voice-in-the-app-2026-11-02.ts
  */
 import { micUsable } from "../app/embed/[agent]/useVoiceChat";
+import { voiceMode } from "../app/embed/[agent]/nativeBridge";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean) => {
@@ -54,6 +55,15 @@ check("no recorder, no button", micUsable({ ...browser, recorder: false }) === f
 check("no getUserMedia, no button", micUsable({ ...browser, microphone: false }) === false);
 check("nothing can speak the reply back, no button", micUsable({ ...browser, audioContext: false, synthesis: false }) === false);
 check("speechSynthesis alone can speak the reply for a host with a recogniser", micUsable({ ...browser, audioContext: false }) === true);
+
+console.log("\nwhen the app asks for the permission (their developer, 2 November)");
+check("a browser is never waiting on an app", voiceMode(false, undefined) === "on");
+check("an app that says nothing gets no microphone", voiceMode(true, undefined) === "off");
+check("true still means the permission is already granted", voiceMode(true, true) === "on");
+check("\"ask\" shows the button and waits for the tap to be answered", voiceMode(true, "ask") === "ask");
+check("a half-written flag is not a yes", voiceMode(true, "yes") === "off");
+check("and neither is a truthy object", voiceMode(true, {}) === "off");
+check("both ways show the button", micUsable({ ...androidWebView, nativeAllowed: voiceMode(true, "ask") !== "off" }) === true);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

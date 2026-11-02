@@ -40,6 +40,8 @@ export interface NativeEvent {
    * "returned" — the customer is back from a payment page.
    * "handoff"  — a fresh sign-in code, carrying `handoff`. Sent unprompted when
    *              the app has one, or in answer to our "signin-needed".
+   * "voice-allowed" / "voice-denied" — the answer to "mic-permission", once the
+   *              customer has seen the OS dialog. See askNativeForMic.
    */
   action: string;
   url?: string;
@@ -145,9 +147,67 @@ export function nativeHandoff(): string | undefined {
  * the ordinary feature test decides.
  */
 export function nativeVoiceAllowed(): boolean {
-  if (typeof window === "undefined") return false;
-  if (!isNative()) return true;
-  return (window as unknown as { __dialogNativeVoice?: unknown }).__dialogNativeVoice === true;
+  return nativeVoiceMode() !== "off";
+}
+
+/**
+ * "off"  — no microphone here; the button is not shown.
+ * "on"   — the permission is already granted; open the mic as a browser would.
+ * "ask"  — the app will ask the customer for the permission WHEN THEY TAP, and
+ *          the mic is not opened until it says yes. See askNativeForMic.
+ *
+ * Their mobile developer, 2 November: "The mic permission needs to be requested
+ * before use, the best way to trigger this request is when the mic button is
+ * clicked. The simplest way is to request it before opening the chat." Both are
+ * supported — "on" is the simple one, "ask" is the one they prefer — and the
+ * difference is one value, not a different integration.
+ */
+export type NativeVoiceMode = "off" | "ask" | "on";
+
+/** The mode, from a flag only a native host sets. A browser is always "on". */
+export function voiceMode(native: boolean, flag: unknown): NativeVoiceMode {
+  if (!native) return "on";
+  if (flag === true || flag === "on" || flag === "granted") return "on";
+  if (flag === "ask") return "ask";
+  return "off";
+}
+
+export function nativeVoiceMode(): NativeVoiceMode {
+  if (typeof window === "undefined") return "off";
+  return voiceMode(isNative(), (window as unknown as { __dialogNativeVoice?: unknown }).__dialogNativeVoice);
+}
+
+/**
+ * Ask the app to put the OS permission dialog in front of the customer, now,
+ * because they have just tapped the microphone.
+ *
+ * The app answers by dispatching the usual `dialog-native` event with
+ * `{ action: "voice-allowed" }` or `{ action: "voice-denied" }`. Anything else
+ * — an app that never answers, a host that has gone away — times out as a
+ * refusal, because the alternative is reaching for a microphone on a maybe,
+ * and on iOS a maybe is a crash.
+ */
+export function askNativeForMic(timeoutMs = 30000): Promise<boolean> {
+  if (typeof window === "undefined") return Promise.resolve(false);
+  if (nativeVoiceMode() !== "ask") return Promise.resolve(nativeVoiceMode() === "on");
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("dialog-native", listener);
+      resolve(ok);
+    };
+    const listener = (e: Event) => {
+      const detail = (e as CustomEvent).detail as NativeEvent | undefined;
+      if (detail?.action === "voice-allowed") done(true);
+      else if (detail?.action === "voice-denied") done(false);
+    };
+    window.addEventListener("dialog-native", listener);
+    const timer = window.setTimeout(() => done(false), timeoutMs);
+    postNative({ action: "mic-permission" });
+  });
 }
 
 /** Every window this widget has opened natively, so the host can close them. */

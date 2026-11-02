@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Locale } from "@dialog/config";
-import { nativeVoiceAllowed } from "./nativeBridge";
+import { nativeVoiceAllowed, nativeVoiceMode, askNativeForMic } from "./nativeBridge";
 
 /**
  * Voice mode as an I/O layer over the normal text chat (not a separate agent):
@@ -762,6 +762,9 @@ export function useVoiceChat(opts: {
     setListening(false);
   }, [stopRecognition, stopBargeListener, stopRealtimeAudio]);
 
+  /** The app has already put the OS dialog in front of this customer. */
+  const nativeMicGranted = useRef(false);
+
   const toggle = useCallback(async () => {
     if (!supported) return;
     if (activeRef.current) { activeRef.current = false; setActive(false); setError(""); cleanup(); return; }
@@ -784,6 +787,24 @@ export function useVoiceChat(opts: {
       }
       if (audioCtxRef.current?.state === "suspended") void audioCtxRef.current.resume();
     } catch { /* ignore */ }
+    /**
+     * ASKING THE APP FIRST.
+     *
+     * In "ask" mode the app has the usage description but has not yet put the
+     * OS permission dialog in front of the customer, and wants to do it on the
+     * tap rather than at launch. So the tap goes to the app, and the
+     * microphone is not touched until it answers yes — a getUserMedia on a
+     * maybe is the crash this whole gate exists for.
+     */
+    if (nativeVoiceMode() === "ask" && !nativeMicGranted.current) {
+      const granted = await askNativeForMic();
+      if (!activeRef.current) return;
+      if (!granted) {
+        setError("Microphone access is needed. Allow it and try again.");
+        return;
+      }
+      nativeMicGranted.current = true;
+    }
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!activeRef.current) { mic.getTracks().forEach((t) => t.stop()); return; }
