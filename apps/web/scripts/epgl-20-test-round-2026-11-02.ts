@@ -46,7 +46,8 @@ const arg = (n: string) => {
   const i = process.argv.indexOf(n);
   return i !== -1 ? process.argv[i + 1] : undefined;
 };
-const SLUG = arg("--slug") ?? "epgl-dialog";
+// 2.0 moved to its own agent on 2 November; epgl-dialog is 1.0 again.
+const SLUG = arg("--slug") ?? "epgl-dialog-2";
 const APPLY = process.argv.includes("--apply");
 
 import { drizzle } from "drizzle-orm/node-postgres";

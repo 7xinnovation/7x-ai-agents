@@ -221,7 +221,7 @@ tidy up afterwards.
 ## Open the assistant
 
 \`\`\`
-https://7xagents.7x-lab.com/embed/epgl-dialog?mock=1
+https://7xagents.7x-lab.com/embed/epgl-dialog-2?mock=1
 \`\`\`
 
 \`?mock=1\` signs you in as a fictional person, with no UAE PASS. Drop it if you

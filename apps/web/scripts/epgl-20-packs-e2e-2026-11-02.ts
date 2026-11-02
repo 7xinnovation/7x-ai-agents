@@ -32,6 +32,8 @@ const HOST = (cliArg("--host") ?? "").replace(/\/$/, "");
 const PACKS = cliArg("--packs") ?? "/Users/emrekarayalcin/Documents/7x-proj-tech/agents/EPGL-2.0-test-packs";
 const VERBOSE = process.argv.includes("--verbose");
 const MAX_TURNS = Number(cliArg("--turns") ?? 60);
+/** 2.0 lives on its own agent since 2 November; epgl-dialog is 1.0 again. */
+const SLUG = cliArg("--slug") ?? "epgl-dialog-2";
 if (!HOST) throw new Error("--host <https://…> is required");
 
 /**
@@ -87,7 +89,7 @@ async function runPack(s: Scenario): Promise<Run> {
       res = await fetch(`${HOST}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentSlug: "epgl-dialog", userMessage, conversationId, locale: "en", mock: true, ...extra }),
+        body: JSON.stringify({ agentSlug: SLUG, userMessage, conversationId, locale: "en", mock: true, ...extra }),
       });
     } catch (e) {
       if (attempt >= 4) throw e;
@@ -135,7 +137,7 @@ async function runPack(s: Scenario): Promise<Run> {
 
   /** Sign in as the mock persona, the way ?mock=1 does in a browser. */
   async function signIn(): Promise<boolean> {
-    const login = `${HOST}/api/uaepass/login?mock=1&agent=epgl-dialog&cid=${conversationId ?? ""}`;
+    const login = `${HOST}/api/uaepass/login?mock=1&agent=${SLUG}&cid=${conversationId ?? ""}`;
     const r1 = await fetch(login, { redirect: "manual" });
     const cookie = (r1.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
     const target = r1.headers.get("location");
@@ -182,7 +184,7 @@ async function runPack(s: Scenario): Promise<Run> {
     const file = fileFor(key);
     if (!file) return `no file in the pack for ${key}`;
     const fd = new FormData();
-    fd.append("agentSlug", "epgl-dialog");
+    fd.append("agentSlug", SLUG);
     fd.append("conversationId", conversationId ?? "");
     fd.append("key", key);
     fd.append("file", new Blob([new Uint8Array(readFileSync(join(docsDir, file)))], { type: "application/pdf" }), file);
@@ -291,7 +293,7 @@ async function main() {
   const only = cliArg("--pack");
   const packs = process.argv.includes("--all") ? ALL : ALL.filter((p) => p.dir === only);
   if (!packs.length) throw new Error(`--pack <dir> (one of: ${ALL.map((p) => p.dir).join(", ")}) or --all`);
-  console.log(`\n${HOST} · epgl-dialog · ${packs.length} pack(s)\n`);
+  console.log(`\n${HOST} · ${SLUG} · ${packs.length} pack(s)\n`);
   const runs: Run[] = [];
   for (const s of packs) {
     console.log(`  ${s.dir}  (${s.code}, licence ${s.company.tl})`);
