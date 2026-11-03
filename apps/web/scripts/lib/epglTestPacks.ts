@@ -823,4 +823,40 @@ export const SCENARIOS: Scenario[] = [
       "**Nothing should already exist for this company.** `CN-1034567` has never been filed. If it says Emirates Post's records show an existing application for this trade licence, stop and tell Emre.",
     ],
   },
+  /**
+   * THE QUIET RUN (3 November 2026, evening).
+   *
+   * Pack 10 went out while we were still polling UAEPay's inquiry every 2.5
+   * seconds for ten minutes, each call minting its own OAuth token — about 240
+   * requests at their UAT while the same customer was trying to pay through it,
+   * and all of it introduced by 920047f that morning. Cut to roughly 100 calls
+   * sharing a few tokens in 56bbab2.
+   *
+   * So this pack is the clean read. If a second attempt still fails with the
+   * traffic down to a trickle, the problem is theirs and we can say so with a
+   * straight face; if it goes through, the volume was ours.
+   */
+  {
+    dir: "11-cep30-sme-uae-domestic-sixth-company",
+    code: "CEP30-UAE-SME-DOM",
+    purpose:
+      "A clean read on the payment, with our own traffic at their gateway cut by more than half.",
+    company: co("20261103L", "CN-1134567", "7X TEST UNION EXPRESS", "7X تست يونيون اكسبريس",
+      ["Courier Services", "Domestic Mail and Parcel Delivery"],
+      ["خدمات التوصيل السريع", "توصيل البريد والطرود المحلية"]),
+    describeSelf:
+      "I run a small UAE-national-owned courier company delivering domestically within the UAE, parcels up to 30 kg.",
+    answers: [
+      "Maximum shipment weight 30 kg. Yes to electronic tracking, yes to consignment notes.",
+      "Domestic only, no international. No food delivery, no medicine delivery, no cold chain.",
+      "Fleet of 5 vehicles. Insurance AED 500,000. No intermediation, no outsourcing.",
+    ],
+    watch: [
+      "**Take the payment to the end, and say exactly what happened on EACH attempt.** First attempt, second attempt, third if it comes to that — which ones UAE Pay refused and which went through. That sequence is the whole result of this run.",
+      "**The chat should keep waiting through a failed attempt**, not say *Payment unsuccessful*. If it does say that, the newest build is not deployed and the run is wasted — stop and tell Emre.",
+      "**When a payment does go through, the chat should catch up within about six seconds.** A little slower than before is expected and fine. Minutes, or never, is not.",
+      "**The amount on UAE Pay's receipt is higher than the AED 1,000 quoted.** That is their fee. Expected, and not worth reporting.",
+      "**Nothing should already exist for this company.** `CN-1134567` has never been filed. If it says Emirates Post's records show an existing application for this trade licence, stop and tell Emre.",
+    ],
+  },
 ];
