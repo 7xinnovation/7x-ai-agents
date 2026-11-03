@@ -785,4 +785,42 @@ export const SCENARIOS: Scenario[] = [
       "**Count the documents on the confirmation.** Every file you upload should go with the application. Anything about documents that could not be attached, or that will follow later, is worth reporting.",
     ],
   },
+  /**
+   * THE RETRY PACK (3 November 2026, evening).
+   *
+   * Pack 09 became LR-54113, and that run is what finally showed the shape of
+   * the thing: UAEPay's first attempt failed, we read their FAILURE as the
+   * PAYMENT's verdict rather than the attempt's and wrote it off, and the
+   * customer then paid on the second attempt — ref S2PXT1911223218145 — against
+   * a payment this side had already called dead. Fixed in 920047f: only the
+   * reconcile sweep may write a payment off, so a failed attempt now leaves the
+   * payment open and the second one is ours to see.
+   *
+   * This pack exists to watch exactly that happen, so its instructions tell the
+   * tester to EXPECT the first attempt to fail and to pay again rather than
+   * stopping there and reporting it.
+   */
+  {
+    dir: "10-cep30-sme-uae-domestic-fifth-company",
+    code: "CEP30-UAE-SME-DOM",
+    purpose:
+      "The retry: a first attempt that fails and a second that goes through, which is the one sequence UAEPay has never let us see end to end.",
+    company: co("20261103K", "CN-1034567", "7X TEST METRO POST", "7X تست مترو بوست",
+      ["Courier Services", "Domestic Mail and Parcel Delivery"],
+      ["خدمات التوصيل السريع", "توصيل البريد والطرود المحلية"]),
+    describeSelf:
+      "I run a small UAE-national-owned courier company delivering domestically within the UAE, parcels up to 30 kg.",
+    answers: [
+      "Maximum shipment weight 30 kg. Yes to electronic tracking, yes to consignment notes.",
+      "Domestic only, no international. No food delivery, no medicine delivery, no cold chain.",
+      "Fleet of 10 vehicles. Insurance AED 500,000. No intermediation, no outsourcing.",
+    ],
+    watch: [
+      "**Expect the first payment attempt to fail. That is normal here, and it is not the test.** Go back in the UAE Pay app, tap pay again, and complete it on the second attempt — that is the sequence this pack exists for.",
+      "**The thing to watch is the CHAT during that first failure.** It should keep waiting. If it says *Payment unsuccessful* and offers *Try again*, stop and tell Emre at once — that is the bug, and it means the fix of 3 November is not on this build.",
+      "**When the payment finally goes through, the chat should move on by itself within a few seconds.** If UAE Pay says Payment Success and the chat is still sitting there a minute later, screenshot both windows together and send them.",
+      "**The amount on UAE Pay's receipt is higher than the AED 1,000 quoted.** That is their fee and it is expected — not worth reporting.",
+      "**Nothing should already exist for this company.** `CN-1034567` has never been filed. If it says Emirates Post's records show an existing application for this trade licence, stop and tell Emre.",
+    ],
+  },
 ];
