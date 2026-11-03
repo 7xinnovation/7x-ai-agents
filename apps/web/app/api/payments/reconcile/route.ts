@@ -16,6 +16,8 @@ export const runtime = "nodejs";
 const PAYMENT_STALE_MIN = Number(process.env.RECONCILE_PAYMENT_MIN ?? 15);
 const ABANDON_MIN = Number(process.env.RECONCILE_ABANDON_MIN ?? 30);
 const CALLBACK_SLA_MIN = Number(process.env.RECONCILE_CALLBACK_SLA_MIN ?? 240); // 4h
+/** How far back to re-ask about a payment we called failed. See 1a. */
+const FAILED_RECHECK_MIN = Number(process.env.RECONCILE_FAILED_RECHECK_MIN ?? 24 * 60);
 
 /**
  * Reconciliation + SLA sweep (PRD: transaction recovery & reconciliation; SLA
@@ -73,6 +75,68 @@ export async function POST(req: NextRequest) {
         out.paymentsBreached++;
       }
     }
+  }
+
+  /**
+   * 1a) A payment we wrote off, in case it went through afterwards.
+   *
+   * 3 November, LR-54112: the chat's 2.5-second poll read UAEPay's inquiry as
+   * FAILURE seventy seconds in -- "Unable to find order ... for merchant
+   * TEST200200014775", a lookup that found nothing rather than a refusal -- and
+   * wrote `failed`. The customer then completed the payment on UAEPay's page.
+   * Nothing ever asked again: the status route returns the stored verdict once
+   * a row leaves `initiated`, the return route skips its probe for the same
+   * reason, and the sweep above selects only `initiated`. The money was taken
+   * and nobody on this side could find out.
+   *
+   * So a recent failure is asked once more, and this pass can only UPGRADE:
+   * failed to paid, never the reverse. A gateway that says SUCCESS about a
+   * payment we called failed is telling us something we got wrong; one that
+   * repeats FAILURE changes nothing. Bounded to a day, because a payment is
+   * settled or disputed long before that.
+   */
+  const writtenOffCut = new Date(now - FAILED_RECHECK_MIN * 60_000);
+  const writtenOff = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.status, "failed"), gt(payments.createdAt, writtenOffCut)));
+  for (const p of writtenOff) {
+    if (!p.agentId) continue;
+    const agent = await getAgentById(p.agentId);
+    if (!agent) continue;
+    const gw = gatewayForPayment(agent.definition, p.provider);
+    if (!gw) continue;
+    out.paymentsChecked++;
+    let status: "initiated" | "paid" | "failed" = "failed";
+    let detail: string | undefined;
+    try {
+      ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference }));
+    } catch { continue; }
+    if (status !== "paid") continue; // only ever upgrades
+    await db.update(payments).set({ status, updatedAt: new Date() }).where(eq(payments.id, p.id));
+    if (p.conversationId) {
+      const c = await getCase(p.conversationId);
+      if (c) await saveCase(c.caseId, setPayment(c.state, { status }));
+    }
+    await audit({
+      agentId: p.agentId,
+      conversationId: p.conversationId ?? undefined,
+      actor: "system",
+      action: "payment_paid_after_being_written_off",
+      payload: { reference: p.reference, ...(detail ? { gateway: detail } : {}) },
+    });
+    await emitEvent({
+      type: "payment.completed",
+      agentId: p.agentId,
+      conversationId: p.conversationId ?? undefined,
+      referenceId: p.reference,
+      outcome: "reconciled_paid",
+      attributes: { reference: p.reference, reconciled: true, wasFailed: true },
+    });
+    if (p.conversationId) {
+      await notifyEpglIfLicenceFee(p.agentId, p.conversationId, p.reference, Number(p.amount ?? 0));
+    }
+    out.paymentsResolved++;
   }
 
   /**

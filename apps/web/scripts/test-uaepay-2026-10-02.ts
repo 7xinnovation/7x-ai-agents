@@ -78,8 +78,11 @@ check("the token is minted per call", /async function accessToken/.test(adapter)
 check("the reference is the per-attempt UUID", /const merchantRequestId = crypto\.randomUUID\(\);/.test(adapter));
 check("...which is what the inquiry is addressed by", /\/v2\/inquiry\/merchant\/\$\{encodeURIComponent\(cfg\.merchantCode\)\}\/txn\/\$\{encodeURIComponent\(input\.reference\)\}/.test(adapter));
 // A payment we cannot read is not a payment that failed.
-check("an unreadable status leaves it open", /if \(!res\.ok\) return \{ status: "initiated" \};/.test(adapter));
-check("...and only SUCCESS is paid", /if \(status === "SUCCESS"\) return \{ status: "paid" \};/.test(adapter));
+// Both carry a `detail` since 2 November — the gateway's own words, for the
+// log and never for the customer. The verdict is what these pin.
+check("an unreadable status leaves it open", /if \(!res\.ok\) return \{ status: "initiated"[,}]/.test(adapter));
+check("...and only SUCCESS is paid", /if \(status === "SUCCESS"\) return \{ status: "paid"[,}]/.test(adapter));
+check("...and FAILURE, and nothing else, is failed", /if \(status === "FAILURE"\) return \{ status: "failed"[,}]/.test(adapter));
 
 console.log("\nThe gateway is chosen by the customer's own choice");
 check("resolved per payment method", /bundle\.paymentFor = \(method\) =>/.test(registry));

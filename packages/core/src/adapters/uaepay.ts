@@ -95,6 +95,82 @@ export function uaePayMobile(raw: unknown): string | undefined {
   return /^\d{10,15}$/.test(digits) ? digits : undefined;
 }
 
+/** What `initiate` needs from the binding to compose a payment link. */
+export interface CreateLinksConfig {
+  merchantCode: string;
+  returnUrl?: string;
+}
+
+/** What `initiate` is handed about the payment, as far as the body cares. */
+export interface CreateLinksInput {
+  caseId: string;
+  amount: number;
+  description: string;
+  email?: string;
+  locale?: string;
+  customer?: { name?: string; mobile?: string };
+}
+
+/**
+ * THE BODY, ON ITS OWN.
+ *
+ * Lifted out of `initiate` on 3 November so the payload can be SHOWN. Every
+ * UAEPay failure so far has been discussed without either side holding the
+ * request that caused it: these calls never passed through the API log (they
+ * are made by the adapter, not by a tool), so "what did you send us" had no
+ * answer but this file. `scripts/uaepay-payload-2026-11-03.ts` now rebuilds the
+ * exact body for any payment reference, from the row and the case it was made
+ * from, without calling them.
+ *
+ * Pure, so the shape is testable and so printing one costs nothing. The Emirates
+ * ID arrives already normalised — `initiate` refuses the payment before this if
+ * it is not fifteen digits — and the token is not part of the body.
+ */
+export function createLinksBody(
+  cfg: CreateLinksConfig,
+  input: CreateLinksInput,
+  merchantRequestId: string,
+  emiratesId: string
+): Record<string, unknown> {
+  const amount = Math.round(input.amount * 100) / 100;
+  return {
+    serviceType: "CREATE_LINK",
+    merchantCode: cfg.merchantCode,
+    source: "UAEPAY",
+    paymentInitiator: {
+      name: input.customer?.name || undefined,
+      emiratesId,
+      mobileNumber: uaePayMobile(input.customer?.mobile),
+      email: input.email,
+      // The hosted page in the conversation's language (guide v1.3+).
+      language: input.locale === "ar" ? "ar" : "en",
+    },
+    paymentLinksInfo: [
+      {
+        merchantLandingURL: cfg.returnUrl,
+        merchantRequestId,
+        merchantOrderId: input.caseId,
+        amount,
+        paymentRemarks: input.description.slice(0, 120),
+        // Only merchantRequestId + status come back on the redirect; the return
+        // route asks the inquiry API for the rest. See the note at the top.
+        enableSecureRedirect: true,
+        // What the customer sees as the service in the UAEPay app and email.
+        metaData: { serviceName: input.description.slice(0, 80) },
+        // ONE line, with its own merchantCode. See notes 2 and 3 above.
+        transactions: [
+          {
+            merchantReferenceId: input.caseId,
+            merchantCode: cfg.merchantCode,
+            transactionRemarks: input.description.slice(0, 120),
+            transactionAmount: amount,
+          },
+        ],
+      },
+    ],
+  };
+}
+
 export const uaePayPayment: PaymentAdapter = {
   async initiate(ctx, input) {
     const cfg = cfgOf(ctx);
@@ -127,46 +203,10 @@ export const uaePayPayment: PaymentAdapter = {
      * reissued links as one payment for one application.
      */
     const merchantRequestId = crypto.randomUUID();
-    const amount = Math.round(input.amount * 100) / 100;
     const res = await fetch(`${cfg.baseUrl}/v3/payments/token/createLinks`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        serviceType: "CREATE_LINK",
-        merchantCode: cfg.merchantCode,
-        source: "UAEPAY",
-        paymentInitiator: {
-          name: input.customer?.name || undefined,
-          emiratesId,
-          mobileNumber: uaePayMobile(input.customer?.mobile),
-          email: input.email,
-          // The hosted page in the conversation's language (guide v1.3+).
-          language: input.locale === "ar" ? "ar" : "en",
-        },
-        paymentLinksInfo: [
-          {
-            merchantLandingURL: cfg.returnUrl,
-            merchantRequestId,
-            merchantOrderId: input.caseId,
-            amount,
-            paymentRemarks: input.description.slice(0, 120),
-            // Only merchantRequestId + status come back on the redirect; the
-            // return route asks the inquiry API for the rest. See the note above.
-            enableSecureRedirect: true,
-            // What the customer sees as the service in the UAEPay app and email.
-            metaData: { serviceName: input.description.slice(0, 80) },
-            // ONE line, with its own merchantCode. See notes 2 and 3 above.
-            transactions: [
-              {
-                merchantReferenceId: input.caseId,
-                merchantCode: cfg.merchantCode,
-                transactionRemarks: input.description.slice(0, 120),
-                transactionAmount: amount,
-              },
-            ],
-          },
-        ],
-      }),
+      body: JSON.stringify(createLinksBody(cfg, input, merchantRequestId, emiratesId)),
     });
 
     /**
@@ -241,6 +281,31 @@ export const uaePayPayment: PaymentAdapter = {
       .filter(Boolean)
       .join(" | ") || undefined;
     if (status === "SUCCESS") return { status: "paid", detail };
+    /**
+     * "I CANNOT FIND IT" IS NOT "IT FAILED" (3 November 2026).
+     *
+     * Their FAILURE covers two different things. One is a payment that was
+     * refused. The other is this:
+     *
+     *   INVALID_REQUEST: Unable to find order S2PSZ3849893459774 and
+     *   transaction S2PSZ3849893459774 for merchant TEST200200014775
+     *
+     * — a lookup that found nothing, against an acquirer merchant of theirs
+     * that is a different one on every attempt. The chat polls this every 2.5
+     * seconds while the customer is still on their page, and the first FAILURE
+     * is final: the row leaves `initiated` and the card says "Payment
+     * unsuccessful". On 3 November it said that while UAEPay's own window was
+     * still reading "Payment has been initiated. Please complete the payment."
+     *
+     * So a not-found leaves the payment open. The reconcile sweep keeps asking,
+     * the customer is not told their payment failed while they are in the middle
+     * of making it, and a real refusal — which names a response code rather
+     * than an absent order — still fails at once.
+     */
+    const notFound =
+      body?.statusInfo?.error?.code === "INVALID_REQUEST" &&
+      /unable to find (order|transaction)/i.test(body?.statusInfo?.error?.message ?? "");
+    if (status === "FAILURE" && notFound) return { status: "initiated", detail };
     if (status === "FAILURE") return { status: "failed", detail };
     // INITIATED / PENDING, and anything they add later.
     return { status: "initiated", detail };
