@@ -185,7 +185,28 @@ export interface PaymentAdapter {
    */
   getStatus(
     ctx: AdapterContext,
-    input: { reference: string }
+    input: {
+      reference: string;
+      /**
+       * IS THIS THE LAST WORD, OR IS THE CUSTOMER STILL STANDING THERE?
+       *
+       * A gateway that reports per ATTEMPT rather than per payment says
+       * "failed" of a link the customer can still use. UAEPay does exactly
+       * that: on 3 November a first attempt failed, the chat's 2.5-second poll
+       * wrote the payment off, and the customer went back into the UAEPay app
+       * and paid successfully — AED 1,031.40, their ref S2PXT1911223218145 —
+       * against a payment this side had already called dead and would never ask
+       * about again.
+       *
+       * So the live poll and the return page ask WITHOUT this flag: a failed
+       * attempt leaves the payment open and the customer can try again in the
+       * window that is still in front of them. Only the reconcile sweep, long
+       * after the link was made, sets it — and only there can a payment be
+       * written off. An adapter whose gateway reports per payment can ignore
+       * it entirely.
+       */
+      final?: boolean;
+    }
   ): Promise<{ status: "initiated" | "paid" | "failed"; detail?: string }>;
 }
 

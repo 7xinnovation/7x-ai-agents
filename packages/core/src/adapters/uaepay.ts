@@ -282,31 +282,33 @@ export const uaePayPayment: PaymentAdapter = {
       .join(" | ") || undefined;
     if (status === "SUCCESS") return { status: "paid", detail };
     /**
-     * "I CANNOT FIND IT" IS NOT "IT FAILED" (3 November 2026).
+     * THEIR FAILURE IS AN ATTEMPT'S, NOT THE PAYMENT'S (3 November 2026).
      *
-     * Their FAILURE covers two different things. One is a payment that was
-     * refused. The other is this:
+     * This was read as the payment's verdict, and it is not. A UAEPay link
+     * survives a failed attempt: the customer stays on their page, taps pay
+     * again, and the second attempt can succeed. Watched end to end on
+     * 3 November with LR-54113 —
      *
-     *   INVALID_REQUEST: Unable to find order S2PSZ3849893459774 and
-     *   transaction S2PSZ3849893459774 for merchant TEST200200014775
+     *   12:08:58  link made, row initiated
+     *   12:10:22  their inquiry: FAILURE, no error code, no transactions
+     *             → we wrote the payment off; the card said
+     *               "Payment unsuccessful"
+     *   12:08 PM  the customer paid in the UAEPay app anyway:
+     *             "Payment Success", ref S2PXT1911223218145, AED 1,031.40
      *
-     * — a lookup that found nothing, against an acquirer merchant of theirs
-     * that is a different one on every attempt. The chat polls this every 2.5
-     * seconds while the customer is still on their page, and the first FAILURE
-     * is final: the row leaves `initiated` and the card says "Payment
-     * unsuccessful". On 3 November it said that while UAEPay's own window was
-     * still reading "Payment has been initiated. Please complete the payment."
+     * — and nothing on this side ever asked again, because every path that
+     * could have stops at a row that has left `initiated`. The earlier
+     * INVALID_REQUEST "unable to find order ... for merchant TEST2002000…"
+     * answers are the same thing seen earlier in the attempt: a lookup for a
+     * transaction that had not happened yet.
      *
-     * So a not-found leaves the payment open. The reconcile sweep keeps asking,
-     * the customer is not told their payment failed while they are in the middle
-     * of making it, and a real refusal — which names a response code rather
-     * than an absent order — still fails at once.
+     * So FAILURE ends a payment only when the caller says this is the last
+     * word — which is the reconcile sweep, fifteen minutes or more after the
+     * link was made. The live poll and the return page leave it open, the
+     * customer keeps the window they are already using, and a second attempt
+     * is still ours to see. `detail` carries their words either way.
      */
-    const notFound =
-      body?.statusInfo?.error?.code === "INVALID_REQUEST" &&
-      /unable to find (order|transaction)/i.test(body?.statusInfo?.error?.message ?? "");
-    if (status === "FAILURE" && notFound) return { status: "initiated", detail };
-    if (status === "FAILURE") return { status: "failed", detail };
+    if (status === "FAILURE") return { status: input.final ? "failed" : "initiated", detail };
     // INITIATED / PENDING, and anything they add later.
     return { status: "initiated", detail };
   },

@@ -24,13 +24,13 @@ const sweep = readFileSync(new URL("../app/api/payments/reconcile/route.ts", imp
 const status = readFileSync(new URL("../app/api/payments/status/route.ts", import.meta.url), "utf8");
 const adapter = readFileSync(new URL("../../../packages/core/src/adapters/uaepay.ts", import.meta.url), "utf8");
 
-console.log("\nthe adapter no longer calls a not-found a failure");
-check("a FAILURE that cannot find the order leaves it open",
-  /if \(status === "FAILURE" && notFound\) return \{ status: "initiated", detail \};/.test(adapter));
-check("...and a FAILURE that is a refusal still fails",
-  /if \(status === "FAILURE"\) return \{ status: "failed", detail \};/.test(adapter));
-check("the not-found is their code and their wording, not a guess",
-  /INVALID_REQUEST/.test(adapter) && /unable to find \(order\|transaction\)/i.test(adapter));
+console.log("\nonly the sweep may write a payment off");
+check("a FAILURE is the attempt's unless the caller says otherwise",
+  /if \(status === "FAILURE"\) return \{ status: input\.final \? "failed" : "initiated", detail \};/.test(adapter));
+check("the sweep is the one that says so", /getStatus\(gw\.ctx, \{ reference: p\.reference, final: true \}\)/.test(sweep));
+check("the live poll does NOT", !/final: true/.test(status));
+check("...and neither does the page the customer lands back on",
+  !/final: true/.test(readFileSync(new URL("../app/api/payments/return/route.ts", import.meta.url), "utf8")));
 
 console.log("\nthe sweep asks again about a recent failure");
 check("it selects failed rows", /eq\(payments\.status, "failed"\)/.test(sweep));

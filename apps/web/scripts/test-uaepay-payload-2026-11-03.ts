@@ -79,17 +79,15 @@ check("fifteen digits pass", uaePayEmiratesId("784198162421055") === "7841981624
 check("fourteen do not", uaePayEmiratesId("78419816242105") === undefined);
 check("nothing at all does not", uaePayEmiratesId(undefined) === undefined);
 
-console.log("\n\"cannot find it\" is not \"it failed\"");
+console.log("\na failed ATTEMPT is not a failed payment");
 const adapter = readFileSync(new URL("../../../packages/core/src/adapters/uaepay.ts", import.meta.url), "utf8");
-check("a not-found FAILURE leaves the payment open",
-  /const notFound =[\s\S]{0,400}if \(status === "FAILURE" && notFound\) return \{ status: "initiated", detail \};/.test(adapter));
-check("...recognised by their code AND their wording",
-  /INVALID_REQUEST"[\s\S]{0,200}unable to find \(order\|transaction\)/i.test(adapter));
-check("a FAILURE that is not a not-found still fails at once",
-  /if \(status === "FAILURE"\) return \{ status: "failed", detail \};/.test(adapter));
-check("the not-found test is applied AFTER success, so a paid payment is unaffected",
-  adapter.indexOf('status === "SUCCESS"') < adapter.indexOf("const notFound"));
-check("the reason still reaches the log either way", /return \{ status: "initiated", detail \}/.test(adapter));
+check("FAILURE ends the payment only when the caller says it is the last word",
+  /if \(status === "FAILURE"\) return \{ status: input\.final \? "failed" : "initiated", detail \};/.test(adapter));
+check("...and SUCCESS is read before it, so a paid payment is never reopened",
+  adapter.indexOf('status === "SUCCESS"') < adapter.indexOf('status === "FAILURE"'));
+check("the reason still reaches the log either way", /"failed" : "initiated", detail \}/.test(adapter));
+check("the evidence is written down, not just the rule",
+  /S2PXT1911223218145/.test(adapter) && /LR-54113/.test(adapter));
 
 console.log("\nnothing secret rides in the body");
 const asText = JSON.stringify(body);

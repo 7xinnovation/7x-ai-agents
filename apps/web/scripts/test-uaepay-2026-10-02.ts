@@ -82,7 +82,11 @@ check("...which is what the inquiry is addressed by", /\/v2\/inquiry\/merchant\/
 // log and never for the customer. The verdict is what these pin.
 check("an unreadable status leaves it open", /if \(!res\.ok\) return \{ status: "initiated"[,}]/.test(adapter));
 check("...and only SUCCESS is paid", /if \(status === "SUCCESS"\) return \{ status: "paid"[,}]/.test(adapter));
-check("...and FAILURE, and nothing else, is failed", /if \(status === "FAILURE"\) return \{ status: "failed"[,}]/.test(adapter));
+// FAILURE is the ATTEMPT's verdict, not the payment's, since 3 November: a
+// UAEPay link survives a failed attempt and the customer can pay on the next
+// one. Only a caller that says this is the last word may write it off.
+check("...and FAILURE ends it only when the caller says it is final",
+  /if \(status === "FAILURE"\) return \{ status: input\.final \? "failed" : "initiated", detail \};/.test(adapter));
 
 console.log("\nThe gateway is chosen by the customer's own choice");
 check("resolved per payment method", /bundle\.paymentFor = \(method\) =>/.test(registry));

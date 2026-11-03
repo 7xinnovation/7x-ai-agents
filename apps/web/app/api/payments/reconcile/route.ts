@@ -49,7 +49,11 @@ export async function POST(req: NextRequest) {
     /** What the gateway said beyond its verdict. Logged, never shown. */
     let detail: string | undefined;
     try {
-      ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference }));
+      // `final`: this sweep is the only place a payment may be written off.
+      // A gateway that reports per attempt — UAEPay does — says "failed" of a
+      // link the customer can still be standing in front of, and the live poll
+      // must not end the payment on it. Fifteen minutes later, here, it can.
+      ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference, final: true }));
     } catch { /* leave as-is, will retry next sweep */ }
     if (status !== "initiated") {
       await db.update(payments).set({ status, updatedAt: new Date() }).where(eq(payments.id, p.id));
@@ -110,7 +114,7 @@ export async function POST(req: NextRequest) {
     let status: "initiated" | "paid" | "failed" = "failed";
     let detail: string | undefined;
     try {
-      ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference }));
+      ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference, final: true }));
     } catch { continue; }
     if (status !== "paid") continue; // only ever upgrades
     await db.update(payments).set({ status, updatedAt: new Date() }).where(eq(payments.id, p.id));
