@@ -200,13 +200,35 @@ export const uaePayPayment: PaymentAdapter = {
     );
     // A payment we cannot read is not a payment that failed. Anything other
     // than a clear answer leaves it where it was, for the sweep to ask again.
-    if (!res.ok) return { status: "initiated" };
-    const body = (await res.json().catch(() => null)) as { statusInfo?: { status?: string } } | null;
+    if (!res.ok) return { status: "initiated", detail: `inquiry HTTP ${res.status}` };
+    const body = (await res.json().catch(() => null)) as {
+      statusInfo?: { status?: string; error?: { code?: string; message?: string } };
+      transactions?: { status?: string; responseCode?: string; responseMessage?: string }[];
+    } | null;
     const status = String(body?.statusInfo?.status ?? "").toUpperCase();
-    if (status === "SUCCESS") return { status: "paid" };
-    if (status === "FAILURE") return { status: "failed" };
+    /**
+     * WHY, IN THE WORDS THEY USED.
+     *
+     * Their verdict is one word and it is the only thing the payment row has
+     * ever kept. Two EPGL payments failed on 3 November and nothing anywhere
+     * said whether the card was declined, the customer walked away, or we had
+     * sent them something they would not take. Whatever else the inquiry
+     * carries — a reason code on the envelope, a response code on the
+     * transaction — is gathered here for the log.
+     */
+    const t = body?.transactions?.[0];
+    const detail = [
+      status || undefined,
+      body?.statusInfo?.error?.code ? `${body.statusInfo.error.code}: ${body.statusInfo.error.message ?? ""}`.trim() : undefined,
+      t?.status && t.status.toUpperCase() !== status ? `txn ${t.status}` : undefined,
+      t?.responseCode ? `${t.responseCode}${t.responseMessage ? `: ${t.responseMessage}` : ""}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" | ") || undefined;
+    if (status === "SUCCESS") return { status: "paid", detail };
+    if (status === "FAILURE") return { status: "failed", detail };
     // INITIATED / PENDING, and anything they add later.
-    return { status: "initiated" };
+    return { status: "initiated", detail };
   },
 };
 

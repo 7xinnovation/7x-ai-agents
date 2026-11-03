@@ -46,13 +46,15 @@ export async function GET(req: NextRequest) {
   // Still open — ask the gateway. Best-effort: a probe failure just means the
   // customer keeps waiting, and the reconcile sweep remains the backstop.
   let status: "initiated" | "paid" | "failed" = pay.status;
+  /** What the gateway said beyond its verdict. Logged, never shown. */
+  let detail: string | undefined;
   try {
     const agent = await getAgentById(pay.agentId);
     if (agent) {
       ensureAdapters();
       // The gateway that TOOK it, not the agent's default one.
       const gw = gatewayForPayment(agent.definition, pay.provider);
-      if (gw) ({ status } = await gw.choice.adapter.getStatus(gw.ctx, { reference }));
+      if (gw) ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference }));
     }
   } catch (err) {
     log.error("payment_status_probe_failed", err, { reference, conversationId });
@@ -69,7 +71,7 @@ export async function GET(req: NextRequest) {
       conversationId,
       actor: "system",
       action: `payment_${status}_via_gateway_probe`,
-      payload: { reference },
+      payload: { reference, ...(detail ? { gateway: detail } : {}) },
     });
     // THIS is where the money is confirmed most of the time.
     //

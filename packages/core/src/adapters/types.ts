@@ -174,7 +174,19 @@ export interface PaymentAdapter {
       customer?: { name?: string; emiratesId?: string; mobile?: string };
     }
   ): Promise<{ reference: string; link?: string; status: "initiated" | "paid" }>;
-  getStatus(ctx: AdapterContext, input: { reference: string }): Promise<{ status: "initiated" | "paid" | "failed" }>;
+  /**
+   * `detail` is for the LOG, never for the customer: what the gateway said
+   * beyond its verdict — a reason code, a message, the state it is actually in.
+   *
+   * Added 3 November, after two UAEPay payments on EPGL 2.0 came back failed
+   * and there was nothing anywhere to say why. The verdict was recorded, the
+   * sentence that explained it was thrown away in the adapter, and answering
+   * "ours or theirs?" meant asking the gateway by hand.
+   */
+  getStatus(
+    ctx: AdapterContext,
+    input: { reference: string }
+  ): Promise<{ status: "initiated" | "paid" | "failed"; detail?: string }>;
 }
 
 /**

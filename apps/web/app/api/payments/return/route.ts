@@ -54,6 +54,8 @@ export async function GET(req: NextRequest) {
   const t = RET_STR[locale];
 
   let status: "initiated" | "paid" | "failed" = "initiated";
+  /** What the gateway said beyond its verdict. Logged, never shown. */
+  let detail: string | undefined;
   if (reference) {
     const db = getDb();
     const [pay] = await db
@@ -70,7 +72,7 @@ export async function GET(req: NextRequest) {
             ensureAdapters();
             // The gateway that TOOK it, not the agent's default one.
             const gw = gatewayForPayment(agent.definition, pay.provider);
-            if (gw) ({ status } = await gw.choice.adapter.getStatus(gw.ctx, { reference }));
+            if (gw) ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference }));
           }
         } catch (err) {
           log.error("payment_return_probe_failed", err, { reference });
@@ -86,7 +88,7 @@ export async function GET(req: NextRequest) {
             conversationId: pay.conversationId ?? undefined,
             actor: "system",
             action: `payment_${status}_on_return`,
-            payload: { reference },
+            payload: { reference, ...(detail ? { gateway: detail } : {}) },
           });
         }
       }

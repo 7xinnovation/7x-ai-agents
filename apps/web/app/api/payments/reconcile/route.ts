@@ -44,8 +44,10 @@ export async function POST(req: NextRequest) {
     const gw = gatewayForPayment(agent.definition, p.provider);
     if (!gw) continue;
     let status: "initiated" | "paid" | "failed" = "initiated";
+    /** What the gateway said beyond its verdict. Logged, never shown. */
+    let detail: string | undefined;
     try {
-      ({ status } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference }));
+      ({ status, detail } = await gw.choice.adapter.getStatus(gw.ctx, { reference: p.reference }));
     } catch { /* leave as-is, will retry next sweep */ }
     if (status !== "initiated") {
       await db.update(payments).set({ status, updatedAt: new Date() }).where(eq(payments.id, p.id));
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest) {
         const c = await getCase(p.conversationId);
         if (c) await saveCase(c.caseId, setPayment(c.state, { status }));
       }
-      await audit({ agentId: p.agentId, conversationId: p.conversationId ?? undefined, actor: "system", action: `payment_reconciled_${status}`, payload: { reference: p.reference } });
+      await audit({ agentId: p.agentId, conversationId: p.conversationId ?? undefined, actor: "system", action: `payment_reconciled_${status}`, payload: { reference: p.reference, ...(detail ? { gateway: detail } : {}) } });
       await emitEvent({ type: status === "paid" ? "payment.completed" : "payment.failed", agentId: p.agentId, conversationId: p.conversationId ?? undefined, referenceId: p.reference, outcome: `reconciled_${status}`, attributes: { reference: p.reference, reconciled: true } });
       // The backstop has to include telling Salesforce. This sweep exists for
       // the payments nothing else caught, and a licence fee we found here is
