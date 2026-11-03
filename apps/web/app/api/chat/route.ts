@@ -72,6 +72,7 @@ import { narrationGuard, durationChosen, durationRequested } from "@/lib/narrati
 import { echoGuard } from "@/lib/echoGuard";
 import { identityGuard, identityValues } from "@/lib/identityGuard";
 import { internalsGuard } from "@/lib/internalsGuard";
+import { bareAckGuard } from "@/lib/bareAckGuard";
 import { branchNarrationGuard, branchIndex, branchNamedIn } from "@/lib/branchName";
 import { setAutoRenew } from "@/lib/nxnAutoRenew";
 import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/customerPulse";
@@ -3524,6 +3525,13 @@ export async function POST(req: NextRequest) {
          * guard has finished with, which is the text that would be on screen.
          */
         const internals = internalsGuard();
+        /**
+         * "No problem." with a file picker under it, to a customer who has just
+         * said the company is the wrong one. Reported twice; the guidance
+         * naming that exact message did not hold. The document has a name, so
+         * the reply gets a sentence that uses it.
+         */
+        const bareAck = bareAckGuard((k) => docLabels.get(k), body.locale === "ar" ? "ar" : "en");
         // An Arabic reply links to the Arabic pages, whatever the model reached for.
         // THE WIDGET'S OWN WORDS FOLLOW THE CONVERSATION.
         //
@@ -3859,13 +3867,13 @@ export async function POST(req: NextRequest) {
             // URL, and the id filter takes the backend's own keys back out of the
             // prose ("Naif Post Office (officeId: 214) confirmed").
             const piped = payGuard ? payGuard.push(ev.delta) : ev.delta;
-            const out = internals.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))))))));
+            const out = internals.push(bareAck.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(uploadGuard.push(totalGuard.push(durationGuard.push(feeGuard.push(piped)))))))))))))); 
             if (out) { send({ type: "text", delta: out }); finalText += out; }
           } else {
             // Anything that is not text ends the run the fence could be inside, so
             // whatever is still held goes out before it -- held bytes must never
             // be dropped on the floor.
-            const held = internals.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
+            const held = internals.push(bareAck.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(
               idFilter.push(
                 uploadGuard.push(
                   totalGuard.push(
@@ -3874,7 +3882,7 @@ export async function POST(req: NextRequest) {
                   ) + totalGuard.flush()
                 ) + uploadGuard.flush()
               ) + idFilter.flush()
-            ))))))) + idMask.flush());
+            ))))))) + idMask.flush()));
             if (held) { send({ type: "text", delta: held }); finalText += held; }
             send(ev);
           }
@@ -4007,7 +4015,7 @@ export async function POST(req: NextRequest) {
           }
         }
         {
-          const rest = internals.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
+          const rest = internals.push(bareAck.push(idMask.push(keyGuard.push(mapOffer.push(links.push(branchNarration.push(echo.push(narration.push(idFilter.push(
             uploadGuard.push(
               totalGuard.push(
                 durationGuard.push(feeGuard.push(payGuard ? payGuard.flush() : "") + feeGuard.flush()) +
@@ -4015,7 +4023,7 @@ export async function POST(req: NextRequest) {
               ) + totalGuard.flush()
             ) +
               uploadGuard.flush()
-          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush()) + internals.flush();
+          ) + idFilter.flush()) + narration.flush()) + echo.flush()) + branchNarration.flush()) + links.flush()) + mapOffer.flush()) + keyGuard.flush()) + idMask.flush()) + bareAck.flush()) + internals.flush();
           if (rest) { send({ type: "text", delta: rest }); finalText += rest; }
           // A withheld sentence is a rule the model did not keep, and the only
           // way we would ever know is here: the customer never sees it and the
