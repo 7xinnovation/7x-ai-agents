@@ -217,11 +217,26 @@ export const uaePayPayment: PaymentAdapter = {
      * transaction — is gathered here for the log.
      */
     const t = body?.transactions?.[0];
+    /**
+     * THE SHAPE, NOT THE CONTENTS.
+     *
+     * The first re-probe of the two failed EPGL payments came back with
+     * "FAILURE" and nothing else, which leaves two possibilities that look
+     * identical from here: they send no reason at all, or they send one under a
+     * key this adapter does not read. Listing the keys settles it without
+     * logging a single value — an inquiry response carries the masked card and
+     * the payer's Emirates ID, and neither belongs in an audit row.
+     */
+    const shape =
+      status !== "SUCCESS" && body
+        ? `keys ${Object.keys(body).join(",")}${t ? ` / txn ${Object.keys(t).join(",")}` : ""}`
+        : undefined;
     const detail = [
       status || undefined,
       body?.statusInfo?.error?.code ? `${body.statusInfo.error.code}: ${body.statusInfo.error.message ?? ""}`.trim() : undefined,
       t?.status && t.status.toUpperCase() !== status ? `txn ${t.status}` : undefined,
       t?.responseCode ? `${t.responseCode}${t.responseMessage ? `: ${t.responseMessage}` : ""}` : undefined,
+      shape,
     ]
       .filter(Boolean)
       .join(" | ") || undefined;
