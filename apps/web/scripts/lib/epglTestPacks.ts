@@ -749,4 +749,40 @@ export const SCENARIOS: Scenario[] = [
       "**The fee should be AED 1,000 and the card should open.** Pay it to the end: this pack exists partly to test that a payment completes.",
     ],
   },
+  /**
+   * THE THIRD SPARE (3 November 2026).
+   *
+   * Pack 08 became LR-54112 within the hour. The suffix skips "I", which is
+   * indistinguishable from a 1 when somebody reads a company name back over a
+   * call, so G, H, J.
+   *
+   * The thing this pack is really for is the payment: UAEPay's inquiry answered
+   * "unable to find order" while the customer was still on their page, we read
+   * that as a failure and wrote the payment off, and when they went on to pay,
+   * nothing on our side ever asked again. Fixed in a10ca6e, and unproven until
+   * a payment goes end to end.
+   */
+  {
+    dir: "09-cep30-sme-uae-domestic-fourth-company",
+    code: "CEP30-UAE-SME-DOM",
+    purpose:
+      "The ordinary journey a third time, for the payment: the one path that has never once completed on UAEPay.",
+    company: co("20261103J", "CN-9234567", "7X TEST RAPID COURIER", "7X تست رابيد كورير",
+      ["Courier Services", "Domestic Mail and Parcel Delivery"],
+      ["خدمات التوصيل السريع", "توصيل البريد والطرود المحلية"]),
+    describeSelf:
+      "I run a small UAE-national-owned courier company delivering domestically within the UAE, parcels up to 30 kg.",
+    answers: [
+      "Maximum shipment weight 30 kg. Yes to electronic tracking, yes to consignment notes.",
+      "Domestic only, no international. No food delivery, no medicine delivery, no cold chain.",
+      "Fleet of 8 vehicles. Insurance AED 500,000. No intermediation, no outsourcing.",
+    ],
+    watch: [
+      "**The payment is the point of this run.** Take it to the end and tell Emre what the chat says afterwards, whichever way it goes. Both ways to pay are worth a run — the card, and Noqodi (UAE Pay).",
+      "**\"Payment unsuccessful\" while UAE Pay's own window still says \"please complete the payment\" is a BUG, not a failed payment.** It was ours and it was fixed on 3 November. If you see it again, screenshot both windows together — that pairing is the whole evidence.",
+      "**If you do pay and the chat does not move on within a minute, say so.** A payment that goes through on their side and leaves the chat sitting there is the exact failure this pack is checking for.",
+      "**Nothing should already exist for this company.** `CN-9234567` has never been filed. If it says Emirates Post's records show an existing application for this trade licence, stop and tell Emre.",
+      "**Count the documents on the confirmation.** Every file you upload should go with the application. Anything about documents that could not be attached, or that will follow later, is worth reporting.",
+    ],
+  },
 ];
