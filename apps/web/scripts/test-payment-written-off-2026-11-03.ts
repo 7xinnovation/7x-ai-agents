@@ -42,6 +42,16 @@ check("...and EPGL are told, which is the whole point",
   sweep.indexOf("payment_paid_after_being_written_off") < sweep.lastIndexOf("notifyEpglIfLicenceFee"));
 check("the case moves with it", /saveCase\(c\.caseId, setPayment\(c\.state, \{ status \}\)\)/.test(sweep));
 
+console.log("\nand we stop hammering them while the customer is paying");
+const embed = readFileSync(new URL("../app/embed/[agent]/Experience.tsx", import.meta.url), "utf8");
+check("the token is reused inside its life", /if \(held && held\.until > Date\.now\(\)\) return held\.token;/.test(adapter));
+check("...with a minute of margin on their 299 seconds", /TOKEN_TTL_MS = 240_000/.test(adapter));
+check("...and kept per credential, not globally", /const key = `\$\{cfg\.baseUrl\}\|\$\{cfg\.clientId\}`/.test(adapter));
+check("a failed mint does not leave a stale one behind", /tokens\.delete\(key\);/.test(adapter));
+check("the poll is quick only while it is likely to settle", /FAST_FOR_MS = 30_000/.test(embed));
+check("...then calms down", /elapsed\(\) < FAST_FOR_MS \? 2500 : 6000/.test(embed));
+check("...and still stops after ten minutes", /STOP_AFTER_MS = 600_000/.test(embed));
+
 console.log("\nwhy nothing else could have caught it");
 check("the status route returns the stored verdict once a row leaves initiated",
   /if \(pay\.status !== "initiated" \|\| !pay\.agentId\) \{\s*\n\s*return NextResponse\.json\(\{ status: pay\.status \}/.test(status));

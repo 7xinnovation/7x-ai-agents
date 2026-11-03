@@ -434,9 +434,7 @@ function PaymentCard({
     if (phase !== "waiting" || !conversationId) return;
     let cancelled = false;
     let closedPolls = 0;
-    let polls = 0;
     const tick = async () => {
-      polls++;
       try {
         const res = await fetch(
           `/api/payments/status?reference=${encodeURIComponent(payment.reference)}&conversationId=${encodeURIComponent(conversationId)}`
@@ -472,13 +470,37 @@ function PaymentCard({
           setNote(strings.payWindowClosed);
         }
       }
-      if (polls > 240) setPhase("ready"); // ~10 min safety stop
+      if (elapsed() > STOP_AFTER_MS) setPhase("ready"); // ~10 min safety stop
     };
-    const id = setInterval(() => void tick(), 2500);
+    /**
+     * QUICK AT FIRST, THEN CALM.
+     *
+     * 2.5 seconds for the first half-minute, because most payments settle in
+     * that window and the customer is watching. After that the gateway is
+     * asked every six seconds instead.
+     *
+     * It matters since 3 November: a failed attempt no longer ends a payment,
+     * so this used to run flat out for ten minutes — about 240 polls, each one
+     * minting its own OAuth token — against the same UAT the customer was
+     * trying to pay through. Ten minutes now costs about 100 calls rather than
+     * 240, and the adapter reuses a token across them.
+     */
+    const started = Date.now();
+    const elapsed = () => Date.now() - started;
+    const FAST_FOR_MS = 30_000;
+    const STOP_AFTER_MS = 600_000;
+    let id: ReturnType<typeof setTimeout>;
+    const loop = () => {
+      id = setTimeout(async () => {
+        await tick();
+        if (!cancelled) loop();
+      }, elapsed() < FAST_FOR_MS ? 2500 : 6000);
+    };
     void tick();
+    loop();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearTimeout(id);
     };
   }, [phase, conversationId, payment.reference, onPaid, strings]);
 

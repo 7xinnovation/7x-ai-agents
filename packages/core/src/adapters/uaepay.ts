@@ -56,13 +56,28 @@ function cfgOf(ctx: AdapterContext): UpConfig {
 }
 
 /**
- * A fresh token, every time.
+ * A token, reused while it is certainly still alive.
  *
- * 299 seconds is shorter than a conversation and far shorter than the gap
- * between creating a link and asking what happened to it, so there is no window
- * in which caching this is both safe and worth the complexity.
+ * It was minted fresh on every call, and that was right while every call was
+ * one of a handful. It stopped being right on 3 November: a failed attempt no
+ * longer ends a payment, so the chat polls the inquiry every 2.5 seconds for as
+ * long as the customer is on UAEPay's page — up to ten minutes, which was about
+ * 240 token requests and 240 inquiries for ONE payment, all of it at their UAT
+ * while the same customer was trying to pay through it.
+ *
+ * Their token lives 299 seconds. It is kept for 240 — a minute of margin
+ * against a slow call and a clock that disagrees — and per credential, so two
+ * agents on different merchants never share one. The failure mode the original
+ * comment was guarding against is a token that expires mid-use; the margin is
+ * what makes that impossible rather than unlikely.
  */
+const tokens = new Map<string, { token: string; until: number }>();
+const TOKEN_TTL_MS = 240_000;
+
 async function accessToken(cfg: UpConfig): Promise<string> {
+  const key = `${cfg.baseUrl}|${cfg.clientId}`;
+  const held = tokens.get(key);
+  if (held && held.until > Date.now()) return held.token;
   const basic = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString("base64");
   const res = await fetch(`${cfg.baseUrl}/oauth/token/client-credentials`, {
     method: "POST",
@@ -73,8 +88,10 @@ async function accessToken(cfg: UpConfig): Promise<string> {
   const token = body?.access_token;
   if (!res.ok || !token) {
     const err = body?.statusInfo?.error;
+    tokens.delete(key);
     throw new Error(`UAEPay auth failed: ${res.status}${err?.code ? ` — ${err.code}: ${err.message ?? ""}` : ""}`);
   }
+  tokens.set(key, { token, until: Date.now() + TOKEN_TTL_MS });
   return token;
 }
 
