@@ -678,4 +678,45 @@ export const SCENARIOS: Scenario[] = [
       "**It should not ask for a lease, insurance, a fleet or an SME licence.**",
     ],
   },
+  /**
+   * PACK 01 AGAIN, AS A DIFFERENT COMPANY (3 November 2026).
+   *
+   * A tester spent three days unable to submit pack 01. Salesforce keys an
+   * application on (applicant, company, product): file one, let it reach
+   * "Under document review", and that combination is locked for that person
+   * for good -- every later attempt comes back "This application is locked.
+   * Applicant-supplied details cannot be changed after submission."
+   *
+   * Pack 01 told testers to change the last letter of the COMPANY NAME so each
+   * run was theirs. That is not what Salesforce matches on: the licence number
+   * in the documents stayed CN-1234567, every run resolved to the same account,
+   * and the second tester walked into the first tester's submitted application.
+   *
+   * So this is pack 01's journey -- same product, same documents, same
+   * questions -- carrying its own licence number. Nothing else about the test
+   * changes. It is good for ONE submission per person, which is the honest
+   * shape of the thing and is said as much in the instructions.
+   */
+  {
+    dir: "07-cep30-sme-uae-domestic-second-company",
+    code: "CEP30-UAE-SME-DOM",
+    purpose:
+      "Pack 01's journey under a second company, for a tester whose own pack-01 application is already submitted and therefore locked.",
+    company: co("20261103G", "CN-7234567", "7X TEST SWIFT POST", "7X تست سويفت بوست",
+      ["Courier Services", "Domestic Mail and Parcel Delivery"],
+      ["خدمات التوصيل السريع", "توصيل البريد والطرود المحلية"]),
+    describeSelf:
+      "I run a small UAE-national-owned courier company delivering domestically within the UAE, parcels up to 30 kg.",
+    answers: [
+      "Maximum shipment weight 30 kg. Yes to electronic tracking, yes to consignment notes.",
+      "Domestic only, no international. No food delivery, no medicine delivery, no cold chain.",
+      "Fleet of 6 vehicles. Insurance AED 500,000. No intermediation, no outsourcing.",
+    ],
+    watch: [
+      "**Nothing should already exist for this company.** `CN-7234567` has never been filed before. If it tells you Emirates Post's records show an existing application for this trade licence, stop and tell Emre — on this pack that sentence cannot be true.",
+      "**It should never ask you to type 30 kg.** The weight belongs to the product, not to you. If it asks you to enter it, report it.",
+      "**The fee should be AED 1,000 and the card should open.** This is the ordinary paid path — of the whole set, this is the one where payment should simply work.",
+      "**This is pack 01's journey under a different company.** If anything here behaves differently from pack 01 — a document it asks for that pack 01 never wanted, a question in a different order — that difference is worth reporting on its own.",
+    ],
+  },
 ];

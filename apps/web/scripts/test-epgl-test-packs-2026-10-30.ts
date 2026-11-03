@@ -24,10 +24,20 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
 
 const packs = SCENARIOS.map((s) => ({ s, p: productFor(s.code), docs: docsFor(s) }));
 
-check("there are five packs beside the 22 October one", SCENARIOS.length === 5);
-check("each has its own folder", new Set(SCENARIOS.map((s) => s.dir)).size === 5);
+check("there are six packs beside the 22 October one", SCENARIOS.length === 6);
+check("each has its own folder", new Set(SCENARIOS.map((s) => s.dir)).size === 6);
 check("...numbered from 02, because 01 is the pack testers already have",
-  SCENARIOS.map((s) => s.dir.slice(0, 2)).join() === "02,03,04,05,06");
+  SCENARIOS.map((s) => s.dir.slice(0, 2)).join() === "02,03,04,05,06,07");
+/**
+ * Pack 07 repeats pack 01's PRODUCT on purpose -- it is the spare for a tester
+ * whose own pack-01 application is locked -- so the licence numbers, not the
+ * product codes, are what has to stay unique across the set.
+ */
+check("every pack applies as its own company",
+  new Set(SCENARIOS.map((s) => s.company.tl)).size === SCENARIOS.length,
+  SCENARIOS.map((s) => s.company.tl).join());
+check("and none of them reuses pack 01's licence number",
+  SCENARIOS.every((s) => s.company.tl !== "CN-1234567"));
 
 // ---- every pack holds what the catalogue asks for ----------------------------
 for (const { s, p, docs } of packs) {

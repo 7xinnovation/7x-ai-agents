@@ -207,10 +207,13 @@ ${s.purpose}
 \`7X TEST - DO NOT PROCESS -\`. That is how Emirates Post know the application is
 ours and not a real customer's.
 
-**2. Add your initials to the end.** The documents say \`${s.company.en.split("- ").pop()}\`.
-Tell the chat you want your initials on the end of it — \`${s.company.en.split("- ").pop()}-XY\`
-— so your run is yours and does not collide with anyone else's. Just say it in
-the chat; you do not need to edit any file.
+**2. One pack, one submission.** Emirates Post file an application against the
+**licence number** in the documents — \`${s.company.tl}\` — and against the person
+signed in. Once yours reaches *Under document review* that pairing is settled
+and a second run on this pack will be refused, however many times you try.
+Changing the company name does not make a new run: it is the licence number
+they match on. So if you need to test twice, ask Emre for another pack rather
+than going round again on this one.
 
 **3. Send Emre the reference number at the end.** It looks like \`LR-54086\`.
 Every run leaves a record in Emirates Post's test system that somebody has to
@@ -347,7 +350,8 @@ export function readme(): string {
 
   return `# EPGL 2.0 test packs
 
-Six packs, one per kind of submission. Each folder stands on its own: open its
+Seven packs: one per kind of submission, and a spare of the ordinary one. Each
+folder stands on its own: open its
 \`TESTING.md\`, use the documents next to it, and you need nothing from any
 other folder.
 
@@ -368,13 +372,15 @@ ${SCENARIOS.map((s) => `**\`${s.dir}\`** — ${s.purpose}`).join("\n\n")}
 
 **Every completed run is a real write to Emirates Post's NewLaw sandbox.** Each
 one leaves an application somebody has to clear down afterwards, so send Emre
-the \`LR-\` reference at the end of every run and do not run a pack twice
-without changing the company suffix.
+the \`LR-\` reference at the end of every run.
 
-Each pack applies as a **different company with a different trade licence
-number**, on purpose: EPGL's duplicate check works on the company, so two packs
-sharing one would have the second application refused as a duplicate of the
-first.
+**A pack is good for one submission per person.** Emirates Post key an
+application on the licence number in the documents, the product, and the person
+signed in; once a run reaches *Under document review* that combination is
+settled and every later attempt on it comes back *"This application is locked"*.
+Changing the company suffix does not get around it — it was never what they
+match on — which is what packs 01 and 07 are two of: the same journey under two
+licence numbers. If a tester needs a third run, they need a third pack.
 
 ## Where these come from
 
