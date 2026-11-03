@@ -66,6 +66,12 @@ import {
 
 /** Who a hand-written call belongs to, for the admin's API Logs page. */
 type LogCtx = { agentId?: string; conversationId?: string; environment?: string };
+import {
+  withoutForeignApplicationId,
+  maskForeignApplicationRefs,
+  isTwoZeroDuplicateCheck,
+  FOREIGN_REFS_NOTE,
+} from "./epglCrossOrg";
 import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
@@ -1568,6 +1574,27 @@ export async function buildApiTools(
     }
   }
 
+  /**
+   * IS THE DUPLICATE CHECK LOOKING AT A DIFFERENT ORG FROM THE CREATE?
+   *
+   * In EPGL 2.0 it is: the check is the 1.x one on preprod2, the application is
+   * created in newlaw, and newlaw has never heard of the records it returns.
+   * Worked out from the hosts rather than hard-coded, so the day EPGL publish a
+   * duplicate check on the new org — or the 2.0 agent stops carrying the old
+   * one — this disarms itself and the references come back. See lib/epglCrossOrg.
+   */
+  const hostOfTool = (t: string | undefined) => {
+    if (!t) return "";
+    try {
+      return new URL(String(map.get(t)?.spec.baseUrl ?? "")).host.toLowerCase();
+    } catch {
+      return "";
+    }
+  };
+  const createHost = hostOfTool([...map.keys()].find(isEpglCompositeTool));
+  const duplicateHost = hostOfTool([...map.keys()].find((t) => /duplicatecheck$/i.test(t)));
+  const duplicateCheckIsForeign = Boolean(createHost && duplicateHost && createHost !== duplicateHost);
+
   // Runtime BACKEND session token: one captured this turn takes priority over one
   // persisted from a previous turn. The UAE PASS identity token is deliberately NOT
   // part of this chain — it is offered separately and only honoured by uaepass_live.
@@ -2872,6 +2899,25 @@ export async function buildApiTools(
     }
 
     /**
+     * EPGL 2.0: an application id the model found in the OTHER org, off the create.
+     *
+     * The duplicate check speaks to preprod2 and the application is created in
+     * newlaw, so an LR- number read off that list is a record the create's own
+     * org has never heard of — and twice the model has sent one as
+     * applicationId__c and been told exactly that. The id is Salesforce's to
+     * mint. See lib/epglCrossOrg.
+     */
+    if (isEpglCompositeTool(toolName)) {
+      const stripped = withoutForeignApplicationId(input);
+      if (stripped.removed.length) {
+        input = stripped.input ?? input;
+        console.warn(
+          `[epgl-2.0] applicationId__c removed from the create: ${[...new Set(stripped.removed)].join(", ")} — the other org's reference`
+        );
+      }
+    }
+
+    /**
      * EPGL 2.0: the customer's files into the New Regulation composite.
      *
      * The 1.x branch below STRIPS documents, because their API 5 takes each
@@ -3838,6 +3884,21 @@ export async function buildApiTools(
     // proceed rather than ask again.
     if (!res.isError && /duplicatecheck$/i.test(toolName)) {
       const decided = opts.duplicateDecision?.();
+      /**
+       * AND IN 2.0, WITHOUT THE REFERENCES.
+       *
+       * They belong to the other org. Kept out of the result entirely rather
+       * than asked for politely: on 3 November a customer was offered "Update
+       * existing application (LR-37795)" and "Check status of LR-37795" for a
+       * record the new system answers with "No application found".
+       */
+      if (duplicateCheckIsForeign && isTwoZeroDuplicateCheck(input)) {
+        const { result: hidden, masked } = maskForeignApplicationRefs(res.result);
+        if (masked) {
+          console.warn(`[epgl-2.0] duplicate check: ${masked} reference(s) withheld — they belong to ${duplicateHost}`);
+        }
+        res = { ...res, result: hidden + FOREIGN_REFS_NOTE };
+      }
       res = {
         ...res,
         result:
