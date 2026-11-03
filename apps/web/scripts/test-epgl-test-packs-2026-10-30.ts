@@ -24,10 +24,10 @@ const check = (l: string, ok: boolean, extra?: unknown) => {
 
 const packs = SCENARIOS.map((s) => ({ s, p: productFor(s.code), docs: docsFor(s) }));
 
-check("there are six packs beside the 22 October one", SCENARIOS.length === 6);
-check("each has its own folder", new Set(SCENARIOS.map((s) => s.dir)).size === 6);
+check("there are seven packs beside the 22 October one", SCENARIOS.length === 7);
+check("each has its own folder", new Set(SCENARIOS.map((s) => s.dir)).size === 7);
 check("...numbered from 02, because 01 is the pack testers already have",
-  SCENARIOS.map((s) => s.dir.slice(0, 2)).join() === "02,03,04,05,06,07");
+  SCENARIOS.map((s) => s.dir.slice(0, 2)).join() === "02,03,04,05,06,07,08");
 /**
  * Pack 07 repeats pack 01's PRODUCT on purpose -- it is the spare for a tester
  * whose own pack-01 application is locked -- so the licence numbers, not the

@@ -719,4 +719,34 @@ export const SCENARIOS: Scenario[] = [
       "**This is pack 01's journey under a different company.** If anything here behaves differently from pack 01 — a document it asks for that pack 01 never wanted, a question in a different order — that difference is worth reporting on its own.",
     ],
   },
+  /**
+   * AND AGAIN, BECAUSE ONE RUN IS ONE RUN (3 November 2026).
+   *
+   * Pack 07 was filed the day it was made -- LR-54110 -- which spends it for
+   * that tester as soon as it clears payment. A pack is consumed per person,
+   * so re-testing the ordinary journey means another licence number, not
+   * another go at the same one. This is pack 07 again under CN-8234567.
+   */
+  {
+    dir: "08-cep30-sme-uae-domestic-third-company",
+    code: "CEP30-UAE-SME-DOM",
+    purpose:
+      "Pack 07 again under a third company, for a tester who has already filed pack 07 and needs the ordinary journey a second time.",
+    company: co("20261103H", "CN-8234567", "7X TEST PRIME DELIVERY", "7X تست برايم ديليفري",
+      ["Courier Services", "Domestic Mail and Parcel Delivery"],
+      ["خدمات التوصيل السريع", "توصيل البريد والطرود المحلية"]),
+    describeSelf:
+      "I run a small UAE-national-owned courier company delivering domestically within the UAE, parcels up to 30 kg.",
+    answers: [
+      "Maximum shipment weight 30 kg. Yes to electronic tracking, yes to consignment notes.",
+      "Domestic only, no international. No food delivery, no medicine delivery, no cold chain.",
+      "Fleet of 4 vehicles. Insurance AED 500,000. No intermediation, no outsourcing.",
+    ],
+    watch: [
+      "**Nothing should already exist for this company.** `CN-8234567` has never been filed before. If it tells you Emirates Post's records show an existing application for this trade licence, stop and tell Emre — on this pack that sentence cannot be true.",
+      "**Count the documents on the confirmation.** Every file you upload should go to Emirates Post with the application. If it says some documents could not be attached, or that it will send them later, that is the thing to report — it was broken until 3 November and this pack is the check that it is fixed.",
+      "**It should never ask you to type 30 kg.** The weight belongs to the product, not to you. If it asks you to enter it, report it.",
+      "**The fee should be AED 1,000 and the card should open.** Pay it to the end: this pack exists partly to test that a payment completes.",
+    ],
+  },
 ];
