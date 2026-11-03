@@ -2156,6 +2156,23 @@ body {
   flex-direction: column;
   gap: 10px;
   margin: 4px 0 0 36px;
+  /**
+   * THE INDENT HAS TO COME OUT OF THE WIDTH, NOT BE ADDED TO IT.
+   *
+   * Reported from the Emirates Post app on 3 November — "the ready to send
+   * section looks out of place" — and it was, by exactly the indent. These
+   * cards are flex children of the conversation, so they stretch to its full
+   * width, and the 36px that lines them up under the assistant's bubble was
+   * then added on top: on a 393px phone the column is 357px wide, the cards
+   * were 357px wide starting 36px in, and the last 36px of every card hung off
+   * the right-hand edge of the screen.
+   *
+   * 86% is what a message row is capped at (see .dlg-msg), so taking the indent
+   * off it puts the right edge of a card exactly where the right edge of the
+   * bubble above it falls. On a wide screen the 360px grid below is narrower
+   * than either and nothing moves.
+   */
+  max-width: calc(86% - 36px);
   animation: dlg-fade-in 0.4s var(--ease) both;
   animation-delay: 0.08s;
 }
