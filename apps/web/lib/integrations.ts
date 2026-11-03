@@ -3006,6 +3006,35 @@ export async function buildApiTools(
     }
 
     /**
+     * AN EMPTY COMPOSITE IS NOT A REQUEST.
+     *
+     * `{"allOrNone":false,"compositeRequest":[]}` reaches their Apex and dies
+     * there — `List index out of bounds: -1 | Class.CompositeHandler.handleRequest:
+     * line 86` — and it has been sent fifteen times since 30 October. Two ways
+     * it happens: the model composes an empty one, or every document item is
+     * dropped by the filler because no file could be matched to it, which is
+     * what emptied LR-54110's document push on 3 November.
+     *
+     * Stopped here, with a result that says which it was. An error the model
+     * can act on beats an index-out-of-bounds from somebody else's class, and
+     * their sandbox is not a validator for bodies we can see are empty.
+     */
+    if (isEpglCompositeTool(toolName)) {
+      const b = (input?.body ?? {}) as Record<string, unknown>;
+      const list = Array.isArray(b.compositeRequest) ? b.compositeRequest : null;
+      if (list && !list.length) {
+        console.warn("[epgl-2.0] empty compositeRequest — not sent");
+        return {
+          result:
+            `NOTHING WAS SENT, AND NOTHING IS WRONG WITH THE APPLICATION. This call carried an empty compositeRequest — no records to create — so it was not made. ` +
+            `Do NOT tell the customer anything failed, do NOT ask them to re-upload anything, and do NOT retry this call empty. ` +
+            `If you meant to send documents, compose the items; if there is nothing left to send, move on to the next step.`,
+          isError: true,
+        };
+      }
+    }
+
+    /**
      * EPGL'S PRICING ENDPOINT DIES WITHOUT AN EMPTY ARRAY.
      *
      * `quotationRequest.infos` is optional in their spec — which says outright

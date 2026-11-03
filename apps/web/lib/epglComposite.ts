@@ -100,7 +100,46 @@ export async function withEpglDocumentFiles(
   const res: FillResult = { input, inlined: [], uploaded: [], unmatched: [], failed: [] };
   if (!items.length) return res;
 
+  /**
+   * A FILE IS FOUND BY ITS SLOT KEY *OR* BY EPGL'S NAME FOR THE SLOT.
+   *
+   * This used to look up `slugOfDocumentType(Document_Type)` alone, which is
+   * the slot key only for slots generated FROM the catalogue. Our own slots are
+   * named by us: `moa` carries Document_Type "Memorandum of Association", which
+   * slugs to `memorandum_of_association`, which is not a key any file has.
+   *
+   * 3 November, LR-54110: the follow-up push built three items — moa,
+   * partner_1_passport, partner_1_emirates_id — and every one of them failed
+   * this lookup, was dropped as unmatched, and left an empty composite behind.
+   * The applicant was told their documents were on file. They were not.
+   *
+   * The slot key wins where both are present, so a catalogue slot still finds
+   * its own file rather than its twin's.
+   */
   const byKey = new Map(files.map((f) => [f.key, f]));
+  /**
+   * TWO SLOTS MAY SHARE ONE OF EPGL'S NAMES.
+   *
+   * `partner_1_passport` and `partner_2_passport` are both "Copy of Passport",
+   * so an alias cannot be a single file or both items would be filled with
+   * partner 1's. The items are built in slot order, so the alias is a queue:
+   * each item takes the next file of that type nobody has taken yet.
+   */
+  const aliases = new Map<string, EpglCaseFile[]>();
+  for (const f of files) {
+    if (!f.salesforceType) continue;
+    const slug = slugOfDocumentType(f.salesforceType);
+    if (slug === f.key) continue; // reachable by its key already
+    (aliases.get(slug) ?? aliases.set(slug, []).get(slug)!).push(f);
+  }
+  const used = new Set<EpglCaseFile>();
+  const fileFor = (type: string): EpglCaseFile | undefined => {
+    const slug = slugOfDocumentType(type);
+    const exact = byKey.get(slug);
+    if (exact && !used.has(exact)) return exact;
+    return (aliases.get(slug) ?? []).find((f) => !used.has(f)) ?? exact;
+  };
+
   const next: CompositeItem[] = [];
   let changed = false;
 
@@ -111,7 +150,7 @@ export async function withEpglDocumentFiles(
     }
     const b = { ...((item.body ?? {}) as Record<string, unknown>) };
     const type = String(b.Document_Type ?? "");
-    const file = byKey.get(slugOfDocumentType(type));
+    const file = fileFor(type);
 
     // The model already supplied a file id (a re-upload of something it just
     // put up). Leave it alone — it is not ours to second-guess.
@@ -136,11 +175,13 @@ export async function withEpglDocumentFiles(
       b.EPG_File_Id__c = id;
       b.fileName = file.fileName;
       res.uploaded.push(file.key);
+      used.add(file);
     } else {
       delete b.EPG_File_Id__c;
       b.content = Buffer.from(file.bytes).toString("base64");
       b.fileName = file.fileName;
       res.inlined.push(file.key);
+      used.add(file);
     }
     next.push({ ...item, body: b });
     changed = true;
@@ -165,9 +206,16 @@ export async function withEpglDocumentFiles(
  * already moved on and they went to a later one. A document that travels with
  * the create cannot miss its application.
  *
- * The model has never emitted a document item in two weeks of runs, so they
- * are put in here rather than asked for. If it ever does emit one, this leaves
- * the composite alone — it is not ours to second-guess.
+ * The model emits SOME of them, and used to make this stand down entirely.
+ * "It has never emitted a document item in two weeks of runs" stopped being
+ * true: on 3 November LR-54110 was created with exactly one — the beneficial
+ * ownership declaration — so this added nothing, and the other six documents
+ * the applicant had uploaded never travelled with the application at all. One
+ * item the model happened to write is not a decision to compose the set.
+ *
+ * So the model's items are kept as written and the rest are added beside them.
+ * A slot it has already covered — by our key or by EPGL's name for the slot —
+ * is left to its version.
  *
  * Only slots EPGL's checklist knows, by the same rule as the follow-up call:
  * `salesforceType` is set on a catalogue-generated slot and on no other. The
@@ -182,8 +230,14 @@ export function withEpglDocumentItems(
   const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
   const items = Array.isArray(body.compositeRequest) ? ([...body.compositeRequest] as CompositeItem[]) : [];
   if (!items.length) return none;
-  // Already carries documents: the model composed them, so leave it be.
-  if (items.some((i) => /sobjects\/EPG_Document__c$/i.test(String(i?.url ?? "")))) return none;
+
+  /** Slots the model wrote items for, by every name they could be known by. */
+  const covered = new Set<string>();
+  for (const i of items) {
+    if (!/sobjects\/EPG_Document__c$/i.test(String(i?.url ?? ""))) continue;
+    const t = (i.body as { Document_Type?: unknown } | undefined)?.Document_Type;
+    if (typeof t === "string" && t) covered.add(slugOfDocumentType(t));
+  }
 
   const request = items.find((i) => /sobjects\/EPG_License_Request__c$/i.test(String(i?.url ?? "")));
   if (!request?.referenceId) return none;
@@ -205,13 +259,29 @@ export function withEpglDocumentItems(
    * false and a refusal costs only that slot. Everything that can pass still
    * travels with the application, which is the point of the one-call shape.
    */
-  const sendable = files.filter((f) => !!f.salesforceType && !(f.validityRequired && !f.validTo));
+  const sendable = files.filter(
+    (f) =>
+      !!f.salesforceType &&
+      !(f.validityRequired && !f.validTo) &&
+      !covered.has(f.key) &&
+      !covered.has(slugOfDocumentType(f.salesforceType!))
+  );
   if (!sendable.length) return none;
 
-  const docs: CompositeItem[] = sendable.map((f, i) => ({
+  /** Never a referenceId the model has already used; Salesforce rejects a clash. */
+  const taken = new Set(items.map((i) => String(i?.referenceId ?? "")));
+  let n = 0;
+  const nextRef = () => {
+    let r: string;
+    do { r = `Doc${++n}`; } while (taken.has(r));
+    taken.add(r);
+    return r;
+  };
+
+  const docs: CompositeItem[] = sendable.map((f) => ({
     method: "POST",
     url: "/services/data/v60.0/sobjects/EPG_Document__c",
-    referenceId: `Doc${i + 1}`,
+    referenceId: nextRef(),
     body: {
       // Their reference syntax, resolved by Salesforce inside the one call.
       EPG_License_Request__c: `@{${ref}.id}`,

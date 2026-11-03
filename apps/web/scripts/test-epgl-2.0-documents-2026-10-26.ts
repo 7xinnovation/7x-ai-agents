@@ -196,10 +196,32 @@ check("the filler fills what we injected", oneFilled.inlined.length === 2, oneFi
 check("...and leaves nothing unmatched", oneFilled.unmatched.length === 0, oneFilled.unmatched);
 
 // Guards.
-check("a composite the model already put documents in is left alone", (() => {
+/**
+ * SUPERSEDED 3 NOVEMBER. This used to assert that one document item from the
+ * model stood the injection down entirely. LR-54110 was created with exactly
+ * one -- the beneficial ownership declaration -- and the other six documents
+ * the applicant had uploaded never went. The rest are now added beside it.
+ */
+check("a document item from the model no longer stands the rest down", (() => {
   const withDocs = CREATE();
   withDocs.body.compositeRequest.push({ method: "POST", url: "/services/data/v60.0/sobjects/EPG_Document__c", referenceId: "Doc1", body: {} } as never);
-  return withEpglDocumentItems(withDocs, FILES).added.length === 0;
+  return withEpglDocumentItems(withDocs, FILES).added.length === 2;
+})());
+check("...and the slot it DID write is left to its version", (() => {
+  const withDocs = CREATE();
+  const mine = FILES.find((f) => f.salesforceType)!;
+  withDocs.body.compositeRequest.push({
+    method: "POST", url: "/services/data/v60.0/sobjects/EPG_Document__c", referenceId: "Doc1",
+    body: { Document_Type: mine.salesforceType },
+  } as never);
+  const out = withEpglDocumentItems(withDocs, FILES);
+  return !out.added.includes(mine.key) && out.added.length === 1;
+})());
+check("...without ever reusing one of its referenceIds", (() => {
+  const withDocs = CREATE();
+  withDocs.body.compositeRequest.push({ method: "POST", url: "/services/data/v60.0/sobjects/EPG_Document__c", referenceId: "Doc1", body: {} } as never);
+  const items = (withEpglDocumentItems(withDocs, FILES).input as any).body.compositeRequest as { referenceId: string }[];
+  return new Set(items.map((i) => i.referenceId)).size === items.length;
 })());
 check("a composite that creates no application is left alone", (() => {
   const noReq = { body: { allOrNone: true, compositeRequest: [{ method: "POST", url: "/services/data/v60.0/sobjects/Account", referenceId: "A", body: {} }] } };
