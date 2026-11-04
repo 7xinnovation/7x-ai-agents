@@ -859,4 +859,36 @@ export const SCENARIOS: Scenario[] = [
       "**Nothing should already exist for this company.** `CN-1134567` has never been filed. If it says Emirates Post's records show an existing application for this trade licence, stop and tell Emre.",
     ],
   },
+  /**
+   * TWO PARTNERS' PASSPORTS, WHICH IS A QUESTION NOBODY HAS ANSWERED
+   * (4 November 2026).
+   *
+   * Partners 2-8 have been unsent since 29 October on the reasoning that
+   * EPGL's catalogue has one `Copy of Passport` for the whole application and
+   * would keep the last one written. No composite has ever carried two of
+   * them, so it was never measured. This pack is the measurement: file once
+   * with two partners and read their own status push.
+   */
+  {
+    dir: "12-cep30-two-partners",
+    code: "CEP30-UAE-SME-DOM",
+    purpose:
+      "Two partners, to find out whether EPGL's checklist holds both passports or only the last one written.",
+    company: co("20261104A", "CN-1234568", "7X TEST TWIN POST", "7X تست توين بوست",
+      ["Courier Services", "Domestic Mail and Parcel Delivery"],
+      ["خدمات التوصيل السريع", "توصيل البريد والطرود المحلية"]),
+    describeSelf:
+      "I run a small UAE-national-owned courier company delivering domestically within the UAE, parcels up to 30 kg.",
+    answers: [
+      "Maximum shipment weight 30 kg. Yes to electronic tracking, yes to consignment notes.",
+      "Domestic only, no international. No food delivery, no medicine delivery, no cold chain.",
+      "Fleet of 7 vehicles. Insurance AED 500,000. No intermediation, no outsourcing.",
+    ],
+    watch: [
+      "**Upload BOTH partners' passports and BOTH their Emirates IDs.** That is the whole point of this pack — the question is whether Emirates Post end up holding two of each or one.",
+      "**It should now ask for every document on the checklist**, not six of them. If it lets you submit with documents outstanding, that is the thing to report.",
+      "**The trade licence should be asked for ONCE.** It used to be asked for twice. If you are asked again for a licence you have already given, say so.",
+      "**Nothing should already exist for this company.** `CN-1234568` has never been filed.",
+    ],
+  },
 ];
