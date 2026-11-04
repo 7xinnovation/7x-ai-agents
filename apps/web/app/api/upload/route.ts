@@ -15,7 +15,7 @@ import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
 import { acceptedDocTypes, expiredForSlot } from "@/lib/documentSlots";
-import { catalogueTwinOf } from "@/lib/documentTwins";
+import { fillCatalogueTwins } from "@/lib/documentTwinsFill";
 import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, ownerDocumentCheck, PARTNER_NAMES_KEY, NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
 
 /** Case-data bookkeeping key: which fields each document's extraction filled. */
@@ -665,36 +665,11 @@ export async function POST(req: NextRequest) {
    * sent — which is what the existing identity mirror does, and a separate
    * thing to fix.
    */
-  let twinFilled: string | null = null;
-  try {
-    const fresh = await getCase(caseRow.caseId);
-    const journey = agent.definition.journeys.find((j) => j.key === fresh?.state.journeyKey);
-    const slots = (journey?.steps ?? []).flatMap((st) => st.documents ?? []);
-    const held = new Set(
-      (fresh?.state.documents ?? [])
-        .filter((d) => d.status === "uploaded" || d.status === "accepted")
-        .map((d) => d.key)
-    );
-    const target = catalogueTwinOf(slots, key, (fresh?.state.data ?? {}) as Record<string, unknown>, (k) => held.has(k));
-    if (target) {
-      await getDb()
-        .insert(documentsTable)
-        .values({ caseId: caseRow.caseId, key: target, status: "uploaded", fileName: file.name, storageKey });
-      await mutateCase(caseRow.caseId, (st) =>
-        setDocument(agent.definition, st, { key: target, status: "uploaded", fileName: file.name })
-      );
-      twinFilled = target;
-      await audit({
-        agentId: agent.id,
-        conversationId,
-        actor: "system",
-        action: "document_twin_filled",
-        payload: { from: key, to: target, fileName: file.name },
-      });
-    }
-  } catch {
-    /* a twin we could not fill is the old behaviour: the customer is asked for it */
-  }
+  // getCase is keyed on the CONVERSATION. The first version of this passed the
+  // case id, got null every time, and inside its own try that looked exactly
+  // like "no twin" — zero document_twin_filled rows in its first day.
+  const twins = await fillCatalogueTwins(agent.definition, conversationId, agent.id).catch(() => null);
+  const twinFilled = twins?.filled.map((f) => f.to).join(", ") || null;
 
   await audit({
     agentId: agent.id,
@@ -705,7 +680,9 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({
-    case: mirrored?.state ?? state,
+    // The latest state there is: a twin filled just now must not come back
+    // looking empty to the client.
+    case: twins?.state ?? mirrored?.state ?? state,
     rejected: false,
     extracted: extractedKeys,
     needsConfirmation: nameQuery ?? undefined,

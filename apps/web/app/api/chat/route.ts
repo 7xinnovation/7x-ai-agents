@@ -63,6 +63,8 @@ import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard, asksSomethingElse, asksToReplace } from "@/lib/uploadGuard";
 import { outstandingNudge } from "@/lib/outstandingDocument";
+import { fillCatalogueTwins } from "@/lib/documentTwinsFill";
+import { slotsForJourney } from "@/lib/journeySlots";
 import { docKeyGuard } from "@/lib/docKeyGuard";
 import { epglDocumentLabels } from "@/lib/epglDocumentLabel";
 import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
@@ -756,7 +758,8 @@ async function epglDocumentRows(
   stateDocs: { key: string; status: string; fileName?: string; validTo?: string }[],
   caseData: Record<string, unknown>,
   definition: AgentDefinition,
-  adapters: ReturnType<typeof resolveAdapters>
+  adapters: ReturnType<typeof resolveAdapters>,
+  journeyKey?: string | null
 ): Promise<EpglCaseFile[]> {
   const get = adapters.storage?.get?.bind(adapters.storage);
   if (!get) return [];
@@ -764,9 +767,21 @@ async function epglDocumentRows(
   if (!wanted.length) return [];
   // EPGL's own name for each slot, so both the one-call items and the
   // follow-up call name a document the same way and neither invents one.
-  const slots = new Map(
-    definition.journeys.flatMap((j) => j.steps).flatMap((st) => st.documents).map((d) => [d.key, d] as const)
-  );
+  /**
+   * THE CASE'S OWN JOURNEY FIRST.
+   *
+   * This was one map over every journey, and a key defined in two journeys kept
+   * whichever came LAST. `moa`, `partner_1_passport` and `partner_1_emirates_id`
+   * are in both `new_license` — carrying EPGL's names since the 29 October merge
+   * — and `renewal`, which carries none. Renewal came last, so every 2.0 file for
+   * those three had no `salesforceType`; the follow-up built "Copy of Passport"
+   * items, the filler found no file of that type, dropped them, and sent an empty
+   * call. Those three have failed on every run since — LR-54110, LR-54115,
+   * LR-54109 — and nothing else has.
+   *
+   * Other journeys still fill in a key the active one does not define.
+   */
+  const slots = slotsForJourney(definition.journeys, journeyKey);
   const sctx = adapterContext(definition, definition.integrations.storage);
   const out: EpglCaseFile[] = [];
   for (const d of wanted) {
@@ -1362,7 +1377,7 @@ export async function POST(req: NextRequest) {
     // own call.
     epglDocuments:
       agent.definition.tenantSlug === "epgl"
-        ? () => epglDocumentRows(session.caseId, liveState.documents, liveState.data, agent.definition, adapters)
+        ? () => epglDocumentRows(session.caseId, liveState.documents, liveState.data, agent.definition, adapters, liveState.journeyKey)
         : undefined,
     /**
      * The application id onto the case, the moment Salesforce issue it.
@@ -1551,6 +1566,20 @@ export async function POST(req: NextRequest) {
    * a case that did not yet know about the key courier: the breakdown said AED
    * 700 and the order was created for 670.
    */
+  /**
+   * CATALOGUE TWINS THAT BECAME DECIDABLE SINCE THE UPLOAD.
+   *
+   * The trade licence is uploaded before the product is chosen, so at the
+   * upload nobody can say whether its EPGL twin is the CEP30 slot or the plain
+   * one, and lib/documentTwins refuses to guess. The product arrives on a later
+   * turn with nothing being uploaded — so the twin is filled here, before the
+   * model reads readiness, or it asks for the same licence a second time.
+   * EPGL only; a no-op without catalogue slots.
+   */
+  if (agent.definition.tenantSlug === "epgl") {
+    const twins = await fillCatalogueTwins(agent.definition, session.conversationId, agent.id).catch(() => null);
+    if (twins) session.state = twins.state;
+  }
   let liveState = session.state;
   /**
    * The courier, as the customer was actually offered it.
