@@ -121,6 +121,28 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
   return lines.join("\n");
 }
 
+/**
+ * What a document's requirement MEANS, in words the model cannot misread.
+ *
+ * It printed the raw value, and `conditional` was read as "optional": on
+ * 4 November the agent told a CEP30 applicant the lease contract was optional
+ * and that "the application is complete without it" — while readiness, which
+ * evaluates the condition, held the application back for want of it. EPGL's
+ * own catalogue marks the lease required.
+ *
+ * The condition itself is printed rather than evaluated here: this listing sits
+ * in the cached part of the prompt, and the model already knows the case's
+ * values. Only `conditional` is reworded, so a journey without conditional
+ * documents gets exactly the text it had.
+ */
+export function requirementText(d: { requirement: string; condition?: string }): string {
+  if (d.requirement !== "conditional") return d.requirement;
+  const when = d.condition?.trim();
+  return when
+    ? `REQUIRED when ${when} — not optional; when that holds the application cannot be submitted without it`
+    : "conditional";
+}
+
 export function buildSystemPrompt(
   agent: AgentDefinition,
   state: CaseState,
@@ -171,7 +193,7 @@ ${journey.steps
               )
               .join("\n") +
             (s.fields.length && s.documents.length ? "\n" : "") +
-            s.documents.map((d) => `      document ${d.key}: ${tr(d.label, locale)} (${d.requirement})`).join("\n")
+            s.documents.map((d) => `      document ${d.key}: ${tr(d.label, locale)} (${requirementText(d)})`).join("\n")
         )
         .join("\n")}${journey.guidance ? `\n\nHow to run this journey:\n${journey.guidance}` : ""}`
     : "No active journey yet. Recognise intent first, then start the matching journey with set_journey.";

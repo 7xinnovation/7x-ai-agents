@@ -341,6 +341,100 @@ export function contentVersionMultipart(
  * convention in an example, not a contract, so the first LR- shaped id in the
  * response wins over hunting for a name they are free to change.
  */
+/**
+ * Does this composite CREATE an application, rather than amend one or carry
+ * documents for one?
+ *
+ * A licence request with an `Id` or a `Name` is the update shape. A composite
+ * with no licence request at all is the document follow-up. Neither is a create.
+ */
+export function createsApplication(input: Record<string, unknown> | undefined): boolean {
+  const body = (input?.body ?? {}) as Record<string, unknown>;
+  const items = Array.isArray(body.compositeRequest) ? (body.compositeRequest as CompositeItem[]) : [];
+  return items.some((i) => {
+    if (!/sobjects\/EPG_License_Request__c$/i.test(String(i?.url ?? ""))) return false;
+    if (String(i?.method ?? "POST").toUpperCase() !== "POST") return false;
+    const b = (i?.body ?? {}) as Record<string, unknown>;
+    return !String(b.Id ?? "").trim() && !String(b.Name ?? "").trim();
+  });
+}
+
+export interface DatedResult {
+  input: Record<string, unknown> | undefined;
+  /** Items given the date the case already held. */
+  dated: string[];
+  /** Items taken off the create because nobody knows their date yet. */
+  withheld: string[];
+}
+
+/**
+ * A DOCUMENT WITHOUT ITS DATE MAY NOT COST THE APPLICATION.
+ *
+ * `withEpglDocumentItems` already keeps undated `validityRequired` slots off the
+ * create — but only the items IT adds. The model writes document items of its
+ * own, and those went through as written. 4 November, 09:31: the model put the
+ * SME licence into the create with no Valid_To__c, and the whole application
+ * came back "Rolled back due to allOrNone=true: Valid_To__c is required for this
+ * document" — Account, owners, Contact and all.
+ *
+ * So the same rule now covers every item, whoever wrote it. Where the case holds
+ * the date, it is put on the item. Where it does not, the item comes off the
+ * create and the follow-up call — `allOrNone: false`, where a refusal costs only
+ * that slot — sends it once the date is known.
+ *
+ * Only on an `allOrNone: true` composite. On the follow-up a refusal is a
+ * refusal of one slot and is recorded as such; there is nothing to protect.
+ */
+export function withDatedDocuments(
+  input: Record<string, unknown> | undefined,
+  files: EpglCaseFile[]
+): DatedResult {
+  const out: DatedResult = { input, dated: [], withheld: [] };
+  const body = (input?.body ?? {}) as Record<string, unknown>;
+  if (body.allOrNone !== true) return out;
+  const items = Array.isArray(body.compositeRequest) ? (body.compositeRequest as CompositeItem[]) : [];
+  if (!items.length) return out;
+
+  const bySlug = new Map<string, EpglCaseFile>();
+  for (const f of files) {
+    if (f.salesforceType) {
+      const slug = slugOfDocumentType(f.salesforceType);
+      if (!bySlug.has(slug)) bySlug.set(slug, f);
+    }
+    if (!bySlug.has(f.key)) bySlug.set(f.key, f);
+  }
+
+  let changed = false;
+  const next: CompositeItem[] = [];
+  for (const item of items) {
+    if (!/sobjects\/EPG_Document__c$/i.test(String(item?.url ?? ""))) {
+      next.push(item);
+      continue;
+    }
+    const b = (item.body ?? {}) as Record<string, unknown>;
+    if (String(b.Valid_To__c ?? "").trim()) {
+      next.push(item);
+      continue;
+    }
+    const type = String(b.Document_Type ?? "");
+    const file = bySlug.get(slugOfDocumentType(type));
+    if (!file?.validityRequired) {
+      next.push(item);
+      continue;
+    }
+    changed = true;
+    if (file.validTo) {
+      next.push({ ...item, body: { ...b, Valid_To__c: file.validTo } });
+      out.dated.push(file.key);
+    } else {
+      out.withheld.push(file.key);
+    }
+  }
+  if (!changed) return out;
+  out.input = { ...(input ?? {}), body: { ...body, compositeRequest: next } };
+  return out;
+}
+
 export function applicationIdFrom(raw: string | undefined): string | null {
   if (!raw) return null;
   let parsed: unknown;

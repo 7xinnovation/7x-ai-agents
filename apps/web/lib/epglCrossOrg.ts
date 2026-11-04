@@ -107,7 +107,18 @@ export function withoutForeignApplicationId(
  * and covers that case anyway.
  */
 export function isTwoZeroDuplicateCheck(input: Record<string, unknown> | undefined): boolean {
-  const at = (k: string) => String((input ?? {})[k] ?? "").trim();
+  /**
+   * THE FIELDS ARE IN `body`.
+   *
+   * A tool's arguments reach the runner as `{ body: { productCode, … } }` —
+   * the audit row of every duplicate check shows exactly that. This read the
+   * top level, found no product code, and decided every 2.0 call was a 1.x one,
+   * so the mask shipped on 3 November never armed once: on 4 November a
+   * customer was offered "Update existing application (LR-37795)" again. Read
+   * both, so a flat call is still understood.
+   */
+  const src = ((input?.body && typeof input.body === "object" ? input.body : input) ?? {}) as Record<string, unknown>;
+  const at = (k: string) => String(src[k] ?? "").trim();
   if (at("serviceId") || at("postalLicenseNumber")) return false;
   return Boolean(at("productCode"));
 }

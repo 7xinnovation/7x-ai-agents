@@ -1372,6 +1372,10 @@ export async function POST(req: NextRequest) {
      * else writes it: the model is told to quote the id, not to file it, and a
      * tool result from twenty turns ago is not a record.
      */
+    // The application this case already has — updated in-turn by
+    // rememberEpglApplicationId below, so a create earlier in the SAME turn
+    // counts. Read by the guard against a second create (lib/integrations).
+    epglApplicationId: agent.definition.tenantSlug === "epgl" ? () => epglApplication.id || null : undefined,
     rememberEpglApplicationId:
       agent.definition.tenantSlug === "epgl"
         ? async (applicationId: string) => {

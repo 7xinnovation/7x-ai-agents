@@ -54,6 +54,8 @@ const FAILURE_PREFACE =
 import { recordApiCall, trackedFetch } from "./apiCallLog";
 import {
   isEpglCompositeTool,
+  createsApplication,
+  withDatedDocuments,
   withEpglDocumentFiles,
   withEpglDocumentItems,
   documentOutcomes,
@@ -1411,6 +1413,14 @@ export async function buildApiTools(
      * it afterwards arrives unmatched.
      */
     rememberEpglApplicationId?: (applicationId: string) => void | Promise<void>;
+    /**
+     * The 2.0 application this CASE already has, read at the moment of the call.
+     *
+     * Its own reader, not `submittedReference`: that one is the 1.x request on
+     * `state.reference`, which a 2.0 case never sets, and it also fills in the id
+     * for status lookups — which on this agent go to the OTHER org.
+     */
+    epglApplicationId?: () => string | null;
     /**
      * What EPGL said about each document the create call carried.
      *
@@ -2914,6 +2924,46 @@ export async function buildApiTools(
         console.warn(
           `[epgl-2.0] applicationId__c removed from the create: ${[...new Set(stripped.removed)].join(", ")} — the other org's reference`
         );
+      }
+
+      /**
+       * ONE APPLICATION PER CONVERSATION.
+       *
+       * The guard against a second submission checks `submitlicenserequest` —
+       * the 1.x tool — and reads `state.reference`, which a 2.0 case never sets.
+       * So 2.0 has had no guard at all. 4 November: LR-54109 was created at
+       * 09:32 and paid at 09:34, and at 09:35 the model called the create again
+       * "to resend the documents that didn't attach". Salesforce made LR-54401.
+       * One customer, one payment, two applications.
+       *
+       * Documents that did not travel with the create are sent by the follow-up
+       * call on the next turn, against the application that exists. Nothing the
+       * model is trying to do here needs a second create.
+       */
+      const existing = opts.epglApplicationId?.() ?? null;
+      if (existing && createsApplication(input)) {
+        console.warn(`[epgl-2.0] second create refused — this conversation already has ${existing}`);
+        return {
+          result:
+            `ALREADY FILED — NOTHING WAS SENT, and nothing is wrong. This conversation already created application ${existing}, ` +
+            `and this call would have created a SECOND application for the same customer and company. ` +
+            `Documents that did not go with the first submission are sent to ${existing} automatically — do NOT re-create the application to send them, ` +
+            `and do NOT ask the customer to upload anything already uploaded. Give them ${existing} as their reference. ` +
+            `If a document is still genuinely missing, ask for that one document by name.`,
+          isError: true,
+        };
+      }
+
+      if (opts.epglDocuments) {
+        const caseFiles = await opts.epglDocuments().catch(() => [] as EpglCaseFile[]);
+        const dated = withDatedDocuments(input, caseFiles);
+        if (dated.dated.length || dated.withheld.length) {
+          input = dated.input ?? input;
+          console.warn(
+            `[epgl-2.0] create: ${dated.dated.length ? `dated ${dated.dated.join(", ")}` : ""}` +
+              `${dated.withheld.length ? ` withheld for want of a date ${dated.withheld.join(", ")}` : ""}`
+          );
+        }
       }
     }
 
