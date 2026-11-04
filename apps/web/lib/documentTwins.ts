@@ -32,7 +32,7 @@
  *    only to carry a file across the boundary between the two; a pair on the
  *    same side of it is two genuine documents.
  */
-import { evalCondition } from "@dialog/core";
+import { evalCondition, conditionDecidable } from "@dialog/core";
 import { acceptedDocTypes } from "./documentSlots";
 import { partnerSlot } from "./docIdentity";
 
@@ -58,27 +58,14 @@ const familiesOf = (s: TwinSlot): string[] => acceptedDocTypes(s.key, labelOf(s)
  * document, applies to this application, and has nothing in it yet.
  */
 /**
- * CAN THIS CONDITION BE ANSWERED YET?
+ * CAN THIS CONDITION BE ANSWERED YET? See conditionDecidable in the case
+ * engine, which readiness uses too — the twin and readiness must agree.
  *
- * The trade licence is the FIRST thing uploaded — it is how the company is
- * read — and the product is chosen after it. On 4 November, at the moment the
- * licence arrived, `product_family` was empty, and `product_family != 'CEP30'`
- * is TRUE of an empty value: the plain "Trade Licence" slot for the four
- * non-CEP30 products would have been filled on a CEP30 application.
- *
- * So a condition is only evaluated once every field it names has a value. Until
- * then the twin is left alone, and it is filled when the product is chosen — on
- * the next turn (see fillCatalogueTwins), not at the upload.
+ * The trade licence is uploaded before the product is chosen, and
+ * `product_family != 'CEP30'` is TRUE of an empty value, so an undecidable
+ * condition must not pick a twin. It is filled on the turn the product lands.
  */
-const CONDITION_WORDS = new Set(["and", "or", "not", "true", "false", "null", "undefined"]);
-export function conditionDecidable(condition: string | undefined, data: Record<string, unknown>): boolean {
-  const c = condition?.trim();
-  if (!c) return true;
-  const names = c.replace(/'[^']*'|"[^"]*"/g, " ").match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
-  return names
-    .filter((n) => !CONDITION_WORDS.has(n.toLowerCase()))
-    .every((n) => data[n] !== undefined && data[n] !== null && data[n] !== "");
-}
+export { conditionDecidable };
 
 export function catalogueTwinOf(
   slots: TwinSlot[],

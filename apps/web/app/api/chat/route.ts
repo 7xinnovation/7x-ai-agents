@@ -82,7 +82,7 @@ import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/custome
 import { log } from "@/lib/logger";
 import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
 import type { EpglCaseFile } from "@/lib/epglComposite";
-import { isEpglCompositeTool, documentCompositeBody, documentOutcomes, sendableDocumentKeys, type EpglDocumentSlot } from "@/lib/epglComposite";
+import { isEpglCompositeTool, documentCompositeBody, documentOutcomes, sendableDocumentKeys, inBatches, type EpglDocumentSlot } from "@/lib/epglComposite";
 
 export const runtime = "nodejs";
 // Multi-tool turns (e.g. a renewal: details + pricing + payment) can run well past
@@ -4825,12 +4825,28 @@ export async function POST(req: NextRequest) {
           if (sending.length) {
             deferred.push(async () => {
               try {
-                const payload = documentCompositeBody(appId, slots);
-                if (!payload) return;
-                const res = await execIntegration(tool, { body: payload });
-                const { sent, refused } = res.isError
-                  ? { sent: [] as string[], refused: [] as { key: string; reason: string }[] }
-                  : documentOutcomes((res as { raw?: string }).raw ?? res.result, sending);
+                /**
+                 * IN BATCHES, ONE CALL EACH.
+                 *
+                 * Their CompositeHandler runs out of database queries past a
+                 * handful of documents in one call (lib/epglComposite,
+                 * MAX_DOCUMENTS_PER_CALL). Each batch is its own transaction,
+                 * and a batch that fails costs only its own slots — the next
+                 * still goes, and anything unsent is retried next turn.
+                 */
+                const sent: string[] = [];
+                const refused: { key: string; reason: string }[] = [];
+                const toSend = slots.filter((sl) => sending.includes(sl.key));
+                for (const batch of inBatches(toSend)) {
+                  const payload = documentCompositeBody(appId, batch);
+                  if (!payload) continue;
+                  const keys = sendableDocumentKeys(batch);
+                  const res = await execIntegration(tool, { body: payload });
+                  if (res.isError) continue;
+                  const out = documentOutcomes((res as { raw?: string }).raw ?? res.result, keys);
+                  sent.push(...out.sent);
+                  refused.push(...out.refused);
+                }
                 await audit({
                   ...a,
                   actor: "system",

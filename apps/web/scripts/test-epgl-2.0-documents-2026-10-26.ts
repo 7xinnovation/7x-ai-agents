@@ -287,9 +287,11 @@ check("a refusal is written to the case with its reason",
   /\[EPGL_DOCS_REFUSED_KEY\]: \{/.test(route));
 check("what went is written to the case so a later turn does not resend it",
   /\[SF_DOCS_SENT_KEY\]: \[/.test(route));
+// Per batch since 4 November (MAX_DOCUMENTS_PER_CALL): each call's outcome
+// is read against that call's own keys, in the order that call sent them.
 check("the order sent is the order read back",
-  /documentOutcomes\(\(res as \{ raw\?: string \}\)\.raw \?\? res\.result, sending\)/.test(route));
-check("it is deferred, like the 1.x push", /deferred\.push\(async \(\) => \{[\s\S]{0,400}documentCompositeBody/.test(route));
+  /const keys = sendableDocumentKeys\(batch\);[\s\S]{0,200}documentOutcomes\(\(res as \{ raw\?: string \}\)\.raw \?\? res\.result, keys\)/.test(route));
+check("it is deferred, like the 1.x push", /deferred\.push\(async \(\) => \{[\s\S]{0,1500}documentCompositeBody/.test(route));
 check("an outcome either way is auditable",
   /action: sent\.length \? "epgl_documents_attached" : "epgl_documents_failed"/.test(route));
 check("the expiry comes off the file itself", /if \(doc\.validTo\) return doc\.validTo;/.test(route));

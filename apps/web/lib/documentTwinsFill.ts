@@ -15,6 +15,37 @@ import { getDb, documents as documentsTable } from "@dialog/db";
 import { setDocument, type CaseState } from "@dialog/core";
 import { getCase, mutateCase, audit } from "./conversation";
 import { catalogueTwinOf, type TwinSlot } from "./documentTwins";
+import { acceptedDocTypes } from "./documentSlots";
+
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * THE DATE TRAVELS WITH THE FILE.
+ *
+ * The first version copied the file and not its expiry. The CEP30 slot is
+ * `validityRequired`, so it went on counting as outstanding: the model asked
+ * for the licence again, the guard answered "already uploaded — nothing to do
+ * here", and the applicant was then asked to type a date printed on the very
+ * licence the case had read it from — `license_expiry_date: 2027-12-31` sat on
+ * the case the whole time.
+ *
+ * The source document's own date first. Our `trade_license` slot is not
+ * `validityRequired`, so it usually has none; for a licence twin the expiry the
+ * extractor read off the licence is the same date, so that stands in.
+ */
+export function twinValidTo(
+  sourceValidTo: string | undefined,
+  to: string,
+  slots: TwinSlot[],
+  data: Record<string, unknown>
+): string | undefined {
+  if (sourceValidTo && ISO.test(sourceValidTo)) return sourceValidTo;
+  const slot = slots.find((s) => s.key === to);
+  const label = typeof slot?.label === "string" ? slot.label : String(slot?.label?.en ?? "");
+  const isLicence = (acceptedDocTypes(to, label) ?? []).includes("trade_license");
+  const read = String(data.license_expiry_date ?? "");
+  return isLicence && ISO.test(read) ? read : undefined;
+}
 
 type Definition = Parameters<typeof setDocument>[0];
 
@@ -49,11 +80,17 @@ export async function fillCatalogueTwins(
       .orderBy(desc(documentsTable.createdAt))
       .limit(1);
     if (!row?.storageKey) continue;
+    const validTo = twinValidTo(fresh.state.documents.find((d) => d.key === from)?.validTo, to, slots, data);
     await getDb()
       .insert(documentsTable)
       .values({ caseId: fresh.caseId, key: to, status: "uploaded", fileName: row.fileName, storageKey: row.storageKey });
     state = await mutateCase(fresh.caseId, (st) =>
-      setDocument(definition, st, { key: to, status: "uploaded", fileName: row.fileName ?? undefined })
+      setDocument(definition, st, {
+        key: to,
+        status: "uploaded",
+        fileName: row.fileName ?? undefined,
+        ...(validTo ? { validTo } : {}),
+      })
     );
     held.add(to);
     filled.push({ from, to });
@@ -62,7 +99,7 @@ export async function fillCatalogueTwins(
       conversationId,
       actor: "system",
       action: "document_twin_filled",
-      payload: { from, to, fileName: row.fileName },
+      payload: { from, to, fileName: row.fileName, validTo: validTo ?? null },
     }).catch(() => {});
   }
   return filled.length ? { state, filled } : null;

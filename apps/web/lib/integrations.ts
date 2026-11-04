@@ -56,6 +56,7 @@ import {
   isEpglCompositeTool,
   createsApplication,
   withDatedDocuments,
+  capDocumentItems,
   withEpglDocumentFiles,
   withEpglDocumentItems,
   documentOutcomes,
@@ -2994,6 +2995,15 @@ export async function buildApiTools(
          */
         const injected = withEpglDocumentItems(input, files);
         input = injected.input ?? input;
+        // Their Apex runs out of queries past a handful of documents in one
+        // call (lib/epglComposite, MAX_DOCUMENTS_PER_CALL). The model's own
+        // items count too; anything trimmed is left unsent, so the follow-up
+        // sends it.
+        const capped = capDocumentItems(input);
+        if (capped.dropped) {
+          input = capped.input ?? input;
+          console.warn(`[epgl-2.0] ${capped.dropped} document item(s) held for the follow-up — over the per-call limit`);
+        }
         const token =
           entry.spec.authType === "oauth2_cc"
             ? await getClientCredentialsToken(entry.spec).catch(() => null)

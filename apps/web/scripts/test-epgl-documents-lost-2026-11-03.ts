@@ -75,18 +75,24 @@ const typesOf = (input: unknown) =>
   docItems(input).map((i) => String((i.body as Record<string, unknown>)?.Document_Type ?? ""));
 
 console.log("\n1 · one item from the model no longer stands the rest down");
+/**
+ * Up to the per-call limit (4 November, MAX_DOCUMENTS_PER_CALL = 4): EPGL's
+ * Apex runs out of queries past a handful of documents in one call. The model
+ * wrote one, so three are added; the other three are left unsent and go on
+ * the follow-up. Before the limit this asserted all seven on the create.
+ */
 const injected = withEpglDocumentItems(createWithOneDoc(), PACK07);
-check("the other six are added", injected.added.length === 6, injected.added);
-check("all seven documents are on the create", docItems(injected.input).length === 7, typesOf(injected.input));
+check("three more are added beside the model's one", injected.added.length === 3, injected.added);
+check("the create carries four documents, the per-call limit", docItems(injected.input).length === 4, typesOf(injected.input));
 check("the model's own item is kept, once", typesOf(injected.input).filter((t) => t === "Beneficial Ownership Declaration").length === 1, typesOf(injected.input));
 check("the declaration is not added a second time", !injected.added.includes("beneficial_ownership_declaration"), injected.added);
 check("no referenceId is used twice",
-  new Set(docItems(injected.input).map((i) => i.referenceId)).size === 7,
+  new Set(docItems(injected.input).map((i) => i.referenceId)).size === 4,
   docItems(injected.input).map((i) => i.referenceId));
 check("and none of them collides with the model's Doc1",
-  injected.added.length === 6 && !docItems(injected.input).some((i, n, all) => all.findIndex((x) => x.referenceId === i.referenceId) !== n));
+  injected.added.length === 3 && !docItems(injected.input).some((i, n, all) => all.findIndex((x) => x.referenceId === i.referenceId) !== n));
 check("every added item is bound to the licence request",
-  docItems(injected.input).filter((i) => (i.body as Record<string, unknown>).EPG_License_Request__c === "@{NewLicenseRequest.id}").length === 6);
+  docItems(injected.input).filter((i) => (i.body as Record<string, unknown>).EPG_License_Request__c === "@{NewLicenseRequest.id}").length === 3);
 
 console.log("\n...and what it still leaves alone");
 const noRequest = withEpglDocumentItems({ body: { compositeRequest: [item("Account", "NewAccount")] } }, PACK07);

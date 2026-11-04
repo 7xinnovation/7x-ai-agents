@@ -98,6 +98,23 @@ export function setDocument(
   return recomputeReadiness(agent, { ...state, documents });
 }
 
+/**
+ * Can this condition be answered yet — does every field it names have a value?
+ *
+ * Shared by readiness and by the catalogue twin (apps/web/lib/documentTwins),
+ * which must agree on it: a slot readiness does not yet require is a slot no
+ * twin should fill. Quoted literals are not field names.
+ */
+const CONDITION_WORDS = new Set(["and", "or", "not", "true", "false", "null", "undefined"]);
+export function conditionDecidable(condition: string | undefined, data: Record<string, unknown>): boolean {
+  const c = condition?.trim();
+  if (!c) return true;
+  const names = c.replace(/'[^']*'|"[^"]*"/g, " ").match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+  return names
+    .filter((n) => !CONDITION_WORDS.has(n.toLowerCase()))
+    .every((n) => data[n] !== undefined && data[n] !== null && data[n] !== "");
+}
+
 /** Recompute submission readiness against the active journey (PRD readiness check). */
 export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): CaseState {
   /**
@@ -153,6 +170,18 @@ export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): 
        */
       if (reqDoc.requirement === "optional") continue;
       if (reqDoc.requirement === "conditional" && !reqDoc.condition?.trim()) continue;
+      /**
+       * NOT BEFORE THE CONDITION CAN BE ANSWERED.
+       *
+       * `product_family != 'CEP30'` is TRUE of an empty product, so before the
+       * product was chosen readiness asked for the plain "Trade Licence" slot —
+       * the one for the four products that are NOT CEP30 — and on 4 November a
+       * CEP30 applicant's licence was filed into it. A conditional document is
+       * required only once every field its condition names has a value.
+       * Mandatory documents are untouched: this rule is as narrow as the one
+       * above it.
+       */
+      if (reqDoc.requirement === "conditional" && !conditionDecidable(reqDoc.condition, state.data)) continue;
       if (!evalCondition(reqDoc.condition, state.data)) continue;
       const uploaded = state.documents.find(
         (d) => d.key === reqDoc.key && (d.status === "uploaded" || d.status === "accepted")

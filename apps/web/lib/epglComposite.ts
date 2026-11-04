@@ -222,6 +222,45 @@ export async function withEpglDocumentFiles(
  * bytes are not put in here; `withEpglDocumentFiles` does that next, to the
  * items added here and the model's alike.
  */
+/**
+ * How many documents one call to their CompositeHandler may carry.
+ *
+ * Their Apex queries in a loop per attached document, inside one transaction
+ * capped at 100 queries. Five went through twice; a full application's worth
+ * failed every time. Four leaves headroom. See withEpglDocumentItems.
+ */
+export const MAX_DOCUMENTS_PER_CALL = 4;
+
+/**
+ * Trim a composite to MAX_DOCUMENTS_PER_CALL document items.
+ *
+ * For what the MODEL wrote: the injector respects the cap, the model does not
+ * know it exists. Items taken off are not lost — nothing records them as sent,
+ * so the follow-up picks them up.
+ */
+export function capDocumentItems(
+  input: Record<string, unknown> | undefined,
+  max = MAX_DOCUMENTS_PER_CALL
+): { input: Record<string, unknown> | undefined; dropped: number } {
+  const body = (input?.body ?? {}) as Record<string, unknown>;
+  const items = Array.isArray(body.compositeRequest) ? (body.compositeRequest as CompositeItem[]) : [];
+  let seen = 0;
+  const next = items.filter((i) => {
+    if (!/sobjects\/EPG_Document__c$/i.test(String(i?.url ?? ""))) return true;
+    seen++;
+    return seen <= max;
+  });
+  if (next.length === items.length) return { input, dropped: 0 };
+  return { input: { ...(input ?? {}), body: { ...body, compositeRequest: next } }, dropped: items.length - next.length };
+}
+
+/** Slots in batches of MAX_DOCUMENTS_PER_CALL, for the follow-up. */
+export function inBatches<T>(xs: T[], size = MAX_DOCUMENTS_PER_CALL): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
+}
+
 export function withEpglDocumentItems(
   input: Record<string, unknown> | undefined,
   files: EpglCaseFile[]
@@ -266,6 +305,23 @@ export function withEpglDocumentItems(
       !covered.has(f.key) &&
       !covered.has(slugOfDocumentType(f.salesforceType!))
   );
+  /**
+   * AND NOT SO MANY THAT THEIR APEX FALLS OVER.
+   *
+   * Each document they attach runs database queries inside a loop in
+   * NewRegulationRequestHook.materialiseProductDocuments, and a whole call is one
+   * Apex transaction with a ceiling of 100. Measured on the NewLaw sandbox: a
+   * create carrying five documents went through twice on 4 November; once all
+   * of an application's documents travelled together, every create failed with
+   * "System.LimitException: Too many SOQL queries: 101". The defect is theirs —
+   * queries in a loop — but carrying everything at once is what reaches it.
+   *
+   * So the create carries at most MAX_DOCUMENTS_PER_CALL, counting the model's
+   * own, and the follow-up sends the rest in batches of the same size.
+   */
+  const already = items.filter((i) => /sobjects\/EPG_Document__c$/i.test(String(i?.url ?? ""))).length;
+  const room = Math.max(0, MAX_DOCUMENTS_PER_CALL - already);
+  sendable.splice(room);
   if (!sendable.length) return none;
 
   /** Never a referenceId the model has already used; Salesforce rejects a clash. */
