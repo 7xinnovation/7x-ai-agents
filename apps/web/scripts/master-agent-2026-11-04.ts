@@ -75,7 +75,9 @@ export function masterDefinition(nxn: Def, epgl: Def, slug = SLUG): Def {
 }
 
 async function main() {
-  const pool = await poolFor(databaseUrlFrom(arg("--env")));
+  const envFile = arg("--env");
+  if (!envFile) throw new Error("--env <file> is required");
+  const pool = await poolFor(databaseUrlFrom(envFile));
   try {
     const load = async (slug: string) => {
       const r = await pool.query("select definition, status from agents where slug = $1", [slug]);
