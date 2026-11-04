@@ -62,6 +62,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import { collectedUploadGuard, asksSomethingElse, asksToReplace } from "@/lib/uploadGuard";
+import { outstandingNudge } from "@/lib/outstandingDocument";
 import { docKeyGuard } from "@/lib/docKeyGuard";
 import { epglDocumentLabels } from "@/lib/epglDocumentLabel";
 import { NAME_CONFLICT_DOC_KEY, withPartnerTypes } from "@/lib/docIdentity";
@@ -4200,6 +4201,45 @@ export async function POST(req: NextRequest) {
               missing: finalState.readiness.missing.map((m) => m.key).slice(0, 6),
             },
           }).catch(() => {});
+
+          /**
+           * AND THEN ASK FOR THE ONE THAT IS ACTUALLY MISSING.
+           *
+           * The note above says there is no safe repair, and for the appender
+           * below that is still true — it cannot tell which document the prose
+           * meant. This is narrower: the model has just asked for a file that is
+           * already in, which is a misfire, and readiness names what is not. The
+           * sentence and the control are written together, so the words name
+           * exactly what the box asks for. See lib/outstandingDocument for the
+           * pack-12 loop this ends.
+           *
+           * Only a document with no file at all. A slot waiting on a DATE for a
+           * file already uploaded is answered by recording the date, and offering
+           * an upload box for it is the same misfire again.
+           */
+          const held = new Set(
+            finalState.documents.filter((d) => d.status === "uploaded" || d.status === "accepted").map((d) => d.key)
+          );
+          const missingDoc = finalState.readiness.missing.find((m) => m.kind === "document" && !held.has(m.key));
+          const nudge =
+            agent.definition.documentsInChat && missingDoc && !asksSomethingElse(finalText)
+              ? outstandingNudge({
+                  prose: finalText,
+                  outstanding: { key: missingDoc.key, label: docLabels.get(missingDoc.key) ?? "" },
+                  locale: body.locale === "ar" ? "ar" : "en",
+                  suppressed: true,
+                })
+              : null;
+          if (nudge) {
+            send({ type: "text", delta: nudge });
+            finalText += nudge;
+            await audit({
+              ...a,
+              actor: "system",
+              action: "outstanding_document_asked",
+              payload: { key: missingDoc!.key },
+            }).catch(() => {});
+          }
         }
 
         // Deterministic upload widget (feedback FB-1425: "AI says upload slots
