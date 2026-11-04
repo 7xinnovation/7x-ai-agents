@@ -143,8 +143,14 @@ check("...computed from the same two conditions the send filter uses",
 check("...and it does not overwrite the note about missing FILES",
   /\$\{documentNote \? `\$\{documentNote\} ` : ""\}/.test(intg));
 check("...and tells the model not to ask for the upload again", /do NOT ask them to upload it again: it is here/.test(intg));
+// The RULE, not its layout: every send path still skips an undated slot that
+// EPGL refuse without a date. Counted per path rather than as one regex over
+// one line, because the create-side filter grew more conditions on 3 November
+// (lib/epglComposite: the model's own items are kept and the rest added) and
+// was wrapped across lines — which this used to report as the rule vanishing.
 check("the send filter itself is unchanged, on both paths",
-  (read("../lib/epglComposite.ts").match(/!!\w+\.salesforceType && !\(\w+\.validityRequired && !\w+\.validTo\)/g) ?? []).length === 3);
+  (read("../lib/epglComposite.ts").match(/!\(\w+\.validityRequired && !\w+\.validTo\)/g) ?? []).length === 3 &&
+  (read("../lib/epglComposite.ts").match(/!!\w+\.salesforceType/g) ?? []).length >= 3);
 
 // ---- the classifier ---------------------------------------------------------------
 const extract = read("../../../packages/core/src/ai/extract.ts");
