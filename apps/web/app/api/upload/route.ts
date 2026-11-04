@@ -15,6 +15,7 @@ import { getAgentBySlug } from "@/lib/agents";
 import { ensureAdapters } from "@/lib/registry";
 import { getCase, mutateCase, audit } from "@/lib/conversation";
 import { acceptedDocTypes, expiredForSlot } from "@/lib/documentSlots";
+import { catalogueTwinOf } from "@/lib/documentTwins";
 import { entityMismatch, expiredLicence, formatGulfDate, partnerDocumentCheck, partnerSlot, partnerIndexByName, ownerDocumentCheck, PARTNER_NAMES_KEY, NAME_CONFLICT_DOC_KEY } from "@/lib/docIdentity";
 
 /** Case-data bookkeeping key: which fields each document's extraction filled. */
@@ -649,6 +650,52 @@ export async function POST(req: NextRequest) {
   await getDb()
     .insert(documentsTable)
     .values({ caseId: caseRow.caseId, key, status: "uploaded", fileName: file.name, storageKey });
+
+  /**
+   * THE SAME FILE INTO ITS CATALOGUE TWIN.
+   *
+   * Our slot reads the company off the trade licence; EPGL's slot is the only
+   * one that reaches their checklist. Both are now required, so without this
+   * the applicant is asked to upload one document twice. See lib/documentTwins
+   * for what is and is not a twin.
+   *
+   * The row matters as much as the state: `epglDocumentRows` finds a file by
+   * looking the slot up in `documents` and reading its storageKey, so a twin
+   * recorded only in the case state would tick in the panel and still never be
+   * sent — which is what the existing identity mirror does, and a separate
+   * thing to fix.
+   */
+  let twinFilled: string | null = null;
+  try {
+    const fresh = await getCase(caseRow.caseId);
+    const journey = agent.definition.journeys.find((j) => j.key === fresh?.state.journeyKey);
+    const slots = (journey?.steps ?? []).flatMap((st) => st.documents ?? []);
+    const held = new Set(
+      (fresh?.state.documents ?? [])
+        .filter((d) => d.status === "uploaded" || d.status === "accepted")
+        .map((d) => d.key)
+    );
+    const target = catalogueTwinOf(slots, key, (fresh?.state.data ?? {}) as Record<string, unknown>, (k) => held.has(k));
+    if (target) {
+      await getDb()
+        .insert(documentsTable)
+        .values({ caseId: caseRow.caseId, key: target, status: "uploaded", fileName: file.name, storageKey });
+      await mutateCase(caseRow.caseId, (st) =>
+        setDocument(agent.definition, st, { key: target, status: "uploaded", fileName: file.name })
+      );
+      twinFilled = target;
+      await audit({
+        agentId: agent.id,
+        conversationId,
+        actor: "system",
+        action: "document_twin_filled",
+        payload: { from: key, to: target, fileName: file.name },
+      });
+    }
+  } catch {
+    /* a twin we could not fill is the old behaviour: the customer is asked for it */
+  }
+
   await audit({
     agentId: agent.id,
     conversationId,
@@ -664,6 +711,6 @@ export async function POST(req: NextRequest) {
     needsConfirmation: nameQuery ?? undefined,
     // Named so the assistant can say it out loud rather than silently skipping a
     // slot the customer was expecting to fill.
-    alsoFilled: mirrored?.filled,
+    alsoFilled: mirrored?.filled ?? twinFilled ?? undefined,
   });
 }
