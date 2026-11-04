@@ -130,29 +130,7 @@ export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): 
 
   for (const step of journey.steps) {
     for (const reqDoc of step.documents) {
-      /**
-       * A CONDITIONAL DOCUMENT IS REQUIRED WHEN ITS CONDITION HOLDS.
-       *
-       * This counted `mandatory` alone, and every document EPGL's catalogue
-       * contributes is `conditional` — the lease, the SME licence, the initial
-       * name approval, the operational standards declaration, each with a
-       * condition naming the product it belongs to. All of them were skipped
-       * here, so readiness never knew they existed.
-       *
-       * LR-54115, 3 November: the panel read 26/26 ready and the application
-       * was submitted and paid with SIX documents uploaded out of thirteen.
-       * EPGL hold one. Their reviewer sees an empty checklist on an
-       * application that told the applicant it was complete. The model asks
-       * for what `readiness.missing` names, so a slot absent from this list is
-       * a slot nobody is ever asked for.
-       *
-       * `optional` still never blocks. A `conditional` slot with no condition
-       * says nothing about when it applies, so it stays non-blocking too —
-       * which keeps this change inert for any journey whose conditions were
-       * never written, rather than demanding a document out of nowhere.
-       */
-      if (reqDoc.requirement === "optional") continue;
-      if (reqDoc.requirement === "conditional" && !reqDoc.condition?.trim()) continue;
+      if (reqDoc.requirement !== "mandatory") continue;
       if (!evalCondition(reqDoc.condition, state.data)) continue;
       const uploaded = state.documents.find(
         (d) => d.key === reqDoc.key && (d.status === "uploaded" || d.status === "accepted")
