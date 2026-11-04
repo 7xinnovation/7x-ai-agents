@@ -4,6 +4,7 @@ import { uaePassConfigured, uaePassDirectSignInUsable } from "@/lib/uaepass";
 import { turnstileSiteKey } from "@/lib/turnstile";
 import { Experience } from "./Experience";
 import type { PublicAgent } from "./types";
+import type { AgentDefinition } from "@dialog/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +22,33 @@ export default async function EmbedPage({
   if (!agent) notFound();
 
   const d = agent.definition;
-  const pub: PublicAgent = {
+  let pub = publicAgent(d);
+  if (d.delegates?.length) {
+    // A master agent: each delegate's public settings, read live from its own row.
+    const children = (
+      await Promise.all(d.delegates.map((x) => getAgentBySlug(x.slug).catch(() => null)))
+    ).filter((a): a is NonNullable<typeof a> => Boolean(a && a.status !== "disabled" && !a.definition.delegates?.length));
+    const delegates = children.map((c) => publicAgent(c.definition));
+    if (!delegates.length) notFound();
+    const first = d.defaultDelegate && delegates.some((x) => x.slug === d.defaultDelegate) ? d.defaultDelegate : delegates[0]!.slug;
+    pub = {
+      ...pub,
+      // Every delegate's journeys, so the progress view knows whichever is running.
+      journeys: delegates.flatMap((x) => x.journeys),
+      delegates,
+      defaultDelegate: first,
+    };
+  }
+
+  const initialLocale = (locale === "ar" || locale === "en" ? locale : d.locales[0]) ?? "en";
+  // Open straight into a journey — "Renew" pressed beside a box on the host's
+  // page or in the app (2026-10-08): ?journey=personal_po_box_renewal&box=450293&emirate=DXB
+  const initialStart = journey || box ? { journey, box, emirate } : undefined;
+  return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} uaePassToken={upt} embedded={embedded === "1"} initialStart={initialStart} />;
+}
+
+function publicAgent(d: AgentDefinition): PublicAgent {
+  return {
     slug: d.slug,
     name: d.name,
     locales: d.locales,
@@ -63,10 +90,4 @@ export default async function EmbedPage({
     // cases and need no CAPTCHA, so they never load Cloudflare's script.
     turnstileSiteKey: d.tenantSlug === "epgl" ? undefined : turnstileSiteKey() || undefined,
   };
-
-  const initialLocale = (locale === "ar" || locale === "en" ? locale : d.locales[0]) ?? "en";
-  // Open straight into a journey — "Renew" pressed beside a box on the host's
-  // page or in the app (2026-10-08): ?journey=personal_po_box_renewal&box=450293&emirate=DXB
-  const initialStart = journey || box ? { journey, box, emirate } : undefined;
-  return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} uaePassToken={upt} embedded={embedded === "1"} initialStart={initialStart} />;
 }

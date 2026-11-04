@@ -6,7 +6,8 @@ import { resolveAdapters, runTurn, classifyIntent, findJourney, evalCondition, a
 import { randomUUID } from "node:crypto";
 import { getDb, payments, documents as documentsTable, documentBlobs } from "@dialog/db";
 import { and, desc, eq } from "drizzle-orm";
-import { getAgentBySlug, getAgentById } from "@/lib/agents";
+import { getAgentBySlug, getAgentById, type LoadedAgent } from "@/lib/agents";
+import { isMaster, delegateSlugs, delegateOf, lastReplyIn, routeTurn, whichService } from "@/lib/masterAgent";
 import { ensureAdapters } from "@/lib/registry";
 import {
   HALL_ACCEPTED_KEY,
@@ -130,7 +131,16 @@ const Body = z.object({
    * single-use and expires in minutes — there is nothing worth storing.
    */
   turnstileToken: z.string().max(4096).optional(),
+  /**
+   * A MASTER AGENT's conversations, one per delegate it has routed to so far
+   * ({ "nxn-dialog": "<uuid>", "epgl-dialog": "<uuid>" }). Sent by the widget
+   * so a customer who moves from one service to the other and back returns to
+   * the conversation they left. Each id is checked against the delegate it is
+   * offered for; one that belongs to anything else simply starts afresh.
+   */
+  delegateConversations: z.record(z.string(), z.string().uuid()).optional(),
 });
+type ChatBody = z.infer<typeof Body>;
 
 // Internal directive used for the post-sign-in account pulse. Never shown to the
 // user as a message; it instructs the agent to assemble the pulse from real data.
@@ -885,6 +895,102 @@ export async function POST(req: NextRequest) {
   const agent = await getAgentBySlug(body.agentSlug);
   if (!agent) return new Response(JSON.stringify({ error: "agent_not_found" }), { status: 404 });
 
+  if (isMaster(agent.definition)) return masterTurn(req, body, agent);
+  return agentTurn(req, body, agent);
+}
+
+const SSE_HEADERS = { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" };
+
+/**
+ * A MASTER AGENT'S TURN (lib/masterAgent): pick the delegate, then run the
+ * turn as that delegate — its own definition, read now — with that delegate's
+ * conversation. The delegate's stream is passed through untouched, after one
+ * `agent` event that tells the widget whose settings, sign-in and uploads now
+ * apply.
+ */
+async function masterTurn(req: NextRequest, body: ChatBody, master: LoadedAgent): Promise<Response> {
+  const def = master.definition;
+  const slugs = delegateSlugs(def);
+  const children: Record<string, LoadedAgent["definition"]> = {};
+  const loaded: Record<string, LoadedAgent> = {};
+  await Promise.all(
+    slugs.map(async (slug) => {
+      const a = await getAgentBySlug(slug).catch(() => null);
+      if (a && a.status !== "disabled" && !isMaster(a.definition)) {
+        children[slug] = a.definition;
+        loaded[slug] = a;
+      }
+    })
+  );
+
+  const current = await delegateOf(body.conversationId, def);
+  const synthetic = Boolean(body.pulse || body.paymentSettled || body.documentUploaded);
+  const decision = await routeTurn({
+    master: def,
+    children,
+    message: body.userMessage,
+    locale: body.locale,
+    current: current && loaded[current] ? current : null,
+    lastReply: current ? await lastReplyIn(body.conversationId).catch(() => null) : null,
+    synthetic,
+  });
+
+  const target = decision.target && loaded[decision.target] ? decision.target : null;
+  if (!target) {
+    // Not sure which service: the master asks, with a button per service.
+    const reply = whichService(def, body.locale);
+    const enc = new TextEncoder();
+    return new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(enc.encode(sse({ type: "agent", agentSlug: null, master: def.slug })));
+          c.enqueue(enc.encode(sse({ type: "text", delta: reply })));
+          c.enqueue(enc.encode(sse({ type: "done", message: reply })));
+          c.close();
+        },
+      }),
+      { headers: SSE_HEADERS }
+    );
+  }
+
+  // The delegate's conversation: the one in hand if it is theirs, else the one
+  // the widget kept for them, else a new one.
+  const conversationId =
+    current === target
+      ? body.conversationId
+      : (await delegateOf(body.delegateConversations?.[target], def)) === target
+        ? body.delegateConversations![target]
+        : undefined;
+
+  const res = await agentTurn(req, { ...body, agentSlug: target, conversationId, delegateConversations: undefined }, loaded[target]!);
+  if (!res.body || !(res.headers.get("content-type") ?? "").includes("text/event-stream")) return res;
+
+  const head = new TextEncoder().encode(
+    sse({ type: "agent", agentSlug: target, master: def.slug, switched: Boolean(current && current !== target), reason: decision.reason })
+  );
+  const reader = res.body.getReader();
+  const headers = new Headers(res.headers);
+  headers.set("X-Dialog-Delegate", target);
+  return new Response(
+    new ReadableStream({
+      start(c) {
+        c.enqueue(head);
+      },
+      async pull(c) {
+        const { done, value } = await reader.read();
+        if (done) c.close();
+        else c.enqueue(value);
+      },
+      cancel(reason) {
+        void reader.cancel(reason).catch(() => {});
+      },
+    }),
+    { status: res.status, headers }
+  );
+}
+
+/** One turn of one ordinary agent — everything the chat did before masters existed. */
+async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): Promise<Response> {
   ensureAdapters();
   const adapters = resolveAdapters(agent.definition);
   const businessOpen = isBusinessOpen(agent.definition);

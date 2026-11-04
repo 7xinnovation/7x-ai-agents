@@ -284,5 +284,37 @@ export const AgentDefinition = z.object({
     })
     .optional(),
   model: z.string().optional(), // override DIALOG_MODEL per agent
+  /**
+   * A MASTER AGENT: one front door over agents that already exist.
+   *
+   * Asked for on 4 November 2026: one agent that offers both EPGL and NXN,
+   * "without rebuilding everything", and where "if we change anything on EPGL
+   * or NXN, it automatically reflects on the master agent".
+   *
+   * So a master holds nothing of theirs. Each entry names a live agent by slug;
+   * every turn is routed to one of them and run by THAT agent's own definition,
+   * knowledge, integrations, journeys, payments and sign-in — read fresh from
+   * its row on every turn, so an edit to either is the master's behaviour on
+   * the very next message. What the master owns is only the front door: its
+   * name, theme, greeting, and the words it uses to offer the services.
+   *
+   * `label` is what the customer sees on the "which service?" buttons and is
+   * also matched exactly, so tapping one routes without asking the model.
+   * `summary` is optional extra routing guidance; the router already reads the
+   * delegate's own name and intents.
+   *
+   * Empty or absent: an ordinary agent.
+   */
+  delegates: z
+    .array(
+      z.object({
+        slug: z.string(),
+        label: LocalizedString,
+        summary: LocalizedString.optional(),
+      })
+    )
+    .optional(),
+  /** Which delegate a master starts on before the customer has said anything — its sign-in and settings apply until the first routed turn. Defaults to the first. */
+  defaultDelegate: z.string().optional(),
 });
 export type AgentDefinition = z.infer<typeof AgentDefinition>;

@@ -91,4 +91,13 @@ export interface PublicAgent {
    * half is Emirates Post's, and they verify the token.
    */
   turnstileSiteKey?: string;
+  /**
+   * A MASTER AGENT's delegates, each as its own public agent, built from its
+   * live definition on every page load. The widget takes its behaviour —
+   * sign-in, uploads, progress, payments — from whichever delegate holds the
+   * conversation, and keeps the master's own name, theme and greeting.
+   */
+  delegates?: PublicAgent[];
+  /** The delegate in charge before anything is routed. */
+  defaultDelegate?: string;
 }

@@ -606,7 +606,7 @@ export function renewalOpener(i: StartIntent, locale: Locale): string {
 }
 
 export function Experience({
-  agent,
+  agent: front,
   initialLocale,
   initialConversationId,
   uaePassToken,
@@ -622,6 +622,54 @@ export function Experience({
   /** Open straight into a journey — the renewal of a named box — see StartIntent. */
   initialStart?: StartIntent;
 }) {
+  /**
+   * A MASTER AGENT (lib/masterAgent): the widget wears the master's name,
+   * theme and greeting, and BEHAVES as whichever delegate holds the
+   * conversation — its sign-in, uploads, progress and every API call go to
+   * that delegate, exactly as on its own embed. The server says which one in
+   * an `agent` event at the start of each routed turn. For an ordinary agent
+   * `agent` is simply the prop.
+   */
+  const masterSlug = front.delegates?.length ? front.slug : null;
+  const [activeSlug, setActiveSlug] = useState<string | null>(front.defaultDelegate ?? front.delegates?.[0]?.slug ?? null);
+  const activeRef = useRef<string | null>(activeSlug);
+  useEffect(() => {
+    if (!masterSlug) return;
+    try {
+      const saved = window.localStorage.getItem(`dlg-active-${masterSlug}`);
+      if (saved && front.delegates!.some((d) => d.slug === saved)) {
+        activeRef.current = saved;
+        setActiveSlug(saved);
+      }
+    } catch {
+      /* private mode */
+    }
+  }, [masterSlug, front.delegates]);
+  const agent: PublicAgent = useMemo(() => {
+    if (!front.delegates?.length) return front;
+    const d = front.delegates.find((x) => x.slug === activeSlug) ?? front.delegates[0]!;
+    return {
+      ...d,
+      name: front.name,
+      theme: front.theme,
+      greeting: front.greeting,
+      readyPrompts: front.readyPrompts,
+      locales: front.locales,
+      allowedOrigins: front.allowedOrigins,
+      journeys: front.journeys,
+    };
+  }, [front, activeSlug]);
+  /** Which conversation belongs to which delegate, so returning to a service returns to its conversation. */
+  const convMapKey = `dlg-convs-${front.slug}`;
+  const readConvMap = useCallback((): Record<string, string> => {
+    try {
+      const v = JSON.parse(window.localStorage.getItem(convMapKey) ?? "{}");
+      return v && typeof v === "object" ? v : {};
+    } catch {
+      return {};
+    }
+  }, [convMapKey]);
+
   const uaePass = useRef<string | undefined>(uaePassToken);
   const [locale, setLocale] = useState<Locale>(initialLocale);
   // On a language switch, the messages already on screen are translated into the
@@ -851,7 +899,8 @@ export function Experience({
   const convId = useRef<string | null>(null);
   // Aborts the in-flight turn so the customer can stop the agent mid-reply.
   const abortRef = useRef<AbortController | null>(null);
-  const storageKey = `dlg-conv-${agent.slug}`;
+  // The master's own key, so the conversation survives a switch of delegate.
+  const storageKey = `dlg-conv-${front.slug}`;
 
   const t = STR[locale];
   const dir = locale === "ar" ? "rtl" : "ltr";
@@ -1528,6 +1577,7 @@ export function Experience({
     const leaving = convId.current;
     const wasSignedIn = authenticated;
     try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
+    try { window.localStorage.removeItem(convMapKey); } catch { /* private mode */ }
     convId.current = null;
     pulsed.current = false;
     setMessages([]);
@@ -1790,6 +1840,7 @@ export function Experience({
      * transcript, panel — so the next person starts from a fresh chat.
      */
     try { window.localStorage.removeItem(storageKey); } catch { /* private mode */ }
+    try { window.localStorage.removeItem(convMapKey); } catch { /* private mode */ }
     convId.current = null;
     pulsed.current = false;
     setSignedInPulse(false);
@@ -2400,7 +2451,8 @@ export function Experience({
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentSlug: agent.slug,
+          agentSlug: front.slug,
+          delegateConversations: masterSlug ? readConvMap() : undefined,
           userMessage: proactive ? "account_pulse" : paymentSettled ? "payment_settled" : documentUploaded ? "document_uploaded" : text,
           pulse: proactive || undefined,
           paymentSettled: paymentSettled || undefined,
@@ -2428,8 +2480,26 @@ export function Experience({
           turnstile.spent();
           return;
         }
+        if (ev.type === "agent") {
+          // A master agent routed this turn. A different delegate means a
+          // different conversation and case, so the old progress goes.
+          if (masterSlug && typeof ev.agentSlug === "string") {
+            if (ev.agentSlug !== activeRef.current) setCaseState(null);
+            activeRef.current = ev.agentSlug;
+            setActiveSlug(ev.agentSlug);
+            try { window.localStorage.setItem(`dlg-active-${masterSlug}`, ev.agentSlug); } catch { /* private mode */ }
+          }
+          return;
+        }
         if (ev.type === "session") {
           convId.current = ev.conversationId;
+          if (masterSlug && activeRef.current) {
+            try {
+              window.localStorage.setItem(convMapKey, JSON.stringify({ ...readConvMap(), [activeRef.current]: ev.conversationId }));
+            } catch {
+              /* private mode */
+            }
+          }
           /**
            * The session ended while they were away, and the header says so.
            *
@@ -2605,7 +2675,7 @@ export function Experience({
       setToolEvent(null);
       setQuiet(false);
     }
-  }, [input, streaming, agent.slug, locale, authenticated, storageKey, turnstile]);
+  }, [input, streaming, agent.slug, front.slug, masterSlug, readConvMap, convMapKey, locale, authenticated, storageKey, turnstile]);
 
   /** Stop the agent mid-reply — aborts the in-flight turn (see abortRef in send). */
   const stopStreaming = useCallback(() => {
@@ -2658,6 +2728,7 @@ export function Experience({
       // customer can read what was erased. The withdrawn conversation is done;
       // the next message starts a fresh one.
       try { window.localStorage.removeItem(storageKey); } catch { /* private mode */ }
+      try { window.localStorage.removeItem(convMapKey); } catch { /* private mode */ }
       convId.current = null;
       pulsed.current = false;
       signedOut.current = true;
