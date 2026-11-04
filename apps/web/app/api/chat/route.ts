@@ -962,6 +962,51 @@ async function masterTurn(req: NextRequest, body: ChatBody, master: LoadedAgent)
         ? body.delegateConversations![target]
         : undefined;
 
+  /**
+   * A TAPPED SERVICE OPENS THE SERVICE; IT IS NOT A QUESTION.
+   *
+   * 4 November, first look on staging: "Postal licences" was handed to EPGL as
+   * the customer's message, and EPGL — reasonably — answered the question it
+   * was given with a page on what a postal licence is. Tapping a service is
+   * opening it, exactly as opening that agent's own widget would be: a first
+   * visit gets the delegate's OWN greeting (read from its row, so it follows
+   * any change to it), and a return visit gets where the customer left off.
+   * Both are written into the delegate's conversation, so its next turn — and
+   * the router — see what the customer was just shown.
+   */
+  if (decision.reason === "label") {
+    const child = loaded[target]!;
+    const session = await getOrCreateSession({
+      agentId: child.id,
+      conversationId,
+      locale: body.locale,
+      authenticated: body.authenticated,
+      userRef: body.userRef,
+    });
+    const resumed = Boolean(conversationId && session.conversationId === conversationId && session.history.length);
+    const last = resumed ? await lastReplyIn(session.conversationId).catch(() => null) : null;
+    const label = tr(def.delegates!.find((d) => d.slug === target)!.label, body.locale);
+    const reply = last
+      ? `${body.locale === "ar" ? `عدنا إلى ${label}. كنا هنا:` : `Back to ${label}. Here's where we left off:`}\n\n${last}`
+      : tr(child.definition.greeting, body.locale);
+    await appendMessage(session.conversationId, "user", body.userMessage);
+    await appendMessage(session.conversationId, "assistant", reply);
+    const enc = new TextEncoder();
+    return new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(enc.encode(sse({ type: "agent", agentSlug: target, master: def.slug, switched: Boolean(current && current !== target), reason: resumed ? "label-resume" : "label-open" })));
+          c.enqueue(enc.encode(sse({ type: "session", conversationId: session.conversationId })));
+          if (resumed) c.enqueue(enc.encode(sse({ type: "case", state: session.state })));
+          c.enqueue(enc.encode(sse({ type: "text", delta: reply })));
+          c.enqueue(enc.encode(sse({ type: "done", state: session.state, message: reply })));
+          c.close();
+        },
+      }),
+      { headers: { ...SSE_HEADERS, "X-Dialog-Delegate": target } }
+    );
+  }
+
   const res = await agentTurn(req, { ...body, agentSlug: target, conversationId, delegateConversations: undefined }, loaded[target]!);
   if (!res.body || !(res.headers.get("content-type") ?? "").includes("text/event-stream")) return res;
 
