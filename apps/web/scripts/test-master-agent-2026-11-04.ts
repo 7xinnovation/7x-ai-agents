@@ -20,6 +20,7 @@ import {
   needsRouter,
   delegateBrief,
   whichService,
+  delegateOpening,
   SWITCH_CONFIDENCE,
   type RouteInput,
 } from "../lib/masterAgent";
@@ -141,6 +142,26 @@ console.log("the router reads the delegates' own definitions");
 const brief = delegateBrief(master.delegates![0]!, nxn, "en");
 check("names the delegate and its live intents", brief.includes("nxn-dialog") && brief.includes("Renew a personal PO Box"), brief);
 check("leaves out the generic human-help intent", !brief.includes("Talk to a person"));
+
+console.log("opening a service shows what its own widget shows");
+const step = { key: "s", title: { en: "S" }, fields: [], documents: [] };
+const withJourneys = AgentDefinition.parse({
+  ...epgl,
+  journeys: [
+    { key: "new_license", intent: "new_license", title: { en: "New Postal Activity License", ar: "رخصة نشاط بريدي جديدة" }, steps: [step] },
+    { key: "renewal", intent: "renewal", title: { en: "Renew Postal Activity License", ar: "تجديد رخصة النشاط البريدي" }, steps: [step] },
+  ],
+});
+const openingText = delegateOpening(withJourneys, "en");
+check("a greeting without buttons gets the journeys as buttons", JSON.stringify(buttonsIn(openingText)) === JSON.stringify(["New Postal Activity License", "Renew Postal Activity License"]), openingText);
+check("…in Arabic too", buttonsIn(delegateOpening(withJourneys, "ar")).includes("رخصة نشاط بريدي جديدة"));
+const buttoned = AgentDefinition.parse({ ...withJourneys, greeting: { en: "Hi\n\n```buttons\n- Rent a box\n```" } });
+check("a greeting with its own buttons is left as written", JSON.stringify(buttonsIn(delegateOpening(buttoned, "en"))) === JSON.stringify(["Rent a box"]));
+check("no journeys, no buttons block", !delegateOpening(epgl, "en").includes("```"));
+check(
+  "tapping an offered journey stays with that delegate",
+  decide(input({ message: "Renew Postal Activity License", current: "epgl-dialog", lastReply: openingText }), null).target === "epgl-dialog"
+);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

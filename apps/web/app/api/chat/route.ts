@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { getDb, payments, documents as documentsTable, documentBlobs } from "@dialog/db";
 import { and, desc, eq } from "drizzle-orm";
 import { getAgentBySlug, getAgentById, type LoadedAgent } from "@/lib/agents";
-import { isMaster, delegateSlugs, delegateOf, lastReplyIn, routeTurn, whichService } from "@/lib/masterAgent";
+import { isMaster, delegateSlugs, delegateOf, lastReplyIn, routeTurn, whichService, delegateOpening } from "@/lib/masterAgent";
 import { ensureAdapters } from "@/lib/registry";
 import {
   HALL_ACCEPTED_KEY,
@@ -988,7 +988,7 @@ async function masterTurn(req: NextRequest, body: ChatBody, master: LoadedAgent)
     const label = tr(def.delegates!.find((d) => d.slug === target)!.label, body.locale);
     const reply = last
       ? `${body.locale === "ar" ? `عدنا إلى ${label}. كنا هنا:` : `Back to ${label}. Here's where we left off:`}\n\n${last}`
-      : tr(child.definition.greeting, body.locale);
+      : delegateOpening(child.definition, body.locale);
     await appendMessage(session.conversationId, "user", body.userMessage);
     await appendMessage(session.conversationId, "assistant", reply);
     const enc = new TextEncoder();

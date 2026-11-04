@@ -275,3 +275,27 @@ export function whichService(master: AgentDefinition, locale: Locale): string {
   const buttons = (master.delegates ?? []).map((d) => `- ${tr(d.label, locale)}`).join("\n");
   return `${ask}\n\n\`\`\`buttons\n${buttons}\n\`\`\``;
 }
+
+/**
+ * WHAT OPENING A SERVICE SHOWS: exactly what that agent's own widget shows.
+ *
+ * 4 November, on production: tapping "Postal licences" gave EPGL's greeting
+ * and nothing to tap. On EPGL's own page that greeting is followed by its
+ * starter buttons — the widget builds them from the agent's journeys whenever
+ * the greeting carries no ```buttons block of its own (Experience.tsx,
+ * `starters`). The master copied the sentence and dropped the options.
+ *
+ * So: the delegate's greeting as written, and when it has no buttons, its
+ * first four journey titles as buttons — the same rule its widget applies,
+ * read from its live definition, so a journey EPGL adds is offered here too.
+ */
+export function delegateOpening(child: AgentDefinition, locale: Locale): string {
+  const greeting = tr(child.greeting, locale).trim();
+  if (/```\s*buttons/.test(greeting)) return greeting;
+  const starters = child.journeys
+    .slice(0, 4)
+    .map((j) => tr(j.title, locale).trim())
+    .filter(Boolean);
+  if (!starters.length) return greeting;
+  return `${greeting}\n\n\`\`\`buttons\n${starters.map((s) => `- ${s}`).join("\n")}\n\`\`\``;
+}

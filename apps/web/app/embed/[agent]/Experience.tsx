@@ -653,7 +653,8 @@ export function Experience({
       name: front.name,
       theme: front.theme,
       greeting: front.greeting,
-      readyPrompts: front.readyPrompts,
+      // The master's own, if it has any; otherwise the active service's (NXN's "Renew in two steps").
+      readyPrompts: front.readyPrompts?.length ? front.readyPrompts : d.readyPrompts,
       locales: front.locales,
       allowedOrigins: front.allowedOrigins,
       journeys: front.journeys,
