@@ -891,4 +891,35 @@ export const SCENARIOS: Scenario[] = [
       "**Nothing should already exist for this company.** `CN-1234568` has never been filed.",
     ],
   },
+  /**
+   * PACK 12 AGAIN, FOR THE 5 NOVEMBER FIXES (5 November 2026).
+   *
+   * Pack 12 became LR-54419 — paid and under review, so that company and
+   * product are locked to the tester. This is the same journey under a fresh
+   * licence, to check the licence is asked for once, the status card carries
+   * no internal SLA, and every required document reaches EPGL.
+   */
+  {
+    dir: "13-cep30-sme-uae-domestic-licence-once",
+    code: "CEP30-UAE-SME-DOM",
+    purpose:
+      "Pack 12's journey under a fresh licence, to check the trade licence is asked for once and the status card is clean.",
+    company: co("20261105A", "CN-1334568", "7X TEST ONE LICENCE POST", "7X تست ون لايسنس بوست",
+      ["Courier Services", "Domestic Mail and Parcel Delivery"],
+      ["خدمات التوصيل السريع", "توصيل البريد والطرود المحلية"]),
+    describeSelf:
+      "I run a small UAE-national-owned courier company delivering domestically within the UAE, parcels up to 30 kg.",
+    answers: [
+      "Maximum shipment weight 30 kg. Yes to electronic tracking, yes to consignment notes.",
+      "Domestic only, no international. No food delivery, no medicine delivery, no cold chain.",
+      "Fleet of 6 vehicles. Insurance AED 500,000. No intermediation, no outsourcing.",
+    ],
+    watch: [
+      "**The trade licence should be asked for ONCE.** Upload `01-trade-licence.pdf` when asked and never again. If you are asked for a \"Trade Licence / Initial Name Approval\" as well, that is the bug — say so and do not upload the `02` file.",
+      "**It should not ask you for the trade licence's expiry date.** It reads 31/12/2027 off the licence.",
+      "**Every required document should be asked for** — MOA, passports, Emirates IDs, SME licence, beneficial ownership, lease, operational standards — and it should not let you submit before they are in.",
+      "**After paying, ask for the status of your application.** The card should NOT show an \"Operational SLA Due\" line.",
+      "**Nothing should already exist for this company.** `CN-1334568` has never been filed.",
+    ],
+  },
 ];
