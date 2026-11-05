@@ -135,7 +135,11 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
  * values. Only `conditional` is reworded, so a journey without conditional
  * documents gets exactly the text it had.
  */
-export function requirementText(d: { requirement: string; condition?: string }): string {
+export function requirementText(d: { requirement: string; condition?: string; satisfiedBy?: string[] }): string {
+  // The same document as another slot: never asked for in its own right.
+  if (d.satisfiedBy?.length) {
+    return `the SAME document as ${d.satisfiedBy.join(" / ")} — satisfied by that upload, never ask for it separately`;
+  }
   if (d.requirement !== "conditional") return d.requirement;
   const when = d.condition?.trim();
   return when

@@ -115,6 +115,21 @@ export function conditionDecidable(condition: string | undefined, data: Record<s
     .every((n) => data[n] !== undefined && data[n] !== null && data[n] !== "");
 }
 
+/**
+ * The file that answers a document slot: its own, or one from a slot it is
+ * `satisfiedBy` — the same document collected under another name. Its own file
+ * wins. Readiness and the expiry check must use the same answer, or a slot
+ * could be "in" for one and "waiting on a date" for the other.
+ */
+function heldFor(
+  state: CaseState,
+  reqDoc: { key: string; satisfiedBy?: string[] }
+): CaseState["documents"][number] | undefined {
+  const held = (key: string) =>
+    state.documents.find((d) => d.key === key && (d.status === "uploaded" || d.status === "accepted"));
+  return held(reqDoc.key) ?? (reqDoc.satisfiedBy ?? []).map(held).find(Boolean);
+}
+
 /** Recompute submission readiness against the active journey (PRD readiness check). */
 export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): CaseState {
   /**
@@ -183,9 +198,7 @@ export function recomputeReadiness(agent: AgentDefinition, stateIn: CaseState): 
        */
       if (reqDoc.requirement === "conditional" && !conditionDecidable(reqDoc.condition, state.data)) continue;
       if (!evalCondition(reqDoc.condition, state.data)) continue;
-      const uploaded = state.documents.find(
-        (d) => d.key === reqDoc.key && (d.status === "uploaded" || d.status === "accepted")
-      );
+      const uploaded = heldFor(state, reqDoc);
       if (!uploaded) missing.push({ key: reqDoc.key, kind: "document" });
       /**
        * A FILE EPGL WILL REFUSE IS NOT A DOCUMENT THAT IS IN.
@@ -247,9 +260,7 @@ export function documentsAwaitingExpiry(agent: AgentDefinition, state: CaseState
     for (const reqDoc of step.documents) {
       if (!reqDoc.validityRequired) continue;
       if (!evalCondition(reqDoc.condition, state.data)) continue;
-      const uploaded = state.documents.find(
-        (d) => d.key === reqDoc.key && (d.status === "uploaded" || d.status === "accepted")
-      );
+      const uploaded = heldFor(state, reqDoc);
       if (uploaded && !uploaded.validTo && !out.includes(reqDoc.key)) out.push(reqDoc.key);
     }
   }

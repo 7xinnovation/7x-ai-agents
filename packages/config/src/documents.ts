@@ -34,6 +34,19 @@ export const DocumentRequirement = z.object({
    */
   salesforceType: z.string().optional(),
   /**
+   * Other slots whose file IS this document.
+   *
+   * An applicant has ONE trade licence. Our `trade_license` slot reads the
+   * company off it; EPGL's catalogue wants the same file again under its own
+   * name — "Trade Licence / Initial Name Approval" for CEP30. On 4 November the
+   * applicant was asked for it twice, in the very reply that confirmed the
+   * product, and told it was "separate from what was already captured". It is
+   * not separate. A slot listing `trade_license` here is satisfied by that
+   * upload for readiness, and the file is copied across for EPGL to receive
+   * (apps/web/lib/documentTwinsFill) — so it is never asked for on its own.
+   */
+  satisfiedBy: z.array(z.string()).optional(),
+  /**
    * EPGL refuse this document without a Valid_To__c (`validityRequired` in
    * their catalogue).
    *

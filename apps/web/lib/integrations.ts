@@ -75,6 +75,7 @@ import {
   isTwoZeroDuplicateCheck,
   FOREIGN_REFS_NOTE,
 } from "./epglCrossOrg";
+import { withoutInternalStatusFields } from "./epglStatusFields";
 import { simulateNxnMockOp, stagingTestBoxNumbers } from "./mockPersona";
 import { audit } from "./conversation";
 import { regionsFor, exactRegion, searchRegions } from "./epRegions";
@@ -3971,6 +3972,15 @@ export async function buildApiTools(
     // instead?" -- on every attempt. They had already answered it. Once they
     // have chosen, the choice is recorded on the case and the model is told to
     // proceed rather than ask again.
+    /**
+     * EPGL's internal working deadline is not the applicant's business.
+     * See lib/epglStatusFields: it was shown as "Operational SLA Due" with
+     * "expect an update by then" on 5 November.
+     */
+    if (!res.isError && /getapplicationstatus$/i.test(toolName)) {
+      const { result: cleaned, removed } = withoutInternalStatusFields(res.result);
+      if (removed) res = { ...res, result: cleaned };
+    }
     if (!res.isError && /duplicatecheck$/i.test(toolName)) {
       const decided = opts.duplicateDecision?.();
       /**
