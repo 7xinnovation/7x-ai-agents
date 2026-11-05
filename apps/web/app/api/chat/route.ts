@@ -83,7 +83,7 @@ import { pulseServiceFor, pulseSurveyToken, pulseIsSandbox } from "@/lib/custome
 import { log } from "@/lib/logger";
 import { withTurnstileToken, hasTurnstileToken } from "@/lib/turnstile";
 import type { EpglCaseFile } from "@/lib/epglComposite";
-import { isEpglCompositeTool, documentCompositeBody, documentOutcomes, sendableDocumentKeys, inBatches, type EpglDocumentSlot } from "@/lib/epglComposite";
+import { isEpglCompositeTool, documentCompositeBody, documentOutcomes, sendableDocumentKeys, inBatches, holderOf, type EpglDocumentSlot } from "@/lib/epglComposite";
 
 export const runtime = "nodejs";
 // Multi-tool turns (e.g. a renewal: details + pricing + payment) can run well past
@@ -811,6 +811,7 @@ async function epglDocumentRows(
         salesforceType: slots.get(d.key)?.salesforceType,
         validTo: epglValidTo(d, caseData),
         validityRequired: slots.get(d.key)?.validityRequired,
+        holder: holderOf(d.key, caseData),
       });
     } catch {
       // One unreadable file must not cost the customer the rest of them.
@@ -4971,6 +4972,7 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
               // the lease contract and the insurance certificate were posted to
               // a certain refusal twice on one turn.
               validityRequired: byKey.get(d.key)?.validityRequired,
+              holder: holderOf(d.key, finalState.data),
             }));
           const sending = sendableDocumentKeys(slots);
           if (sending.length) {

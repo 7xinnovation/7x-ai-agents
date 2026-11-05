@@ -148,9 +148,14 @@ check("...and tells the model not to ask for the upload again", /do NOT ask them
 // one line, because the create-side filter grew more conditions on 3 November
 // (lib/epglComposite: the model's own items are kept and the rest added) and
 // was wrapped across lines — which this used to report as the rule vanishing.
-check("the send filter itself is unchanged, on both paths",
-  (read("../lib/epglComposite.ts").match(/!\(\w+\.validityRequired && !\w+\.validTo\)/g) ?? []).length === 3 &&
-  (read("../lib/epglComposite.ts").match(/!!\w+\.salesforceType/g) ?? []).length >= 3);
+// Since 5 November the rule lives in ONE function, isSendable, that every path
+// calls — so it is checked there, and each path is checked for calling it.
+check("the send filter itself is unchanged, on both paths", (() => {
+  const src = read("../lib/epglComposite.ts");
+  const fn = src.slice(src.indexOf("function isSendable"), src.indexOf("function isSendable") + 300);
+  return /!!\w+\.salesforceType/.test(fn) && /!\(\w+\.validityRequired && !\w+\.validTo\)/.test(fn) &&
+    (src.match(/filter\(\s*\(?\w*\)?\s*=?>?\s*isSendable|isSendable\(f\)|filter\(isSendable\)/g) ?? []).length >= 3;
+})());
 
 // ---- the classifier ---------------------------------------------------------------
 const extract = read("../../../packages/core/src/ai/extract.ts");

@@ -153,11 +153,14 @@ const genuinelyMissing = await withEpglDocumentFiles(
 check("a type we hold no file for is still reported unmatched", genuinelyMissing.unmatched.length === 1, genuinelyMissing.unmatched);
 
 console.log("\n...and two slots sharing one of EPGL's names get a file each");
+// Since 5 November partner 2 travels only with its Holder (test-partner-holder).
+const SARA = "Sara Al Hashimi";
 const bothPassports = documentCompositeBody("LR-54110", [
   { key: "partner_1_passport", salesforceType: "Copy of Passport" },
-  { key: "partner_2_passport", salesforceType: "Copy of Passport" },
+  { key: "partner_2_passport", salesforceType: "Copy of Passport", holder: SARA },
 ]);
-const pair = await withEpglDocumentFiles({ body: bothPassports! }, PACK07, async () => null);
+const withHolder = PACK07.map((f) => (f.key.startsWith("partner_2_") ? { ...f, holder: SARA } : f));
+const pair = await withEpglDocumentFiles({ body: bothPassports! }, withHolder, async () => null);
 check("both are filled", pair.inlined.length === 2, pair.inlined);
 check("and with DIFFERENT files", new Set(pair.inlined).size === 2, pair.inlined);
 check("partner 1 first, partner 2 second", pair.inlined.join(",") === "partner_1_passport,partner_2_passport", pair.inlined);

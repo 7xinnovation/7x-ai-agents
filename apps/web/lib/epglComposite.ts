@@ -36,6 +36,50 @@ export interface EpglCaseFile {
   validTo?: string;
   /** EPGL refuse this slot without a Valid_To__c. */
   validityRequired?: boolean;
+  /** Whose document this is, for a second or later partner. See holderOf. */
+  holder?: string;
+}
+
+/**
+ * WHOSE PASSPORT, WHEN THERE IS MORE THAN ONE.
+ *
+ * An EPGL application has one slot per Document_Type, so partner 2's "Copy of
+ * Passport" used to land as an extra file behind partner 1's and never show as
+ * a document of its own. On 5 November EPGL added an optional `Holder` on
+ * document items: partner 1's copy fills the normal slot, and each further
+ * partner gets their own ("Copy of Passport - Sara Al Hashimi").
+ *
+ * So partner 1 carries no holder, and partners 2-8 carry their name. A later
+ * partner whose name we do not have is NOT sent: without a holder it would
+ * stack behind partner 1's again, which is the defect this exists to end.
+ */
+const PER_PERSON = /^partner_(\d+)_(passport|emirates_id)$/;
+
+export function holderOf(key: string, data: Record<string, unknown> | undefined): string | undefined {
+  const m = PER_PERSON.exec(key);
+  if (!m || Number(m[1]) < 2) return undefined;
+  const n = m[1]!;
+  const named = data?.[`partner_${n}_name`];
+  const fromMap = (data?.__partner_names as Record<string, unknown> | undefined)?.[n];
+  const name = typeof named === "string" && named.trim() ? named : typeof fromMap === "string" ? fromMap : "";
+  return name.trim() || undefined;
+}
+
+/** A second or later partner's document, which may only travel with its holder. */
+export function needsHolder(key: string): boolean {
+  const m = PER_PERSON.exec(key);
+  return !!m && Number(m[1]) >= 2;
+}
+
+/** The one rule both paths send by. */
+function isSendable(s: { key: string; salesforceType?: string; validTo?: string; validityRequired?: boolean; holder?: string }): boolean {
+  return !!s.salesforceType && !(s.validityRequired && !s.validTo) && !(needsHolder(s.key) && !s.holder);
+}
+
+/** How a slot is told apart from another of the same Document_Type. */
+function slotIdentity(documentType: string, holder?: unknown): string {
+  const h = typeof holder === "string" ? holder.trim().toLowerCase() : "";
+  return h ? `${slugOfDocumentType(documentType)}|${h}` : slugOfDocumentType(documentType);
 }
 
 export interface CompositeItem {
@@ -133,11 +177,21 @@ export async function withEpglDocumentFiles(
     (aliases.get(slug) ?? aliases.set(slug, []).get(slug)!).push(f);
   }
   const used = new Set<EpglCaseFile>();
-  const fileFor = (type: string): EpglCaseFile | undefined => {
+  /**
+   * An item naming a Holder takes that person's file and nobody else's; an
+   * item without one takes a file without one, so partner 1's slot is never
+   * filled with partner 2's passport.
+   */
+  const fileFor = (type: string, holder?: unknown): EpglCaseFile | undefined => {
     const slug = slugOfDocumentType(type);
+    const h = typeof holder === "string" ? holder.trim().toLowerCase() : "";
+    if (h) {
+      const pool = [byKey.get(slug), ...(aliases.get(slug) ?? [])].filter(Boolean) as EpglCaseFile[];
+      return pool.find((f) => !used.has(f) && (f.holder ?? "").trim().toLowerCase() === h);
+    }
     const exact = byKey.get(slug);
-    if (exact && !used.has(exact)) return exact;
-    return (aliases.get(slug) ?? []).find((f) => !used.has(f)) ?? exact;
+    if (exact && !used.has(exact) && !exact.holder) return exact;
+    return (aliases.get(slug) ?? []).find((f) => !used.has(f) && !f.holder) ?? (exact && !exact.holder ? exact : undefined);
   };
 
   const next: CompositeItem[] = [];
@@ -150,7 +204,7 @@ export async function withEpglDocumentFiles(
     }
     const b = { ...((item.body ?? {}) as Record<string, unknown>) };
     const type = String(b.Document_Type ?? "");
-    const file = fileFor(type);
+    const file = fileFor(type, b.Holder);
 
     // The model already supplied a file id (a re-upload of something it just
     // put up). Leave it alone — it is not ours to second-guess.
@@ -274,8 +328,9 @@ export function withEpglDocumentItems(
   const covered = new Set<string>();
   for (const i of items) {
     if (!/sobjects\/EPG_Document__c$/i.test(String(i?.url ?? ""))) continue;
-    const t = (i.body as { Document_Type?: unknown } | undefined)?.Document_Type;
-    if (typeof t === "string" && t) covered.add(slugOfDocumentType(t));
+    const ib = i.body as { Document_Type?: unknown; Holder?: unknown } | undefined;
+    const t = ib?.Document_Type;
+    if (typeof t === "string" && t) covered.add(slotIdentity(t, ib?.Holder));
   }
 
   const request = items.find((i) => /sobjects\/EPG_License_Request__c$/i.test(String(i?.url ?? "")));
@@ -300,10 +355,9 @@ export function withEpglDocumentItems(
    */
   const sendable = files.filter(
     (f) =>
-      !!f.salesforceType &&
-      !(f.validityRequired && !f.validTo) &&
-      !covered.has(f.key) &&
-      !covered.has(slugOfDocumentType(f.salesforceType!))
+      isSendable(f) &&
+      !(covered.has(f.key) && !f.holder) &&
+      !covered.has(slotIdentity(f.salesforceType!, f.holder))
   );
   /**
    * AND NOT SO MANY THAT THEIR APEX FALLS OVER.
@@ -342,6 +396,7 @@ export function withEpglDocumentItems(
       // Their reference syntax, resolved by Salesforce inside the one call.
       EPG_License_Request__c: `@{${ref}.id}`,
       Document_Type: f.salesforceType!,
+      ...(f.holder ? { Holder: f.holder } : {}),
       ...(f.validTo ? { Valid_To__c: f.validTo } : {}),
     },
   }));
@@ -615,6 +670,8 @@ export interface EpglDocumentSlot {
   validTo?: string;
   /** Their catalogue refuses this slot outright without a Valid_To__c. */
   validityRequired?: boolean;
+  /** Whose document it is, for partners 2-8. See holderOf. */
+  holder?: string;
 }
 
 export function documentCompositeBody(
@@ -625,7 +682,7 @@ export function documentCompositeBody(
   // Same filter as sendableDocumentKeys, and it must stay the same filter: the
   // outcome of this call is recorded against the keys that function returns, so
   // the two disagreeing would attribute one slot's refusal to another.
-  const sendable = slots.filter((s) => !!s.salesforceType && !(s.validityRequired && !s.validTo));
+  const sendable = slots.filter(isSendable);
   if (!sendable.length) return null;
   return {
     allOrNone: false,
@@ -636,6 +693,7 @@ export function documentCompositeBody(
       body: {
         applicationId__c: applicationId,
         Document_Type: s.salesforceType,
+        ...(s.holder ? { Holder: s.holder } : {}),
         ...(s.validTo ? { Valid_To__c: s.validTo } : {}),
       },
     })),
@@ -658,7 +716,7 @@ export function documentCompositeBody(
  * push here and once by a composite the model wrote itself.
  */
 export function sendableDocumentKeys(slots: EpglDocumentSlot[]): string[] {
-  return slots.filter((s) => !!s.salesforceType && !(s.validityRequired && !s.validTo)).map((s) => s.key);
+  return slots.filter(isSendable).map((s) => s.key);
 }
 
 /**
