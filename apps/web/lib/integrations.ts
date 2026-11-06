@@ -41,6 +41,9 @@ import { redactGuestPII } from "./pii";
  * state. Everything is written to `api_calls` in full, which is where a real
  * diagnosis is made — this one took one query.
  */
+/** The first words of a write that timed out; other notes key off it. */
+const TIMED_OUT_UNKNOWN = "TIMED OUT WITH THE OUTCOME UNKNOWN.";
+
 const FAILURE_PREFACE =
   "SYSTEM DETAIL — FOR YOUR DECISION, NOT FOR THE CUSTOMER. What follows is Emirates Post's own internal output. " +
   "Use it to work out what to do and to tell the customer, in ordinary words, what it means for them and what happens next. " +
@@ -4865,7 +4868,14 @@ export async function buildApiTools(
           "\n\n105 MEANS THE BUNDLE ID IS WRONG, not that anything is broken on Emirates Post's side. The only valid id is the one the PRICING call used — the same string, exactly — and a renewal cannot be saved as a bundle it was not priced as. Do not describe this to the customer as a backend problem with the bundle, do not send them to raise an enquiry over it, and do not try a different spelling of the name: re-read the bundle id from the pricing response and send that.",
       };
     }
-    if (res.isError && /(rental_save|guest_renewal_save)$/i.test(toolName)) {
+    /**
+     * NOT ON A TIMEOUT. A save that timed out may have gone through — with a
+     * saved card it may have CHARGED the card — and "no money has moved" is
+     * then a guess presented as fact. On 6 November (box 453345) both notes were
+     * appended to one timed-out save, and the customer was told "nothing has
+     * been charged to your Visa ending 1111" when nobody knew.
+     */
+    if (res.isError && /(rental_save|guest_renewal_save)$/i.test(toolName) && !res.result.startsWith(TIMED_OUT_UNKNOWN)) {
       res = {
         ...res,
         result:
@@ -5825,7 +5835,7 @@ export async function executeOperation(
     if (aborted && op.method !== "GET" && op.method !== "HEAD") {
       return {
         result:
-          "TIMED OUT WITH THE OUTCOME UNKNOWN. The request was sent and no reply came back in time, so it may have succeeded on their side. Do NOT say it failed, do NOT say the booking was not recorded, and do NOT send it again — a retry could create a second one. Tell the customer it is taking longer than usual to confirm, that their payment is safe, and that you are checking; then check the status with a READ operation if one exists, and offer a callback only if that cannot confirm it either.",
+          `${TIMED_OUT_UNKNOWN} The request was sent and no reply came back in time, so it may have succeeded on their side — including a charge to their card. Do NOT say it failed, do NOT say the booking was not recorded, do NOT say they have or have not been charged, and do NOT send it again — a retry could create a second one, or charge them twice. Tell the customer it is taking longer than usual to confirm and that you cannot yet say whether it went through; then check the status with a READ operation if one exists, and if none can confirm it, offer a callback so the team can check before anything is retried.`,
         isError: true,
       };
     }
