@@ -62,7 +62,7 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
-import { productCardGuard, productOptions, chainGuards } from "@/lib/productCards";
+import { productCardGuard, productOptions, productFromMessage, chainGuards } from "@/lib/productCards";
 import {
   offersBatch, uploadModeFrom, productFirstDirective, modeChoiceDirective, batchStartDirective, batchReportDirective,
   missingDocuments, BATCH_LOG_KEY, UPLOAD_MODE_KEY, type BatchLog,
@@ -2111,8 +2111,24 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
   let batchReport: string | null = null;
   if (offersBatch(agent.definition, session.state.journeyKey)) {
     const loc = body.locale === "ar" ? "ar" : "en";
-    const data = session.state.data as Record<string, unknown>;
-    const hasProduct = typeof data.product_code === "string" && data.product_code.trim() !== "";
+    let data = session.state.data as Record<string, unknown>;
+    let hasProduct = typeof data.product_code === "string" && data.product_code.trim() !== "";
+    /**
+     * The tap on a licence card IS the choice. Recorded now, before the reply,
+     * so this very turn offers the two ways of uploading — waiting for the model
+     * to record it meant the offer's turn had already passed (staging, 6 Nov).
+     */
+    const tapped = !isDocumentUploaded && !isPaymentSettled ? productFromMessage(agent.definition, body.userMessage) : null;
+    if (tapped && data.product_code !== tapped) {
+      session.state = await mutateCase(session.caseId, (st: CaseState) => ({
+        ...st,
+        journeyKey: st.journeyKey || "new_license",
+        data: { ...st.data, product_code: tapped },
+      }));
+      liveState = session.state;
+      data = session.state.data as Record<string, unknown>;
+      hasProduct = true;
+    }
     const log = data[BATCH_LOG_KEY] as BatchLog | undefined;
     if (isDocumentUploaded && log && (log.placed.length || log.unplaced.length)) {
       // Reported once: cleared before the reply is written.

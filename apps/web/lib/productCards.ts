@@ -37,11 +37,34 @@ export function productOptions(def: AgentDefinition, locale: Locale): ProductOpt
   return [];
 }
 
+/**
+ * Titles only. The cards renderer has no `key` — any line it does not know is
+ * printed as a labelled row, which put "key CEP30-UAE-SME-DOM" on every card
+ * (seen on staging, 6 November). A tap sends the title; productFromMessage
+ * turns it back into the code.
+ */
 export function canonicalProductBlock(options: ProductOption[]): string {
-  return `${OPEN}\n${options.map((o) => `- title: ${o.label}\n  key: ${o.code}`).join("\n")}\n\`\`\``;
+  return `${OPEN}\n${options.map((o) => `- title: ${o.label}`).join("\n")}\n\`\`\``;
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9؀-ۿ]+/g, "");
+
+/**
+ * The product a message names: a tapped card (its title, in either language)
+ * or the bare code. Exact matches only — "the CEP one" is left to the model.
+ *
+ * Needed BEFORE the turn: the model records product_code during its reply, so
+ * on the tap's own turn the case still had no product, the server thought the
+ * licence was not yet chosen, and the "Upload all at once" offer was never
+ * made — every turn after it was an upload turn (staging, 6 November).
+ */
+export function productFromMessage(def: AgentDefinition, message: string | undefined): string | null {
+  const m = norm(message ?? "");
+  if (!m) return null;
+  for (const locale of ["en", "ar"] as const)
+    for (const o of productOptions(def, locale)) if (m === norm(o.label) || m === norm(o.code)) return o.code;
+  return null;
+}
 
 /** A cards block naming two or more products — by code, by full name, or by the name before its scope. */
 export function isProductMenu(block: string, options: ProductOption[]): boolean {

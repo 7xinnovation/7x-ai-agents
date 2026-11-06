@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import type { AgentDefinition, CaseState } from "@dialog/config";
 import { slotPrompt, parseSlotChoice } from "@dialog/core";
 import {
-  productOptions, canonicalProductBlock, isProductMenu, productCardGuard, chainGuards,
+  productOptions, productFromMessage, canonicalProductBlock, isProductMenu, productCardGuard, chainGuards,
 } from "@/lib/productCards";
 import {
   offersBatch, uploadModeFrom, batchCandidates, assignPartnerSlot, missingDocuments, modeChoiceDirective,
@@ -44,7 +44,17 @@ for (const [n, b] of [["the full menu", FULL], ["the grouped seven", GROUPED], [
   check(`${n} is recognised as the licence menu`, isProductMenu(b, opts));
 check("a branch menu is not", !isProductMenu(BRANCHES, opts));
 const canon = canonicalProductBlock(opts);
-check("the canonical block has all ten codes as keys", opts.every((o) => canon.includes(`key: ${o.code}`)));
+check("the canonical block has all ten titles", opts.every((o) => canon.includes(`- title: ${o.label}`)));
+check("...and no `key:` row, which the cards renderer would print on every card", !/\bkey:/.test(canon));
+// The tap's own turn: the card's title comes back as the message.
+check("a tapped card is read as its product code", opts.every((o) => productFromMessage(def, o.label) === o.code));
+check("...so is the bare code", productFromMessage(def, "CEP30-UAE-SME-DOM") === "CEP30-UAE-SME-DOM");
+check("...and an Arabic tap", productOptions(def, "ar").every((o) => productFromMessage(def, o.label) === o.code));
+check("a sentence that only mentions a licence is not a tap", productFromMessage(def, "I want the CEP licence please") === null);
+const chatRoute = read("../app/api/chat/route.ts");
+check("the route records the tapped product BEFORE deciding this turn's offer",
+  chatRoute.indexOf("productFromMessage(agent.definition, body.userMessage)") > 0 &&
+  chatRoute.indexOf("productFromMessage(agent.definition, body.userMessage)") < chatRoute.indexOf("directive = modeChoiceDirective(loc)"));
 check("...and no two cards share a title", new Set([...canon.matchAll(/title: (.+)/g)].map((m) => m[1])).size === 10);
 
 const stream = (text: string, size: number) => {
