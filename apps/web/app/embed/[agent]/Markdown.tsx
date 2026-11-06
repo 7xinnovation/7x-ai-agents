@@ -41,11 +41,97 @@ export interface UploadCtx {
   ownerIndex?: Record<string, number>;
   messageIndex?: number;
   onUpload: (key: string, file: File) => void;
+  /** "Upload all at once" (lib/batchUpload): many files, each placed by the server. */
+  onBatch?: (files: File[]) => void;
+  batch?: BatchFile[];
   onQr: () => void;
   strings: {
     upload: string; uploading: string; replace: string; optional: string;
     upTo: string; takePhoto: string; fromPhone: string; uploaded: string;
   };
+}
+
+export interface BatchFile {
+  name: string;
+  status: "uploading" | "placed" | "unplaced" | "refused";
+  /** The slot it went to, when it went to one. */
+  key?: string;
+}
+
+/**
+ * "Upload all at once": one control, many files (6 November 2026).
+ *
+ * The files are sent one request each, and each comes back with the slot it was
+ * placed in — or none — so every file shows where it went as it lands. The
+ * agent speaks once, when the whole batch is in (Experience.uploadBatch).
+ */
+function BatchUpload({ ctx }: { ctx: UploadCtx }) {
+  const ar = ctx.locale === "ar";
+  const files = ctx.batch ?? [];
+  const busy = files.some((f) => f.status === "uploading");
+  const label = (f: BatchFile) => {
+    if (f.status === "uploading") return ar ? "جارٍ القراءة…" : "Reading…";
+    if (f.status === "unplaced") return ar ? "لم يتم التعرف عليه" : "Not recognised";
+    const name = f.key && ctx.docs[f.key] ? tr(ctx.docs[f.key]!.label, ctx.locale) : "";
+    if (f.status === "refused") return ar ? `${name} — لم يُقبل` : `${name} — not accepted`;
+    return name;
+  };
+  return (
+    <div className={`dlg-chat-upload dlg-batch-upload${files.length && !busy ? " is-done" : ""}`}>
+      <div className="dlg-chat-upload-head">
+        <FileText size={15} weight="regular" />
+        <span className="dlg-chat-upload-name">{ar ? "ارفع جميع مستنداتك" : "Upload all your documents"}</span>
+      </div>
+      {files.length ? (
+        <ul className="dlg-batch-list" style={{ listStyle: "none", margin: "6px 0", padding: 0, fontSize: 13 }}>
+          {files.map((f, i) => (
+            <li key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 0" }}>
+              {f.status === "uploading" ? (
+                <ArrowClockwise size={13} weight="bold" className="spin" />
+              ) : f.status === "placed" ? (
+                <CheckCircle size={13} weight="fill" />
+              ) : (
+                <Warning size={13} weight="fill" />
+              )}
+              <span className="fname" style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+              <span style={{ opacity: 0.75, whiteSpace: "nowrap" }}>{label(f)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="dlg-chat-upload-actions">
+        <button type="button" className="dlg-upload-phone" onClick={ctx.onQr} title={ctx.strings.fromPhone}>
+          <DeviceMobile size={14} weight="bold" /> {ctx.strings.fromPhone}
+        </button>
+        <label className={`dlg-upload ${busy ? "busy" : ""}`}>
+          {busy ? (
+            <>
+              <ArrowClockwise size={14} weight="bold" className="spin" /> {ctx.strings.uploading}
+            </>
+          ) : (
+            <>
+              <UploadSimple size={14} weight="bold" /> {ar ? (files.length ? "إضافة ملفات" : "اختر الملفات") : files.length ? "Add more files" : "Choose files"}
+            </>
+          )}
+          <input
+            type="file"
+            hidden
+            multiple
+            disabled={busy || !ctx.onBatch}
+            accept=".pdf,.png,.jpg,.jpeg"
+            onClick={resetFileInput}
+            onChange={(e) => {
+              const picked = Array.from(e.target.files ?? []);
+              if (picked.length && ctx.onBatch) ctx.onBatch(picked);
+            }}
+          />
+        </label>
+      </div>
+      <div className="dlg-chat-upload-hint">
+        {ar ? "يمكنك اختيار عدة ملفات معاً · PDF أو صور" : "Select several files together · PDF or photos"} · {ctx.strings.upTo} 10MB
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -1134,6 +1220,7 @@ export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { 
       if (!/^\s*```\s*upload\s*$/.test(lines[j]!)) continue;
       const body: string[] = [];
       for (j++; j < lines.length && !/^\s*```\s*$/.test(lines[j]!); j++) body.push(lines[j]!);
+      if (body.some((l) => /^\s*(?:-\s*)?key\s*:\s*batch\s*$/i.test(l))) continue; // the batch control, not a slot
       for (const key of resolveUploadKeys(body, uploadCtx)) if (!keys.includes(key)) keys.push(key);
     }
     if (keys.length <= cap) return null; // nothing to choose between
@@ -1162,6 +1249,14 @@ export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { 
         // Body names which document(s) to upload; parsing is tolerant and falls
         // back to the journey's pending documents so the block never renders as
         // nothing once the message is complete (FB-1425).
+        // "key: batch" is the many-files control, never a slot to resolve.
+        if (uploadCtx && body.some((l) => /^\s*(?:-\s*)?key\s*:\s*batch\s*$/i.test(l))) {
+          if (uploadCtx.onBatch && (uploadCtx.maxUploads === undefined || uploadsShown < uploadCtx.maxUploads)) {
+            uploadsShown++;
+            nodes.push(<BatchUpload key={k++} ctx={uploadCtx} />);
+          }
+          continue;
+        }
         if (uploadCtx) {
           for (const dkey of resolveUploadKeys(body, uploadCtx)) {
             // FB-1565: one ask at a time. An agent that declares a per-message

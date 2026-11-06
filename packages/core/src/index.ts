@@ -14,5 +14,6 @@ export * from "./ai/caseIntake";
 export * from "./ai/tools";
 export * from "./ai/orchestrator";
 export * from "./ai/extract";
+export * from "./ai/classifySlot";
 export * from "./ai/handover";
 export * from "./a2a/protocol";

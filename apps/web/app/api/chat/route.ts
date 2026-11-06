@@ -62,6 +62,11 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
+import { productCardGuard, productOptions, chainGuards } from "@/lib/productCards";
+import {
+  offersBatch, uploadModeFrom, productFirstDirective, modeChoiceDirective, batchStartDirective, batchReportDirective,
+  missingDocuments, BATCH_LOG_KEY, UPLOAD_MODE_KEY, type BatchLog,
+} from "@/lib/batchUpload";
 import { collectedUploadGuard, asksSomethingElse, asksToReplace } from "@/lib/uploadGuard";
 import { outstandingNudge } from "@/lib/outstandingDocument";
 import { fillCatalogueTwins } from "@/lib/documentTwinsFill";
@@ -2096,12 +2101,72 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
   if (hallStillOutstanding && hallToAccept) {
     customerContext = `${customerContext ?? ""}${hallDirective(hallToAccept, body.locale)}`.trim();
   }
+  /**
+   * EPGL 2.0's new licence: the licence first, then the way the documents come
+   * in, then — for "Upload all at once" — one report of the whole batch. Each
+   * step is stated for the turn it applies to, from the case, rather than left
+   * in a 78,000-character guidance block for the model to find. See
+   * lib/batchUpload and lib/productCards.
+   */
+  let batchReport: string | null = null;
+  if (offersBatch(agent.definition, session.state.journeyKey)) {
+    const loc = body.locale === "ar" ? "ar" : "en";
+    const data = session.state.data as Record<string, unknown>;
+    const hasProduct = typeof data.product_code === "string" && data.product_code.trim() !== "";
+    const log = data[BATCH_LOG_KEY] as BatchLog | undefined;
+    if (isDocumentUploaded && log && (log.placed.length || log.unplaced.length)) {
+      // Reported once: cleared before the reply is written.
+      session.state = await mutateCase(session.caseId, (st: CaseState) => {
+        const { [BATCH_LOG_KEY]: _done, ...rest } = st.data as Record<string, unknown>;
+        return { ...st, data: rest };
+      });
+      liveState = session.state;
+      const labelOf = (k: string) => {
+        for (const j of agent.definition.journeys) for (const st of j.steps) for (const d of st.documents) if (d.key === k) return tr(d.label, loc);
+        return k;
+      };
+      const refused = new Set(session.state.documents.filter((d) => d.status === "rejected").map((d) => d.key));
+      batchReport = batchReportDirective(
+        {
+          placed: log.placed.filter((p) => !refused.has(p.key)),
+          unplaced: [...log.unplaced, ...log.placed.filter((p) => refused.has(p.key)).map((p) => ({ file: `${p.file} (refused by a check)` }))],
+        },
+        missingDocuments(agent.definition, session.state, loc),
+        labelOf
+      );
+      await audit({ ...{ agentId: agent.id, conversationId: session.conversationId }, actor: "system", action: "batch_upload_reported", payload: { placed: log.placed, unplaced: log.unplaced } });
+    } else if (!isDocumentUploaded && !isPaymentSettled) {
+      let directive = "";
+      const applying =
+        session.state.journeyKey === "new_license" ||
+        (!session.state.journeyKey && (isPulse || /\b(apply|application|new licen[cs]e|postal activity licen[cs]e)\b/i.test(body.userMessage ?? "") || /تقديم|طلب رخصة/.test(body.userMessage ?? "")));
+      if (!hasProduct) {
+        if (applying) directive = productFirstDirective();
+      } else if (!data[UPLOAD_MODE_KEY]) {
+        const mode = uploadModeFrom(body.userMessage);
+        const uploadedSoFar = session.state.documents.filter((d) => d.status === "uploaded" || d.status === "accepted").length;
+        if (mode) {
+          session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, [UPLOAD_MODE_KEY]: mode } }));
+          liveState = session.state;
+          if (mode === "batch") directive = batchStartDirective(missingDocuments(agent.definition, session.state, loc), loc);
+        } else if (uploadedSoFar <= 1) {
+          // Only at the start: a conversation already collecting documents
+          // one by one is not interrupted to be offered the other way.
+          directive = modeChoiceDirective(loc);
+        }
+      }
+      if (directive) {
+        customerContext = `${customerContext ?? ""}${directive}`.trim();
+        if (isPulse) pulseDirective += directive;
+      }
+    }
+  }
   const effectiveMessage = isPulse
     ? pulseDirective
     : isPaymentSettled
       ? paymentSettledDirective(agent.definition, session.state.journeyKey, session.state)
       : isDocumentUploaded
-        ? uploadedDirective(session.state, agent.definition, body.locale)
+        ? batchReport ?? uploadedDirective(session.state, agent.definition, body.locale)
         : body.userMessage;
 
   const a = { agentId: agent.id, conversationId: session.conversationId };
@@ -3918,9 +3983,14 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
         // A customer who names a term gets that term, not the menu again
         // (21 October). Collapsed here rather than asked for in the prompt:
         // the model had already been told, and showed five cards anyway.
-        const durationGuard = durationCardGuard(
-          () => apiTools.getDurationPrices()?.terms ?? null,
-          () => durationRequested(body.userMessage)
+        // The EPGL licence menu, replaced by the catalogue's own list before the
+        // duration guard sees it (lib/productCards). Inert on every other agent.
+        const durationGuard = chainGuards(
+          productCardGuard(() => productOptions(agent.definition, body.locale === "ar" ? "ar" : "en")),
+          durationCardGuard(
+            () => apiTools.getDurationPrices()?.terms ?? null,
+            () => durationRequested(body.userMessage)
+          )
         );
         // The invoiced figure outranks the rental hold: on EPGL there is no hold,
         // and until this the guard was armed with null on every EPGL turn.

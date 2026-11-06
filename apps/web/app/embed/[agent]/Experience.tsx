@@ -36,7 +36,7 @@ import QRCode from "qrcode";
 import { tr, evalCondition, type CaseState, type Locale } from "@dialog/config";
 import { Microphone } from "@phosphor-icons/react";
 import { docSignature } from "@/lib/caseDocs";
-import { Markdown, TypewriterMarkdown, type UploadCtx } from "./Markdown";
+import { Markdown, TypewriterMarkdown, type UploadCtx, type BatchFile } from "./Markdown";
 import { useVoiceChat } from "./useVoiceChat";
 import { useTurnstile } from "./useTurnstile";
 import type { PublicAgent } from "./types";
@@ -887,6 +887,8 @@ export function Experience({
   // assistant confirm + continue as soon as no turn is streaming.
   const [paymentPulse, setPaymentPulse] = useState(false);
   const [uploadingKeys, setUploadingKeys] = useState<Set<string>>(() => new Set());
+  /** "Upload all at once": every file in the current batch and where it went. */
+  const [batchFiles, setBatchFiles] = useState<BatchFile[]>([]);
   const [full] = useState(false);
   // Mobile (feedback FB-5): the case panel is a full-screen overlay toggled here.
   const [mobileCaseOpen, setMobileCaseOpen] = useState(false);
@@ -1165,6 +1167,75 @@ export function Experience({
     [agent.slug]
   );
 
+  /**
+   * "UPLOAD ALL AT ONCE" (lib/batchUpload).
+   *
+   * One request per file, two at a time — each is read by a vision model, and
+   * a dozen at once would queue behind each other anyway. The case is applied
+   * once, when the LAST file is in, so the turn that reports the batch fires
+   * once and sees all of it; while it runs the batch counts as an upload in
+   * flight, which keeps the live-sync poll from applying a half-finished case
+   * and firing that turn early.
+   */
+  const uploadBatch = useCallback(
+    async (files: File[]) => {
+      if (!convId.current || !files.length) return;
+      const start = batchFiles.length;
+      setBatchFiles((prev) => [...prev, ...files.map((f) => ({ name: f.name, status: "uploading" as const }))]);
+      setUploadingKeys((prev) => new Set(prev).add("__batch__"));
+      inflightUploads.current += 1;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let lastCase: any = null;
+      const queue = files.map((f, i) => ({ f, i: start + i }));
+      /**
+       * The documents that say who the partners ARE go first, alone, so a
+       * passport read after them can be matched to its partner by name. Only a
+       * hint from the file name — the server places nothing by it, and a batch
+       * in any order still works (lib/batchUpload, assignPartnerSlot).
+       */
+      const COMPANY = /licen[cs]e|moa|memorandum|association|trade/i;
+      const first = queue.filter((q) => COMPANY.test(q.f.name) && !/sme/i.test(q.f.name));
+      const rest = queue.filter((q) => !first.includes(q));
+      queue.splice(0, queue.length, ...rest);
+      const worker = async (own?: typeof queue) => {
+        const take = () => (own ? own.shift() : queue.shift());
+        for (let item = take(); item; item = take()) {
+          let next: BatchFile = { name: item.f.name, status: "unplaced" };
+          try {
+            const fd = new FormData();
+            fd.append("agentSlug", agent.slug);
+            fd.append("conversationId", convId.current!);
+            fd.append("key", "__batch__");
+            fd.append("file", item.f);
+            const res = await fetch("/api/upload", { method: "POST", body: fd });
+            const json = await res.json();
+            if (json.case) lastCase = json.case;
+            const slot: string | undefined = json.batch?.placed ?? json.slot ?? undefined;
+            next = { name: item.f.name, key: slot, status: json.rejected ? "refused" : slot ? "placed" : "unplaced" };
+          } catch {
+            /* reported as not recognised; the file can be added again */
+          }
+          const at = item.i;
+          setBatchFiles((prev) => prev.map((x, j) => (j === at ? next : x)));
+        }
+      };
+      try {
+        await worker(first);
+        await Promise.all([worker(), worker()]);
+      } finally {
+        inflightUploads.current = Math.max(0, inflightUploads.current - 1);
+        justUploaded.current = true;
+        if (lastCase && inflightUploads.current === 0) setCaseState(lastCase);
+        setUploadingKeys((prev) => {
+          const next = new Set(prev);
+          next.delete("__batch__");
+          return next;
+        });
+      }
+    },
+    [agent.slug, batchFiles.length]
+  );
+
   // Open the QR hand-off for the current conversation (feedback FB-6, web →
   // phone). The mobile page keys off agent slug + conversation id.
   const openQrHandoff = useCallback(() => {
@@ -1214,13 +1285,15 @@ export function Experience({
       pendingDocs: pendingDocKeys,
       maxUploads: agent.uploadsPerMessage,
       onUpload: uploadDoc,
+      onBatch: uploadBatch,
+      batch: batchFiles,
       onQr: openQrHandoff,
       strings: {
         upload: t.upload, uploading: t.uploading, replace: t.replace, optional: t.optional,
         upTo: t.upTo, takePhoto: t.takePhoto, fromPhone: t.fromPhone, uploaded: t.uploaded,
       },
     };
-  }, [agent, caseState, locale, uploadingKeys, pendingDocKeys, uploadDoc, openQrHandoff, t]);
+  }, [agent, caseState, locale, uploadingKeys, pendingDocKeys, uploadDoc, uploadBatch, batchFiles, openQrHandoff, t]);
 
   // Live-sync: while documents are still pending (and nothing local is in
   // flight), poll the conversation so uploads made on a phone via the QR

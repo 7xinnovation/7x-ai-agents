@@ -7,7 +7,9 @@ import {
   adapterContext,
   extractFieldsFromDocument,
   DOC_TYPE_LABELS,
+  classifyDocumentIntoSlot,
 } from "@dialog/core";
+import { BATCH_KEY, BATCH_LOG_KEY, batchCandidates, assignPartnerSlot, type BatchLog } from "@/lib/batchUpload";
 import { getDb, documents as documentsTable, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import type { DocumentRequirement } from "@dialog/config";
@@ -131,7 +133,7 @@ export async function POST(req: NextRequest) {
   const form = await req.formData();
   const agentSlug = String(form.get("agentSlug") ?? "");
   const conversationId = String(form.get("conversationId") ?? "");
-  const key = String(form.get("key") ?? "");
+  let key = String(form.get("key") ?? "");
   const file = form.get("file");
 
   if (!agentSlug || !conversationId || !key || !(file instanceof File)) {
@@ -143,6 +145,56 @@ export async function POST(req: NextRequest) {
 
   const caseRow = await getCase(conversationId);
   if (!caseRow) return NextResponse.json({ error: "conversation_not_found" }, { status: 404 });
+
+  /**
+   * "UPLOAD ALL AT ONCE": THE FILE NAMES ITS OWN SLOT (lib/batchUpload).
+   *
+   * Only the slot is decided here. From the line after this block the file is
+   * a single upload to that slot like any other — same type gate, same
+   * extraction, same expiry and identity checks — so a batch cannot let in
+   * anything one-at-a-time would refuse.
+   */
+  let batchPlaced: string | null = null;
+  if (key === BATCH_KEY) {
+    // English labels: they are read by the classifier, never shown.
+    const candidates = batchCandidates(agent.definition, caseRow.state, "en");
+    let choice: Awaited<ReturnType<typeof classifyDocumentIntoSlot>> = { key: null };
+    try {
+      choice = await classifyDocumentIntoSlot({
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        candidates,
+      });
+    } catch (e) {
+      choice = { key: null, why: e instanceof Error ? e.message : "classification failed" };
+    }
+    await audit({
+      agentId: agent.id,
+      conversationId,
+      actor: "system",
+      action: "batch_upload_placed",
+      payload: { fileName: file.name, key: choice.key, holderName: choice.holderName ?? null, why: choice.why ?? null, candidates: candidates.map((c) => c.key) },
+    });
+    if (!choice.key) {
+      const state = await mutateCase(caseRow.caseId, (st) => {
+        const log = ((st.data as Record<string, unknown>)[BATCH_LOG_KEY] as BatchLog | undefined) ?? { placed: [], unplaced: [] };
+        return { ...st, data: { ...st.data, [BATCH_LOG_KEY]: { ...log, unplaced: [...log.unplaced, { file: file.name, why: choice.why }] } } };
+      });
+      return NextResponse.json({ case: state, batch: { placed: null } });
+    }
+    // The partner is settled under the row lock, against what the rest of the
+    // batch has already reserved — see assignPartnerSlot.
+    let placedKey = choice.key;
+    await mutateCase(caseRow.caseId, (st) => {
+      const data = st.data as Record<string, unknown>;
+      const log = (data[BATCH_LOG_KEY] as BatchLog | undefined) ?? { placed: [], unplaced: [] };
+      placedKey = assignPartnerSlot(choice.key!, choice.holderName, data, st.documents, log.placed.map((p) => p.key));
+      return { ...st, data: { ...st.data, [BATCH_LOG_KEY]: { ...log, placed: [...log.placed, { file: file.name, key: placedKey }] } } };
+    });
+    key = placedKey;
+    batchPlaced = placedKey;
+  }
 
   // Locate the document requirement across the agent's journeys.
   let req_: DocumentRequirement | undefined;
@@ -178,7 +230,7 @@ export async function POST(req: NextRequest) {
         rejectionReason: reason,
       })
     );
-    return NextResponse.json({ case: state, rejected: true, reason });
+    return NextResponse.json({ case: state, slot: key, rejected: true, reason });
   }
 
   // Read the bytes once — used for both storage and field extraction.
@@ -318,7 +370,7 @@ export async function POST(req: NextRequest) {
       action: "document_rejected_wrong_type",
       payload: { key, fileName: file.name, classified: extraction.docType },
     });
-    return NextResponse.json({ case: state, rejected: true, reason: mismatchReason });
+    return NextResponse.json({ case: state, slot: key, rejected: true, reason: mismatchReason });
   }
 
   // An identity document for somebody this licence does not name is REFUSED, not
@@ -350,7 +402,7 @@ export async function POST(req: NextRequest) {
         action: "document_rejected_wrong_person",
         payload: { key, fileName: file.name },
       });
-      return NextResponse.json({ case: state, rejected: true, reason: verdict.reject });
+      return NextResponse.json({ case: state, slot: key, rejected: true, reason: verdict.reject });
     }
   }
 
@@ -391,7 +443,7 @@ export async function POST(req: NextRequest) {
       action: "document_rejected_expired_licence",
       payload: { key, fileName: file.name, expiredOn: on, field: stale.field },
     });
-    return NextResponse.json({ case: state, rejected: true, reason });
+    return NextResponse.json({ case: state, slot: key, rejected: true, reason });
   }
 
   // Cross-check against the entity already on the application: the right KIND of
@@ -440,7 +492,7 @@ export async function POST(req: NextRequest) {
       action: "document_rejected_entity_mismatch",
       payload: { key, fileName: file.name },
     });
-    return NextResponse.json({ case: state, rejected: true, reason });
+    return NextResponse.json({ case: state, slot: key, rejected: true, reason });
   }
   // Names disagree and nothing exact settles it. The document is KEPT -- a
   // registered name beside a trade name looks identical to a wrong company, and
@@ -469,7 +521,7 @@ export async function POST(req: NextRequest) {
       action: "document_rejected_wrong_partner",
       payload: { key, fileName: file.name },
     });
-    return NextResponse.json({ case: state, rejected: true, reason });
+    return NextResponse.json({ case: state, slot: key, rejected: true, reason });
   }
   const nameQuery =
     partner.conflict?.reason ?? (conflict?.severity === "confirm" ? conflict.reason : null);
@@ -508,7 +560,7 @@ export async function POST(req: NextRequest) {
       action: "document_rejected_expired",
       payload: { key, fileName: file.name, expiry: extraction.docExpiryDate },
     });
-    return NextResponse.json({ case: state, rejected: true, reason: expiredReason });
+    return NextResponse.json({ case: state, slot: key, rejected: true, reason: expiredReason });
   }
 
   /**
@@ -552,7 +604,7 @@ export async function POST(req: NextRequest) {
       action: "document_rejected_expired_validity",
       payload: { key, fileName: file.name, expiredOn: on, docType: extraction.docType ?? null },
     });
-    return NextResponse.json({ case: state, rejected: true, reason });
+    return NextResponse.json({ case: state, slot: key, rejected: true, reason });
   }
 
   // Everything from here runs against the FRESHEST case state, not the snapshot
@@ -689,5 +741,6 @@ export async function POST(req: NextRequest) {
     // Named so the assistant can say it out loud rather than silently skipping a
     // slot the customer was expecting to fill.
     alsoFilled: mirrored?.filled ?? twinFilled ?? undefined,
+    batch: batchPlaced ? { placed: batchPlaced } : undefined,
   });
 }
