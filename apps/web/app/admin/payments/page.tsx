@@ -64,6 +64,16 @@ export default async function PaymentsPage({
     return `/admin/payments?${p.toString()}`;
   };
 
+  // The export is the page as it stands: same window, agent and status.
+  const exportHref = (() => {
+    const p = new URLSearchParams();
+    if (windowDays !== "all") p.set("days", String(windowDays));
+    if (picked) p.set("status", picked);
+    if (selected) p.set("agent", selected.slug);
+    const q = p.toString();
+    return `/api/admin/payments/export${q ? `?${q}` : ""}`;
+  })();
+
   return (
     <>
       <header className="sa-top">
@@ -74,7 +84,12 @@ export default async function PaymentsPage({
             {selected ? ` · ${selected.name}` : " across all agents"}.
           </p>
         </div>
-        <AgentFilter agents={agentList} allowAll={!scope} />
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <a className="sa-btn" href={exportHref}>
+            Export CSV
+          </a>
+          <AgentFilter agents={agentList} allowAll={!scope} />
+        </div>
       </header>
 
       <div className="sa-tabs">
@@ -136,7 +151,9 @@ export default async function PaymentsPage({
               <div className="sa-tr" key={r.id}>
                 <span className="sa-nowrap">{when(r.createdAt)}</span>
                 <span>{r.agentName ?? "—"}</span>
-                <span className="sa-mono">{r.reference}</span>
+                <span className="sa-mono">
+                  <Link href={`/admin/payments/${r.id}`}>{r.reference.length > 18 ? `${r.reference.slice(0, 8)}…` : r.reference}</Link>
+                </span>
                 <span>{money(r.amount, r.currency)}</span>
                 <span>
                   <span className={`sa-tag ${r.status === "paid" ? "ok" : r.status === "failed" ? "bad" : ""}`}>{r.status}</span>
@@ -146,7 +163,7 @@ export default async function PaymentsPage({
                   {r.gatewayRef ? <span className="sa-muted"> · {r.gatewayRef}</span> : null}
                 </span>
                 <span className="sa-cell-actions">
-                  {r.conversationId ? <Link href={`/admin/conversations/${r.conversationId}`}>Transcript</Link> : null}
+                  <Link href={`/admin/payments/${r.id}`}>Details</Link>
                 </span>
               </div>
             ))}
