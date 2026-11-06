@@ -62,7 +62,7 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
-import { noUploadBeforeProductGuard, productOptions, productFromMessage, chainGuards } from "@/lib/productCards";
+import { noUploadBeforeProductGuard, productOptions, productFromMessage, productDerived, chainGuards } from "@/lib/productCards";
 import {
   offersBatch, uploadModeFrom, productFirstDirective, modeChoiceDirective, batchStartDirective, batchReportDirective,
   missingDocuments, BATCH_LOG_KEY, UPLOAD_MODE_KEY, type BatchLog,
@@ -2119,11 +2119,11 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
      * to record it meant the offer's turn had already passed (staging, 6 Nov).
      */
     const tapped = !isDocumentUploaded && !isPaymentSettled ? productFromMessage(agent.definition, body.userMessage) : null;
-    if (tapped && data.product_code !== tapped) {
+    if (tapped && (data.product_code !== tapped || data.product_family !== productDerived(tapped).product_family)) {
       session.state = await mutateCase(session.caseId, (st: CaseState) => ({
         ...st,
         journeyKey: st.journeyKey || "new_license",
-        data: { ...st.data, product_code: tapped },
+        data: { ...st.data, product_code: tapped, ...productDerived(tapped) },
       }));
       liveState = session.state;
       data = session.state.data as Record<string, unknown>;

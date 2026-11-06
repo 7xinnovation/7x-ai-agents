@@ -18,6 +18,7 @@
  */
 import { tr, evalCondition, type AgentDefinition, type CaseState } from "@dialog/config";
 import { recomputeReadiness, type SlotCandidate } from "@dialog/core";
+import { productDerived } from "./productCards";
 
 /** The key a batch upload is posted under; the upload route resolves the real slot. */
 export const BATCH_KEY = "__batch__";
@@ -74,7 +75,13 @@ const partnerName = (data: Record<string, unknown>, n: string): string | undefin
 export function batchCandidates(def: AgentDefinition, state: CaseState, locale: "en" | "ar"): SlotCandidate[] {
   const j = def.journeys.find((x) => x.key === (state.journeyKey || "new_license"));
   if (!j) return [];
-  const data = state.data as Record<string, unknown>;
+  /**
+   * Conditions are judged with the product's derived fields filled from its
+   * code, whatever the model has or has not recorded yet (productDerived).
+   */
+  const raw = state.data as Record<string, unknown>;
+  const code = typeof raw.product_code === "string" ? raw.product_code : "";
+  const data = code ? { ...raw, ...productDerived(code) } : raw;
   const namesKnown = !!partnerName(data, "1");
   const out: SlotCandidate[] = [];
   for (const s of j.steps)
@@ -156,7 +163,10 @@ export function assignPartnerSlot(
 export function missingDocuments(def: AgentDefinition, state: CaseState, locale: "en" | "ar"): { key: string; label: string }[] {
   const labels = new Map<string, string>();
   for (const j of def.journeys) for (const s of j.steps) for (const d of s.documents) if (!labels.has(d.key)) labels.set(d.key, tr(d.label, locale));
-  return recomputeReadiness(def, state)
+  const raw = state.data as Record<string, unknown>;
+  const code = typeof raw.product_code === "string" ? raw.product_code : "";
+  const judged = code ? { ...state, data: { ...raw, ...productDerived(code) } } : state;
+  return recomputeReadiness(def, judged)
     .readiness.missing.filter((m) => m.kind === "document")
     .map((m) => ({ key: m.key, label: labels.get(m.key) ?? m.key }));
 }

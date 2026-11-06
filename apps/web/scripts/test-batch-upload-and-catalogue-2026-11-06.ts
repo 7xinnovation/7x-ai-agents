@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import type { AgentDefinition, CaseState } from "@dialog/config";
 import { slotPrompt, parseSlotChoice } from "@dialog/core";
 import {
-  productOptions, productFromMessage, canonicalProductBlock, isProductMenu, productCardGuard, noUploadBeforeProductGuard, chainGuards,
+  productOptions, productFromMessage, productDerived, canonicalProductBlock, isProductMenu, productCardGuard, noUploadBeforeProductGuard, chainGuards,
 } from "@/lib/productCards";
 import {
   offersBatch, uploadModeFrom, batchCandidates, assignPartnerSlot, missingDocuments, modeChoiceDirective,
@@ -178,6 +178,25 @@ check("...and holds the poll off while the batch runs", /add\("__batch__"\)/.tes
   check("...and is checked AFTER a logged batch is reported",
     r.indexOf("batch_upload_reported") < r.indexOf("batch_upload_turn_skipped"));
   check("the licence-first directive covers 'not my company'", /company on file is not theirs/.test(productFirstDirective()));
+}
+
+// ---- the five "not recognised" (staging, 6 November, 09:51) ----------------
+{
+  check("CEP30 SME: family CEP30, SME", JSON.stringify(productDerived("CEP30-UAE-SME-DOM")) === '{"product_family":"CEP30","product_is_sme":true}');
+  check("CEP30 General: family CEP30, not SME", productDerived("CEP30-GEN-INTL").product_is_sme === false && productDerived("CEP30-GEN-INTL").product_family === "CEP30");
+  check("a permit is its own family", productDerived("FOODMED").product_family === "FOODMED" && !productDerived("FOODMED").product_is_sme);
+  check("every catalogue code derives a family the field accepts", (() => {
+    const fam = def.journeys.flatMap((j) => j.steps.flatMap((s) => s.fields)).find((f) => f.key === "product_family") as unknown as { options: { value: string }[] };
+    return opts.every((o) => fam.options.some((x) => x.value === productDerived(o.code).product_family));
+  })());
+  // Exactly the case staging had: product_code recorded, nothing derived yet.
+  const tappedOnly = { journeyKey: "new_license", data: { product_code: "CEP30-UAE-SME-DOM", partner_1_name: "Ahmed Al Mansoori", partner_2_name: "Sara Al Hashimi", partner_count: 2, legal_form: "Limited Liability Company (LLC)" }, documents: [] } as unknown as CaseState;
+  const keys = batchCandidates(def, tappedOnly, "en").map((c) => c.key);
+  for (const k of ["sme_licence_federal_or_local_government", "lease_contract", "insurance_certificate_goods_in_transit", "operational_fleet_declaration", "operational_standards_self_declaration"])
+    check(`with only the code recorded, the batch still offers ${k}`, keys.includes(k), keys);
+  const miss = missingDocuments(def, tappedOnly, "en").map((m) => m.key);
+  check("...and the needed-documents list includes them", miss.includes("lease_contract") && miss.includes("sme_licence_federal_or_local_government"), miss);
+  check("the tap records the derived fields with the code", /product_code: tapped, \.\.\.productDerived\(tapped\)/.test(read("../app/api/chat/route.ts")));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

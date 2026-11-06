@@ -50,6 +50,20 @@ export function canonicalProductBlock(options: ProductOption[]): string {
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9؀-ۿ]+/g, "");
 
 /**
+ * The two fields every later question and document is conditioned on, from the
+ * code alone — the rule their own field help states: product_family is CEP30
+ * for any CEP30-* product and otherwise the code; product_is_sme is true when
+ * the code says SME. They were left to the model, so a product recorded by the
+ * server (a tapped card) had neither, and the batch offered no lease, SME
+ * licence, insurance, fleet or standards slot: five files "not recognised"
+ * (staging, 6 November).
+ */
+export function productDerived(code: string): { product_family: string; product_is_sme: boolean } {
+  const c = code.trim().toUpperCase();
+  return { product_family: c.startsWith("CEP30") ? "CEP30" : c, product_is_sme: /(^|-)SME(-|$)/.test(c) };
+}
+
+/**
  * The product a message names: a tapped card (its title, in either language)
  * or the bare code. Exact matches only — "the CEP one" is left to the model.
  *
