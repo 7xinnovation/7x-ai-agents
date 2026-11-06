@@ -100,7 +100,8 @@ check("...and so does the agent", /if \(selected\) p\.set\("agent", selected\.sl
 for (const [name, src] of [["journeys", journeys], ["payments", paymentsPage]] as [string, string][]) {
   check(`${name} honours the account's agent scope`, src.includes("currentScope") && src.includes("selectAgent"));
   check(`${name} offers the agent filter`, src.includes("<AgentFilter"));
-  check(`${name} links each row to its transcript`, src.includes("/admin/conversations/"));
+  // Payments rows open the transaction page (6 November), which carries the transcript.
+  check(`${name} links each row to its transcript`, src.includes("/admin/conversations/") || (name === "payments" && src.includes("/admin/payments/${r.id}")));
   check(`${name} says plainly when there is nothing`, /sa-empty-line/.test(src));
   check(`${name} is never cached`, src.includes('export const dynamic = "force-dynamic"'));
 }

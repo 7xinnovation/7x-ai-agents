@@ -29,42 +29,86 @@ export function CodeBlock({ code, title, lang = "text", className = "" }: { code
         </button>
       </div>
       <pre>
-        <code dangerouslySetInnerHTML={{ __html: highlight(code, lang) }} />
+        <code>
+          {highlight(code, lang).map((t, i) => (t.cls ? <span key={i} className={t.cls}>{t.text}</span> : t.text))}
+        </code>
       </pre>
     </div>
   );
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/**
+ * Colouring as tokens, rendered as React text — never as HTML (6 November
+ * 2026, security audit: raw inner HTML "can lead to XSS"). The old
+ * version escaped the code and then ran regular expressions over the HTML it
+ * was building, which was safe only as long as no expression ever matched
+ * inside a tag it had inserted itself. Text in React nodes is escaped by
+ * React, whatever the code contains.
+ */
+export interface Token {
+  text: string;
+  cls?: "tok-k" | "tok-s" | "tok-n" | "tok-c";
+}
 
-function highlight(code: string, lang: string): string {
-  const safe = esc(code);
+/** Walk `src` with one global expression; `pick` turns each match into tokens. */
+function scan(src: string, re: RegExp, pick: (m: RegExpExecArray) => Token[]): Token[] {
+  const out: Token[] = [];
+  let last = 0;
+  for (let m = re.exec(src); m; m = re.exec(src)) {
+    if (m[0] === "") {
+      re.lastIndex++;
+      continue;
+    }
+    if (m.index > last) out.push({ text: src.slice(last, m.index) });
+    out.push(...pick(m));
+    last = m.index + m[0].length;
+  }
+  if (last < src.length) out.push({ text: src.slice(last) });
+  return out;
+}
+
+const STR = String.raw`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`;
+
+export function highlight(code: string, lang: string): Token[] {
   if (lang === "json") {
-    return safe
-      .replace(/(&quot;|")([^"\n]*?)\1(\s*:)/g, '<span class="tok-k">$1$2$1</span>$3')
-      .replace(/:\s*("(?:[^"\\]|\\.)*")/g, (m, s) => m.replace(s, `<span class="tok-s">${s}</span>`))
-      .replace(/\b(true|false|null)\b/g, '<span class="tok-n">$1</span>')
-      .replace(/(:\s*)(-?\d+(?:\.\d+)?)/g, '$1<span class="tok-n">$2</span>');
+    return scan(code, /("(?:[^"\\\n]|\\.)*")(\s*:)?|\b(true|false|null)\b|(-?\b\d+(?:\.\d+)?\b)/g, (m) =>
+      m[1] !== undefined
+        ? m[2] !== undefined
+          ? [{ text: m[1], cls: "tok-k" }, { text: m[2] }]
+          : [{ text: m[1], cls: "tok-s" }]
+        : [{ text: m[0], cls: "tok-n" }]
+    );
   }
   if (lang === "bash" || lang === "http") {
-    // Line by line: a comment line is wrapped whole and never tokenised again,
-    // so the class name of its own span cannot be read as a string.
-    return safe
-      .split("\n")
-      .map((line) => {
-        if (/^\s*#/.test(line)) return `<span class="tok-c">${line}</span>`;
-        return line
-          .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, '<span class="tok-s">$1</span>')
-          .replace(/^(\s*)(curl|POST|GET|DELETE|PATCH|export)\b/, '$1<span class="tok-k">$2</span>')
-          .replace(/(\s)(-{1,2}[A-Za-z][\w-]*)/g, '$1<span class="tok-n">$2</span>');
-      })
-      .join("\n");
+    // Line by line: a comment line is one token, never tokenised again.
+    return code.split("\n").flatMap((line, i) => {
+      const nl: Token[] = i === 0 ? [] : [{ text: "\n" }];
+      if (/^\s*#/.test(line)) return [...nl, { text: line, cls: "tok-c" as const }];
+      const re = new RegExp(`(${STR})|^(\\s*)(curl|POST|GET|DELETE|PATCH|export)\\b|(\\s)(-{1,2}[A-Za-z][\\w-]*)`, "g");
+      return [
+        ...nl,
+        ...scan(line, re, (m) =>
+          m[1] !== undefined
+            ? [{ text: m[1], cls: "tok-s" }]
+            : m[3] !== undefined
+              ? [{ text: m[2] ?? "" }, { text: m[3], cls: "tok-k" }]
+              : [{ text: m[4] ?? "" }, { text: m[5] ?? "", cls: "tok-n" }]
+        ),
+      ];
+    });
   }
   if (lang === "js" || lang === "python") {
-    return safe
-      .replace(/(^|\n)(\s*)(\/\/[^\n]*|#[^\n]*)/g, '$1$2<span class="tok-c">$3</span>')
-      .replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, '<span class="tok-s">$1</span>')
-      .replace(/\b(const|let|await|async|import|from|return|def|for|in|if|else|while|print|function|new)\b/g, '<span class="tok-k">$1</span>');
+    const re = new RegExp(
+      `(?<=^|\\n)([ \\t]*)(\\/\\/[^\\n]*|#[^\\n]*)|(${STR}|\`(?:[^\`\\\\]|\\\\.)*\`)|\\b(const|let|await|async|import|from|return|def|for|in|if|else|while|print|function|new)\\b`,
+      "g"
+    );
+    return scan(code, re, (m) =>
+      m[2] !== undefined
+        ? [{ text: m[1] ?? "" }, { text: m[2], cls: "tok-c" }]
+        : m[3] !== undefined
+          ? [{ text: m[3], cls: "tok-s" }]
+          : [{ text: m[4] ?? "", cls: "tok-k" }]
+    );
   }
-  return safe;
+  return [{ text: code }];
 }
