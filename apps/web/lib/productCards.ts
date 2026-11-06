@@ -79,24 +79,27 @@ export function isProductMenu(block: string, options: ProductOption[]): boolean 
   return hits >= 2;
 }
 
-/** The longest tail of `s` that is a proper prefix of OPEN. */
-function heldTail(s: string): number {
-  const max = Math.min(OPEN.length - 1, s.length);
-  for (let n = max; n > 0; n--) if (OPEN.startsWith(s.slice(s.length - n).toLowerCase())) return n;
+/** The longest tail of `s` that is a proper prefix of `open`. */
+function heldTail(s: string, open: string): number {
+  const max = Math.min(open.length - 1, s.length);
+  for (let n = max; n > 0; n--) if (open.startsWith(s.slice(s.length - n).toLowerCase())) return n;
   return 0;
 }
 
-/** Streaming: passes text through, holding only a cards block until it closes. */
-export function productCardGuard(options: () => ProductOption[]) {
+/**
+ * Streaming: passes text through, holding only a fenced block that opens with
+ * `open` until it closes, then lets `rewrite` decide what goes out instead.
+ */
+function fencedGuard(open: string, rewrite: (block: string, closed: boolean) => string) {
   let mode: "pass" | "capture" = "pass";
   let buf = "";
   const step = (): string => {
     let out = "";
     for (;;) {
       if (mode === "pass") {
-        const i = buf.toLowerCase().indexOf(OPEN);
+        const i = buf.toLowerCase().indexOf(open);
         if (i === -1) {
-          const hold = heldTail(buf);
+          const hold = heldTail(buf, open);
           out += buf.slice(0, buf.length - hold);
           buf = buf.slice(buf.length - hold);
           return out;
@@ -106,13 +109,13 @@ export function productCardGuard(options: () => ProductOption[]) {
         mode = "capture";
         continue;
       }
-      const close = /\n[ \t]*```[ \t]*(\n|$)/.exec(buf.slice(OPEN.length));
+      const close = /\n[ \t]*```[ \t]*(\n|$)/.exec(buf.slice(open.length));
       if (!close) return out;
-      const end = OPEN.length + close.index + close[0].length;
+      const end = open.length + close.index + close[0].length;
       const block = buf.slice(0, end);
-      const opts = options();
       const trailing = close[1] === "\n" ? "\n" : "";
-      out += isProductMenu(block, opts) ? canonicalProductBlock(opts) + trailing : block;
+      const replaced = rewrite(block, true);
+      out += replaced === block ? block : replaced ? replaced + trailing : "";
       buf = buf.slice(end);
       mode = "pass";
     }
@@ -123,12 +126,58 @@ export function productCardGuard(options: () => ProductOption[]) {
       return step();
     },
     flush(): string {
-      // An unclosed block at the end of the reply is still the menu if it names products.
+      // An unclosed block at the very end of the reply is judged as it stands.
       const rest = buf;
       buf = "";
       mode = "pass";
-      if (rest.toLowerCase().startsWith(OPEN) && isProductMenu(rest, options())) return canonicalProductBlock(options());
-      return rest;
+      return rest.toLowerCase().startsWith(open) ? rewrite(rest, false) : rest;
+    },
+  };
+}
+
+/** The licence menu, whoever wrote it, goes out as the catalogue's ten. */
+export function productCardGuard(options: () => ProductOption[]) {
+  return fencedGuard(OPEN, (block) => {
+    const opts = options();
+    return isProductMenu(block, opts) ? canonicalProductBlock(opts) : block;
+  });
+}
+
+/**
+ * NO UPLOAD BEFORE THE LICENCE (6 November 2026).
+ *
+ * Every document depends on the licence, and "Upload all at once" is offered
+ * only once it is chosen — so a document asked for before it is a document
+ * taken one at a time, outside the batch. Seen on staging: the applicant said
+ * the signed-in company was not theirs, and the trade licence was asked for at
+ * once, before the menu, despite the directive saying the licence comes first.
+ *
+ * While no product is chosen, an ```upload block is replaced by the licence
+ * menu — or dropped, when this reply already shows the menu or recorded a
+ * product along the way.
+ */
+export function noUploadBeforeProductGuard(active: () => boolean, options: () => ProductOption[]) {
+  let menuShown = false;
+  const watch = productCardGuard(options);
+  const upload = fencedGuard("```upload", (block) => {
+    if (!active()) return block;
+    const opts = options();
+    if (menuShown || opts.length < 2) return "";
+    menuShown = true;
+    return canonicalProductBlock(opts);
+  });
+  // The cards guard runs first, so a menu the model wrote is seen (and
+  // normalised) before any upload block after it.
+  return {
+    push(d: string): string {
+      const out = watch.push(d);
+      if (out.includes(OPEN) && isProductMenu(out.slice(out.indexOf(OPEN)), options())) menuShown = true;
+      return upload.push(out);
+    },
+    flush(): string {
+      const out = watch.flush();
+      if (out.includes(OPEN) && isProductMenu(out.slice(out.indexOf(OPEN)), options())) menuShown = true;
+      return upload.push(out) + upload.flush();
     },
   };
 }

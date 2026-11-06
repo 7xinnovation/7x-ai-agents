@@ -9,7 +9,7 @@ import {
   DOC_TYPE_LABELS,
   classifyDocumentIntoSlot,
 } from "@dialog/core";
-import { BATCH_KEY, BATCH_LOG_KEY, batchCandidates, assignPartnerSlot, type BatchLog } from "@/lib/batchUpload";
+import { BATCH_KEY, BATCH_LOG_KEY, UPLOAD_MODE_KEY, batchCandidates, assignPartnerSlot, type BatchLog } from "@/lib/batchUpload";
 import { getDb, documents as documentsTable, conversations } from "@dialog/db";
 import { eq } from "drizzle-orm";
 import type { DocumentRequirement } from "@dialog/config";
@@ -194,6 +194,18 @@ export async function POST(req: NextRequest) {
     });
     key = placedKey;
     batchPlaced = placedKey;
+  } else if ((caseRow.state.data as Record<string, unknown>)[UPLOAD_MODE_KEY] === "batch") {
+    /**
+     * A single file in batch mode — a Replace on a refused card, say — is
+     * logged like a batch file, so its turn is reported the batch way (what is
+     * in, what is still missing) rather than "next, the MOA". It also lets the
+     * chat route tell an upload the customer made from a slot the server
+     * filled itself (the CEP30 twin), which in batch mode needs no reply at all.
+     */
+    await mutateCase(caseRow.caseId, (st) => {
+      const log = ((st.data as Record<string, unknown>)[BATCH_LOG_KEY] as BatchLog | undefined) ?? { placed: [], unplaced: [] };
+      return { ...st, data: { ...st.data, [BATCH_LOG_KEY]: { ...log, placed: [...log.placed, { file: file.name, key }] } } };
+    });
   }
 
   // Locate the document requirement across the agent's journeys.

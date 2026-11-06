@@ -169,7 +169,9 @@ export function productFirstDirective(): string {
     "\nTHIS TURN, IF THIS IS A NEW LICENCE APPLICATION: the licence comes FIRST, before any document, any upload, any company lookup and any " +
     "trade-licence question. Ask which licence or permit they are applying for and show the options as ONE ```cards block (one card per " +
     "product, `key:` the product code). The system replaces that block with the full, fixed list, so do not shorten, group or reword it, and " +
-    "do NOT add an ```upload block to this reply. Looking up their company comes after the licence is chosen."
+    "do NOT add an ```upload block to this reply. Looking up their company comes after the licence is chosen. If they have just said the " +
+    "company on file is not theirs, do NOT ask for their trade licence now: say it goes in with their other documents once the licence is " +
+    "chosen, and show the menu. (An upload block before the licence is chosen is replaced by the menu anyway.)"
   );
 }
 

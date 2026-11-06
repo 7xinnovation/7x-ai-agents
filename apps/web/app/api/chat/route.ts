@@ -62,7 +62,7 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
-import { productCardGuard, productOptions, productFromMessage, chainGuards } from "@/lib/productCards";
+import { noUploadBeforeProductGuard, productOptions, productFromMessage, chainGuards } from "@/lib/productCards";
 import {
   offersBatch, uploadModeFrom, productFirstDirective, modeChoiceDirective, batchStartDirective, batchReportDirective,
   missingDocuments, BATCH_LOG_KEY, UPLOAD_MODE_KEY, type BatchLog,
@@ -2151,6 +2151,27 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
         labelOf
       );
       await audit({ ...{ agentId: agent.id, conversationId: session.conversationId }, actor: "system", action: "batch_upload_reported", payload: { placed: log.placed, unplaced: log.unplaced } });
+    } else if (isDocumentUploaded && data[UPLOAD_MODE_KEY] === "batch") {
+      /**
+       * Batch mode, an upload turn, and nothing in the log: no file of the
+       * customer's arrived — every upload in batch mode is logged, one at a
+       * time included (app/api/upload). What changed is a slot the server
+       * filled itself, the CEP30 "Initial Name Approval" from the trade
+       * licence, and answering it with "next, the MOA" talked over the batch
+       * control on screen (staging, 6 November). No reply.
+       */
+      await audit({ agentId: agent.id, conversationId: session.conversationId, actor: "system", action: "batch_upload_turn_skipped", payload: {} });
+      const enc = new TextEncoder();
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(enc.encode(sse({ type: "session", conversationId: session.conversationId })));
+            c.enqueue(enc.encode(sse({ type: "done", state: session.state, message: "" })));
+            c.close();
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } }
+      );
     } else if (!isDocumentUploaded && !isPaymentSettled) {
       let directive = "";
       const applying =
@@ -4002,7 +4023,17 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
         // The EPGL licence menu, replaced by the catalogue's own list before the
         // duration guard sees it (lib/productCards). Inert on every other agent.
         const durationGuard = chainGuards(
-          productCardGuard(() => productOptions(agent.definition, body.locale === "ar" ? "ar" : "en")),
+          noUploadBeforeProductGuard(
+            () => {
+              const d = liveState.data as Record<string, unknown>;
+              return (
+                offersBatch(agent.definition, liveState.journeyKey) &&
+                (!liveState.journeyKey || liveState.journeyKey === "new_license") &&
+                !(typeof d.product_code === "string" && d.product_code.trim())
+              );
+            },
+            () => productOptions(agent.definition, body.locale === "ar" ? "ar" : "en")
+          ),
           durationCardGuard(
             () => apiTools.getDurationPrices()?.terms ?? null,
             () => durationRequested(body.userMessage)

@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import type { AgentDefinition, CaseState } from "@dialog/config";
 import { slotPrompt, parseSlotChoice } from "@dialog/core";
 import {
-  productOptions, productFromMessage, canonicalProductBlock, isProductMenu, productCardGuard, chainGuards,
+  productOptions, productFromMessage, canonicalProductBlock, isProductMenu, productCardGuard, noUploadBeforeProductGuard, chainGuards,
 } from "@/lib/productCards";
 import {
   offersBatch, uploadModeFrom, batchCandidates, assignPartnerSlot, missingDocuments, modeChoiceDirective,
@@ -138,7 +138,7 @@ const route = read("../app/api/chat/route.ts");
 const upload = read("../app/api/upload/route.ts");
 const md = read("../app/embed/[agent]/Markdown.tsx");
 const exp = read("../app/embed/[agent]/Experience.tsx");
-check("the chat route runs the menu guard ahead of the duration guard", /chainGuards\(\s*productCardGuard\(/.test(route));
+check("the chat route runs the menu guard ahead of the duration guard", /chainGuards\(\s*noUploadBeforeProductGuard\(/.test(route));
 check("...states the licence first, the choice, the start and the report", ["productFirstDirective()", "modeChoiceDirective(loc)", "batchStartDirective(", "batchReportDirective("].every((x) => route.includes(x)));
 check("...records the chosen mode on the case", /\[UPLOAD_MODE_KEY\]: mode/.test(route));
 check("...and clears the batch log once reported", /\[BATCH_LOG_KEY\]: _done/.test(route));
@@ -147,6 +147,38 @@ check("...settling the partner under the row lock", /mutateCase\(caseRow\.caseId
 check("the widget renders for `key: batch` and takes several files", /key\\s\*:\\s\*batch/.test(md) && /<BatchUpload/.test(md) && /\bmultiple\b/.test(md));
 check("the browser posts each file as __batch__", /fd\.append\("key", "__batch__"\)/.test(exp));
 check("...and holds the poll off while the batch runs", /add\("__batch__"\)/.test(exp));
+
+
+// ---- 6 November, second staging run ----------------------------------------
+{
+  const run = (g: { push(d: string): string; flush(): string }, text: string, size: number) => {
+    let out = "";
+    for (let i = 0; i < text.length; i += size) out += g.push(text.slice(i, i + size));
+    return out + g.flush();
+  };
+  const ASK_TL = "No problem — please upload your trade licence.\n\n```upload\nkey: trade_license\n```";
+  for (const size of [1, 5, 4096]) {
+    const out = run(noUploadBeforeProductGuard(() => true, () => opts), ASK_TL, size);
+    check(`no licence yet: the trade-licence upload becomes the licence menu (${size}-char pieces)`,
+      !out.includes("```upload") && out.includes(canonicalProductBlock(opts)), out);
+  }
+  const both = run(noUploadBeforeProductGuard(() => true, () => opts), FULL + "\n\n```upload\nkey: trade_license\n```", 7);
+  check("...and is simply dropped when the reply already shows the menu",
+    !both.includes("```upload") && both.split("```cards").length === 2, both);
+  const after = run(noUploadBeforeProductGuard(() => false, () => opts), ASK_TL, 3);
+  check("once the licence is chosen an upload block passes untouched", after === ASK_TL, after);
+  const plain = "Hello there, nothing fenced here.";
+  check("text without blocks passes untouched", run(noUploadBeforeProductGuard(() => true, () => opts), plain, 2) === plain);
+
+  const up = read("../app/api/upload/route.ts");
+  check("in batch mode a single upload is logged too", /\[UPLOAD_MODE_KEY\] === "batch"/.test(up) && /placed: \[\.\.\.log\.placed, \{ file: file\.name, key \}\]/.test(up));
+  const r = read("../app/api/chat/route.ts");
+  check("an upload turn in batch mode with nothing logged gets no reply",
+    /isDocumentUploaded && data\[UPLOAD_MODE_KEY\] === "batch"/.test(r) && /batch_upload_turn_skipped/.test(r));
+  check("...and is checked AFTER a logged batch is reported",
+    r.indexOf("batch_upload_reported") < r.indexOf("batch_upload_turn_skipped"));
+  check("the licence-first directive covers 'not my company'", /company on file is not theirs/.test(productFirstDirective()));
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
