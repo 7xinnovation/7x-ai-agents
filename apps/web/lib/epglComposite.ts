@@ -123,7 +123,28 @@ export interface FillResult {
   unmatched: string[];
   /** Slots whose upload failed — dropped rather than sent empty. */
   failed: string[];
+  /**
+   * Which of OUR slots each document item was filled from, by referenceId.
+   *
+   * What went is recorded against these keys, not against EPGL's name slugged:
+   * on LR-54500 the create recorded `memorandum_of_association` and
+   * `copy_of_passport`, the follow-up looked for `moa` and `partner_1_passport`,
+   * and sent all three again.
+   */
+  byRef: Map<string, string>;
 }
+
+/**
+ * EPGL's names for the trade licence, any of which the model may write.
+ *
+ * The CEP30 checklist calls it "Trade Licence / Initial Name Approval", the
+ * permits "Trade Licence", and our own slot is `trade_license`. On LR-54500 the
+ * model's item found no file under the name it used, was dropped, and the
+ * applicant was told their licence "didn't come through" — it was on file, and
+ * went 45 seconds later. A licence item is filled from whichever licence file
+ * this application's checklist knows, under that file's own catalogue name.
+ */
+const LICENCE_SLUGS = new Set(["trade_licence", "trade_license", "trade_licence_initial_name_approval"]);
 
 /**
  * Put the bytes in. `upload` is injected so the HTTP half stays in
@@ -141,7 +162,7 @@ export async function withEpglDocumentFiles(
 ): Promise<FillResult> {
   const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
   const items = Array.isArray(body.compositeRequest) ? ([...body.compositeRequest] as CompositeItem[]) : [];
-  const res: FillResult = { input, inlined: [], uploaded: [], unmatched: [], failed: [] };
+  const res: FillResult = { input, inlined: [], uploaded: [], unmatched: [], failed: [], byRef: new Map() };
   if (!items.length) return res;
 
   /**
@@ -204,7 +225,13 @@ export async function withEpglDocumentFiles(
     }
     const b = { ...((item.body ?? {}) as Record<string, unknown>) };
     const type = String(b.Document_Type ?? "");
-    const file = fileFor(type, b.Holder);
+    let file = fileFor(type, b.Holder);
+    if (!file && !b.EPG_File_Id__c && LICENCE_SLUGS.has(slugOfDocumentType(type))) {
+      // Only a file carrying a catalogue name: an invented Document_Type is
+      // refused, and inside the allOrNone create that costs the application.
+      file = files.find((f) => LICENCE_SLUGS.has(f.key) && !!f.salesforceType && !used.has(f));
+      if (file) b.Document_Type = file.salesforceType;
+    }
 
     // The model already supplied a file id (a re-upload of something it just
     // put up). Leave it alone — it is not ours to second-guess.
@@ -230,12 +257,14 @@ export async function withEpglDocumentFiles(
       b.fileName = file.fileName;
       res.uploaded.push(file.key);
       used.add(file);
+      if (item.referenceId) res.byRef.set(item.referenceId, file.key);
     } else {
       delete b.EPG_File_Id__c;
       b.content = Buffer.from(file.bytes).toString("base64");
       b.fileName = file.fileName;
       res.inlined.push(file.key);
       used.add(file);
+      if (item.referenceId) res.byRef.set(item.referenceId, file.key);
     }
     next.push({ ...item, body: b });
     changed = true;

@@ -1846,6 +1846,8 @@ export async function buildApiTools(
 
     /** Set when a document slot could not be filled; appended to the result below. */
     let documentNote: string | null = null;
+    /** Which of our slots each document item was filled from (lib/epglComposite FillResult.byRef). */
+    let filledByRef: Map<string, string> | null = null;
 
     // A BOX YOU DO NOT HOLD IS NOT YOURS TO MANAGE.
     //
@@ -3022,6 +3024,7 @@ export async function buildApiTools(
           return typeof j?.id === "string" ? j.id : null;
         });
         input = filled.input ?? input;
+        filledByRef = filled.byRef;
         if (filled.uploaded.length || filled.inlined.length || filled.unmatched.length || filled.failed.length) {
           console.log(
             `[epgl-2.0] documents: ${filled.inlined.length} inline, ${filled.uploaded.length} uploaded` +
@@ -3032,11 +3035,20 @@ export async function buildApiTools(
         // A slot we could not fill was dropped rather than sent hollow. Say so,
         // so the model asks for it again instead of telling the customer it is
         // on file.
+        /**
+         * An item we had no file for was dropped. That is NOT the same as a
+         * document missing from the application: every file the applicant has
+         * uploaded is sent automatically, straight after the create, under its
+         * own slot. On LR-54500 the old wording ("ask the customer to upload")
+         * had the assistant tell them their trade licence "didn't come through"
+         * when it had been on file all along and went 45 seconds later.
+         */
         if (filled.failed.length || filled.unmatched.length) {
           documentNote =
-            `NOT EVERY DOCUMENT WENT WITH THIS APPLICATION. These slots had no file behind them and were left off rather than filed empty: ` +
-            `${[...filled.failed, ...filled.unmatched].join(", ")}. Everything else was submitted. Ask the customer to upload the missing ` +
-            `one(s) and send them again — do NOT tell them the whole application failed.`;
+            `Some document items in this call were left off (${[...filled.failed, ...filled.unmatched].join(", ")}) — this is internal and ` +
+            `the application WAS filed. Every document the customer has already uploaded is sent to the application automatically right ` +
+            `after this; do NOT tell them a document "didn't come through", do NOT ask them to re-attach or re-upload anything they ` +
+            `have uploaded, and do NOT send it yourself. Only a document they have never uploaded may be asked for, by name.`;
         }
         /**
          * AND THE SLOTS DROPPED FOR WANT OF A DATE RATHER THAN A FILE.
@@ -5208,7 +5220,9 @@ export async function buildApiTools(
     if (!res.isError && isEpglCompositeTool(toolName) && opts.rememberEpglDocuments) {
       // Off the request, so it covers documents the MODEL composed as well as
       // ones put in here — see documentKeysByReference.
+      // Our slot keys where the filler knows them; EPGL's name, slugged, otherwise.
       const byRef = documentKeysByReference(input);
+      for (const [ref, key] of filledByRef ?? []) byRef.set(ref, key);
       const outcome = byRef.size
         ? documentOutcomesByReference((res as { raw?: string }).raw ?? res.result, byRef)
         : { sent: [] as string[], refused: [] as { key: string; reason: string }[] };

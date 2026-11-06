@@ -171,11 +171,27 @@ export async function POST(req: NextRequest) {
     .where(eq(conversations.id, found.conversationId))
     .limit(1);
 
+  /**
+   * EPGL send one event per change on THEIR side — payment recorded, documents
+   * reviewed — and several of those leave the applicant's status where it was.
+   * LR-54500 got "has moved to: Under Review" twice, a second apart. The state
+   * is still updated and the event audited; the applicant is told only when
+   * what they would read is different from the last thing they were told.
+   */
+  const text = sentence(body, conv?.locale ?? "en");
+  const [last] = await getDb()
+    .select({ content: messages.content })
+    .from(messages)
+    .where(and(eq(messages.conversationId, found.conversationId), sql`${messages.meta} ->> 'source' = ${ACTION}`))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  const repeated = typeof last?.content === "string" && last.content === text;
+
   if (!stale) {
-    await getDb().insert(messages).values({
+    if (!repeated) await getDb().insert(messages).values({
       conversationId: found.conversationId,
       role: "assistant",
-      content: sentence(body, conv?.locale ?? "en"),
+      content: text,
       meta: { source: ACTION, eventId: body.eventId, eventType: body.eventType ?? "status.changed", applicationId },
     });
     await getDb()
@@ -193,7 +209,7 @@ export async function POST(req: NextRequest) {
     actor: "system",
     action: ACTION,
     // auditSeen matches on `reference`, so the event id has to live there.
-    payload: { reference: body.eventId, eventType: body.eventType, applicationId, stale, body: body.application ?? null },
+    payload: { reference: body.eventId, eventType: body.eventType, applicationId, stale, repeated, body: body.application ?? null },
   });
 
   return NextResponse.json({ received: true, eventId: body.eventId, ...(stale ? { stale: true } : {}) });
