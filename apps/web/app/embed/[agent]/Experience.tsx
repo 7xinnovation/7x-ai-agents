@@ -82,6 +82,8 @@ interface ChatMessage {
   /** The proactive account pulse — a long visual summary. Voice mode speaks only
    *  its intro line rather than reading the whole snapshot aloud. */
   pulse?: boolean;
+  /** A master agent's first opening of a service — its ready prompts sit under it. */
+  opening?: boolean;
 }
 
 /**
@@ -2562,6 +2564,15 @@ export function Experience({
             activeRef.current = ev.agentSlug;
             setActiveSlug(ev.agentSlug);
             try { window.localStorage.setItem(`dlg-active-${masterSlug}`, ev.agentSlug); } catch { /* private mode */ }
+            if (ev.reason === "label-open") {
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.role !== "assistant") return prev;
+                const next = prev.slice();
+                next[next.length - 1] = { ...last, opening: true };
+                return next;
+              });
+            }
           }
           return;
         }
@@ -3063,6 +3074,30 @@ export function Experience({
     caseState && (dataEntries.length > 0 || caseState.documents.length > 0 || docSlots.length > 0);
   const iconWeight = "regular" as const;
 
+  const readyBlock = (
+    <div className="dlg-starters dlg-ready">
+      <span className="dlg-starters-label">{t.readyPrompt}</span>
+      <div className="dlg-starters-grid">
+        {(agent.readyPrompts ?? []).map((p, pi) => (
+          <button
+            key={pi}
+            type="button"
+            className="dlg-starter is-ready"
+            style={{ ["--i" as string]: pi }}
+            onClick={() => prefillComposer(tr(p.prompt, locale))}
+            disabled={streaming}
+          >
+            <span>
+              <strong>{tr(p.label, locale)}</strong>
+              <em>{tr(p.prompt, locale)}</em>
+            </span>
+            <PencilSimple size={14} weight="bold" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className={`dlg-root ${full ? "is-full" : ""} ${mobileCaseOpen ? "is-mobile-case" : ""}`} dir={dir} style={rootStyle}>
       <header className="dlg-header">
@@ -3291,29 +3326,10 @@ export function Experience({
                   tappable (feedback FB-1434: structured options, not prose). */}
               <div className="dlg-bubble" dir="auto"><Markdown text={tr(agent.greeting, locale)} onSelect={messages.length === 0 && !streaming ? handleCardSelect : undefined} locale={locale} stackChoices={agent.stackedChoices} /></div>
             </div>
-            {messages.length === 0 && (agent.readyPrompts?.length ?? 0) > 0 ? (
-              <div className="dlg-starters dlg-ready">
-                <span className="dlg-starters-label">{t.readyPrompt}</span>
-                <div className="dlg-starters-grid">
-                  {(agent.readyPrompts ?? []).map((p, pi) => (
-                    <button
-                      key={pi}
-                      type="button"
-                      className="dlg-starter is-ready"
-                      style={{ ["--i" as string]: pi }}
-                      onClick={() => prefillComposer(tr(p.prompt, locale))}
-                      disabled={streaming}
-                    >
-                      <span>
-                        <strong>{tr(p.label, locale)}</strong>
-                        <em>{tr(p.prompt, locale)}</em>
-                      </span>
-                      <PencilSimple size={14} weight="bold" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+            {/* A master agent's greeting is the front door, not a service: the
+                ready prompts belong to a service (NXN's "Renew in two steps"),
+                so they wait until it is opened and sit under its opening. */}
+            {messages.length === 0 && (masterSlug ? (front.readyPrompts?.length ?? 0) > 0 : (agent.readyPrompts?.length ?? 0) > 0) ? readyBlock : null}
             {messages.length === 0 && starters.length > 0 && !greetingHasButtons ? (
               <div className="dlg-starters">
                 <span className="dlg-starters-label">{t.askAnything}</span>
@@ -3407,6 +3423,7 @@ export function Experience({
                 </div>
               </div>
             ))}
+            {masterSlug && !streaming && messages[messages.length - 1]?.opening && (agent.readyPrompts?.length ?? 0) > 0 ? readyBlock : null}
           </div>
 
           {authReason ? (
