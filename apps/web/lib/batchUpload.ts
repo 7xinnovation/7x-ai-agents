@@ -210,8 +210,9 @@ export function epgl20ConductDirective(productCode: string | null, locale: "en" 
     : "";
   return (
     "\nHOW TO ASK IN THIS APPLICATION:\n" +
-    "- ONE QUESTION PER MESSAGE. Never number several questions in one reply and never offer a 'yes to all' button. When more than one thing " +
-    "needs an answer, ask the first, wait, then ask the next.\n" +
+    "- ONE QUESTION PER MESSAGE. Never number or bullet several questions in one reply, and never combine them into one set of buttons " +
+    "('Yes to both', 'Yes to all', 'Yes to X only'): that is still several questions. When more than one thing needs an answer, ask the " +
+    "first with its own buttons, wait for the reply, then ask the next.\n" +
     `- ${chosen}NEVER ASK ABOUT SHIPMENT WEIGHT. Every CEP licence covers documents and parcels up to 30 kg and that is recorded automatically. ` +
     "Mention the limit only if they say themselves that they carry heavier.\n" +
     "- A passport or Emirates ID already uploaded for a person — as partner, owner or anyone else — is never asked for again for another role " +

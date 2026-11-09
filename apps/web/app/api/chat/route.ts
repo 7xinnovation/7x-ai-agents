@@ -2203,11 +2203,24 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
           directive = modeChoiceDirective(loc);
         }
       }
-      if (applying || hasProduct) directive += epgl20ConductDirective(typeof data.product_code === "string" ? data.product_code : null, loc);
+      // Before the product: from the first applying turn. After it, below — on
+      // every turn, the upload and payment turns included.
+      if (applying && !hasProduct) directive += epgl20ConductDirective(null, loc);
       if (directive) {
         customerContext = `${customerContext ?? ""}${directive}`.trim();
         if (isPulse) pulseDirective += directive;
       }
+    }
+    /**
+     * The rules for asking hold on EVERY turn once the licence is chosen —
+     * not only the ones the customer typed. The reply after a batch upload
+     * asked "tracking? consignment notes?" under one "Yes to both" button
+     * (staging, 9 November), the very thing BUG-181 reported.
+     */
+    if (hasProduct) {
+      const conduct = epgl20ConductDirective(typeof data.product_code === "string" ? data.product_code : null, loc);
+      customerContext = `${customerContext ?? ""}${conduct}`.trim();
+      if (isPulse) pulseDirective += conduct;
     }
   }
   const effectiveMessage = isPulse

@@ -70,14 +70,17 @@ check("the chat route fills the defaults", /productDefaults\(code, data\)/.test(
 
 console.log("BUG-181 / 182 / 183: how it asks");
 const dir = epgl20ConductDirective("CEP30-UAE-SME-INTL", "en");
-check("one question per message, no 'yes to all'", /ONE QUESTION PER MESSAGE/.test(dir) && /yes to all/.test(dir));
+check("one question per message, no 'yes to all' or 'yes to both'", /ONE QUESTION PER MESSAGE/.test(dir) && /Yes to all/.test(dir) && /Yes to both/.test(dir));
 check("the tapped card is not re-confirmed", /do NOT ask them to confirm/.test(dir) && dir.includes("CEP30-UAE-SME-INTL"));
 check("weight is never asked", /NEVER ASK ABOUT SHIPMENT WEIGHT/.test(dir));
 check("ID documents on file are not asked for again", /never asked for again/.test(dir));
 check("working days, never 'same day'", /WORKING DAYS/.test(dir) && /one working day/.test(dir) && /Never say 'same day'/.test(dir));
 check("Arabic gets the Arabic figure", epgl20ConductDirective(null, "ar").includes("يوم عمل واحد"));
 check("before a product, no product sentence", !epgl20ConductDirective(null, "en").includes("They have chosen"));
-check("the route adds it on 2.0 new-licence turns", /if \(applying \|\| hasProduct\) directive \+= epgl20ConductDirective/.test(route));
+check("the route adds it before the product on applying turns", /if \(applying && !hasProduct\) directive \+= epgl20ConductDirective\(null/.test(route));
+const after = route.slice(route.indexOf("if (isPulse) pulseDirective += directive;"));
+check("...and on EVERY turn once the product is chosen, upload turns included (outside the typed-turn branch)",
+  /^\s*if \(isPulse\) pulseDirective \+= directive;\n\s*\}\n\s*\}\n[\s\S]{0,600}if \(hasProduct\) \{\n\s*const conduct = epgl20ConductDirective/.test(after));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
