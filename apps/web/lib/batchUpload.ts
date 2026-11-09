@@ -185,6 +185,43 @@ export function productFirstDirective(): string {
   );
 }
 
+/**
+ * HOW THE 2.0 NEW-LICENCE JOURNEY ASKS, ON EVERY TURN OF IT (9 November 2026).
+ *
+ * From the tester's round:
+ *   BUG-180  "Will you be carrying shipments ABOVE 30 kg?" under a "Yes to all
+ *            three" button — a yes that meant the licence did not apply.
+ *   BUG-181  three confirmation questions in one numbered message.
+ *   BUG-182  the 30 kg limit re-asked later, after the licence was chosen; the
+ *            signatory's Emirates ID and passport asked for when they were
+ *            already on file as a partner's.
+ *   BUG-183  "licence issued same day" — EPGL want the timeline in working days.
+ *            On 2.0 it is also not true: the paid advice SUBMITS the
+ *            application, and EPGL's review follows (epgl-20-payment-flow).
+ *
+ * The 30 kg figure is recorded by the server (productDefaults). The rest is
+ * stated every turn rather than left in the guidance block, where the model
+ * had it and did otherwise.
+ */
+export function epgl20ConductDirective(productCode: string | null, locale: "en" | "ar"): string {
+  const chosen = productCode
+    ? `They have chosen ${productCode}. The card they tapped already answers its ownership, SME status and scope — do NOT ask them to confirm ` +
+      "any of those, and do not ask 'are you sure'. If something they say later contradicts the card, say which licence fits instead, in one line. "
+    : "";
+  return (
+    "\nHOW TO ASK IN THIS APPLICATION:\n" +
+    "- ONE QUESTION PER MESSAGE. Never number several questions in one reply and never offer a 'yes to all' button. When more than one thing " +
+    "needs an answer, ask the first, wait, then ask the next.\n" +
+    `- ${chosen}NEVER ASK ABOUT SHIPMENT WEIGHT. Every CEP licence covers documents and parcels up to 30 kg and that is recorded automatically. ` +
+    "Mention the limit only if they say themselves that they carry heavier.\n" +
+    "- A passport or Emirates ID already uploaded for a person — as partner, owner or anyone else — is never asked for again for another role " +
+    "(the authorised signatory, say). Use the one on file.\n" +
+    "- TIMES ARE IN WORKING DAYS. After payment the application goes to EPGL for review, which takes about one working day (8 working hours)" +
+    (locale === "ar" ? " — بالعربية: يوم عمل واحد (8 ساعات عمل)" : "") +
+    ". Never say 'same day', 'today', 'immediately' or 'instantly' about the review or the licence, for any payment method, and give no other figure.\n"
+  );
+}
+
 /** Licence chosen, no way chosen yet: offer the two. */
 export function modeChoiceDirective(locale: "en" | "ar"): string {
   const b = MODE_LABELS.batch[locale];

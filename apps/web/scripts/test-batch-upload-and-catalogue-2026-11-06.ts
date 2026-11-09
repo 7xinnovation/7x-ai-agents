@@ -164,7 +164,8 @@ check("...and holds the poll off while the batch runs", /add\("__batch__"\)/.tes
   }
   const both = run(noUploadBeforeProductGuard(() => true, () => opts), FULL + "\n\n```upload\nkey: trade_license\n```", 7);
   check("...and is simply dropped when the reply already shows the menu",
-    !both.includes("```upload") && both.split("```cards").length === 2, both);
+    // The menu is two groups since 9 Nov (licences, permits): once is two blocks.
+    !both.includes("```upload") && both.split(canonicalProductBlock(opts)).length === 2 && both.split("```cards").length === 3, both);
   const after = run(noUploadBeforeProductGuard(() => false, () => opts), ASK_TL, 3);
   check("once the licence is chosen an upload block passes untouched", after === ASK_TL, after);
   const plain = "Hello there, nothing fenced here.";

@@ -62,9 +62,9 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
-import { noUploadBeforeProductGuard, productOptions, productFromMessage, productDerived, chainGuards } from "@/lib/productCards";
+import { noUploadBeforeProductGuard, productOptions, productFromMessage, productDerived, productDefaults, chainGuards } from "@/lib/productCards";
 import {
-  offersBatch, uploadModeFrom, productFirstDirective, modeChoiceDirective, batchStartDirective, batchReportDirective,
+  offersBatch, uploadModeFrom, productFirstDirective, modeChoiceDirective, epgl20ConductDirective, batchStartDirective, batchReportDirective,
   missingDocuments, BATCH_LOG_KEY, UPLOAD_MODE_KEY, type BatchLog,
 } from "@/lib/batchUpload";
 import { collectedUploadGuard, asksSomethingElse, asksToReplace } from "@/lib/uploadGuard";
@@ -2129,6 +2129,17 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
       data = session.state.data as Record<string, unknown>;
       hasProduct = true;
     }
+    {
+      // The product's own answers — the 30 kg ceiling — filled while empty, so
+      // they are never asked (lib/productCards productDefaults, BUG-180/182).
+      const code = typeof data.product_code === "string" ? data.product_code : "";
+      const defaults = code ? productDefaults(code, data) : {};
+      if (Object.keys(defaults).length) {
+        session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, ...defaults } }));
+        liveState = session.state;
+        data = session.state.data as Record<string, unknown>;
+      }
+    }
     const log = data[BATCH_LOG_KEY] as BatchLog | undefined;
     if (isDocumentUploaded && log && (log.placed.length || log.unplaced.length)) {
       // Reported once: cleared before the reply is written.
@@ -2192,6 +2203,7 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
           directive = modeChoiceDirective(loc);
         }
       }
+      if (applying || hasProduct) directive += epgl20ConductDirective(typeof data.product_code === "string" ? data.product_code : null, loc);
       if (directive) {
         customerContext = `${customerContext ?? ""}${directive}`.trim();
         if (isPulse) pulseDirective += directive;
@@ -4032,7 +4044,8 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
                 !(typeof d.product_code === "string" && d.product_code.trim())
               );
             },
-            () => productOptions(agent.definition, body.locale === "ar" ? "ar" : "en")
+            () => productOptions(agent.definition, body.locale === "ar" ? "ar" : "en"),
+            () => (body.locale === "ar" ? "ar" : "en")
           ),
           durationCardGuard(
             () => apiTools.getDurationPrices()?.terms ?? null,
