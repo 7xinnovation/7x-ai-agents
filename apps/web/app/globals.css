@@ -2022,6 +2022,14 @@ body {
   max-height: 132px;
   padding: 6px 0;
 }
+/* The composer's field draws no ring of its own (9 November: "a blue border
+   text box shows up once I click on the agent text box"). The everything-
+   tappable rule above gives it one, and a text field is :focus-visible on a
+   click too, not only from a keyboard. The composer already shows focus around
+   the whole bar (:focus-within, above), so the inner ring was a second box. */
+.dlg-input textarea:focus-visible {
+  outline: none;
+}
 .dlg-input textarea::placeholder {
   color: var(--c-text-muted);
 }
