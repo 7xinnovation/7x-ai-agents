@@ -366,7 +366,16 @@ export async function extractFieldsFromDocument(input: {
     "- If the document is an identity card (e.g. Emirates ID) and the fields describe an agent/representative, map the card's name, ID number and expiry to those agent fields only.\n" +
     "- If the document is an Emirates ID card and the fields include an owner/signatory Emirates ID field, map the card's ID number (format 784-YYYY-NNNNNNN-N) into it. Map NOTHING ELSE about the person: not their name, not their Arabic name, not their nationality. Who the owner, partners and licence members ARE is printed on the trade licence and the MOA, and an identity card is evidence that a named person is who they say they are — never evidence that the company's register says something different. The holder's name goes in \"" + HOLDER_NAME_KEY + "\" and nowhere else.\n" +
     "- WHOSE CARD IS IT: for ANY identity document, always return the holder's printed name in \"" + HOLDER_NAME_KEY + "\", even when the person is nobody you were told about and even when no owner or partner name field seems to fit. That key is how the application checks the document was issued to the right person; omitting it is how somebody else's Emirates ID gets accepted. It is never the company's name and never a name you inferred from the file name.\n" +
-    "- If the document is NOT a type that carries application data (business_card, other), return ONLY the " + DOC_TYPE_KEY + " classification and nothing else.\n" +
+    /**
+     * AND ITS OWN EXPIRY, WHATEVER IT IS (10 November 2026).
+     *
+     * The fixed type list has no pharmaceutical authorisation, food safety
+     * clearance or cold-chain declaration, so each was "other" — and "other"
+     * returned nothing else, the printed "Expiry Date: 30/09/2027" with it.
+     * EPGL refuse those slots without a Valid_To, so the assistant had to ask
+     * the applicant for a date already on the page.
+     */
+    "- If the document is NOT a type that carries application data (business_card, other), return ONLY the " + DOC_TYPE_KEY + " classification and, when one is printed, its own " + DOC_EXPIRY_KEY + " — nothing else.\n" +
     "- Respond with the JSON object only, no prose, no markdown fences.";
 
   try {
