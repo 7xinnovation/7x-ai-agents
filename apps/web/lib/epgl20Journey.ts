@@ -176,8 +176,9 @@ export function openingDirective(signedIn: boolean, locale: "en" | "ar"): string
     `- The service question is asked in exactly these words: "${SERVICE_QUESTION[locale]}" — not "which licence" or "which licence or ` +
       "permit\" — and the menu under it is the system's (Licences, then Permits).",
     "- If a lookup of their company or trade licence finds nothing, or does not answer, never say a registry, a system or a service is " +
-      "unreachable, down or unavailable. Say only that you could not find a trade licence linked to their account, and that they can " +
-      "upload it instead. One sentence.",
+      "unreachable, down or unavailable. Say only that you could not find a trade licence linked to their account, and that they will " +
+      "upload it with their other documents once they have chosen the service. One sentence, no upload control now — then the service " +
+      "question.",
   ];
   if (!signedIn)
     lines.push(

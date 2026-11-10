@@ -249,13 +249,70 @@ function fencedGuard(open: string, rewrite: (block: string, closed: boolean) => 
  */
 export function productCardGuard(options: () => ProductOption[], locale: () => Locale = () => "en") {
   let shown = false;
-  return fencedGuard(OPEN, (block) => {
+  const fenced = fencedGuard(OPEN, (block) => {
     const opts = options();
     if (!isProductMenu(block, opts) && !(shown && isPartialMenu(block, opts))) return block;
     if (shown) return "";
     shown = true;
     return canonicalProductBlock(opts, locale());
   });
+  // The model's own group headings go: the menu brings its own. Without this a
+  // reply read "Licences / [the menu, with its headings] / Permits" — a stray
+  // second heading under the menu (staging, 10 November).
+  const headings = headingFilter(MENU_HEADING);
+  return {
+    push: (d: string) => fenced.push(headings.push(d)),
+    flush: () => fenced.push(headings.flush()) + fenced.flush(),
+  };
+}
+
+const HEADING_SPELLINGS = ["licences", "licenses", "permits", "التراخيص", "التصاريح"].flatMap((w) =>
+  [w, `**${w}**`, `**${w}:**`, `**${w}**:`, `${w}:`, `## ${w}`, `### ${w}`, `#### ${w}`, `# ${w}`]
+);
+
+/** A line that is only a menu group heading, as the model writes one. */
+const MENU_HEADING = /^[ \t]*(?:#{1,4}[ \t]*)?(?:\*\*)?[ \t]*(?:licen[cs]es|permits|التراخيص|التصاريح)[ \t]*:?[ \t]*(?:\*\*)?[ \t]*:?[ \t]*\r?\n?$/i;
+
+/**
+ * Streaming: drops whole lines matching `drop`. Only a line that could still
+ * become one — it starts with `*`, `#` or a heading word — is held until its
+ * newline; everything else streams as it comes.
+ */
+export function headingFilter(drop: RegExp) {
+  let buf = "";
+  let midLine = false;
+  /** Could this start of a line still turn out to be a heading? */
+  const couldBe = (partial: string) => {
+    const p = partial.replace(/^[ \t]+/, "").toLowerCase();
+    return HEADING_SPELLINGS.some((h) => h.startsWith(p));
+  };
+  return {
+    push(d: string): string {
+      buf += d;
+      let out = "";
+      for (;;) {
+        const nl = buf.indexOf("\n");
+        if (nl === -1) {
+          if (!midLine && buf && couldBe(buf)) return out;
+          out += buf;
+          if (buf) midLine = true;
+          buf = "";
+          return out;
+        }
+        const line = buf.slice(0, nl + 1);
+        buf = buf.slice(nl + 1);
+        if (midLine || !drop.test(line)) out += line;
+        midLine = false;
+      }
+    },
+    flush(): string {
+      const r = buf;
+      buf = "";
+      const wasMid = midLine;
+      midLine = false;
+      return !wasMid && drop.test(r) ? "" : r;
+    },
+  };
 }
 
 /** A block naming even one product, once the whole menu has gone out. */

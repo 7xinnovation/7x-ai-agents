@@ -9,6 +9,8 @@ import {
   openingDirective, productRulesDirective, SERVICE_QUESTION, HOLDS_CEP_KEY, CEP_NUMBER_KEY, TEMPERATURE_CATEGORIES,
 } from "../lib/epgl20Journey";
 import { productFirstDirective } from "../lib/batchUpload";
+import { productCardGuard, productOptions, canonicalProductBlock } from "../lib/productCards";
+import type { AgentDefinition } from "@dialog/config";
 
 let pass = 0, fail = 0;
 const check = (n: string, ok: boolean, got?: unknown) => {
@@ -21,7 +23,7 @@ const md = readFileSync(new URL("../app/embed/[agent]/Markdown.tsx", import.meta
 console.log("BUG-185: a lookup that finds nothing is said humanly");
 const open = openingDirective(true, "en");
 check("never 'registry unreachable'", /never say a registry, a system or a service is unreachable/.test(open));
-check("says no trade licence linked to their account, upload instead", /could not find a trade licence linked to their account/.test(open));
+check("says no trade licence linked to their account, uploaded later with the rest", /could not find a trade licence linked to their account/.test(open) && /no upload control now/.test(open));
 
 console.log("BUG-186: the question, and the headings");
 check("the question is 'Which service are you applying for?'", open.includes(`"${SERVICE_QUESTION.en}"`) && productFirstDirective().includes("Which service are you applying for?"));
@@ -91,6 +93,30 @@ check("missing documents named, and the summary held back", /DOCUMENTS STILL MIS
 check("FOODMED: storage premises site, type exactly 'Storage premises'", /Site_Type__c exactly "Storage premises"/.test(food) && /never Retail, Pharmacy/.test(food));
 check("LOCKERS: each site's type, address, emirate, lockers, authentication, permission, and the document", /"Locker site" or "PUDO point"/.test(lockRules) && /number of lockers/.test(lockRules) && /authenticate/.test(lockRules) && /Site Locations and Contracts document/.test(lockRules));
 check("the route adds the product rules on every turn with the live missing list", /productRulesDirective\(code, missingDocuments\(agent\.definition, session\.state, loc\)\.map/.test(route));
+
+console.log("Staging, 10 Nov: no stray heading under the menu");
+{
+  const def = JSON.parse(readFileSync(new URL("./fixtures/epgl-dialog-2.stg.2026-11-06.json", import.meta.url), "utf8")) as AgentDefinition;
+  const opts = productOptions(def, "en");
+  const menu = canonicalProductBlock(opts, "en");
+  const model =
+    "Which service are you applying for?\n\n**Licences**\n\n```cards\n- title: CEP30-GEN-DOM\n- title: FOODMED\n```\n\n**Permits**\n\n```cards\n- title: LOCKERS\n- title: OUTSOURCE\n```\n";
+  const run = (text: string, size: number) => {
+    const g = productCardGuard(() => opts, () => "en");
+    let o = "";
+    for (let i = 0; i < text.length; i += size) o += g.push(text.slice(i, i + size));
+    return o + g.flush();
+  };
+  for (const size of [1, 3, 11, 4096]) {
+    const o = run(model, size);
+    check(`the model's own headings go, the menu's stay (${size}-char pieces)`,
+      o.split("**Licences**").length === 2 && o.split("**Permits**").length === 2 && o.includes(menu) && o.startsWith("Which service are you applying for?"), o);
+  }
+  const prose = "**Licences** are issued for one year. Permits too.\n";
+  check("a sentence that starts with the word is kept", run(prose, 2) === prose, run(prose, 2));
+  const plain = "Here is a line.\n**Bold** start, kept.\nLicences\nare listed below\n";
+  check("other lines are kept; a lone heading word on its own line is dropped", run(plain, 4) === "Here is a line.\n**Bold** start, kept.\nare listed below\n", run(plain, 4));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
