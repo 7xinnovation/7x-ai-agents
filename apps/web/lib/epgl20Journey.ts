@@ -210,6 +210,10 @@ export function productRulesDirective(code: string, missingDocs: string[], data:
       "question and then answer, correct or withdraw it in the same message. Each message says one thing once."
   );
   out.push(
+    "- RECORD EVERY ANSWER THE MOMENT IT IS GIVEN with collect_field (a yes/no as true/false) — cold_chain_capability, " +
+      "declares_food_delivery, declares_medicine_delivery, affirms_* and the rest. An answer only acknowledged in words is lost."
+  );
+  out.push(
     "- A question with several answers allowed ('select all that apply') is NEVER a ```buttons block — that is single-choice. Use one " +
       "```toggles block with `style: checkbox`, one `- key: Label` line per option, and a `confirm:` line."
   );
@@ -248,4 +252,42 @@ export function productRulesDirective(code: string, missingDocs: string[], data:
       : "- Every required document is in."
   );
   return out.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// A checkbox answer is recorded by the server (staging, 10 November).
+// ---------------------------------------------------------------------------
+
+/**
+ * "Chilled: Yes. Frozen: No. … Confirm categories." — what a ```toggles block
+ * sends. The model acknowledged it ("Got it — Chilled and Vaccines") and
+ * recorded nothing, so the categories would have reached Salesforce only if it
+ * remembered them at submission. Read here instead.
+ */
+export function toggleAnswers(message: string | undefined): { label: string; on: boolean }[] | null {
+  const m = (message ?? "").trim();
+  const items = [...m.matchAll(/([^.:]+?):\s*(Yes|No|نعم|لا)\s*\./g)].map((x) => ({ label: x[1]!.trim(), on: /^(yes|نعم)$/i.test(x[2]!) }));
+  return items.length >= 2 ? items : null;
+}
+
+type FieldLike = { key: string; type: string; options?: { value: string; label: Record<string, string> | string }[] };
+
+/** The multi-choice field every toggled label belongs to, with the ticked values joined as Salesforce takes them. */
+export function multiChoiceFromToggles(fields: FieldLike[], message: string | undefined): { key: string; value: string } | null {
+  const items = toggleAnswers(message);
+  if (!items) return null;
+  const n = (s: string) => s.toLowerCase().replace(/[^a-z0-9؀-ۿ]+/g, "");
+  for (const f of fields) {
+    if (f.type !== "multienum" || !f.options?.length) continue;
+    const byLabel = new Map<string, string>();
+    for (const o of f.options) {
+      byLabel.set(n(o.value), o.value);
+      const l = o.label;
+      for (const t of typeof l === "string" ? [l] : Object.values(l ?? {})) if (t) byLabel.set(n(t), o.value);
+    }
+    if (!items.every((i) => byLabel.has(n(i.label)))) continue;
+    const on = items.filter((i) => i.on).map((i) => byLabel.get(n(i.label))!);
+    return { key: f.key, value: on.join(";") };
+  }
+  return null;
 }

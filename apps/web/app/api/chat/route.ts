@@ -63,7 +63,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import {
-  cepHolderStep, asksForFreshApplication, hasApplicationInProgress, freshApplication, freshApplicationDirective, openingDirective, productRulesDirective,
+  cepHolderStep, multiChoiceFromToggles, asksForFreshApplication, hasApplicationInProgress, freshApplication, freshApplicationDirective, openingDirective, productRulesDirective,
 } from "@/lib/epgl20Journey";
 import { noUploadBeforeProductGuard, productOptions, productFromMessage, productDerived, productDefaults, chainGuards } from "@/lib/productCards";
 import {
@@ -2161,6 +2161,17 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
       const defaults = code ? productDefaults(code, data) : {};
       if (Object.keys(defaults).length) {
         session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, ...defaults } }));
+        liveState = session.state;
+        data = session.state.data as Record<string, unknown>;
+      }
+    }
+    {
+      // A checkbox answer for a multi-choice field is recorded here, not left
+      // to the model (temperature-sensitive categories, staging 10 Nov).
+      const fields = agent.definition.journeys.flatMap((j) => j.steps.flatMap((st) => st.fields)) as unknown as Parameters<typeof multiChoiceFromToggles>[0];
+      const picked = !isDocumentUploaded && !isPaymentSettled ? multiChoiceFromToggles(fields, body.userMessage) : null;
+      if (picked && data[picked.key] !== picked.value) {
+        session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, [picked.key]: picked.value } }));
         liveState = session.state;
         data = session.state.data as Record<string, unknown>;
       }

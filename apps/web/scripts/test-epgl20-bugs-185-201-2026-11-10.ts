@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { emptyCase, type CaseState } from "@dialog/config";
 import {
   cepHolderAnswer, cepNumberFrom, cepHolderStep, requiresCepLicence, asksForFreshApplication, hasApplicationInProgress, freshApplication,
-  openingDirective, productRulesDirective, SERVICE_QUESTION, HOLDS_CEP_KEY, CEP_NUMBER_KEY, TEMPERATURE_CATEGORIES,
+  openingDirective, productRulesDirective, multiChoiceFromToggles, SERVICE_QUESTION, HOLDS_CEP_KEY, CEP_NUMBER_KEY, TEMPERATURE_CATEGORIES,
 } from "../lib/epgl20Journey";
 import { productFirstDirective, batchCandidates } from "../lib/batchUpload";
 import { productCardGuard, productOptions, canonicalProductBlock } from "../lib/productCards";
@@ -129,6 +129,19 @@ console.log("Staging, 10 Nov: Food and Medicine documents in a batch, before the
   const noFood = keys({ product_code: "FOODMED", declares_food_delivery: false, declares_medicine_delivery: true });
   check("answered 'no food': the food clearance is not offered", !noFood.includes("municipal_food_safety_clearance") && noFood.includes("pharmaceutical_handling_authorisation"), noFood);
   check("a CEP application is not offered them", !keys({ product_code: "CEP30-GEN-DOM" }).includes("municipal_food_safety_clearance"));
+}
+
+console.log("Staging, 10 Nov: a checkbox answer is recorded");
+{
+  const def = JSON.parse(readFileSync(new URL("./fixtures/epgl-dialog-2.stg.2026-11-06.json", import.meta.url), "utf8")) as AgentDefinition;
+  const fields = def.journeys.flatMap((j) => j.steps.flatMap((s) => s.fields)) as unknown as Parameters<typeof multiChoiceFromToggles>[0];
+  const msg = "Chilled: Yes. Frozen: No. Ambient controlled: No. Vaccines: Yes. Biologics: No. Dairy: No. Fresh produce: No. Other: No. Confirm categories.";
+  const got = multiChoiceFromToggles(fields, msg);
+  check("the ticked categories, semicolon-delimited", got?.key === "temperature_sensitive_categories" && got.value === "Chilled;Vaccines", got);
+  check("the declaration toggle is not mistaken for one", multiChoiceFromToggles(fields, "I have read and agree to the Declaration and Undertaking: Yes. Accept and continue.") === null);
+  check("plain text is not", multiChoiceFromToggles(fields, "Yes") === null);
+  check("the route records it", /multiChoiceFromToggles\(fields, body\.userMessage\)/.test(route));
+  check("every answer is recorded the moment it is given", /RECORD EVERY ANSWER THE MOMENT IT IS GIVEN/.test(productRulesDirective("FOODMED", [], {})));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
