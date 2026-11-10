@@ -46,6 +46,10 @@ export function slotPrompt(candidates: SlotCandidate[]): string {
     list +
     "\n\nDecide which ONE of them this file is.\n" +
     "- Judge by what the document IS — its title, issuer and content — never by its file name.\n" +
+    // A test-pack stamp ("7X TEST DOCUMENT - DO NOT PROCESS") made the
+    // classifier refuse the file outright (staging, 10 November): sorting a
+    // file is not processing it, and the stamp says nothing about its type.
+    "- A watermark or stamp such as \"TEST DOCUMENT - DO NOT PROCESS\" does not change what kind of document it is: sort it like any other.\n" +
     "- A passport or Emirates ID belongs to ONE person: match the name printed on it to the person each slot belongs to. If it matches none of them, answer null.\n" +
     "- Declarations look alike. Tell them apart by their title and what they declare (who owns the company, operating standards, the vehicle fleet, …).\n" +
     "- A trade licence and an SME licence are different documents: an SME licence certifies the company's size classification and lists no activities.\n" +
