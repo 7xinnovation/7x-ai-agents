@@ -144,5 +144,16 @@ console.log("Staging, 10 Nov: a checkbox answer is recorded");
   check("every answer is recorded the moment it is given", /RECORD EVERY ANSWER THE MOMENT IT IS GIVEN/.test(productRulesDirective("FOODMED", [], {})));
 }
 
+console.log("Retest, 10 Nov afternoon: start-over, sign-in, stray trade-licence box");
+{
+  const exp = readFileSync(new URL("../app/embed/[agent]/Experience.tsx", import.meta.url), "utf8");
+  const reset = exp.slice(exp.indexOf("const resetChat = useCallback"), exp.indexOf("const resetChat = useCallback") + 1500);
+  check("start-over empties the batch list", /setBatchFiles\(\[\]\)/.test(reset));
+  check("start-over forgets the document baseline (no stray 'document uploaded' turn)", /uploadedBaseline\.current = null/.test(reset));
+  check("the in-chat Sign in button opens UAE PASS directly", /\^\(sign in\|تسجيل الدخول\)\$\/i\.test\(choice\.trim\(\)\)\) \{ signIn\(\); return; \}/.test(exp));
+  check("a signed-out apply raises the sign-in bar on the first reply", /if \(signInBanner\) send\(\{ type: "auth_required"/.test(route));
+  check("no upload box is added before a service is chosen", /!beforeProductChosen\(finalState\);/.test(route) && /&& !beforeProductChosen\(finalState\)/.test(route));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

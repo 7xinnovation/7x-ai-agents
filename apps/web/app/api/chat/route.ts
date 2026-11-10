@@ -2112,6 +2112,13 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
    * lib/batchUpload and lib/productCards.
    */
   let batchReport: string | null = null;
+  /**
+   * THE SIGN-IN BAR COMES WITH THE ANSWER (10 Nov retest).
+   * A signed-out "apply" got the fixed reply with a Sign in button, which sent
+   * a turn, which then raised the bar: three taps to reach UAE PASS. The bar is
+   * raised on the first reply now, as it was before BUG-190.
+   */
+  let signInBanner: string | null = null;
   if (offersBatch(agent.definition, session.state.journeyKey)) {
     const loc = body.locale === "ar" ? "ar" : "en";
     let data = session.state.data as Record<string, unknown>;
@@ -2230,6 +2237,8 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
         // Every turn before the product: the question's wording, the lookup
         // that found nothing, and the sign-in answer (BUG-185/186/190).
         directive += openingDirective(!!session.authenticated, loc);
+        if (!session.authenticated && (applying || /\bsign[\s-]?in\b|تسجيل الدخول/i.test(body.userMessage ?? "")))
+          signInBanner = loc === "ar" ? "سجّل الدخول عبر الهوية الرقمية (UAE PASS) لتقديم الطلب." : "Sign in with UAE PASS to apply.";
       } else if (!data[UPLOAD_MODE_KEY]) {
         /**
          * A PERMIT FOR CEP LICENCE HOLDERS ASKS THAT FIRST (BUG-197/200).
@@ -3819,6 +3828,7 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
           conversationId: session.conversationId,
           ...(session.expired ? { expired: session.expired } : {}),
         });
+        if (signInBanner) send({ type: "auth_required", reason: signInBanner });
         if (isNewSession) {
           await emitEvent({ type: "conversation.started", ...a, attributes: { locale: body.locale } });
         }
@@ -4577,6 +4587,15 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
          * the prose says one document and the control offers another. What can
          * be done is to stop finding out about it from a screenshot.
          */
+        /** EPGL 2.0 with no service chosen yet: no document is asked for. */
+        const beforeProductChosen = (st: typeof finalState) => {
+          const code = (st.data as Record<string, unknown>).product_code;
+          return (
+            offersBatch(agent.definition, st.journeyKey) &&
+            (!st.journeyKey || st.journeyKey === "new_license") &&
+            !(typeof code === "string" && code.trim())
+          );
+        };
         if (uploadGuard.suppressed()) {
           await audit({
             ...a,
@@ -4610,7 +4629,7 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
           );
           const missingDoc = finalState.readiness.missing.find((m) => m.kind === "document" && !held.has(m.key));
           const nudge =
-            agent.definition.documentsInChat && missingDoc && !asksSomethingElse(finalText)
+            agent.definition.documentsInChat && missingDoc && !asksSomethingElse(finalText) && !beforeProductChosen(finalState)
               ? outstandingNudge({
                   prose: finalText,
                   outstanding: { key: missingDoc.key, label: docLabels.get(missingDoc.key) ?? "" },
@@ -4674,7 +4693,11 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
           !/```\s*upload/i.test(finalText) &&
           !uploadGuard.sawBlock() &&
           !uploadGuard.suppressed() &&
-          !asksSomethingElse(finalText);
+          !asksSomethingElse(finalText) &&
+          // EPGL 2.0 before a service is picked: the reply is the service menu,
+          // and "you'll upload it with your documents" is not a request. The net
+          // added a Trade Licence box under the menu (10 Nov retest).
+          !beforeProductChosen(finalState);
         if (lateUploadsAllowed) {
           const docStatus = new Map(finalState.documents.map((d) => [d.key, d.status]));
           const pendingDocs = activeJourney.steps

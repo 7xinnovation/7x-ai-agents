@@ -891,6 +891,10 @@ export function Experience({
   const [uploadingKeys, setUploadingKeys] = useState<Set<string>>(() => new Set());
   /** "Upload all at once": every file in the current batch and where it went. */
   const [batchFiles, setBatchFiles] = useState<BatchFile[]>([]);
+  /** The document watcher's memory (see the in-chat documents flow below). */
+  const uploadedBaseline = useRef<string | null>(null);
+  const pendingDocNotify = useRef(false);
+  const justUploaded = useRef(false);
   const [full] = useState(false);
   // Mobile (feedback FB-5): the case panel is a full-screen overlay toggled here.
   const [mobileCaseOpen, setMobileCaseOpen] = useState(false);
@@ -1658,6 +1662,14 @@ export function Experience({
     pulsed.current = false;
     setMessages([]);
     setCaseState(null);
+    // A new chat starts with no batch list and no document baseline. The list
+    // showed the last application's files (10 Nov retest), and the emptied case
+    // read as a document change, firing a "document uploaded" turn that left
+    // the greeting's buttons dead.
+    setBatchFiles([]);
+    uploadedBaseline.current = null;
+    pendingDocNotify.current = false;
+    justUploaded.current = false;
     setInput("");
     setAuthReason(null);
     // The SIGN-IN SURVIVES A NEW CHAT. Clearing it here made the header say
@@ -1921,6 +1933,9 @@ export function Experience({
     pulsed.current = false;
     setSignedInPulse(false);
     setCaseState(null);
+    setBatchFiles([]);
+    uploadedBaseline.current = null;
+    pendingDocNotify.current = false;
     setActivity(null);
     setActivityOpen(false);
     setInput("");
@@ -2929,9 +2944,12 @@ export function Experience({
   const handleCardSelect = useCallback(
     (choice: string) => {
       if (streaming) return;
+      // "Sign in" in the reply opens UAE PASS itself, as the bar does — not a
+      // turn that then raises the bar (10 Nov retest: three taps to sign in).
+      if (!authenticated && /^(sign in|تسجيل الدخول)$/i.test(choice.trim())) { signIn(); return; }
       void send(choice);
     },
-    [streaming, send]
+    [streaming, send, authenticated, signIn]
   );
 
   // In-chat documents flow: when a new document lands (uploaded in the chat or via
@@ -2953,9 +2971,7 @@ export function Experience({
    * reason changes whenever any of them does — a new upload, a replacement, a
    * rejection, a rejection cleared by a better copy.
    */
-  const uploadedBaseline = useRef<string | null>(null);
-  const pendingDocNotify = useRef(false);
-  const justUploaded = useRef(false);
+  // uploadedBaseline / pendingDocNotify / justUploaded: declared with the batch state above.
   useEffect(() => {
     if (!resumed || !agent.documentsInChat) return;
     const docs = caseState?.documents ?? [];
