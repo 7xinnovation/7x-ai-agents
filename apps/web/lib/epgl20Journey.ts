@@ -114,6 +114,51 @@ export function cepHolderStep(code: string, data: Record<string, unknown>, messa
   return { set, directive: "", blocking: false };
 }
 
+/** Set when EPGL refuse the CEP number at submission; cleared by a new number. */
+export const CEP_REFUSED_KEY = "__cep_licence_refused";
+
+const normLicence = (v: unknown) => String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * A CEP NUMBER THAT CANNOT BE RIGHT GETS ASKED FOR AGAIN (10 Nov retest).
+ *
+ * The tester typed the trade licence number (CN-5234567) as the CEP licence
+ * number; EPGL refused it at submission and the agent called it "theirs to
+ * look into" and offered to raise it with the team. A number equal to the
+ * trade licence number, or one EPGL have refused, is asked for again, and a
+ * reply that is just a number replaces it.
+ */
+export function cepNumberRecheck(
+  code: string, data: Record<string, unknown>, message: string | undefined, locale: "en" | "ar"
+): { set: Record<string, unknown>; directive: string } | null {
+  if (!requiresCepLicence(code) || data[HOLDS_CEP_KEY] !== true) return null;
+  const current = data[CEP_NUMBER_KEY];
+  if (typeof current !== "string" || !current.trim()) return null;
+  const trade = normLicence(data.trade_license_number);
+  const isTrade = !!trade && normLicence(current) === trade;
+  const refused = data[CEP_REFUSED_KEY] === true;
+  if (!isTrade && !refused) return null;
+  const msg = (message ?? "").trim();
+  const n = msg.length <= 40 ? cepNumberFrom(msg) : null;
+  if (n && normLicence(n) !== normLicence(current) && normLicence(n) !== trade)
+    return { set: { [CEP_NUMBER_KEY]: n, [CEP_REFUSED_KEY]: false }, directive: `\nTHIS TURN: their corrected CEP licence number is ${n}; it is recorded. Carry on.` };
+  const why = isTrade
+    ? `${current.trim()} is their TRADE licence number, not a CEP licence number`
+    : `EPGL did not find ${current.trim()} as an active CEP licence in their register`;
+  const noOption =
+    code.trim().toUpperCase() === "LOCKERS"
+      ? ` If they do not hold a CEP licence after all, they can say so: the permit then goes ahead with a new CEP licence application.`
+      : "";
+  return {
+    set: {},
+    directive:
+      `\nTHIS TURN: ${why}. Say so in one plain sentence and ask ONE question: their CEP licence number, exactly as printed on the CEP ` +
+      `licence Emirates Post Group Licensing issued them.${noOption} Do NOT show the summary or submit until a different number is ` +
+      "given. Never offer to raise it with the team, never call it EPGL's problem or something they cannot fix: it is the number." +
+      (locale === "ar" ? " Reply in Arabic." : ""),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // BUG-191: "I want a new application" starts one.
 // ---------------------------------------------------------------------------
@@ -236,6 +281,11 @@ export function productRulesDirective(code: string, missingDocs: string[], data:
     const n = data[CEP_NUMBER_KEY];
     if (typeof n === "string" && n.trim())
       out.push(`- Their CEP licence number is ${n.trim()}: send it as Principal_Licence_Number on the application. Do not ask for it again.`);
+    out.push(
+      "- IF SUBMISSION IS REFUSED BECAUSE THE CEP LICENCE NUMBER IS NOT RECOGNISED: that is the number they gave, not a fault to report. " +
+        "Say the number was not found as an active CEP licence and ask them to check it and type it again. Never offer to raise it with " +
+        "the team, a callback, or say it is EPGL's to look into."
+    );
   }
   if (c === "OUTSOURCE") {
     const n = data[CEP_NUMBER_KEY];

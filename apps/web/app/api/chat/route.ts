@@ -63,7 +63,7 @@ import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
 import {
-  cepHolderStep, multiChoiceFromToggles, asksForFreshApplication, hasApplicationInProgress, freshApplication, freshApplicationDirective, openingDirective, productRulesDirective,
+  cepHolderStep, cepNumberRecheck, CEP_REFUSED_KEY, CEP_NUMBER_KEY as EPGL_CEP_NUMBER_KEY, multiChoiceFromToggles, asksForFreshApplication, hasApplicationInProgress, freshApplication, freshApplicationDirective, openingDirective, productRulesDirective,
 } from "@/lib/epgl20Journey";
 import { noUploadBeforeProductGuard, productOptions, productFromMessage, productDerived, productDefaults, chainGuards } from "@/lib/productCards";
 import {
@@ -2266,6 +2266,15 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
           // one by one is not interrupted to be offered the other way.
           directive += modeChoiceDirective(loc);
         }
+      }
+      if (hasProduct) {
+        const recheck = cepNumberRecheck(String(data.product_code), data, body.userMessage, loc);
+        if (recheck && Object.keys(recheck.set).length) {
+          session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, ...recheck.set } }));
+          liveState = session.state;
+          data = session.state.data as Record<string, unknown>;
+        }
+        if (recheck?.directive) directive += recheck.directive;
       }
       // Before the product: from the first applying turn. After it, below — on
       // every turn, the upload and payment turns included.
@@ -4716,6 +4725,20 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
               .join("");
             send({ type: "text", delta: blocks });
             finalText += blocks;
+          }
+        }
+
+        // EPGL refused the CEP licence number at submission: mark it, so the
+        // next turn asks for the right number (lib/epgl20Journey, cepNumberRecheck).
+        {
+          const fd = finalState.data as Record<string, unknown>;
+          const cepNo = typeof fd[EPGL_CEP_NUMBER_KEY] === "string" ? String(fd[EPGL_CEP_NUMBER_KEY]).trim() : "";
+          if (
+            cepNo && fd[CEP_REFUSED_KEY] !== true && offersBatch(agent.definition, finalState.journeyKey) &&
+            finalText.includes(cepNo) && /\bCEP\b/i.test(finalText) &&
+            /(not|n't)\s+(recogni[sz]e|recogni[sz]ed|found|find|active|valid)|could not be filed|refused|rejected/i.test(finalText)
+          ) {
+            await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, [CEP_REFUSED_KEY]: true } })).catch(() => {});
           }
         }
 

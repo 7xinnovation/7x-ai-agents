@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { emptyCase, type CaseState } from "@dialog/config";
-import {
+import { cepNumberRecheck,
   cepHolderAnswer, cepNumberFrom, cepHolderStep, requiresCepLicence, asksForFreshApplication, hasApplicationInProgress, freshApplication,
   openingDirective, productRulesDirective, multiChoiceFromToggles, SERVICE_QUESTION, HOLDS_CEP_KEY, CEP_NUMBER_KEY, TEMPERATURE_CATEGORIES,
 } from "../lib/epgl20Journey";
@@ -153,6 +153,23 @@ console.log("Retest, 10 Nov afternoon: start-over, sign-in, stray trade-licence 
   check("the in-chat Sign in button opens UAE PASS directly", /\^\(sign in\|تسجيل الدخول\)\$\/i\.test\(choice\.trim\(\)\)\) \{ signIn\(\); return; \}/.test(exp));
   check("a signed-out apply raises the sign-in bar on the first reply", /if \(signInBanner\) send\(\{ type: "auth_required"/.test(route));
   check("no upload box is added before a service is chosen", /!beforeProductChosen\(finalState\);/.test(route) && /&& !beforeProductChosen\(finalState\)/.test(route));
+}
+
+console.log("Retest, 10 Nov: a CEP number that cannot be right is asked for again");
+{
+  const base = { product_code: "LOCKERS", holds_cep_licence: true, cep_licence_number: "CN-5234567", trade_license_number: "CN-5234567" };
+  const r1 = cepNumberRecheck("LOCKERS", base, "Yes, looks good", "en");
+  check("the trade licence number typed as the CEP number: asked again", !!r1 && /TRADE licence number/.test(r1.directive) && !Object.keys(r1.set).length, r1);
+  check("...never offered to the team", /Never offer to raise it with the team/.test(r1?.directive ?? ""));
+  const r2 = cepNumberRecheck("LOCKERS", base, "CEP-2024-00123", "en");
+  check("a new number replaces it", r2?.set.cep_licence_number === "CEP-2024-00123" && r2.set.__cep_licence_refused === false, r2);
+  check("the trade number again is not taken", Object.keys(cepNumberRecheck("LOCKERS", base, "CN 5234567", "en")?.set ?? {}).length === 0);
+  const refused = { ...base, trade_license_number: "CN-1111111", __cep_licence_refused: true };
+  check("refused by EPGL: asked again", /did not find CN-5234567/.test(cepNumberRecheck("LOCKERS", refused, "ok", "en")?.directive ?? ""));
+  check("a good number, not refused: nothing", cepNumberRecheck("LOCKERS", { ...base, trade_license_number: "CN-1111111" }, "ok", "en") === null);
+  check("not a CEP permit: nothing", cepNumberRecheck("FOODMED", base, "ok", "en") === null);
+  check("the route marks a refusal", /\[CEP_REFUSED_KEY\]: true/.test(route));
+  check("the rules forbid escalating it", /IF SUBMISSION IS REFUSED BECAUSE THE CEP LICENCE NUMBER IS NOT RECOGNISED/.test(productRulesDirective("LOCKERS", [], base)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
