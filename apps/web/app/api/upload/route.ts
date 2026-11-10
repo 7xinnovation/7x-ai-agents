@@ -181,7 +181,7 @@ export async function POST(req: NextRequest) {
         const log = ((st.data as Record<string, unknown>)[BATCH_LOG_KEY] as BatchLog | undefined) ?? { placed: [], unplaced: [] };
         return { ...st, data: { ...st.data, [BATCH_LOG_KEY]: { ...log, unplaced: [...log.unplaced, { file: file.name, why: choice.why }] } } };
       });
-      return NextResponse.json({ case: state, batch: { placed: null } });
+      return NextResponse.json({ case: state, batch: { placed: null, why: choice.why ?? null } });
     }
     // The partner is settled under the row lock, against what the rest of the
     // batch has already reserved — see assignPartnerSlot.
