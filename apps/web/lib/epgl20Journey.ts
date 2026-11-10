@@ -215,7 +215,7 @@ export function productRulesDirective(code: string, missingDocs: string[], data:
   );
   out.push(
     "- A question with several answers allowed ('select all that apply') is NEVER a ```buttons block — that is single-choice. Use one " +
-      "```toggles block with `style: checkbox`, one `- key: Label` line per option, and a `confirm:` line."
+      "```toggles block with `style: checkbox`, `select: any`, one `- key: Label` line per option, and a `confirm:` line."
   );
   if (c === "FOODMED") {
     out.push(

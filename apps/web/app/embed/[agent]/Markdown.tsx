@@ -830,7 +830,7 @@ function ChatSelect({
 }
 
 function ChatToggles({
-  items, title, confirmLabels, variant, defaultOn, onSelect,
+  items, title, confirmLabels, variant, defaultOn, onSelect, pickAny,
 }: {
   items: { key: string; label: string; variant?: "switch" | "checkbox" }[];
   title?: string;
@@ -843,6 +843,12 @@ function ChatToggles({
   variant?: "switch" | "checkbox";
   defaultOn?: boolean;
   onSelect: (text: string) => void;
+  /**
+   * A MULTI-CHOICE LIST, not an acknowledgment (10 Nov retest): "select all
+   * that apply" needs ONE box ticked, not every one. `select: any` on the
+   * block, or a checkbox list whose labels acknowledge nothing.
+   */
+  pickAny?: boolean;
 }) {
   const checkbox = variant === "checkbox";
   /**
@@ -870,7 +876,7 @@ function ChatToggles({
   // enough: a greyed-out "Proceed to payment" still reads as the next step, and
   // the customer taps it and nothing happens. Where there is nothing to
   // acknowledge, the button is simply there.
-  const showConfirm = required.length === 0 || allOn;
+  const showConfirm = pickAny ? items.some((it) => on[it.key]) : required.length === 0 || allOn;
   const submit = (label: string) => {
     // Strip markdown links from labels (e.g. the T&C link) so the sent reply
     // reads clean.
@@ -1375,20 +1381,26 @@ export function Markdown({ text, onSelect, uploadCtx, locale, stackChoices }: { 
         let tDefaultOn = false;
         const tItems: { key: string; label: string; variant?: "switch" | "checkbox" }[] = [];
         let tCheckKeys = new Set<string>();
+        let tSelect = "";
         for (const l of body) {
           const item = l.match(/^\s*-\s+([\w.-]+)\s*:\s*(.+?)\s*$/);
-          const meta = l.match(/^\s*(title|confirm|style|default|checkboxes)\s*:\s*(.+?)\s*$/i);
+          const meta = l.match(/^\s*(title|confirm|style|default|checkboxes|select)\s*:\s*(.+?)\s*$/i);
           if (item) tItems.push({ key: item[1]!.trim(), label: item[2]!.trim() });
           else if (meta) {
             if (/^title$/i.test(meta[1]!)) tTitle = meta[2]!.trim();
             else if (/^style$/i.test(meta[1]!)) tVariant = /checkbox/i.test(meta[2]!) ? "checkbox" : "switch";
             else if (/^default$/i.test(meta[1]!)) tDefaultOn = /^(on|yes|true)$/i.test(meta[2]!.trim());
+            else if (/^select$/i.test(meta[1]!)) tSelect = meta[2]!.trim().toLowerCase();
             else if (/^checkboxes$/i.test(meta[1]!)) tCheckKeys = new Set(meta[2]!.split(",").map((x) => x.trim()).filter(Boolean));
             else tConfirms = meta[2]!.split("|").map((x) => x.trim()).filter(Boolean);
           }
         }
         for (const it of tItems) if (tCheckKeys.has(it.key)) it.variant = "checkbox";
-        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabels={tConfirms.length ? tConfirms : ["Confirm"]} variant={tVariant} defaultOn={tDefaultOn} onSelect={onSelect} />);
+        const tPickAny =
+          tSelect === "any" ||
+          (tSelect !== "all" && tVariant === "checkbox" && tCheckKeys.size === 0 && tItems.length >= 3 &&
+            !tItems.some((it) => /\]\(|agree|accept|acknowledg|confirm|declar|undertak|I have read|أوافق|أقر|أتعهد/i.test(it.label)));
+        if (onSelect && tItems.length) nodes.push(<ChatToggles key={k++} items={tItems} title={tTitle} confirmLabels={tConfirms.length ? tConfirms : ["Confirm"]} variant={tVariant} defaultOn={tDefaultOn} onSelect={onSelect} pickAny={tPickAny} />);
         continue;
       }
       if (isSummary) {

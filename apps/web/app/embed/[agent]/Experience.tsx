@@ -271,6 +271,9 @@ export function displayValue(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "object") return JSON.stringify(v);
   const s = String(v);
+  // A multi-choice answer is stored "Chilled;Frozen;…" (Salesforce's
+  // multi-select format); shown with spaces so it wraps in the panel.
+  if (/^[^;]+(;[^;]+)+$/.test(s)) return s.split(";").map((x) => x.trim()).join(", ");
   const m = s.match(ISO_DATE_RE);
   if (!m) return s;
   const date = `${m[3]}-${m[2]}-${m[1]}`;

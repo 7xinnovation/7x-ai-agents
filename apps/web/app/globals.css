@@ -2624,6 +2624,8 @@ body {
 .dlg-field-value {
   font-weight: 600;
   text-align: end;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: color-mix(in srgb, var(--c-text) 92%, var(--c-primary));
 }
 /* Inline correction of a captured value (pencil edit, FB-1325). */
