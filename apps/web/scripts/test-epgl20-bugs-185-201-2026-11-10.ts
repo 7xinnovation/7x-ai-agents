@@ -8,7 +8,7 @@ import {
   cepHolderAnswer, cepNumberFrom, cepHolderStep, requiresCepLicence, asksForFreshApplication, hasApplicationInProgress, freshApplication,
   openingDirective, productRulesDirective, SERVICE_QUESTION, HOLDS_CEP_KEY, CEP_NUMBER_KEY, TEMPERATURE_CATEGORIES,
 } from "../lib/epgl20Journey";
-import { productFirstDirective } from "../lib/batchUpload";
+import { productFirstDirective, batchCandidates } from "../lib/batchUpload";
 import { productCardGuard, productOptions, canonicalProductBlock } from "../lib/productCards";
 import type { AgentDefinition } from "@dialog/config";
 
@@ -116,6 +116,19 @@ console.log("Staging, 10 Nov: no stray heading under the menu");
   check("a sentence that starts with the word is kept", run(prose, 2) === prose, run(prose, 2));
   const plain = "Here is a line.\n**Bold** start, kept.\nLicences\nare listed below\n";
   check("other lines are kept; a lone heading word on its own line is dropped", run(plain, 4) === "Here is a line.\n**Bold** start, kept.\nare listed below\n", run(plain, 4));
+}
+
+console.log("Staging, 10 Nov: Food and Medicine documents in a batch, before the food / medicine questions");
+{
+  const def = JSON.parse(readFileSync(new URL("./fixtures/epgl-dialog-2.stg.2026-11-06.json", import.meta.url), "utf8")) as AgentDefinition;
+  const keys = (data: Record<string, unknown>) =>
+    batchCandidates(def, { ...emptyCase(), journeyKey: "new_license", data: data as CaseState["data"] }, "en").map((c) => c.key);
+  const before = keys({ product_code: "FOODMED" });
+  for (const k of ["municipal_food_safety_clearance", "pharmaceutical_handling_authorisation", "cold_chain_capability_declaration", "storage_premises_declaration"])
+    check(`unanswered: ${k} is offered`, before.includes(k), before);
+  const noFood = keys({ product_code: "FOODMED", declares_food_delivery: false, declares_medicine_delivery: true });
+  check("answered 'no food': the food clearance is not offered", !noFood.includes("municipal_food_safety_clearance") && noFood.includes("pharmaceutical_handling_authorisation"), noFood);
+  check("a CEP application is not offered them", !keys({ product_code: "CEP30-GEN-DOM" }).includes("municipal_food_safety_clearance"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

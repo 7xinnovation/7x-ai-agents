@@ -81,7 +81,18 @@ export function batchCandidates(def: AgentDefinition, state: CaseState, locale: 
    */
   const raw = state.data as Record<string, unknown>;
   const code = typeof raw.product_code === "string" ? raw.product_code : "";
-  const data = code ? { ...raw, ...productDerived(code) } : raw;
+  /**
+   * A QUESTION NOT YET ASKED DOES NOT TURN A DOCUMENT AWAY (10 November).
+   *
+   * Food and Medicine's clearance, pharmaceutical authorisation and cold-chain
+   * declaration are conditioned on "do you deliver food / medicine?" — asked
+   * AFTER the documents in a batch. All three were "not recognised" on
+   * staging. Until the answer is in, the slot is offered; a file that is one of
+   * them is itself the answer's evidence, and the question still follows.
+   */
+  const pending: Record<string, unknown> = {};
+  for (const k of UNASKED_YES) if (raw[k] === undefined || raw[k] === null || raw[k] === "") pending[k] = true;
+  const data = code ? { ...raw, ...pending, ...productDerived(code) } : raw;
   const namesKnown = !!partnerName(data, "1");
   const out: SlotCandidate[] = [];
   for (const s of j.steps)
@@ -115,6 +126,8 @@ export function batchCandidates(def: AgentDefinition, state: CaseState, locale: 
 }
 
 const PARTNER_ID = /^partner_(\d+)_(passport|emirates_id)$/;
+/** Yes/no answers a batch may arrive before; while unanswered they count as yes for placing a file. */
+const UNASKED_YES = ["declares_food_delivery", "declares_medicine_delivery"];
 const sameName = (a: string, b: string) => {
   const n = (s: string) => s.toLowerCase().replace(/[^a-z]+/g, " ").trim().split(" ").filter(Boolean).sort().join(" ");
   return !!a && !!b && n(a) === n(b);
