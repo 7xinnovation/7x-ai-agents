@@ -32,7 +32,7 @@ check("the licence-first directive names Licences and Permits", /Licences and Pe
 
 console.log("BUG-190: the sign-in answer, word for word");
 const out = openingDirective(false, "en");
-check("not signed in: a fixed reply with two buttons", /word for word/.test(out) && /```buttons\n- Sign in\n- Ask a question instead\n```/.test(out));
+check("not signed in: a fixed reply, no buttons (the bar has Sign in)", /word for word/.test(out) && /It only takes a moment\.$/m.test(out) && !/```buttons\n- Sign in/.test(out));
 check("signed in: no sign-in text", !/word for word/.test(open));
 check("Arabic fixed reply", /تسجيل الدخول/.test(openingDirective(false, "ar")));
 check("the route adds it on every turn before a product", /directive \+= openingDirective\(!!session\.authenticated, loc\)/.test(route));

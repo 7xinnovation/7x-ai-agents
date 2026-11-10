@@ -183,10 +183,10 @@ export function openingDirective(signedIn: boolean, locale: "en" | "ar"): string
   if (!signedIn)
     lines.push(
       "- THEY ARE NOT SIGNED IN. Applying needs sign-in. Whenever they ask to apply, decline, or ask why — 'no need for sign in', 'can I " +
-        "skip it' — answer with exactly this, word for word, and nothing else:\n" +
+        "skip it' — answer with exactly this, word for word, and nothing else — no buttons or cards (the sign-in bar below the chat carries the Sign in button):\n" +
         (locale === "ar"
-          ? "يتطلب التقديم تسجيل الدخول، لربط الطلب بشركتك والتحقق من هويتك لدى مجموعة بريد الإمارات للتراخيص. يستغرق ذلك لحظات فقط.\n```buttons\n- تسجيل الدخول\n- طرح سؤال بدلاً من ذلك\n```"
-          : "Applying needs you to be signed in: it links the application to your company and verifies your identity with Emirates Post Group Licensing. It only takes a moment.\n```buttons\n- Sign in\n- Ask a question instead\n```")
+          ? "يتطلب التقديم تسجيل الدخول، لربط الطلب بشركتك والتحقق من هويتك لدى مجموعة بريد الإمارات للتراخيص. يستغرق ذلك لحظات فقط."
+          : "Applying needs you to be signed in: it links the application to your company and verifies your identity with Emirates Post Group Licensing. It only takes a moment.")
     );
   return lines.join("\n") + "\n";
 }
