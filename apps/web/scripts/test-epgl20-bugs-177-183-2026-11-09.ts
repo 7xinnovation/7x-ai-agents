@@ -80,7 +80,7 @@ check("before a product, no product sentence", !epgl20ConductDirective(null, "en
 check("the route adds it before the product on applying turns", /if \(applying && !hasProduct\) directive \+= epgl20ConductDirective\(null/.test(route));
 const after = route.slice(route.indexOf("if (isPulse) pulseDirective += directive;"));
 check("...and on EVERY turn once the product is chosen, upload turns included (outside the typed-turn branch)",
-  /^\s*if \(isPulse\) pulseDirective \+= directive;\n\s*\}\n\s*\}\n[\s\S]{0,600}if \(hasProduct\) \{\n\s*const conduct = epgl20ConductDirective/.test(after));
+  /^\s*if \(isPulse\) pulseDirective \+= directive;\n\s*\}\n\s*\}\n[\s\S]{0,600}if \(hasProduct\) \{\n[^\n]*\n\s*const conduct =\s*epgl20ConductDirective/.test(after));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

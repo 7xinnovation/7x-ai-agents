@@ -665,10 +665,23 @@ function ChatCardSelect({
   const [q, setQ] = React.useState("");
   const boxRef = React.useRef<HTMLDivElement | null>(null);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const panelRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
-    inputRef.current?.focus();
+    inputRef.current?.focus({ preventScroll: true });
+    /**
+     * THE LIST IS BROUGHT INTO VIEW (BUG-192, 10 November).
+     *
+     * The panel opens BELOW its trigger, and on the last message that is
+     * under the fold: the tester saw the search box and nothing else —
+     * "no dropdown list of temperature-sensitive categories". Scrolled to
+     * its nearest edge, so a panel already in view does not move.
+     */
+    const panel = panelRef.current;
+    if (panel && typeof panel.scrollIntoView === "function") {
+      requestAnimationFrame(() => panel.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+    }
     const onDown = (e: MouseEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
     };
@@ -700,7 +713,7 @@ function ChatCardSelect({
         <CaretDown size={14} weight="bold" className={open ? "is-open" : ""} />
       </button>
       {open ? (
-        <div className="dlg-cardselect-panel">
+        <div className="dlg-cardselect-panel" ref={panelRef}>
           <div className="dlg-cardselect-search">
             <MagnifyingGlass size={14} weight="bold" />
             <input

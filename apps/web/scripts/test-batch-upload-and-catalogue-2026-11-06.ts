@@ -54,7 +54,7 @@ check("a sentence that only mentions a licence is not a tap", productFromMessage
 const chatRoute = read("../app/api/chat/route.ts");
 check("the route records the tapped product BEFORE deciding this turn's offer",
   chatRoute.indexOf("productFromMessage(agent.definition, body.userMessage)") > 0 &&
-  chatRoute.indexOf("productFromMessage(agent.definition, body.userMessage)") < chatRoute.indexOf("directive = modeChoiceDirective(loc)"));
+  chatRoute.indexOf("productFromMessage(agent.definition, body.userMessage)") < chatRoute.indexOf("directive += modeChoiceDirective(loc)"));
 check("...and no two cards share a title", new Set([...canon.matchAll(/title: (.+)/g)].map((m) => m[1])).size === 10);
 
 const stream = (text: string, size: number) => {

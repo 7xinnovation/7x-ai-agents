@@ -62,6 +62,9 @@ import { faqLine, mentionsFaq, journeyJustCompleted } from "@/lib/faqLine";
 import { contactSeed } from "@/lib/knownContact";
 import { boxNumberIn, mayManage } from "@/lib/boxOwnership";
 import { durationCardGuard } from "@/lib/durationCards";
+import {
+  cepHolderStep, asksForFreshApplication, hasApplicationInProgress, freshApplication, freshApplicationDirective, openingDirective, productRulesDirective,
+} from "@/lib/epgl20Journey";
 import { noUploadBeforeProductGuard, productOptions, productFromMessage, productDerived, productDefaults, chainGuards } from "@/lib/productCards";
 import {
   offersBatch, uploadModeFrom, productFirstDirective, modeChoiceDirective, epgl20ConductDirective, batchStartDirective, batchReportDirective,
@@ -2114,6 +2117,28 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
     let data = session.state.data as Record<string, unknown>;
     let hasProduct = typeof data.product_code === "string" && data.product_code.trim() !== "";
     /**
+     * "I WANT A NEW APPLICATION" STARTS ONE (BUG-191, 10 November).
+     *
+     * Asked for in the same chat, the case kept the earlier company, trade
+     * licence and partners, and the model carried on with them. The case is
+     * emptied here — the signed-in person stays — and the model is told to
+     * reuse nothing from earlier in the conversation.
+     */
+    let freshStart = false;
+    if (
+      !isDocumentUploaded && !isPaymentSettled &&
+      (!session.state.journeyKey || session.state.journeyKey === "new_license") &&
+      asksForFreshApplication(body.userMessage) && hasApplicationInProgress(session.state)
+    ) {
+      const before = { reference: session.state.reference, product: data.product_code ?? null };
+      session.state = await mutateCase(session.caseId, (st: CaseState) => freshApplication(st));
+      liveState = session.state;
+      data = session.state.data as Record<string, unknown>;
+      hasProduct = false;
+      freshStart = true;
+      await audit({ agentId: agent.id, conversationId: session.conversationId, actor: "system", action: "epgl_fresh_application", payload: before });
+    }
+    /**
      * The tap on a licence card IS the choice. Recorded now, before the reply,
      * so this very turn offers the two ways of uploading — waiting for the model
      * to record it meant the offer's turn had already passed (staging, 6 Nov).
@@ -2188,19 +2213,38 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
       const applying =
         session.state.journeyKey === "new_license" ||
         (!session.state.journeyKey && (isPulse || /\b(apply|application|new licen[cs]e|postal activity licen[cs]e)\b/i.test(body.userMessage ?? "") || /تقديم|طلب رخصة/.test(body.userMessage ?? "")));
+      if (freshStart) directive += freshApplicationDirective();
       if (!hasProduct) {
-        if (applying) directive = productFirstDirective();
+        if (applying || freshStart) directive += productFirstDirective();
+        // Every turn before the product: the question's wording, the lookup
+        // that found nothing, and the sign-in answer (BUG-185/186/190).
+        directive += openingDirective(!!session.authenticated, loc);
       } else if (!data[UPLOAD_MODE_KEY]) {
+        /**
+         * A PERMIT FOR CEP LICENCE HOLDERS ASKS THAT FIRST (BUG-197/200).
+         * Before the upload choice: "are you an existing CEP licence holder?",
+         * then the number. Recorded by the server from the answers.
+         */
+        const code = String(data.product_code);
+        const cep = cepHolderStep(code, data, body.userMessage, loc);
+        if (cep && Object.keys(cep.set).length) {
+          session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, ...cep.set } }));
+          liveState = session.state;
+          data = session.state.data as Record<string, unknown>;
+        }
+        if (cep?.directive) directive += cep.directive;
+      }
+      if (hasProduct && !data[UPLOAD_MODE_KEY] && !cepHolderStep(String(data.product_code), data, undefined, loc)?.blocking) {
         const mode = uploadModeFrom(body.userMessage);
         const uploadedSoFar = session.state.documents.filter((d) => d.status === "uploaded" || d.status === "accepted").length;
         if (mode) {
           session.state = await mutateCase(session.caseId, (st: CaseState) => ({ ...st, data: { ...st.data, [UPLOAD_MODE_KEY]: mode } }));
           liveState = session.state;
-          if (mode === "batch") directive = batchStartDirective(missingDocuments(agent.definition, session.state, loc), loc);
+          if (mode === "batch") directive += batchStartDirective(missingDocuments(agent.definition, session.state, loc), loc);
         } else if (uploadedSoFar <= 1) {
           // Only at the start: a conversation already collecting documents
           // one by one is not interrupted to be offered the other way.
-          directive = modeChoiceDirective(loc);
+          directive += modeChoiceDirective(loc);
         }
       }
       // Before the product: from the first applying turn. After it, below — on
@@ -2218,7 +2262,12 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
      * (staging, 9 November), the very thing BUG-181 reported.
      */
     if (hasProduct) {
-      const conduct = epgl20ConductDirective(typeof data.product_code === "string" ? data.product_code : null, loc);
+      const code = typeof data.product_code === "string" ? data.product_code : null;
+      const conduct =
+        epgl20ConductDirective(code, loc) +
+        // What the chosen product needs before the summary: its sites, its
+        // multi-choice questions, the documents still missing (BUG-192..199).
+        (code ? productRulesDirective(code, missingDocuments(agent.definition, session.state, loc).map((m) => m.label), data) : "");
       customerContext = `${customerContext ?? ""}${conduct}`.trim();
       if (isPulse) pulseDirective += conduct;
     }
