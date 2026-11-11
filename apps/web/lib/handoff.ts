@@ -36,6 +36,22 @@ export interface HandoffClaims {
   agent: string;
   /** Epoch ms after which it is refused. */
   exp: number;
+  /** Who signed in — see HandoffIdentity. */
+  id?: HandoffIdentity;
+}
+
+/**
+ * Who signed in, as verified when the code was minted. Carried (encrypted, two
+ * minutes) so a MASTER agent can sign the customer into the service they are
+ * actually in — EPGL as well as NXN — not only the one whose users service
+ * checked the token. Identity, never a credential: no token goes in here.
+ */
+export interface HandoffIdentity {
+  sub: string;
+  emiratesId?: string;
+  name?: string;
+  mobile?: string;
+  email?: string;
 }
 
 /**
@@ -44,8 +60,8 @@ export interface HandoffClaims {
  * Deliberately takes no token: nothing secret goes in, so nothing secret comes
  * out. Callers must have verified the customer before reaching here.
  */
-export function mintHandoff(cid: string, agent: string, now = Date.now()): string | null {
-  const payload: HandoffClaims = { cid, agent, exp: now + HANDOFF_TTL_MS };
+export function mintHandoff(cid: string, agent: string, now = Date.now(), id?: HandoffIdentity): string | null {
+  const payload: HandoffClaims = { cid, agent, exp: now + HANDOFF_TTL_MS, ...(id ? { id } : {}) };
   return encryptSecret(JSON.stringify(payload));
 }
 

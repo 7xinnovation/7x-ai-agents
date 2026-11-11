@@ -1544,7 +1544,13 @@ export function Experience({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           // A master asks as itself, so a code minted for any of its delegates is taken.
-          body: JSON.stringify({ agent: masterSlug ?? agent.slug, handoff }),
+          // ...and says which of its services it is in, so the sign-in lands there
+          // (EPGL as well as NXN) instead of pulling the customer over to NXN.
+          body: JSON.stringify(
+            masterSlug
+              ? { agent: masterSlug, handoff, as: activeRef.current ?? undefined, cid: convId.current ?? undefined, locale }
+              : { agent: agent.slug, handoff }
+          ),
         });
         if (!res.ok) return false;
         const data = (await res.json()) as { conversationId?: string; agent?: string };
@@ -1570,7 +1576,7 @@ export function Experience({
         return false;
       }
     },
-    [agent.slug, storageKey, masterSlug, front.delegates]
+    [agent.slug, storageKey, masterSlug, front.delegates, locale]
   );
 
   useEffect(() => {

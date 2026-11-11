@@ -105,5 +105,15 @@ const TOKEN = "ep-session-token-that-must-never-appear";
   check("...and still not once expired", readHandoff(code, team, NOW + HANDOFF_TTL_MS + 1).ok === false);
 }
 
+// 9. The identity a master needs to sign the customer into its OTHER service
+//    rides in the code, encrypted — and still no token.
+{
+  const code = mintHandoff(CID, "nxn-dialog", NOW, { sub: "uaepass-sub-1", emiratesId: "784198012345678", name: "Test Person" })!;
+  const r = readHandoff(code, ["ep-master", "nxn-dialog", "epgl-dialog"], NOW + 1_000);
+  check("the identity reads back", r.ok && r.claims.id?.sub === "uaepass-sub-1" && r.claims.id?.emiratesId === "784198012345678", r);
+  check("...and is not readable in the code", !code.includes("784198012345678") && !code.includes("uaepass-sub-1"));
+  check("...and still carries no token", !code.includes(TOKEN));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
