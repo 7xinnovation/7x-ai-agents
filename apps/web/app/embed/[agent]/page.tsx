@@ -33,10 +33,11 @@ export default async function EmbedPage({
       children.map(async (c) => ({
         ...publicAgent(c.definition),
         appSignIn: await appSignIn(c.id, c.definition),
-        // Under a master, sources follow the MASTER: off unless it asks for them.
-        // "Should not be showing sources" (11 November) — EPGL's chips under an
-        // Emirates Post assistant.
-        showSources: d.showSources === true,
+        // No source chips under a master: "should not be showing sources"
+        // (11 November) — EPGL's knowledge-base chips under an Emirates Post
+        // assistant. ep-master's own config says true, so the config is not
+        // what decides it here.
+        showSources: false,
       }))
     );
     if (!delegates.length) notFound();
@@ -47,7 +48,7 @@ export default async function EmbedPage({
       journeys: delegates.flatMap((x) => x.journeys),
       delegates,
       defaultDelegate: first,
-      showSources: d.showSources === true,
+      showSources: false,
     };
   }
 
