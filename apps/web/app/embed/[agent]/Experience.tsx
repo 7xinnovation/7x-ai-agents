@@ -1495,7 +1495,15 @@ export function Experience({
           const res = await fetch("/api/uaepass/host", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ agent: agent.slug, token, cid: convId.current ?? undefined }),
+            /**
+             * The service the customer is IN, read now — not the one this
+             * listener was set up under. On ep-master (11 November) it was set
+             * up as NXN, the first service, and never again: the customer
+             * moved to EPGL, signed in on EPGL's portal, and the portal's token
+             * was checked by Emirates Post ("rejected by Emirates Post",
+             * signed: true), refused, and the popup left open.
+             */
+            body: JSON.stringify({ agent: activeRef.current ?? agent.slug, token, cid: convId.current ?? undefined }),
           });
           if (!res.ok) return;
           setAuthenticated(true);
@@ -1519,7 +1527,7 @@ export function Experience({
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [allowedOrigins]);
+  }, [allowedOrigins, agent.slug]);
 
   /**
    * The same handover, from a native app instead of a hosting page.
@@ -1593,6 +1601,26 @@ export function Experience({
     if (isDismissed(token)) return;
     uaePass.current = token;
     void (async () => {
+      /**
+       * A MASTER (ep-master) takes the app's token the way the handoff does:
+       * the server checks it with whichever service can (NXN) and signs in the
+       * one the customer is IN (EPGL as well). /api/uaepass/host would check an
+       * Emirates Post token with EPGL, refuse it, and leave them signed out.
+       */
+      if (masterSlug) {
+        try {
+          const res = await fetch("/api/embed/handoff", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agent: masterSlug, token, locale }),
+          });
+          const data = res.ok ? ((await res.json()) as { handoff?: string }) : {};
+          if (data.handoff) await redeemHandoff(data.handoff);
+        } catch {
+          /* leave signed out; they can still sign in from here */
+        }
+        return;
+      }
       try {
         const res = await fetch("/api/uaepass/host", {
           method: "POST",
@@ -1607,7 +1635,8 @@ export function Experience({
         /* leave signed out; the next chat turn re-verifies the same token */
       }
     })();
-  }, [agent.slug, redeemHandoff]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per token; uaePass.current guards repeats
+  }, [agent.slug, redeemHandoff, masterSlug]);
 
   // Resume a prior session for this agent (PRD: partial-application retention).
   useEffect(() => {
