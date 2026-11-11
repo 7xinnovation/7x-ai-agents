@@ -4,6 +4,7 @@ import { getOrCreateSession, markAuthenticated, rememberVerifiedEmiratesId, save
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { mintHandoff, readHandoff, HANDOFF_TTL_MS } from "@/lib/handoff";
 import { log } from "@/lib/logger";
+import { isMaster, delegateSlugs, defaultDelegate } from "@/lib/masterAgent";
 
 export const runtime = "nodejs";
 
@@ -40,14 +41,24 @@ export async function POST(req: NextRequest) {
 
   // --- Redeem -------------------------------------------------------------
   if (body.handoff) {
-    const r = readHandoff(body.handoff, slug);
+    /**
+     * A MASTER AGENT (ep-master) redeems for itself or any of its delegates.
+     *
+     * 11 November: the app was switched from nxn-dialog to ep-master and "click
+     * login, nothing happens". The code is minted for the delegate that holds
+     * the customer's Emirates Post account (below), and the widget asks as
+     * whichever delegate is active — two slugs, one sign-in, refused as
+     * wrong_agent every time.
+     */
+    const allowed = isMaster(agent.definition) ? [slug, ...delegateSlugs(agent.definition)] : [slug];
+    const r = readHandoff(body.handoff, allowed);
     if (!r.ok) {
       log.warn("handoff_refused", { agentId: agent.id, reason: r.reason });
       // One answer for every failure. Which of them it was is ours to know, not
       // something to tell whoever is holding the code.
       return NextResponse.json({ ok: false, error: "invalid_handoff" }, { status: 401 });
     }
-    return NextResponse.json({ ok: true, conversationId: r.claims.cid });
+    return NextResponse.json({ ok: true, conversationId: r.claims.cid, agent: r.claims.agent });
   }
 
   // --- Mint ---------------------------------------------------------------
@@ -55,36 +66,55 @@ export async function POST(req: NextRequest) {
   if (!token) return NextResponse.json({ ok: false, error: "bad_request" }, { status: 400 });
 
   const looksSigned = token.split(".").length === 3;
-  let sub: string | undefined;
   /**
-   * The Emirates ID this introspection already knows.
-   *
-   * Kept, not merely used. A rental save carries userProfile.idNumber and
-   * Emirates Post answers 115 USER_PROFILE_INVALID without it — and an app
-   * sign-in is the one route where nothing else will ever ask: the token is
-   * held encrypted against the conversation precisely so it never reaches the
-   * WebView, so no later turn has one in hand to introspect. 18 September: a
-   * rental from the app reached the payment step and died there, with the box
-   * already reserved, because this value was discarded here.
+   * WHO CHECKS THE TOKEN. For an ordinary agent, itself. For a MASTER, the
+   * delegate that can: ep-master has no Emirates Post users service of its own
+   * (that is NXN's integration), so checking the app's token against the
+   * master found nothing to check it with and refused every sign-in — the
+   * other half of "click login, nothing happens" (11 November). The
+   * conversation is then that delegate's, which is what the master's chat
+   * route expects a conversation id to be.
    */
+  type Loaded = NonNullable<Awaited<ReturnType<typeof getAgentBySlug>>>;
+  const candidates: { slug: string; a: Loaded }[] = [];
+  if (isMaster(agent.definition)) {
+    const first = defaultDelegate(agent.definition);
+    const order = [first, ...delegateSlugs(agent.definition).filter((s) => s !== first)].filter(Boolean) as string[];
+    for (const s of order) {
+      const d = await getAgentBySlug(s);
+      if (d) candidates.push({ slug: s, a: d });
+    }
+  } else candidates.push({ slug, a: agent });
+
+  let sub: string | undefined;
   let emiratesId: string | undefined;
   let reason = "";
-  // Scoped to the tenant: see the note in lib/hostToken. A key installed for one
-  // host must never be used to check another's token.
-  const tenant = agent.definition.tenantSlug;
-  if (looksSigned && hostTokenConfigured(tenant)) {
-    const v = verifyHostToken(token, { tenant });
-    if (v.ok) sub = v.claims.sub;
-    else reason = v.reason;
-  } else {
-    const usersBase = await epUsersBaseUrl(agent.id, agent.definition.activeEnvironment ?? "production");
-    if (!usersBase) reason = "no host users service configured for this environment";
-    else {
+  let owner: Loaded = agent;
+  let ownerSlug = slug;
+  for (const { slug: candSlug, a: cand } of candidates) {
+    // Scoped to the tenant: see the note in lib/hostToken. A key installed for one
+    // host must never be used to check another's token.
+    const tenant = cand.definition.tenantSlug;
+    if (looksSigned && hostTokenConfigured(tenant)) {
+      const v = verifyHostToken(token, { tenant });
+      if (v.ok) sub = v.claims.sub;
+      else reason = v.reason;
+    } else {
+      const usersBase = await epUsersBaseUrl(cand.id, cand.definition.activeEnvironment ?? "production");
+      if (!usersBase) {
+        reason ||= "no host users service configured for this environment";
+        continue;
+      }
       const v = await introspectEmiratesPostToken(token, usersBase);
       if (v.ok) {
         sub = v.identity.sub;
         emiratesId = v.identity.emiratesId;
       } else reason = v.reason;
+    }
+    if (sub) {
+      owner = cand;
+      ownerSlug = candSlug;
+      break;
     }
   }
   if (!sub) {
@@ -94,7 +124,7 @@ export async function POST(req: NextRequest) {
 
   const locale = body.locale === "ar" ? "ar" : "en";
   const session = await getOrCreateSession({
-    agentId: agent.id,
+    agentId: owner.id,
     conversationId: body.cid,
     locale,
     authenticated: false,
@@ -106,7 +136,7 @@ export async function POST(req: NextRequest) {
   await markAuthenticated(session.conversationId, sub);
   if (emiratesId && session.caseId) await rememberVerifiedEmiratesId(session.caseId, emiratesId);
 
-  const handoff = mintHandoff(session.conversationId, slug);
+  const handoff = mintHandoff(session.conversationId, ownerSlug);
   if (!handoff) {
     // encryptSecret returns null with no SECRETS_KEY. Failing here is right:
     // falling back to handing the raw token to the WebView is the thing this
@@ -119,5 +149,6 @@ export async function POST(req: NextRequest) {
     handoff,
     conversationId: session.conversationId,
     expiresIn: Math.floor(HANDOFF_TTL_MS / 1000),
+    agent: ownerSlug,
   });
 }

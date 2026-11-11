@@ -1543,10 +1543,18 @@ export function Experience({
         const res = await fetch("/api/embed/handoff", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agent: agent.slug, handoff }),
+          // A master asks as itself, so a code minted for any of its delegates is taken.
+          body: JSON.stringify({ agent: masterSlug ?? agent.slug, handoff }),
         });
         if (!res.ok) return false;
-        const data = (await res.json()) as { conversationId?: string };
+        const data = (await res.json()) as { conversationId?: string; agent?: string };
+        // ...and the widget becomes the delegate that holds the signed-in conversation.
+        if (masterSlug && data.agent && front.delegates?.some((d) => d.slug === data.agent)) {
+          if (data.agent !== activeRef.current) setCaseState(null);
+          activeRef.current = data.agent;
+          setActiveSlug(data.agent);
+          try { window.localStorage.setItem(`dlg-active-${masterSlug}`, data.agent); } catch { /* private mode */ }
+        }
         if (data.conversationId) {
           convId.current = data.conversationId;
           try { window.localStorage.setItem(storageKey, data.conversationId); } catch { /* private mode */ }
@@ -1562,7 +1570,7 @@ export function Experience({
         return false;
       }
     },
-    [agent.slug, storageKey]
+    [agent.slug, storageKey, masterSlug, front.delegates]
   );
 
   useEffect(() => {

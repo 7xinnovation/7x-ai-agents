@@ -94,5 +94,16 @@ const TOKEN = "ep-session-token-that-must-never-appear";
   check("identical inputs still produce different codes", a !== b, { a: a.slice(0, 24), b: b.slice(0, 24) });
 }
 
+// 8. A master agent (ep-master, 11 November) redeems a code minted for any of
+//    its delegates — and still nothing outside that list.
+{
+  const code = mintHandoff(CID, "nxn-dialog", NOW)!;
+  const team = ["ep-master", "nxn-dialog", "epgl-dialog"];
+  const r = readHandoff(code, team, NOW + 1_000);
+  check("a master takes its delegate's code", r.ok && r.claims.agent === "nxn-dialog", r);
+  check("...but not one from outside it", readHandoff(code, ["ep-master", "epgl-dialog"], NOW + 1_000).ok === false);
+  check("...and still not once expired", readHandoff(code, team, NOW + HANDOFF_TTL_MS + 1).ok === false);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

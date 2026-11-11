@@ -60,7 +60,9 @@ export type HandoffResult =
  * here because "expired" is a customer who took too long to open the screen and
  * "malformed" is someone probing, and those deserve different log lines.
  */
-export function readHandoff(code: string, agent: string, now = Date.now()): HandoffResult {
+export function readHandoff(code: string, agent: string | readonly string[], now = Date.now()): HandoffResult {
+  // A master agent redeems for itself or any of its delegates: one sign-in, one widget.
+  const allowed = typeof agent === "string" ? [agent] : agent;
   // decryptSecret passes anything without the encrypted prefix straight back --
   // right for reading legacy plaintext rows out of the database, catastrophic
   // here, where the input is supplied by whoever is calling. Without this a
@@ -80,7 +82,7 @@ export function readHandoff(code: string, agent: string, now = Date.now()): Hand
   }
   // Agent before expiry: a code offered to the wrong agent is a different kind of
   // wrong from a slow customer, and should not be reported as staleness.
-  if (claims.agent !== agent) return { ok: false, reason: "wrong_agent" };
+  if (!allowed.includes(claims.agent)) return { ok: false, reason: "wrong_agent" };
   if (now >= claims.exp) return { ok: false, reason: "expired" };
   return { ok: true, claims };
 }
