@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAgentBySlug } from "@/lib/agents";
-import { getOrCreateSession, markAuthenticated, rememberVerifiedEmiratesId, saveSessionToken, mutateCase } from "@/lib/conversation";
-import { contactSeed } from "@/lib/knownContact";
+import { getOrCreateSession, markAuthenticated, rememberVerifiedEmiratesId, saveSessionToken } from "@/lib/conversation";
 import { epUsersBaseUrl, hostTokenConfigured, introspectEmiratesPostToken, verifyHostToken } from "@/lib/hostToken";
 import { mintHandoff, readHandoff, HANDOFF_TTL_MS } from "@/lib/handoff";
 import { log } from "@/lib/logger";
@@ -29,7 +28,7 @@ export const runtime = "nodejs";
  * validated by using it. We never take the caller's word for who they are.
  */
 export async function POST(req: NextRequest) {
-  let body: { agent?: string; token?: string; handoff?: string; locale?: string; cid?: string; as?: string } = {};
+  let body: { agent?: string; token?: string; handoff?: string; locale?: string; cid?: string } = {};
   try {
     body = await req.json();
   } catch {
@@ -58,44 +57,6 @@ export async function POST(req: NextRequest) {
       // One answer for every failure. Which of them it was is ours to know, not
       // something to tell whoever is holding the code.
       return NextResponse.json({ ok: false, error: "invalid_handoff" }, { status: 401 });
-    }
-    /**
-     * SIGNED IN TO THE SERVICE THEY ARE IN (11 November).
-     *
-     * "On ep-master the PO Box part works, but I click new postal licence, it
-     * asks me to sign in, and when I do it shows me PO boxes." The code names
-     * NXN's conversation — NXN is the delegate whose users service could check
-     * the app's token — and the widget followed it there. So when the widget
-     * says it is in another of this master's services (`as`), that service's
-     * conversation is signed in with the identity the code carries, and the
-     * customer stays where they were. Only the identity crosses over: the
-     * Emirates Post token stays on NXN's conversation, the one thing that uses it.
-     */
-    const as = body.as;
-    const id = r.claims.id;
-    if (isMaster(agent.definition) && as && as !== r.claims.agent && allowed.includes(as) && as !== slug && id?.sub) {
-      const target = await getAgentBySlug(as);
-      if (target) {
-        const session = await getOrCreateSession({
-          agentId: target.id,
-          conversationId: body.cid,
-          locale: body.locale === "ar" ? "ar" : "en",
-          authenticated: false,
-        });
-        await markAuthenticated(session.conversationId, id.sub);
-        if (id.emiratesId && session.caseId) await rememberVerifiedEmiratesId(session.caseId, id.emiratesId);
-        if (session.caseId && (id.name || id.mobile || id.email)) {
-          try {
-            await mutateCase(session.caseId, (st) => {
-              const seed = contactSeed(st, { name: id.name, mobile: id.mobile, email: id.email });
-              return Object.keys(seed).length ? { ...st, data: { ...st.data, ...seed } } : st;
-            });
-          } catch {
-            /* the sign-in has succeeded; a convenience never fails it */
-          }
-        }
-        return NextResponse.json({ ok: true, conversationId: session.conversationId, agent: as });
-      }
     }
     return NextResponse.json({ ok: true, conversationId: r.claims.cid, agent: r.claims.agent });
   }
@@ -128,7 +89,6 @@ export async function POST(req: NextRequest) {
   let sub: string | undefined;
   let emiratesId: string | undefined;
   let reason = "";
-  let contact: { name?: string; mobile?: string; email?: string } = {};
   let owner: Loaded = agent;
   let ownerSlug = slug;
   for (const { slug: candSlug, a: cand } of candidates) {
@@ -149,7 +109,6 @@ export async function POST(req: NextRequest) {
       if (v.ok) {
         sub = v.identity.sub;
         emiratesId = v.identity.emiratesId;
-        contact = { name: v.identity.name, mobile: v.identity.mobileNumber, email: v.identity.email };
       } else reason = v.reason;
     }
     if (sub) {
@@ -177,7 +136,7 @@ export async function POST(req: NextRequest) {
   await markAuthenticated(session.conversationId, sub);
   if (emiratesId && session.caseId) await rememberVerifiedEmiratesId(session.caseId, emiratesId);
 
-  const handoff = mintHandoff(session.conversationId, ownerSlug, Date.now(), { sub, emiratesId, ...contact });
+  const handoff = mintHandoff(session.conversationId, ownerSlug);
   if (!handoff) {
     // encryptSecret returns null with no SECRETS_KEY. Failing here is right:
     // falling back to handing the raw token to the WebView is the thing this

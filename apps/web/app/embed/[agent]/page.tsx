@@ -5,6 +5,7 @@ import { turnstileSiteKey } from "@/lib/turnstile";
 import { Experience } from "./Experience";
 import type { PublicAgent } from "./types";
 import type { AgentDefinition } from "@dialog/config";
+import { epUsersBaseUrl } from "@/lib/hostToken";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,13 +23,22 @@ export default async function EmbedPage({
   if (!agent) notFound();
 
   const d = agent.definition;
-  let pub = publicAgent(d);
+  let pub = { ...publicAgent(d), appSignIn: await appSignIn(agent.id, d) };
   if (d.delegates?.length) {
     // A master agent: each delegate's public settings, read live from its own row.
     const children = (
       await Promise.all(d.delegates.map((x) => getAgentBySlug(x.slug).catch(() => null)))
     ).filter((a): a is NonNullable<typeof a> => Boolean(a && a.status !== "disabled" && !a.definition.delegates?.length));
-    const delegates = children.map((c) => publicAgent(c.definition));
+    const delegates = await Promise.all(
+      children.map(async (c) => ({
+        ...publicAgent(c.definition),
+        appSignIn: await appSignIn(c.id, c.definition),
+        // Under a master, sources follow the MASTER: off unless it asks for them.
+        // "Should not be showing sources" (11 November) — EPGL's chips under an
+        // Emirates Post assistant.
+        showSources: d.showSources === true,
+      }))
+    );
     if (!delegates.length) notFound();
     const first = d.defaultDelegate && delegates.some((x) => x.slug === d.defaultDelegate) ? d.defaultDelegate : delegates[0]!.slug;
     pub = {
@@ -37,6 +47,7 @@ export default async function EmbedPage({
       journeys: delegates.flatMap((x) => x.journeys),
       delegates,
       defaultDelegate: first,
+      showSources: d.showSources === true,
     };
   }
 
@@ -45,6 +56,15 @@ export default async function EmbedPage({
   // page or in the app (2026-10-08): ?journey=personal_po_box_renewal&box=450293&emirate=DXB
   const initialStart = journey || box ? { journey, box, emirate } : undefined;
   return <Experience agent={pub} initialLocale={initialLocale} initialConversationId={cid} uaePassToken={upt} embedded={embedded === "1"} initialStart={initialStart} />;
+}
+
+/** Can the mobile app's Emirates Post sign-in be checked by this agent? */
+async function appSignIn(id: string, d: AgentDefinition): Promise<boolean> {
+  try {
+    return Boolean(await epUsersBaseUrl(id, d.activeEnvironment ?? "production"));
+  } catch {
+    return true; // unknown: keep the behaviour every agent had before
+  }
 }
 
 function publicAgent(d: AgentDefinition): PublicAgent {

@@ -236,10 +236,78 @@
     }
   }
 
+  /**
+   * 3. THEY SIGNED IN FROM THE MOBILE APP (11 November).
+   *
+   * Inside Emirates Post's app the assistant is a WebView, and the app's own
+   * sign-in is Emirates Post's -- it knows nothing about this site's. So for a
+   * service signed in HERE the assistant asks the app to open this site's login
+   * in its in-app browser, with `dlg-claim=<code>` on the URL. There is no
+   * opener to post to and no shared cookie domain, so once the customer is
+   * signed in and the token appears, this page hands it to the assistant's
+   * server in a form POST (not fetch: this site's connect-src does not list
+   * us, and form-action is unrestricted), together with the code that names
+   * the conversation. The server verifies the token like any other.
+   *
+   * The code is kept across the login redirects in sessionStorage (and a
+   * 15-minute localStorage copy, for a browser that loses the first).
+   */
+  var CLAIM_KEY = "dlg-claim";
+  var CLAIM = /(^|[?&#])dlg-claim=([^&#]+)/;
+  function pendingClaim() {
+    var m = null;
+    try { m = CLAIM.exec(String(location.search) + String(location.hash)) || CLAIM.exec(openedWith()); } catch (e) { m = null; }
+    if (m) {
+      var c = decodeURIComponent(m[2]);
+      try { window.sessionStorage.setItem(CLAIM_KEY, c); } catch (e) { /* private mode */ }
+      try { window.localStorage.setItem(CLAIM_KEY, JSON.stringify({ c: c, exp: Date.now() + 15 * 60000 })); } catch (e) { /* private mode */ }
+      return c;
+    }
+    try { var s = window.sessionStorage.getItem(CLAIM_KEY); if (s) return s; } catch (e) { /* no storage */ }
+    try {
+      var l = JSON.parse(window.localStorage.getItem(CLAIM_KEY) || "null");
+      if (l && l.c && l.exp > Date.now()) return l.c;
+    } catch (e) { /* no storage */ }
+    return null;
+  }
+  function dropClaim() {
+    try { window.sessionStorage.removeItem(CLAIM_KEY); } catch (e) { /* no storage */ }
+    try { window.localStorage.removeItem(CLAIM_KEY); } catch (e) { /* no storage */ }
+  }
+  var claimSent = false;
+  function sendClaim(token) {
+    if (claimSent || !ASSISTANT) return;
+    var c = pendingClaim();
+    if (!c || !document.body) return;
+    claimSent = true;
+    dropClaim();
+    var f = document.createElement("form");
+    f.method = "POST";
+    f.action = ASSISTANT + "/api/embed/claim";
+    f.style.display = "none";
+    var fields = [["claim", c], ["token", token], ["lang", String(document.documentElement.lang || "")]];
+    for (var i = 0; i < fields.length; i++) {
+      var inp = document.createElement("input");
+      inp.type = "hidden";
+      inp.name = fields[i][0];
+      inp.value = fields[i][1];
+      f.appendChild(inp);
+    }
+    document.body.appendChild(f);
+    f.submit();
+  }
+  // Read now, before the login page redirects away from the URL that carries it.
+  pendingClaim();
+
+  function hasOpener() {
+    try { return Boolean(window.opener && window.opener !== window); } catch (e) { return false; }
+  }
+
   function sync() {
     var token = readToken();
     if (token) {
       pushToOpener(token);
+      if (!hasOpener()) sendClaim(token);
       if (canCookie) {
         // Rewritten even when unchanged: that is what pushes the idle expiry forward
         // for a customer who is still active.

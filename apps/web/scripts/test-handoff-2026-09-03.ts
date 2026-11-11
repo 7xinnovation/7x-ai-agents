@@ -13,7 +13,7 @@
  *   npx tsx scripts/test-handoff-2026-09-03.ts
  */
 process.env.SECRETS_KEY ||= "0".repeat(64);
-import { mintHandoff, readHandoff, HANDOFF_TTL_MS } from "@/lib/handoff";
+import { mintHandoff, readHandoff, HANDOFF_TTL_MS, mintClaim, readClaim, CLAIM_TTL_MS } from "@/lib/handoff";
 
 let pass = 0, fail = 0;
 const check = (l: string, ok: boolean, extra?: unknown) => {
@@ -113,6 +113,18 @@ const TOKEN = "ep-session-token-that-must-never-appear";
   check("the identity reads back", r.ok && r.claims.id?.sub === "uaepass-sub-1" && r.claims.id?.emiratesId === "784198012345678", r);
   check("...and is not readable in the code", !code.includes("784198012345678") && !code.includes("uaepass-sub-1"));
   check("...and still carries no token", !code.includes(TOKEN));
+}
+
+// 10. Sign-in claims (EPGL in the mobile app, 11 November): they read back,
+//     expire, and never pass for a handoff — nor a handoff for a claim.
+{
+  const claim = mintClaim(CID, "epgl-dialog", NOW)!;
+  const r = readClaim(claim, NOW + 60_000);
+  check("a claim reads back", r.ok && r.cid === CID && r.agent === "epgl-dialog", r);
+  check("...lasts fifteen minutes", readClaim(claim, NOW + CLAIM_TTL_MS - 1).ok && !readClaim(claim, NOW + CLAIM_TTL_MS).ok);
+  check("a claim is not a handoff", readHandoff(claim, ["ep-master", "epgl-dialog"], NOW + 1_000).ok === false);
+  check("a handoff is not a claim", readClaim(mintHandoff(CID, "epgl-dialog", NOW)!, NOW + 1_000).ok === false);
+  check("a forged plain claim is refused", readClaim(JSON.stringify({ k: "claim", cid: CID, agent: "epgl-dialog", exp: NOW * 2 }), NOW).ok === false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

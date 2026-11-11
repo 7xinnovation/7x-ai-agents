@@ -739,6 +739,8 @@ export function Experience({
   const portalSignInFailed = useRef(false);
   const portalWatch = useRef<number | null>(null);
   /** The "the app never answered" timer, so a later answer can cancel it. */
+  /** Watching a conversation signed in from the app's browser — see signIn. */
+  const claimWatch = useRef<number | null>(null);
   const nativeAskTimer = useRef<number | null>(null);
   /** Auth as it stands NOW, for callbacks that outlive the render they were made in. */
   const authenticatedRef = useRef(false);
@@ -1552,18 +1554,27 @@ export function Experience({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           // A master asks as itself, so a code minted for any of its delegates is taken.
-          // ...and says which of its services it is in, so the sign-in lands there
-          // (EPGL as well as NXN) instead of pulling the customer over to NXN.
-          body: JSON.stringify(
-            masterSlug
-              ? { agent: masterSlug, handoff, as: activeRef.current ?? undefined, cid: convId.current ?? undefined, locale }
-              : { agent: agent.slug, handoff }
-          ),
+          body: JSON.stringify({ agent: masterSlug ?? agent.slug, handoff }),
         });
         if (!res.ok) return false;
         const data = (await res.json()) as { conversationId?: string; agent?: string };
-        // ...and the widget becomes the delegate that holds the signed-in conversation.
         if (masterSlug && data.agent && front.delegates?.some((d) => d.slug === data.agent)) {
+          /**
+           * THE APP'S SIGN-IN IS NOT EVERY SERVICE'S (11 November).
+           *
+           * It is Emirates Post's, and signs in NXN only. The customer in
+           * EPGL stays where they are, signed out of EPGL — its sign-in is its
+           * own portal — and the NXN conversation is filed for when they go
+           * back to PO Boxes. Following the code to NXN is what put PO boxes on
+           * screen in the middle of a licence application.
+           */
+          const active = front.delegates.find((d) => d.slug === activeRef.current);
+          if (active && active.slug !== data.agent && active.appSignIn === false) {
+            if (data.conversationId) {
+              try { window.localStorage.setItem(convMapKey, JSON.stringify({ ...readConvMap(), [data.agent]: data.conversationId })); } catch { /* private mode */ }
+            }
+            return true;
+          }
           if (data.agent !== activeRef.current) setCaseState(null);
           activeRef.current = data.agent;
           setActiveSlug(data.agent);
@@ -1584,7 +1595,7 @@ export function Experience({
         return false;
       }
     },
-    [agent.slug, storageKey, masterSlug, front.delegates, locale]
+    [agent.slug, storageKey, masterSlug, front.delegates, convMapKey, readConvMap]
   );
 
   useEffect(() => {
@@ -2215,6 +2226,75 @@ export function Experience({
      * The host portal below is already skipped in the app for its own reasons;
      * this is the same argument one step further.
      */
+    /**
+     * IN THE APP, A SERVICE THE APP CANNOT SIGN IN (11 November).
+     *
+     * The app's sign-in is Emirates Post's; EPGL's is its own portal. So for
+     * EPGL the app is asked to OPEN that portal — not to sign in — with a claim
+     * code on the URL. Our relay script on the portal hands the token back to
+     * our server with that code once they are signed in (it cannot post to us:
+     * there is no opener in an in-app browser), and we watch this conversation
+     * until it turns authenticated.
+     */
+    if (isNative() && agent.appSignIn === false && agent.hostLoginUrl) {
+      setAuthReason(null);
+      setAuthInfo(
+        locale === "ar"
+          ? "سجّل الدخول في الصفحة التي فُتحت، ثم أغلقها للعودة إلى هنا."
+          : "Sign in on the page that opened, then close it to come back here."
+      );
+      void (async () => {
+        try {
+          const res = await fetch("/api/embed/claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agent: agent.slug, cid: convId.current ?? undefined, locale }),
+          });
+          const data = res.ok ? ((await res.json()) as { claim?: string; conversationId?: string }) : {};
+          if (!data.claim || !data.conversationId) throw new Error("no claim");
+          const cid = data.conversationId;
+          convId.current = cid;
+          if (masterSlug && activeRef.current) {
+            try { window.localStorage.setItem(convMapKey, JSON.stringify({ ...readConvMap(), [activeRef.current]: cid })); } catch { /* private mode */ }
+          }
+          const url = agent.hostLoginUrl!;
+          openExternal(`${url}${url.includes("?") ? "&" : "?"}dlg-claim=${encodeURIComponent(data.claim)}`, { name: "dlg-host-login", kind: "signin" });
+          if (claimWatch.current) window.clearInterval(claimWatch.current);
+          const until = Date.now() + 15 * 60_000;
+          claimWatch.current = window.setInterval(async () => {
+            if (Date.now() > until || convId.current !== cid) {
+              if (claimWatch.current) window.clearInterval(claimWatch.current);
+              claimWatch.current = null;
+              return;
+            }
+            try {
+              const r = await fetch(`/api/conversations/${cid}`);
+              if (!r.ok) return;
+              const c = (await r.json()) as { authenticated?: boolean; case?: CaseState };
+              if (!c.authenticated) return;
+              if (claimWatch.current) window.clearInterval(claimWatch.current);
+              claimWatch.current = null;
+              signedOut.current = false;
+              setAuthenticated(true);
+              setAuthInfo(null);
+              setAuthReason(null);
+              setSignedInPulse(true);
+              if (c.case) setCaseState(c.case);
+            } catch {
+              /* try again on the next tick */
+            }
+          }, 3000);
+        } catch {
+          setAuthInfo(null);
+          setAuthReason(
+            locale === "ar"
+              ? "تعذّر بدء تسجيل الدخول. يرجى المحاولة مرة أخرى."
+              : "Sign-in could not be started. Please try again."
+          );
+        }
+      })();
+      return;
+    }
     if (isNative()) {
       tried.push("asked the app");
       postNative({ action: "signin-needed", reason: "customer-asked" });
@@ -2444,7 +2524,7 @@ export function Experience({
       setAuthReason(null);
     }
     armSignInFallback(tried);
-  }, [agent.uaePassEnabled, agent.uaePassDirect, agent.hostLoginUrl, agent.nativeUaePassFallback, agent.slug, locale, armSignInFallback]);
+  }, [agent.uaePassEnabled, agent.uaePassDirect, agent.hostLoginUrl, agent.nativeUaePassFallback, agent.slug, agent.appSignIn, locale, armSignInFallback, masterSlug, convMapKey, readConvMap]);
 
   /**
    * The host sign-in popup closed. If no token reached us, say so instead of

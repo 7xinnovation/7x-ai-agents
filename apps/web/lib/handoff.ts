@@ -96,9 +96,44 @@ export function readHandoff(code: string, agent: string | readonly string[], now
   if (typeof claims?.cid !== "string" || typeof claims?.agent !== "string" || typeof claims?.exp !== "number") {
     return { ok: false, reason: "malformed" };
   }
+  // A sign-in CLAIM (below) is the same shape and must never pass for a handoff.
+  if ((claims as { k?: unknown }).k !== undefined) return { ok: false, reason: "malformed" };
   // Agent before expiry: a code offered to the wrong agent is a different kind of
   // wrong from a slow customer, and should not be reported as staleness.
   if (!allowed.includes(claims.agent)) return { ok: false, reason: "wrong_agent" };
   if (now >= claims.exp) return { ok: false, reason: "expired" };
   return { ok: true, claims };
+}
+
+
+/**
+ * A SIGN-IN CLAIM: the other direction (11 November).
+ *
+ * Inside the mobile app, a service whose sign-in is NOT the app's (EPGL, on
+ * ep-master) opens its own login page in the app's browser. Nothing can post
+ * back from there, so the login page's relay sends the token it finds to
+ * /api/embed/claim with this code, which names the conversation to sign in.
+ *
+ * Grants nothing by itself: the token that comes with it is verified exactly
+ * like any host token. Fifteen minutes, because a UAE PASS sign-in on a phone
+ * is an app switch and an OTP, not a page load.
+ */
+export const CLAIM_TTL_MS = 15 * 60_000;
+
+export function mintClaim(cid: string, agent: string, now = Date.now()): string | null {
+  return encryptSecret(JSON.stringify({ k: "claim", cid, agent, exp: now + CLAIM_TTL_MS }));
+}
+
+export function readClaim(code: string, now = Date.now()): { ok: true; cid: string; agent: string } | { ok: false; reason: string } {
+  if (!isEncrypted(code)) return { ok: false, reason: "malformed" };
+  const plain = decryptSecret(code);
+  if (!plain) return { ok: false, reason: "malformed" };
+  try {
+    const c = JSON.parse(plain) as { k?: string; cid?: unknown; agent?: unknown; exp?: unknown };
+    if (c.k !== "claim" || typeof c.cid !== "string" || typeof c.agent !== "string" || typeof c.exp !== "number") return { ok: false, reason: "malformed" };
+    if (now >= c.exp) return { ok: false, reason: "expired" };
+    return { ok: true, cid: c.cid, agent: c.agent };
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
 }
