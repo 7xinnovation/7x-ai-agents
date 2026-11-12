@@ -1987,6 +1987,26 @@ export async function buildApiTools(
         chosen = uniqueByNumber[sent] ?? offeredBoxIds.find((id) => id.endsWith(sent) || sent.endsWith(id)) ?? null;
       }
       /**
+       * A WRONG PREFIX, NOT A MISSING ONE (12 November, staging).
+       *
+       * FreeBoxes listed box 72423 as uniqueBoxId 172423; the model wrote
+       * 2072423 — the "2" prefix it had seen on other MyBox ids, plus a 0. Neither
+       * id ends with the other, so the match above found nothing, the invented id
+       * went out, and Emirates Post answered 108 BOX_NOT_FREE for a box they had
+       * just listed as free. Twice, two boxes. So: the printed number the sent id
+       * ends with, and failing that the box the customer chose on the case.
+       */
+      if (sent && !chosen) {
+        const nums = Object.keys(uniqueByNumber)
+          .filter((n) => n.length >= 3 && sent.endsWith(n) && offeredBoxIds.includes(uniqueByNumber[n]!))
+          .sort((a, b) => b.length - a.length);
+        const caseBox = String(opts.caseBoxNumber?.() ?? "").trim();
+        chosen =
+          (nums[0] ? uniqueByNumber[nums[0]] : undefined) ??
+          (caseBox && offeredBoxIds.includes(uniqueByNumber[caseBox] ?? "") ? uniqueByNumber[caseBox] : undefined) ??
+          null;
+      }
+      /**
        * ON `uniqueBoxID`, WHICHEVER KEY IT ARRIVED UNDER.
        *
        * This used to run only in the branch above — only when the id the model

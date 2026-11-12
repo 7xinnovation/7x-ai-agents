@@ -58,10 +58,14 @@ check("...and everything else is collected, so true", /body\.physicalBoxRequired
 check("a value the model DID send is left alone", /=== undefined/.test(block));
 
 console.log("\nThe behaviour, on the two id shapes Emirates Post actually use");
-const resolve = (offered: string[], byNumber: Record<string, string>, body: Record<string, unknown>) => {
+const resolve = (offered: string[], byNumber: Record<string, string>, body: Record<string, unknown>, caseBox = "") => {
   const sent = String(body.uniqueBoxID ?? body.uniqueBoxId ?? body.boxNumber ?? "");
   let chosen: string | null = offered.includes(sent) ? sent : null;
   if (sent && !chosen) chosen = byNumber[sent] ?? offered.find((id) => id.endsWith(sent) || sent.endsWith(id)) ?? null;
+  if (sent && !chosen) {
+    const nums = Object.keys(byNumber).filter((n) => n.length >= 3 && sent.endsWith(n) && offered.includes(byNumber[n]!)).sort((a, b) => b.length - a.length);
+    chosen = (nums[0] ? byNumber[nums[0]] : undefined) ?? (caseBox && offered.includes(byNumber[caseBox] ?? "") ? byNumber[caseBox] : undefined) ?? null;
+  }
   const out = { ...body };
   if (chosen) { out.uniqueBoxID = chosen; delete out.uniqueBoxId; delete out.boxNumber; }
   return out;
@@ -87,6 +91,20 @@ const resolve = (offered: string[], byNumber: Record<string, string>, body: Reco
   check("a box we never offered is not invented into uniqueBoxID", out.uniqueBoxID === undefined, out);
   check("...and is left for Emirates Post to refuse", out.boxNumber === "999999", out);
 }
+
+{
+  // MyBox, Abu Dhabi, staging 12 November — the exact payload that failed.
+  const offered = ["172423", "172432", "172447", "172449", "172472"];
+  const byNum = { "72423": "172423", "72432": "172432", "72447": "172447", "72449": "172449", "72472": "172472" };
+  const out = resolve(offered, byNum, { bundleId: "IN", uniqueBoxID: "2072423" });
+  check("a wrong prefix (2072423 for 172423) resolves by the printed number", out.uniqueBoxID === "172423", out);
+  const out2 = resolve(offered, byNum, { bundleId: "IN", uniqueBoxID: "9999999" }, "72432");
+  check("an id matching nothing falls back to the box chosen on the case", out2.uniqueBoxID === "172432", out2);
+  const out3 = resolve(offered, byNum, { bundleId: "IN", uniqueBoxID: "9999999" });
+  check("...and with no case box, nothing is invented", out3.uniqueBoxID === "9999999", out3);
+}
+check("the source carries the wrong-prefix fallback", /sent\.endsWith\(n\) && offeredBoxIds\.includes\(uniqueByNumber\[n\]!\)/.test(block));
+check("...and the case-box fallback", /opts\.caseBoxNumber\?\.\(\)/.test(block));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
