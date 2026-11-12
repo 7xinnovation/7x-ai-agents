@@ -1360,6 +1360,15 @@ export function Experience({
   // voiceReady above.
   const [canExpand, setCanExpand] = useState(false);
   useEffect(() => setCanExpand(!isNative() && window.parent !== window), []);
+  /**
+   * A native host may know the bottom inset when the WebView cannot report it
+   * (older Android WebViews give env(safe-area-inset-bottom) as 0 even edge to
+   * edge). `window.__dialogNativeBottomInset = <css px>` before load, if so.
+   */
+  useEffect(() => {
+    const v = (window as unknown as { __dialogNativeBottomInset?: unknown }).__dialogNativeBottomInset;
+    if (typeof v === "number" && v > 0 && v < 200) document.documentElement.style.setProperty("--dlg-native-inset-bottom", `${v}px`);
+  }, []);
   // A phone has no tooltip, so a control whose meaning lives in one has to say
   // it another way. Settled after mount for the same hydration reason.
   const [coarsePointer, setCoarsePointer] = useState(false);

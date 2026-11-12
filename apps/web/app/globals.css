@@ -1971,6 +1971,10 @@ body {
   z-index: 2;
   margin-top: -22px;
   padding: 26px 16px 10px;
+  /* Clear of the phone's navigation bar / home indicator: the OS inset when the
+     WebView reports one, or the one a native host hands us
+     (window.__dialogNativeBottomInset, in CSS px), whichever is larger. */
+  padding-bottom: calc(10px + max(env(safe-area-inset-bottom, 0px), var(--dlg-native-inset-bottom, 0px)));
   pointer-events: none;
   background: linear-gradient(
     180deg,
