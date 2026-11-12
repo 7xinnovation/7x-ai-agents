@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Space_Grotesk } from "next/font/google";
-import { LayoutGrid, MessagesSquare, Inbox, Activity, BarChart3, Users, Search, ArrowUpRight, LogOut, PanelLeftClose, PanelLeftOpen, Menu, X, ShieldCheck, HeartPulse, ScrollText, ListChecks, Receipt } from "lucide-react";
+import { LayoutGrid, MessagesSquare, Inbox, BarChart3, Users, Search, ArrowUpRight, LogOut, PanelLeftClose, PanelLeftOpen, Menu, X, ShieldCheck, HeartPulse, ScrollText, ListChecks, Receipt } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const grotesk = Space_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-grotesk", display: "swap" });
@@ -15,7 +15,7 @@ const NAV = [
   { href: "/admin/agents", label: "Agents", icon: MessagesSquare, exact: false },
   { href: "/admin/inbox", label: "Inbox", icon: Inbox, exact: false },
   { href: "/admin/analytics", label: "Insights", icon: BarChart3, exact: false },
-  { href: "/admin/activity", label: "Activity", icon: Activity, exact: true },
+  // Activity is hidden for now (12 November) — the page still exists at /admin/activity.
   { href: "/admin/journeys", label: "Journeys", icon: ListChecks, exact: false },
   { href: "/admin/payments", label: "Payments", icon: Receipt, exact: false },
   { href: "/admin/api-logs", label: "API Logs", icon: ScrollText, exact: false },

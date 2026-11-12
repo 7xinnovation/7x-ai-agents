@@ -35,7 +35,7 @@ export default async function ConversationView({ params }: { params: Promise<{ i
         <div>
           <h1>Conversation</h1>
           <p>
-            <Link href="/admin/activity">Activity</Link> / {agent?.name ?? "—"} ·{" "}
+            <Link href="/admin/inbox">Inbox</Link> / {agent?.name ?? "—"} ·{" "}
             {data.conversation.locale.toUpperCase()} · {data.conversation.authenticated ? "authenticated" : "guest"} ·{" "}
             {fmt(data.conversation.createdAt)}
           </p>

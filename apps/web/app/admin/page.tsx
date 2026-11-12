@@ -135,7 +135,6 @@ export default async function Overview() {
                 <span className="text-[12px] text-muted">{ago(r.createdAt)}</span>
               </div>
             ))}
-            <Link href="/admin/activity" className="mt-1.5 inline-flex items-center gap-1 text-[13px] font-semibold text-[var(--color-brand)] hover:underline">All activity <ArrowRight className="h-3.5 w-3.5" /></Link>
           </CardContent>
         </Card>
       </div>
