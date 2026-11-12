@@ -90,6 +90,7 @@ check("the save completes userProfile, not only the id", /rental_save_profile_co
 check("...name from the signed-in profile", /up\.customerNameEN = known\.name/.test(integrations));
 check("...mobile and email, falling back to the save's own contact details", /body\.contactPhone/.test(integrations) && /body\.contactEmail/.test(integrations));
 check("...never overwriting what was written", /if \(blank\(up\.customerNameEN\) && known\?\.name\)/.test(integrations));
+check("idType goes with idNumber", /up\.idType = "EmiratesID"/.test(integrations));
 check("the profile resolver reaches the save", /verifiedProfile: agent\.definition\.tenantSlug === "nxn" \? resolveProfile/.test(route));
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

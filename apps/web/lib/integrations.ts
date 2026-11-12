@@ -2527,6 +2527,13 @@ export async function buildApiTools(
       if (opts.verifiedProfile || body.contactEmail || body.contactPhone) {
         const up = (body.userProfile ?? {}) as Record<string, unknown>;
         const blank = (v: unknown) => !String(v ?? "").trim();
+        // The documented save that worked sent idType beside idNumber; none of
+        // the failed ones did.
+        if (!blank(up.idNumber) && blank(up.idType)) {
+          up.idType = "EmiratesID";
+          body.userProfile = up;
+          patched = true;
+        }
         if (blank(up.customerNameEN) || blank(up.mobileNumber) || blank(up.email)) {
           const known = opts.verifiedProfile ? await opts.verifiedProfile().catch(() => null) : null;
           const before = JSON.stringify(up);
