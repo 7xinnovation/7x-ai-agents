@@ -1506,7 +1506,7 @@ export async function buildApiTools(
      * The rest of the signed-in customer's profile — name, mobile, email — for
      * userProfile on a rental save. See the save patch (12 November).
      */
-    verifiedProfile?: () => Promise<{ name?: string; mobile?: string; email?: string } | null>;
+    verifiedProfile?: () => Promise<{ name?: string; nameAr?: string; mobile?: string; email?: string } | null>;
     /**
      * The PO Boxes this customer actually holds, for the ownership gate.
      *
@@ -2534,12 +2534,46 @@ export async function buildApiTools(
           body.userProfile = up;
           patched = true;
         }
-        if (blank(up.customerNameEN) || blank(up.mobileNumber) || blank(up.email)) {
+        /**
+         * The shape Emirates Post IT gave as correct (12 November): customerNameAr,
+         * customerNameEN, email, idNumber, idType, language, mobileNumber, the
+         * mobile written 971XXXXXXXXX. The account record masks its mobile
+         * (`*********123`), so a masked one is never sent: the save's own
+         * contact phone is, normalised.
+         */
+        const realMobile = (v: unknown) => {
+          const s = String(v ?? "").trim();
+          if (!s || s.includes("*")) return "";
+          const d = s.replace(/[^\d]/g, "");
+          if (/^9715\d{8}$/.test(d)) return d;
+          if (/^05\d{8}$/.test(d)) return "971" + d.slice(1);
+          if (/^5\d{8}$/.test(d)) return "971" + d;
+          return d.length >= 9 ? d : "";
+        };
+        if (!blank(up.mobileNumber)) {
+          const n = realMobile(up.mobileNumber);
+          if (n && n !== up.mobileNumber) {
+            up.mobileNumber = n;
+            body.userProfile = up;
+            patched = true;
+          } else if (!n) {
+            delete up.mobileNumber;
+            body.userProfile = up;
+            patched = true;
+          }
+        }
+        if (blank(up.language)) {
+          up.language = String(opts.locale ?? "").toLowerCase().startsWith("ar") ? "Arabic" : "English";
+          body.userProfile = up;
+          patched = true;
+        }
+        if (blank(up.customerNameEN) || blank(up.customerNameAr) || blank(up.mobileNumber) || blank(up.email)) {
           const known = opts.verifiedProfile ? await opts.verifiedProfile().catch(() => null) : null;
           const before = JSON.stringify(up);
           if (blank(up.customerNameEN) && known?.name) up.customerNameEN = known.name;
+          if (blank(up.customerNameAr) && known?.nameAr) up.customerNameAr = known.nameAr;
           if (blank(up.mobileNumber)) {
-            const m = known?.mobile || String(body.contactPhone ?? "").trim();
+            const m = realMobile(known?.mobile) || realMobile(body.contactPhone);
             if (m) up.mobileNumber = m;
           }
           if (blank(up.email)) {
@@ -2558,7 +2592,7 @@ export async function buildApiTools(
                 tool: toolName,
                 method: entry.op.method,
                 path: entry.op.path,
-                input: { fields: ["customerNameEN", "mobileNumber", "email"].filter((k) => !blank(up[k])), hadName: Boolean(known?.name) },
+                input: { fields: ["customerNameEN", "customerNameAr", "mobileNumber", "email"].filter((k) => !blank(up[k])), hadName: Boolean(known?.name) },
                 response: "userProfile carried only some of customerNameEN, mobileNumber, email; completed from the signed-in profile and the save's contact details.",
               },
             }).catch(() => {});

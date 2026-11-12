@@ -1083,7 +1083,7 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
   let hostToken: string | undefined;
   let verifiedEmiratesId: string | undefined;
   /** Name and mobile from the same verified introspection, for the survey. */
-  let verifiedIdentity: { name?: string; mobile?: string; email?: string } | undefined;
+  let verifiedIdentity: { name?: string; nameAr?: string; mobile?: string; email?: string } | undefined;
   if (body.uaePassToken) {
     // Two shapes, decided by what the token IS rather than by configuration:
     // a signed JWS is verified against a key; Emirates Post's identity-service
@@ -1175,7 +1175,7 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
           if (verifiedEmiratesId && session.caseId) {
             void rememberVerifiedEmiratesId(session.caseId, verifiedEmiratesId).catch(() => {});
           }
-          verifiedIdentity = { name: v.identity.name, mobile: v.identity.mobileNumber, email: v.identity.email };
+          verifiedIdentity = { name: v.identity.name, nameAr: v.identity.nameAr, mobile: v.identity.mobileNumber, email: v.identity.email };
         } else reason = v.reason;
       }
     }
@@ -1326,20 +1326,21 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
    * then the stored token, introspected once.
    */
   let profileResolved: { name?: string; mobile?: string; email?: string } | null | undefined;
-  const resolveProfile = async (): Promise<{ name?: string; mobile?: string; email?: string } | null> => {
+  const resolveProfile = async (): Promise<{ name?: string; nameAr?: string; mobile?: string; email?: string } | null> => {
     if (profileResolved !== undefined) return profileResolved;
     const d = session.state.data as Record<string, unknown>;
-    let p: { name?: string; mobile?: string; email?: string } = {
+    let p: { name?: string; nameAr?: string; mobile?: string; email?: string } = {
       name: verifiedIdentity?.name ?? str(d.contact_name),
+      nameAr: verifiedIdentity?.nameAr,
       mobile: verifiedIdentity?.mobile ?? str(d.contact_phone),
       email: verifiedIdentity?.email ?? str(d.contact_email),
     };
     const stored = backendSessionToken ?? uaePassIdentityToken;
-    if ((!p.name || !p.mobile || !p.email) && stored && session.authenticated) {
+    if ((!p.name || !p.nameAr || !p.mobile || !p.email) && stored && session.authenticated) {
       try {
         const usersBase = await epUsersBaseUrl(agent.id, agent.definition.activeEnvironment ?? "production");
         const v = usersBase ? await introspectEmiratesPostToken(stored, usersBase) : null;
-        if (v?.ok) p = { name: p.name ?? v.identity.name, mobile: p.mobile ?? v.identity.mobileNumber, email: p.email ?? v.identity.email };
+        if (v?.ok) p = { name: p.name ?? v.identity.name, nameAr: p.nameAr ?? v.identity.nameAr, mobile: p.mobile ?? v.identity.mobileNumber, email: p.email ?? v.identity.email };
       } catch {
         /* what we have is what goes; the save fills the rest from its own contact details */
       }

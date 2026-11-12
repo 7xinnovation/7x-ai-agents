@@ -123,6 +123,8 @@ export interface EpIdentity {
    */
   email?: string;
   name?: string;
+  /** The Arabic name on the same record (fullNameAR, else first + last). */
+  nameAr?: string;
   /** Emirates Post's own numeric user id. */
   epUserId?: number;
 }
@@ -180,6 +182,10 @@ export async function introspectEmiratesPostToken(
       .map((k) => (u as Record<string, unknown>)[k])
       .find((v): v is string => typeof v === "string" && v.includes("@")),
     name: [u.firstNameEN, u.lastNameEN].filter((x) => typeof x === "string" && x).join(" ").trim() || undefined,
+    nameAr:
+      (typeof u.fullNameAR === "string" && u.fullNameAR.trim()) ||
+      [u.firstNameAR, u.lastNameAR].filter((x) => typeof x === "string" && x).join(" ").trim() ||
+      undefined,
     epUserId: typeof u.id === "number" ? u.id : undefined,
   };
   introspectCache.set(key, { at: Date.now(), result: identity });

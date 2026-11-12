@@ -93,5 +93,22 @@ check("...never overwriting what was written", /if \(blank\(up\.customerNameEN\)
 check("idType goes with idNumber", /up\.idType = "EmiratesID"/.test(integrations));
 check("the profile resolver reaches the save", /verifiedProfile: agent\.definition\.tenantSlug === "nxn" \? resolveProfile/.test(route));
 
+console.log("\nThe profile IT gave as correct (12 November)");
+const mob = /const realMobile = (\(v: unknown\) => \{[\s\S]*?\n        \});/.exec(integrations);
+check("the mobile rule is where the test thinks it is", Boolean(mob));
+const realMobile: (v: unknown) => string = eval(mob![1]!.replace(": unknown", ""));
+for (const [what, v, want] of [
+  ["local 05", "0542574775", "971542574775"],
+  ["already 971", "971567067392", "971567067392"],
+  ["+971 with spaces", "+971 56 706 7392", "971567067392"],
+  ["bare 5", "567067392", "971567067392"],
+  ["masked by the account record", "*********392", ""],
+  ["empty", "", ""],
+] as const) check(`mobile ${what}: ${JSON.stringify(v)}`, realMobile(v) === want, realMobile(v));
+check("language is set from the conversation", /up\.language = String\(opts\.locale/.test(integrations));
+check("customerNameAr is filled from the account", /up\.customerNameAr = known\.nameAr/.test(integrations));
+check("the account's Arabic name is read", /fullNameAR/.test(read("../lib/hostToken.ts")));
+check("the resolver carries it", /nameAr: p\.nameAr \?\? v\.identity\.nameAr/.test(route));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
