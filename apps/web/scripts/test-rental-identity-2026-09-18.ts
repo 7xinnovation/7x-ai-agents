@@ -85,5 +85,12 @@ console.log("\nThe failure is not reported as a payment");
 check("a failed save says no money moved", /NO ORDER WAS CREATED AND NO MONEY HAS MOVED/.test(integrations));
 check("...and keeps the reservation alive", /Their reservation is still held/.test(integrations));
 
+// 12 November: every production rental died 115 carrying userProfile {idNumber} alone.
+check("the save completes userProfile, not only the id", /rental_save_profile_completed/.test(integrations));
+check("...name from the signed-in profile", /up\.customerNameEN = known\.name/.test(integrations));
+check("...mobile and email, falling back to the save's own contact details", /body\.contactPhone/.test(integrations) && /body\.contactEmail/.test(integrations));
+check("...never overwriting what was written", /if \(blank\(up\.customerNameEN\) && known\?\.name\)/.test(integrations));
+check("the profile resolver reaches the save", /verifiedProfile: agent\.definition\.tenantSlug === "nxn" \? resolveProfile/.test(route));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

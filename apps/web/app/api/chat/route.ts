@@ -1319,6 +1319,34 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
    * stored token — one introspection, cached by lib/hostToken for the token's
    * life, and written back onto the case so the next turn does not repeat it.
    */
+  /**
+   * The rest of who they are — name, mobile, email — for userProfile on a
+   * rental save (12 November: every production rental died 115 carrying the
+   * id alone). This turn's verification, then what sign-in seeded on the case,
+   * then the stored token, introspected once.
+   */
+  let profileResolved: { name?: string; mobile?: string; email?: string } | null | undefined;
+  const resolveProfile = async (): Promise<{ name?: string; mobile?: string; email?: string } | null> => {
+    if (profileResolved !== undefined) return profileResolved;
+    const d = session.state.data as Record<string, unknown>;
+    let p: { name?: string; mobile?: string; email?: string } = {
+      name: verifiedIdentity?.name ?? str(d.contact_name),
+      mobile: verifiedIdentity?.mobile ?? str(d.contact_phone),
+      email: verifiedIdentity?.email ?? str(d.contact_email),
+    };
+    const stored = backendSessionToken ?? uaePassIdentityToken;
+    if ((!p.name || !p.mobile || !p.email) && stored && session.authenticated) {
+      try {
+        const usersBase = await epUsersBaseUrl(agent.id, agent.definition.activeEnvironment ?? "production");
+        const v = usersBase ? await introspectEmiratesPostToken(stored, usersBase) : null;
+        if (v?.ok) p = { name: p.name ?? v.identity.name, mobile: p.mobile ?? v.identity.mobileNumber, email: p.email ?? v.identity.email };
+      } catch {
+        /* what we have is what goes; the save fills the rest from its own contact details */
+      }
+    }
+    return (profileResolved = p.name || p.mobile || p.email ? p : null);
+  };
+
   let eidResolved: string | null | undefined;
   const resolveEmiratesId = async (): Promise<string | null> => {
     if (eidResolved !== undefined) return eidResolved;
@@ -1653,6 +1681,7 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
     // answers 115 USER_PROFILE_INVALID without it, and the model was the only
     // thing supplying it. See resolveEmiratesId, and the save patch that uses it.
     verifiedEmiratesId: agent.definition.tenantSlug === "nxn" ? resolveEmiratesId : undefined,
+    verifiedProfile: agent.definition.tenantSlug === "nxn" ? resolveProfile : undefined,
     // Set on the save payload rather than handed to the model, which pasted it
     // into a pay block and sent the customer to our own return page.
     paymentReturnUrl: (agent.definition.journeys ?? [])

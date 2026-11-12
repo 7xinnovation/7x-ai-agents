@@ -1503,6 +1503,11 @@ export async function buildApiTools(
      */
     verifiedEmiratesId?: () => Promise<string | null>;
     /**
+     * The rest of the signed-in customer's profile — name, mobile, email — for
+     * userProfile on a rental save. See the save patch (12 November).
+     */
+    verifiedProfile?: () => Promise<{ name?: string; mobile?: string; email?: string } | null>;
+    /**
      * The PO Boxes this customer actually holds, for the ownership gate.
      *
      * Resolved lazily and only when a management call is about to run. Returning
@@ -2504,6 +2509,55 @@ export async function buildApiTools(
       // model had written something left a billingDetail of firstName, lastName and
       // emailAddress only — no address, city or country — and that save came back
       // 157. Every save that carried all six fields has succeeded.
+      /**
+       * THE WHOLE PROFILE, NOT ONLY THE ID (12 November).
+       *
+       * Every new rental on production — 21 Oct, 2 Nov, 11 Nov, three paid
+       * customers — died at the save with 115 USER_PROFILE_INVALID while every
+       * renewal went through. All six failed saves carried `userProfile:
+       * {idNumber}` and nothing else, and the billing name and email built from
+       * that profile went out blank. The contract asks for customerNameEN,
+       * mobileNumber, email and idNumber; the model wrote one of the four and
+       * the idNumber stamp below made sure of that one only.
+       *
+       * Filled where missing from the signed-in customer's own Emirates Post
+       * profile, then from the contact details already on this save. Never
+       * overwrites what was written.
+       */
+      if (opts.verifiedProfile || body.contactEmail || body.contactPhone) {
+        const up = (body.userProfile ?? {}) as Record<string, unknown>;
+        const blank = (v: unknown) => !String(v ?? "").trim();
+        if (blank(up.customerNameEN) || blank(up.mobileNumber) || blank(up.email)) {
+          const known = opts.verifiedProfile ? await opts.verifiedProfile().catch(() => null) : null;
+          const before = JSON.stringify(up);
+          if (blank(up.customerNameEN) && known?.name) up.customerNameEN = known.name;
+          if (blank(up.mobileNumber)) {
+            const m = known?.mobile || String(body.contactPhone ?? "").trim();
+            if (m) up.mobileNumber = m;
+          }
+          if (blank(up.email)) {
+            const e = known?.email || String(body.contactEmail ?? "").trim();
+            if (e) up.email = e;
+          }
+          if (JSON.stringify(up) !== before) {
+            body.userProfile = up;
+            patched = true;
+            void audit({
+              agentId,
+              conversationId: opts.conversationId,
+              actor: "system",
+              action: "rental_save_profile_completed",
+              payload: {
+                tool: toolName,
+                method: entry.op.method,
+                path: entry.op.path,
+                input: { fields: ["customerNameEN", "mobileNumber", "email"].filter((k) => !blank(up[k])), hadName: Boolean(known?.name) },
+                response: "userProfile carried only some of customerNameEN, mobileNumber, email; completed from the signed-in profile and the save's contact details.",
+              },
+            }).catch(() => {});
+          }
+        }
+      }
       const pay = (body.paymentProperties ?? {}) as Record<string, unknown>;
       const u = (body.userProfile ?? {}) as Record<string, unknown>;
       const full = String(u.customerNameEN ?? u.customerNameAr ?? "").trim();
