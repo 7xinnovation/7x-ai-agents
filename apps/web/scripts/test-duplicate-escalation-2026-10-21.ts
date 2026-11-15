@@ -43,11 +43,13 @@ check("a fresh case starts with none", emptyCase().escalation === null, emptyCas
 check("the tool writes it on success", /escalation: \{ reference, at: new Date\(\)\.toISOString\(\), reason: String\(input\.reason \?\? ""\) \}/.test(tools));
 
 console.log("\nA second call is answered with the first reference");
-check("the fence is before the adapter call", tools.indexOf("const already = state.escalation;") < tools.indexOf("await adapters.crm.createCallback"));
-check("...and returns the reference already given", /ALREADY RAISED — NOTHING FAILED/.test(tools) && /\$\{already\.reference\}/.test(tools));
-check("...telling the model not to invent a new one", /do NOT invent a new reference/.test(tools));
+// Reworded 15 November: the fence compares against every case raised and
+// names what the matching one covers. See test-separate-enquiries-2026-11-15.ts.
+check("the fence is before the adapter call", tools.indexOf("const blockedBy =") > 0 && tools.indexOf("const blockedBy =") < tools.indexOf("await adapters.crm.createCallback"));
+check("...and returns the reference already given", /NOT RAISED AGAIN — NOTHING FAILED/.test(tools) && /\$\{blockedBy\.reference\}/.test(tools));
+check("...telling the model not to invent a new one", /do NOT invent a reference/.test(tools));
 check("...and not to narrate a re-filing", /submitting it properly/.test(tools));
-check("it is not an error, so the turn carries on", !/ALREADY RAISED[\s\S]{0,900}isError: true/.test(tools));
+check("it is not an error, so the turn carries on", !/NOT RAISED AGAIN[\s\S]{0,1500}isError: true/.test(tools));
 
 console.log("\nSame matter, restated, is the same enquiry");
 const first = "I'm not happy with the experience I want to escalate an issue";

@@ -1,0 +1,75 @@
+/**
+ * A different matter is a different case, at once; and the references this
+ * conversation raised are the record.
+ *
+ * Production, 14 November (conversation 2396afcb). INQ-01289167 was raised at
+ * 22:50 about a mailbox installation. At 22:55 the customer asked for a SEPARATE
+ * enquiry about MyHome discounts; the duplicate fence refused anything within
+ * ten minutes and said "if the reference comes up at all, it is INQ-01289167",
+ * so she was told the discounts were recorded under the mailbox case. Four
+ * refusals later the window lapsed, INQ-01289171 was created for real at 23:00,
+ * and at 23:01 the model told her it had invented it.
+ *
+ * Run from apps/web:  npx tsx scripts/test-separate-enquiries-2026-11-15.ts
+ */
+import { emptyCase } from "@dialog/config";
+import { dispatchTool } from "../../../packages/core/src/ai/tools";
+
+let pass = 0, fail = 0;
+const check = (n: string, ok: boolean, got?: unknown) => {
+  if (ok) { pass++; console.log(`  ok   ${n}`); }
+  else { fail++; console.log(`  FAIL ${n}${got === undefined ? "" : ` — ${JSON.stringify(got)}`}`); }
+};
+
+let n = 1289167;
+const created: string[] = [];
+const crm = { createCallback: async (_c: unknown, req: { reason: string }) => { const reference = `INQ-0${n}`; n += 4; created.push(`${reference}: ${req.reason}`); return { reference }; } };
+const agent = { name: "Mira", integrations: { crm: { adapter: "mock" } }, journeys: [], fields: [] } as never;
+let state = emptyCase() as Parameters<typeof dispatchTool>[2]["state"];
+const call = async (reason: string, userMessage: string) => {
+  const r = await dispatchTool("request_escalation", { name: "Nisreen", phone: "0569665516", email: "n@example.com", reason }, {
+    agent, state, adapters: { crm } as never, authenticated: true, locale: "en", agentId: "a", caseId: "c", userMessage,
+  } as never);
+  state = r.state;
+  return r;
+};
+const ago = (min: number) => { if (state.escalation) state = { ...state, escalation: { ...state.escalation, at: new Date(Date.now() - min * 60_000).toISOString() }, escalations: (state.escalations ?? []).map((e) => ({ ...e, at: new Date(Date.now() - min * 60_000).toISOString() })) }; };
+
+const MAILBOX = "Customer asks whether Emirates Post offers a physical mailbox installation service for private villas, standalone or as an add-on to MyHome.";
+const DISCOUNT = "Customer would like to know whether any special discounts or promotional rates are available for the MyHome PO Box subscription.";
+
+console.log("\nThe 14 November sequence");
+const r1 = await call(MAILBOX, "Yes, please raise an official enquiry about mailbox installation");
+check("the first enquiry is raised", /INQ-01289167/.test(r1.result) && created.length === 1, r1.result);
+ago(5); // 22:55
+const r2 = await call(DISCOUNT, "Please raise an enquiry about discounts");
+check("five minutes later, a DIFFERENT matter is raised at once", created.length === 2 && /INQ-01289171/.test(r2.result), r2.result);
+check("both are on the record", state.escalations?.length === 2, state.escalations);
+ago(1);
+const r3 = await call("Customer wants to know about MyHome discounts and promotional rates available for the subscription", "did you raise it?");
+check("restating the discounts enquiry is NOT a third case", created.length === 2, created);
+check("...it is answered with the discounts reference", /INQ-01289171/.test(r3.result), r3.result);
+check("...says what that reference covers", /covers ONLY/.test(r3.result) && /discounts/.test(r3.result), r3.result);
+check("...and forbids moving a topic onto another case", /Do NOT tell the customer that INQ-01289171 covers any OTHER topic/.test(r3.result), r3.result);
+check("...and no longer says 'it is the same one you already gave them'", !/same one you already gave them/.test(r3.result));
+const r4 = await call(MAILBOX, "and the mailbox one?");
+check("restating the FIRST enquiry returns the FIRST reference", /INQ-01289167/.test(r4.result) && created.length === 2, r4.result);
+
+console.log("\nThe October duplicates stay fixed");
+state = emptyCase() as typeof state; created.length = 0;
+await call("I'm not happy with the experience I want to escalate an issue", "escalate");
+const d1 = await call("Customer requested to speak to someone about service quality", "No, thanks");
+check("a differently-worded retry in the same exchange is not a second case", created.length === 1, created);
+check("...and is not an error", !d1.isError);
+ago(1);
+await call("", "when will they call?");
+check("a reason-less call is never a second case", created.length === 1, created);
+
+console.log("\nThe prompt carries the record");
+const promptSrc = (await import("node:fs")).readFileSync(new URL("../../../packages/core/src/ai/prompt.ts", import.meta.url), "utf8");
+check("the case-state section lists the enquiries", /\$\{enquiriesNote\(state\)\}/.test(promptSrc));
+check("...as returned by the case system, never invented", /none was generated by you/.test(promptSrc) && /never say one of these was invented or not created/.test(promptSrc));
+check("...each covering only its own matter", /Each reference covers only the matter listed beside it/.test(promptSrc));
+
+console.log(`\n${pass} passed, ${fail} failed\n`);
+process.exit(fail ? 1 : 0);

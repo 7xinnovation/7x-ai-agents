@@ -8,14 +8,18 @@ import { setField, setDocument, setJourney, setPayment, findJourney, evalConditi
 import { RECORD_IDENTITY } from "./extract";
 
 /**
- * How long after an enquiry a SECOND one can be a second enquiry at all.
+ * How long after an enquiry a DIFFERENTLY-WORDED second call is still treated
+ * as the same exchange.
  *
  * Every duplicate reported on 20 October was filed within the same minute or
  * two of the first — the model answering "no, thanks" or "when will they call?"
- * by raising the case again. A customer who genuinely has a second, unrelated
- * matter has by then had a conversation about the first.
+ * by raising the case again. This was ten minutes and applied to every topic,
+ * which on 14 November refused a customer's genuinely separate enquiry five
+ * minutes after her first (see request_escalation). A restatement of the SAME
+ * matter is caught by sameEnquiry at any time; this window only covers a retry
+ * worded so differently that the comparison misses it.
  */
-const NEW_ENQUIRY_AFTER_MINUTES = 10;
+const SAME_EXCHANGE_MINUTES = 2;
 
 /**
  * Is this the enquiry we already raised, restated?
@@ -1158,22 +1162,45 @@ export async function dispatchTool(
        * confirmation, a thank-you and a "when will they call?" are none of
        * those, which is exactly what was being filed.
        */
-      const already = state.escalation;
-      if (already) {
-        const since = (Date.now() - Date.parse(already.at)) / 60_000;
-        const newMatter =
-          Number.isFinite(since) && since >= NEW_ENQUIRY_AFTER_MINUTES && !sameEnquiry(already.reason, String(input.reason ?? ""));
-        if (!newMatter) {
-          return {
-            result:
-              `ALREADY RAISED — NOTHING FAILED AND NOTHING IS MISSING. This conversation's enquiry is already with the team under reference ${already.reference}, ` +
-              `and no second one has been created. Do NOT say you are filing it, submitting it properly, or raising it again, and do NOT invent a new reference: ` +
-              `if the reference comes up at all, it is ${already.reference} and it is the same one you already gave them. ` +
-              `Answer whatever they actually asked — if that was "no, thanks" or a thank-you, simply close warmly and stop.`,
-            state,
-            events,
-          };
-        }
+      /**
+       * A DIFFERENT MATTER IS A DIFFERENT CASE — AT ONCE (15 November).
+       *
+       * The fence above used to refuse ANY second enquiry for ten minutes,
+       * whatever it was about. Production, 14 November: a customer had
+       * INQ-01289167 about a mailbox installation and five minutes later asked
+       * for a separate enquiry about MyHome discounts. The fence refused it and
+       * said "if the reference comes up at all, it is INQ-01289167", so the
+       * model told her the discounts were recorded under the mailbox case —
+       * which they never were — then contradicted itself through four refusals
+       * until the window lapsed and INQ-01289171 was created for real.
+       *
+       * So the same matter (compared against EVERY case raised here) gets its
+       * own reference back, any time; a different one is raised now. The only
+       * time rule left is the restated retry inside one exchange, which is what
+       * the October duplicates were.
+       */
+      const raised = [...(state.escalations ?? [])];
+      if (state.escalation && !raised.some((e) => e.reference === state.escalation!.reference)) raised.push(state.escalation);
+      const reason = String(input.reason ?? "");
+      const same = raised.find((e) => sameEnquiry(e.reason, reason));
+      const latest = raised[raised.length - 1];
+      const sinceLatest = latest ? (Date.now() - Date.parse(latest.at)) / 60_000 : Infinity;
+      const blockedBy = same ?? (Number.isFinite(sinceLatest) && sinceLatest < SAME_EXCHANGE_MINUTES ? latest : undefined);
+      if (blockedBy) {
+        const list = raised.map((e) => `${e.reference} (${e.reason || "no reason recorded"})`).join("; ");
+        return {
+          result:
+            `NOT RAISED AGAIN — NOTHING FAILED. ${same ? "This is the same matter as" : "A case was created moments ago:"} ${blockedBy.reference}, ` +
+            `which covers ONLY: "${blockedBy.reason || "the customer's earlier request"}". Every case raised in this conversation: ${list}. ` +
+            `All of these were returned by Emirates Post's case system. Do NOT say you are filing it, submitting it properly, or raising it again, and do NOT invent a reference. ` +
+            `Do NOT tell the customer that ${blockedBy.reference} covers any OTHER topic. ` +
+            (same
+              ? `If they are in fact asking about something different, call request_escalation again with that different matter as the reason.`
+              : `If the customer is asking about a different matter, call request_escalation again on their next message with that matter as the reason.`) +
+            ` Answer whatever they actually asked — if that was "no, thanks" or a thank-you, simply close warmly and stop.`,
+          state,
+          events,
+        };
       }
       /**
        * THEIR CASE SYSTEM WILL NOT TAKE A CALLBACK WITHOUT AN EMAIL.
@@ -1271,10 +1298,11 @@ export async function dispatchTool(
         status: "escalated",
         escalation: { reference, at: new Date().toISOString(), reason: String(input.reason ?? "") },
       };
+      state = { ...state, escalations: [...raised, state.escalation!] };
       events.push({ type: "escalation", reference });
       events.push({ type: "case", state });
       return {
-        result: `Enquiry recorded with reference ${reference} — the team receives it from here. Give the customer the reference and say the team will contact them; do not send them anywhere else to raise it again.`,
+        result: `Enquiry recorded with reference ${reference}, returned by the case system — the team receives it from here. Give the customer the reference and say the team will contact them; do not send them anywhere else to raise it again.`,
         state,
         events,
       };

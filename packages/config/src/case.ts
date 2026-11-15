@@ -261,6 +261,19 @@ export const CaseState = z.object({
     })
     .nullable()
     .default(null),
+  /**
+   * EVERY enquiry this conversation raised, oldest first (15 November).
+   *
+   * `escalation` holds only the latest, so after a second case the first was
+   * gone from the record and the model had nothing but its own history to say
+   * which references were real. Production, 14 November: INQ-01289167 and
+   * INQ-01289171 were both returned by Emirates Post's case system, and the
+   * model then told the customer it had made the second one up. The prompt now
+   * lists these as the record.
+   */
+  escalations: z
+    .array(z.object({ reference: z.string(), at: z.string(), reason: z.string().default("") }))
+    .default([]),
   // Set once submitted to the system of record.
   reference: z.string().nullable(),
   /**
@@ -299,6 +312,7 @@ export function emptyCase(): CaseState {
     receiptOfferedAt: null,
     gsbCompanies: [],
     escalation: null,
+    escalations: [],
     readiness: { complete: false, missing: [] },
     payment: { status: "none", reference: null, amount: null, currency: "AED", link: null, baseAmount: null, provider: null, method: null },
     reference: null,
