@@ -77,6 +77,18 @@ const JOURNEYS: Record<string, string> = {
 export const journeyLabel = (key: string | null | undefined): string | null =>
   key ? JOURNEYS[key] ?? key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : null;
 
+/**
+ * What a payment bought, in the two words the Payments list shows (16 November
+ * 2026): a new rental or a renewal, for a person or a company. Read from the
+ * journey the case was on; null when the journey doesn't say.
+ */
+export function purchaseKind(key: string | null | undefined): { kind: string | null; customer: string | null } {
+  const k = key ?? "";
+  const kind = /renewal/.test(k) ? "Renewal" : /rental|new_license/.test(k) ? "New" : null;
+  const customer = /^personal_/.test(k) ? "Personal" : /^corporate_/.test(k) ? "Corporate" : null;
+  return { kind, customer };
+}
+
 /** "2_YEAR" → "2 years"; anything else as it was recorded. */
 function durationLabel(v: unknown): string | null {
   const s = str(v);

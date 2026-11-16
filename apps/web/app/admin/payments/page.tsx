@@ -16,6 +16,7 @@ import { paymentRows, paymentTotals, type Window } from "@/lib/transactions";
 import { listAgentsForFilter } from "@/lib/metrics";
 import { AgentFilter } from "../AgentFilter";
 import { currentScope, selectAgent } from "@/lib/scope";
+import { casesForConversations, purchaseKind } from "@/lib/paymentDetail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +55,8 @@ export default async function PaymentsPage({
   const selected = selectAgent(agentList, agent, scope);
   const rows = await paymentRows({ windowDays, agentId: selected?.id, status: picked || null, limit: 300 });
   const t = paymentTotals(rows);
+  const byConv = await casesForConversations([...new Set(rows.map((r) => r.conversationId).filter((x): x is string => Boolean(x)))]);
+  const bought = (conversationId: string | null) => purchaseKind(conversationId ? byConv.get(conversationId)?.journeyKey : null);
 
   const qs = (over: { days?: Window; status?: string }) => {
     const p = new URLSearchParams();
@@ -137,23 +140,29 @@ export default async function PaymentsPage({
         {rows.length === 0 ? (
           <p className="sa-empty-line">No payments in this window.</p>
         ) : (
-          <div className="sa-table sa-txn">
+          <div className="sa-table sa-txn sa-txn-pay">
             <div className="sa-tr sa-th">
               <span>Raised</span>
               <span>Agent</span>
               <span>Reference</span>
+              <span>Type</span>
+              <span>Customer</span>
               <span>Amount</span>
               <span>Status</span>
               <span>Gateway</span>
               <span />
             </div>
-            {rows.map((r) => (
+            {rows.map((r) => {
+              const b = bought(r.conversationId);
+              return (
               <div className="sa-tr" key={r.id}>
                 <span className="sa-nowrap">{when(r.createdAt)}</span>
                 <span>{r.agentName ?? "—"}</span>
                 <span className="sa-mono">
                   <Link href={`/admin/payments/${r.id}`}>{r.reference.length > 18 ? `${r.reference.slice(0, 8)}…` : r.reference}</Link>
                 </span>
+                <span>{b.kind ?? "—"}</span>
+                <span>{b.customer ?? "—"}</span>
                 <span>{money(r.amount, r.currency)}</span>
                 <span>
                   <span className={`sa-tag ${r.status === "paid" ? "ok" : r.status === "failed" ? "bad" : ""}`}>{r.status}</span>
@@ -166,7 +175,8 @@ export default async function PaymentsPage({
                   <Link href={`/admin/payments/${r.id}`}>Details</Link>
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
