@@ -34,7 +34,9 @@ const nxn = route.slice(route.indexOf("const PULSE_DIRECTIVE ="), route.indexOf(
 
 console.log("\nThere are two pulses now, and the right one is chosen");
 check("EPGL has its own", /const EPGL_PULSE_DIRECTIVE =/.test(route));
-check("...selected by agent", /agent\.definition\.slug === "epgl-dialog" \? EPGL_PULSE_DIRECTIVE : PULSE_DIRECTIVE/.test(route));
+check("...selected by tenant, so EPGL 2.0 gets it too", /let pulseDirective = hasEpglSalesforce \? EPGL_PULSE_DIRECTIVE : PULSE_DIRECTIVE/.test(route));
+check("...the company profile is read for EPGL 2.0 too", /if \(hasEpglSalesforce\) \{\s*const profile = await knownEpglProfile/.test(route));
+check("...no exact-slug check left for the pulse", !/slug === "epgl-dialog" \? EPGL_PULSE_DIRECTIVE/.test(route));
 // Everything else keeps exactly what it had. This change was about EPGL being
 // wrong, not about the Emirates Post pulse being wrong.
 //

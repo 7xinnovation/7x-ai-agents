@@ -1989,11 +1989,16 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
   let customerContext: string | undefined;
   // Emirates Post's pulse talks about PO Boxes, which is right for Emirates Post
   // and wrong for a postal-activity licence. See EPGL_PULSE_DIRECTIVE.
-  let pulseDirective = agent.definition.slug === "epgl-dialog" ? EPGL_PULSE_DIRECTIVE : PULSE_DIRECTIVE;
+  //
+  // Keyed on the tenant, not the slug (18 November 2026): EPGL 2.0 is
+  // `epgl-dialog-2`, so an exact match on "epgl-dialog" handed it Emirates
+  // Post's pulse — and the mock sign-in read its test customer's PO Boxes out to
+  // a licence applicant. The company profile below had the same check.
+  let pulseDirective = hasEpglSalesforce ? EPGL_PULSE_DIRECTIVE : PULSE_DIRECTIVE;
   if (authenticated && userRef) {
     // EPGL: prefill the signed-in customer's company profile + EID + quarterly
     // figures from their Salesforce/IDEP company data (feedback FB-2/FB-3).
-    if (agent.definition.slug === "epgl-dialog") {
+    if (hasEpglSalesforce) {
       const profile = await knownEpglProfile(agent.id, userRef).catch(() => ({}));
       customerContext = formatEpglProfileContext(profile);
       /**
