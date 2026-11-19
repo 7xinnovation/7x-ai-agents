@@ -493,6 +493,31 @@ export function saidNoEmail(message: string | undefined): boolean {
   );
 }
 
+/**
+ * Which offered payment method the customer's message names, if exactly one.
+ *
+ * The payment buttons send their label verbatim ("Pay with Noqodi (UAE Pay)"),
+ * so a label match is the normal case. Failing that, a few unmistakable words
+ * per well-known key. Two methods named, or none, is not a choice: undefined.
+ */
+export function inferPaymentMethod(
+  offered: { key: string; label?: { en?: string; ar?: string } }[],
+  message: string | undefined
+): string | undefined {
+  const norm = (s: string) => s.toLowerCase().replace(/[()—–-]/g, " ").replace(/\s+/g, " ").trim();
+  const t = norm(String(message ?? ""));
+  if (!t) return undefined;
+  const byLabel = offered.filter((m) => [m.label?.en, m.label?.ar].some((l) => l && norm(l) === t));
+  if (byLabel.length === 1) return String(byLabel[0]!.key).trim().toLowerCase();
+  const WORDS: Record<string, RegExp> = {
+    uaepay: /noqodi|uae ?pay|نقودي/,
+    gateway: /\bcard\b|credit|debit|بطاقة|البطاقة/,
+    viban: /iban|bank transfer|آيبان|ايبان|تحويل بنكي/,
+  };
+  const hits = offered.filter((m) => WORDS[String(m.key).trim().toLowerCase()]?.test(t));
+  return hits.length === 1 ? String(hits[0]!.key).trim().toLowerCase() : undefined;
+}
+
 export function haltedBy(agent: AgentDefinition, state: CaseState, fieldKey: string): string {
   const journey = findJourney(agent, state.journeyKey);
   const sub = journey?.submission;
@@ -1399,6 +1424,37 @@ export async function dispatchTool(
       // still be raising a VIBAN for the same application. Refused here rather
       // than in a prompt, because "do not call this tool" is exactly the kind of
       // instruction that survives review and fails on the day.
+      /**
+       * NO RECORDED METHOD, SEVERAL ON OFFER: READ IT, DON'T GUESS (2026-11-19).
+       *
+       * LR-54536 on EPGL 2.0 staging: the customer pressed "Pay with Noqodi (UAE
+       * Pay)", the model called request_payment without recording
+       * payment_method, and the empty method fell through to the agent's single
+       * `payment` binding — N-Genius. A different gateway, settling elsewhere,
+       * opened under a button that named UAE Pay.
+       *
+       * So when nothing is recorded and more than one method is switched on,
+       * the customer's own words decide (the buttons send the label verbatim).
+       * When they don't, nothing opens: the model is told to ask and record.
+       */
+      if (!String(state.data["payment_method"] ?? "").trim()) {
+        const live = (Array.isArray(agent.paymentMethods) ? agent.paymentMethods : []).filter((m) => m.enabled !== false);
+        if (live.length > 1) {
+          const inferred = inferPaymentMethod(live, ctx.userMessage);
+          if (inferred) {
+            state = { ...state, data: { ...state.data, payment_method: inferred } };
+          } else {
+            return {
+              result:
+                `PAYMENT METHOD NOT RECORDED: this agent offers ${live.map((m) => `"${m.label?.en || m.key}" (${m.key})`).join(", ")} and the customer's choice is not on the case. ` +
+                "NOTHING has been charged and nothing has failed. Ask which they want if they have not said, record it with collect_field(payment_method, <key>), then call request_payment again.",
+              state,
+              events,
+              isError: true,
+            };
+          }
+        }
+      }
       const method = String(state.data["payment_method"] ?? "").toLowerCase();
       if (method === "viban") {
         return {
