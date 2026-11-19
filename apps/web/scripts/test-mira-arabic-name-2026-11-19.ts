@@ -19,12 +19,12 @@ const RULE = "YOUR NAME IN ARABIC IS ميره";
 
 for (const locale of ["ar", "en"] as const) {
   const mira = { ...base, name: "EPGL Dialog", persona: "You are Mira, the licensing assistant." };
-  const p = JSON.stringify(buildSystemPrompt(mira, emptyCase(mira.journeys[0]?.key ?? null), locale, false));
+  const p = JSON.stringify(buildSystemPrompt(mira, emptyCase(), locale, false));
   check(`${locale}: an agent whose persona is Mira gets the rule`, p.includes(RULE));
   check(`${locale}: ...and it names both wrong spellings`, p.includes("Never ميرا and never ميرة"));
 }
 const other = { ...base, name: "Support", persona: "You are Sam, the support assistant." };
-check("an agent not called Mira does not", !JSON.stringify(buildSystemPrompt(other, emptyCase(null), "ar", false)).includes(RULE));
+check("an agent not called Mira does not", !JSON.stringify(buildSystemPrompt(other, emptyCase(), "ar", false)).includes(RULE));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
