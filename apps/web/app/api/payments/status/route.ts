@@ -43,6 +43,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: pay.status }, { headers: { "Cache-Control": "no-store" } });
   }
 
+  /**
+   * UAE PAY IS NOT ASKED WHILE THE CUSTOMER IS STILL PAYING (2026-11-19).
+   *
+   * UAE Pay: "you're inquiring for the payment before completion … you should
+   * wait for redirection or webhook". This poll runs every few seconds while
+   * the customer is on their page, and three UAT card payments in a row failed
+   * with the card processor unable to find the order. So for UAE Pay the poll
+   * only reads our own row. The row is moved by the return route, which asks
+   * UAE Pay once, after their redirect, and by the reconcile sweep, which asks
+   * only after the payment has been open for its stale window.
+   */
+  if (pay.provider === "uaepay") {
+    return NextResponse.json({ status: pay.status }, { headers: { "Cache-Control": "no-store" } });
+  }
+
   // Still open — ask the gateway. Best-effort: a probe failure just means the
   // customer keeps waiting, and the reconcile sweep remains the backstop.
   let status: "initiated" | "paid" | "failed" = pay.status;
