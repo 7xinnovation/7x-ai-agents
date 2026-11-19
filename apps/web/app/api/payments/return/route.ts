@@ -7,6 +7,8 @@ import { ensureAdapters } from "@/lib/registry";
 import { getCase, saveCase, audit } from "@/lib/conversation";
 import { gatewayForPayment } from "@/lib/paymentGateway";
 import { log } from "@/lib/logger";
+import { notifyEpglIfLicenceFee } from "@/lib/epglPayment";
+import { onPaymentSettled } from "@/lib/a2a/tasks";
 
 export const runtime = "nodejs";
 
@@ -72,7 +74,7 @@ export async function GET(req: NextRequest) {
   if (reference) {
     const db = getDb();
     const [pay] = await db
-      .select({ status: payments.status, agentId: payments.agentId, conversationId: payments.conversationId, provider: payments.provider })
+      .select({ status: payments.status, agentId: payments.agentId, conversationId: payments.conversationId, provider: payments.provider, amount: payments.amount })
       .from(payments)
       .where(eq(payments.reference, reference))
       .limit(1);
@@ -103,6 +105,20 @@ export async function GET(req: NextRequest) {
             action: `payment_${status}_on_return`,
             payload: { reference, ...(detail ? { gateway: detail } : {}) },
           });
+          /**
+           * THE RETURN IS WHERE UAE PAY'S MONEY IS CONFIRMED, SO IT TELLS EPGL (2026-11-19).
+           *
+           * The notification used to hang off the status poll and the webhook.
+           * Since UAE Pay is no longer polled (they asked us to wait for the
+           * redirect), this route is the first to see it paid — and then the
+           * poll finds the row already "paid" and returns early. LR-54539 was
+           * paid, shown as paid in the chat, and left "Pending Payment" /
+           * "Unpaid" in Salesforce until the sweep. Both calls are idempotent.
+           */
+          if (status === "paid" && pay.conversationId) {
+            await notifyEpglIfLicenceFee(pay.agentId, pay.conversationId, reference, Number(pay.amount ?? 0));
+            void onPaymentSettled(pay.conversationId).catch(() => {});
+          }
         }
       }
     }

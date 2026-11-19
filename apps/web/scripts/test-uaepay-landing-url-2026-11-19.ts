@@ -29,6 +29,10 @@ check("the return route falls back to the first UUID in the query", /\?\? uuidIn
 check("...and still asks the gateway for the outcome", /gw\.choice\.adapter\.getStatus\(gw\.ctx, \{ reference \}\)/.test(route));
 check("...for a POST as well as a GET", /export async function POST\(req: NextRequest\) \{\s*return GET\(req\);/.test(route));
 
+// LR-54539: paid via the return, never reported to EPGL until the sweep.
+check("a payment confirmed on return is reported to EPGL", /if \(status === "paid" && pay\.conversationId\) \{\s*await notifyEpglIfLicenceFee\(pay\.agentId, pay\.conversationId, reference, Number\(pay\.amount \?\? 0\)\);/.test(route));
+check("...and settles a waiting A2A task", /void onPaymentSettled\(pay\.conversationId\)/.test(route));
+
 // Same regex as the route, against the shapes UAE Pay might send.
 const uuidIn = (s: string) => { try { s = decodeURIComponent(s); } catch {} return s.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0]?.toLowerCase() ?? ""; };
 const ID = "b18b6f89-4d76-4c1e-9a2b-0123456789ab";
