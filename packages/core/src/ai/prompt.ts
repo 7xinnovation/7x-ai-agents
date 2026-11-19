@@ -443,7 +443,7 @@ ${journey?.submission?.apiFlow
       : "";
 
   const volatile = `# This turn
-- Session language: ${locale === "ar" ? "ARABIC" : "ENGLISH"}. Every part of this reply — prose, card/button/toggle/summary labels — must be in this language.${intent ? `
+- Session language: ${locale === "ar" ? "ARABIC" : "ENGLISH"}. Every part of this reply — prose, card/button/toggle/summary labels — must be in this language.${locale === "ar" && /\bMira\b|ميرا|ميره|ميرة/i.test(`${agent.name} ${agent.persona ?? ""}`) ? " Your name in Arabic is written ميره — never ميرا or ميرة, even where an earlier message or your configured greeting spells it differently." : ""}${intent ? `
 - Classified intent: "${intent.intent}" (confidence ${intent.confidence.toFixed(2)}).` : ""}${suggestedJourney ? `
 - This intent maps to journey "${suggestedJourney}". If the user wants to proceed (and is authenticated when the journey requires it), call set_journey("${suggestedJourney}") NOW — and in the SAME response also make the first lookup that step needs, so the customer waits for one round instead of two. Do not ask for details before starting the journey.` : ""}${applicableFees}${customerContext ? `
 

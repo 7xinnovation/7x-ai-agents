@@ -16,12 +16,14 @@ const check = (name: string, ok: boolean) => { ok ? pass++ : fail++; console.log
 const raw = (seed as unknown as { agents: { definition: unknown }[] }).agents[0]!.definition;
 const base = AgentDefinition.parse(raw);
 const RULE = "YOUR NAME IN ARABIC IS ميره";
+const TAIL = "Your name in Arabic is written ميره";
 
 for (const locale of ["ar", "en"] as const) {
   const mira = { ...base, name: "EPGL Dialog", persona: "You are Mira, the licensing assistant." };
   const p = JSON.stringify(buildSystemPrompt(mira, emptyCase(), locale, false));
   check(`${locale}: an agent whose persona is Mira gets the rule`, p.includes(RULE));
   check(`${locale}: ...and it names both wrong spellings`, p.includes("Never ميرا and never ميرة"));
+  check(`${locale}: the per-turn reminder is there only in Arabic`, p.includes(TAIL) === (locale === "ar"));
 }
 const other = { ...base, name: "Support", persona: "You are Sam, the support assistant." };
 check("an agent not called Mira does not", !JSON.stringify(buildSystemPrompt(other, emptyCase(), "ar", false)).includes(RULE));
