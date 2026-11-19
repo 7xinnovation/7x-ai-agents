@@ -48,7 +48,7 @@ check("merchantRequestId is the payment reference", link.merchantRequestId === R
 check("merchantOrderId is the case, not the attempt", link.merchantOrderId === INPUT.caseId);
 check("...and so is merchantReferenceId on the line", txn.merchantReferenceId === INPUT.caseId);
 check("the two are NOT the same value", link.merchantRequestId !== link.merchantOrderId);
-check("the landing URL is ours", link.merchantLandingURL === CFG.returnUrl);
+check("the landing URL is ours, open for their result (2026-11-19)", link.merchantLandingURL === `${CFG.returnUrl}?response=`, link.merchantLandingURL);
 
 console.log("\nthe money");
 check("the amount is on the link", link.amount === 1000);

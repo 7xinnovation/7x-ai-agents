@@ -40,6 +40,19 @@ const RET_STR = {
   },
 } as const;
 
+/**
+ * UAE Pay concatenates its result onto the landing URL, which we end in
+ * `?response=` (see landingUrl in the adapter). What follows is theirs to
+ * format, so the payment is found by the first UUID anywhere in the query —
+ * our merchantRequestId is the only UUID they send back. Only a lookup key:
+ * the outcome still comes from the inquiry API below.
+ */
+function uuidIn(search: string): string {
+  let s = search;
+  try { s = decodeURIComponent(search); } catch { /* use it raw */ }
+  return s.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0]?.toLowerCase() ?? "";
+}
+
 export async function GET(req: NextRequest) {
   // N-Genius appends its own order reference; accept the common spellings.
   const q = req.nextUrl.searchParams;
@@ -49,7 +62,7 @@ export async function GET(req: NextRequest) {
    * it, and the one the payment row is keyed by.
    */
   const reference =
-    q.get("ref") ?? q.get("reference") ?? q.get("orderReference") ?? q.get("merchantRequestId") ?? "";
+    q.get("ref") ?? q.get("reference") ?? q.get("orderReference") ?? q.get("merchantRequestId") ?? uuidIn(req.nextUrl.search);
   const locale: "en" | "ar" = q.get("lang") === "ar" ? "ar" : "en";
   const t = RET_STR[locale];
 

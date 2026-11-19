@@ -38,6 +38,21 @@ import type { AdapterContext, PaymentAdapter } from "./types";
  * lost by sending only `merchantRequestId` and `status` back.
  */
 
+/**
+ * UAE PAY APPENDS THE RESULT STRAIGHT ONTO THE LANDING URL (2026-11-19).
+ *
+ * The guide's example is "http://returnURL/redirect.html?response=" — they
+ * concatenate, they do not add a parameter. Our configured return URL ended in
+ * "/api/payments/return", so the first successful UAT card payment landed the
+ * customer on "/api/payments/returnb18b6f89-…": a 404, with the chat left
+ * spinning. So the URL always ends in an open `response=` parameter.
+ */
+export function landingUrl(returnUrl: string | undefined): string | undefined {
+  if (!returnUrl) return undefined;
+  if (/[?&]response=$/.test(returnUrl)) return returnUrl;
+  return `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}response=`;
+}
+
 interface UpConfig {
   baseUrl: string;
   merchantCode: string;
@@ -164,7 +179,7 @@ export function createLinksBody(
     },
     paymentLinksInfo: [
       {
-        merchantLandingURL: cfg.returnUrl,
+        merchantLandingURL: landingUrl(cfg.returnUrl),
         merchantRequestId,
         merchantOrderId: input.caseId,
         amount,
