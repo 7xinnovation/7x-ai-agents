@@ -30,7 +30,7 @@ import { MOCK_PERSONA_SUB, MOCK_PERSONA_EID, MOCK_PERSONA_NAME, MOCK_PERSONA_CON
 import { uaePassMockAllowed } from "@/lib/uaepass";
 import { isBusinessOpen } from "@/lib/businessHours";
 import { emitEvent } from "@/lib/analytics";
-import { normaliseCompanyKey, buildApiTools, holdTermMismatch } from "@/lib/integrations";
+import { normaliseCompanyKey, buildApiTools, holdTermMismatch, epglServiceRecordId } from "@/lib/integrations";
 import {
   companyByEmiratesId,
   companyByAccountId,
@@ -1588,6 +1588,11 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
               : liveState.journeyKey === "new_license"
                 ? { serviceId: "S-EPG-000002", serviceNameEn: "Issue Postal Activity License" }
                 : {}),
+            // The service RECORD as well (2026-11-20). The model dropped it on
+            // a 1.0 new licence and Salesforce's trigger threw a null pointer in
+            // updateFinacialYearSummary. A record id belongs to one org, so it is
+            // read from this environment's own journey notes, never hard-coded.
+            serviceRecordId: epglServiceRecordId(agent.definition.journeys?.find((j) => j.key === liveState.journeyKey)),
           })
         : undefined,
     // The same files, base64, for Emirates Post's rental save -- the trade licence

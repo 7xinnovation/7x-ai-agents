@@ -834,6 +834,21 @@ export interface EpglRequestFacts {
    */
   serviceId?: string;
   serviceNameEn?: string;
+  /** EPG_Service__c — the service RECORD, read from this environment's journey notes by epglServiceRecordId. */
+  serviceRecordId?: string;
+}
+
+/**
+ * The EPG_Service__c record id a journey's own notes give ("EPG_Service__c a1H…").
+ *
+ * A record id belongs to one Salesforce org, so it is not hard-coded: each
+ * environment's journey states its own, and this reads it from there. Absent
+ * when the notes do not name one, in which case nothing is filled.
+ */
+export function epglServiceRecordId(journey: unknown): string | undefined {
+  if (!journey) return undefined;
+  const m = JSON.stringify(journey).match(/EPG_Service__c[\s:'"=]{1,6}([a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?)\b/);
+  return m?.[1];
 }
 
 /**
@@ -1189,6 +1204,7 @@ export function withEpglRequestFields(
     Activity_Codes__c: postalActivityCodes(facts.activityCodes) ?? undefined,
     serviceId__c: facts.serviceId,
     ServiceNameEN__c: facts.serviceNameEn,
+    EPG_Service__c: facts.serviceRecordId,
     EPG_Terms_and_Conditions__c: facts.termsAccepted === true ? true : undefined,
     EPG_Amount_Paid__c: facts.amountPaid,
     /**
