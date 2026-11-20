@@ -1455,6 +1455,24 @@ export async function dispatchTool(
           }
         }
       }
+      /**
+       * A NEAR-MISS KEY IS READ AS THE METHOD IT NAMES (2026-11-20).
+       *
+       * LR-38161 on EPGL 1.0 staging: the model recorded "noqodi" for UAE Pay,
+       * the key check below refused it as "not available", and the customer was
+       * told of "a small issue" and lost the Noqodi button. A recorded value that
+       * is not one of this agent's keys but plainly names one ("noqodi", "card",
+       * "bank transfer") is mapped to that key; anything else is left for the
+       * check below to refuse.
+       */
+      {
+        const recorded = String(state.data["payment_method"] ?? "").trim().toLowerCase();
+        const all = Array.isArray(agent.paymentMethods) ? agent.paymentMethods : [];
+        if (recorded && all.length && !all.some((m) => String(m.key).trim().toLowerCase() === recorded)) {
+          const mapped = inferPaymentMethod(all, recorded);
+          if (mapped) state = { ...state, data: { ...state.data, payment_method: mapped } };
+        }
+      }
       const method = String(state.data["payment_method"] ?? "").toLowerCase();
       if (method === "viban") {
         return {

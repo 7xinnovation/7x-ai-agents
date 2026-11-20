@@ -46,5 +46,12 @@ check("...the inferred key is recorded on the case", /state = \{ \.\.\.state, da
 check("...otherwise nothing opens", /PAYMENT METHOD NOT RECORDED/.test(tools));
 check("...and it runs before the gateway is chosen", tools.indexOf("PAYMENT METHOD NOT RECORDED") < tools.indexOf("const pay = adapters.paymentFor?.(chosenMethod)"));
 
+// LR-38161 (2026-11-20): the model recorded "noqodi"; a near-miss key is mapped, not refused.
+check("recorded 'noqodi' → uaepay", inferPaymentMethod(EPGL, "noqodi") === "uaepay");
+check("recorded 'card' → gateway", inferPaymentMethod(EPGL, "card") === "gateway");
+check("recorded 'bank transfer' → viban", inferPaymentMethod([...EPGL, { key: "viban", label: { en: "Bank transfer (Virtual IBAN)", ar: "" } }], "bank transfer") === "viban");
+check("a near-miss key on the case is mapped before the checks", /if \(recorded && all\.length && !all\.some\([^)]*\)[^{]*\{\s*const mapped = inferPaymentMethod\(all, recorded\);/.test(tools));
+check("...before the method is read for VIBAN and the gateway", tools.indexOf("const mapped = inferPaymentMethod(all, recorded)") < tools.indexOf('if (method === "viban")'));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
