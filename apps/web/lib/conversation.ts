@@ -390,7 +390,9 @@ export async function knownCustomerBoxes(
       if (/^(po)?box(number|no)?$/.test(nk) && (typeof v === "string" || typeof v === "number")) box = String(v);
       else if (nk === "emirate" && typeof v === "string") emirate = v;
     }
-    if (box && !seen.has(box)) seen.set(box, { box, emirate });
+    // Number AND emirate: 72002 Dubai and 72002 Sharjah are two boxes (BUG-212).
+    const key = `${box}|${(emirate ?? "").trim().toLowerCase()}`;
+    if (box && !seen.has(key)) seen.set(key, { box, emirate });
     if (seen.size >= limit) break;
   }
   return [...seen.values()];

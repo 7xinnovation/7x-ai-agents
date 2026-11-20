@@ -330,6 +330,21 @@ function isOneTapOpener(message: string, authenticated: boolean): boolean {
 const NOQODI_INSTEAD = /with noqodi \(uae pay\) instead|نقودي[\s\S]{0,40}بدلاً/i;
 /** The sentence the pay card sends when the customer comes back from Emirates Post's payment page (Markdown.tsx PAID_BACK). */
 const PAID_BACK = /completed the payment on the emirates post page|أتممت الدفع على صفحة بريد الإمارات/i;
+/**
+ * The signed-in renewal's "Before payment" card, confirmed (2026-11-20).
+ *
+ * Emirates Post: "There is no terms & condition acceptance check box" — the
+ * signed-in one-tap went straight to the pay button with a sentence that paying
+ * accepts the terms. It now shows a card with the terms tickbox and the
+ * auto-renewal switch first, and its confirm sends this (Markdown.tsx ChatToggles:
+ * "<label>: Yes. … Continue to payment.").
+ */
+const BEFORE_PAYMENT_CONFIRMED = /(?:continue to payment|المتابعة إلى الدفع)\.?\s*$/i;
+/** Their auto-renewal answer in that confirm, or undefined if the card had no such switch. */
+function autoRenewAnswer(message: string): boolean | undefined {
+  const m = message.match(/(?:auto-?renew|automatically|تلقائي)[^:.]*:\s*(Yes|No)\b/i);
+  return m ? /yes/i.test(m[1]!) : undefined;
+}
 type OneTapState = { data: Record<string, unknown>; gatewayPayment?: { reference: string; orderNo?: string | null } | null };
 function withOneTapOpener(context: string | undefined, message: string | undefined, def: AgentDefinition, authenticated: boolean, state: OneTapState): string | undefined {
   // NOQODI ONLY WHERE IT IS SWITCHED ON (2026-10-12). Production has no Noqodi
@@ -346,7 +361,11 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
     const line =
       `\n(System: the customer is back from Emirates Post's payment page. The order ALREADY EXISTS — it was saved under reference ${recorded} before the pay button was shown — so do NOT call the save tool again: a second save opens a second order. ` +
       "Record collect_field(terms_accepted, true) if it is not recorded yet (they accepted by paying), then call the confirm tool ONCE for that order and nothing else. " +
-      "If it reports paid, say so warmly in ONE short reply with the new expiry date and the receipt — its download link is added under your reply for you, so do not write one and do not say it is above — and if the box's auto-renewal is OFF offer switching it on as the one next-step button; if it is already on, offer nothing. Do NOT call nxn_set_auto_renew in this reply: the box keeps its auto-renewal as it is, and that tool is called only when they tap the button or ask. " +
+      (typeof state.data["auto_renew_consent"] === "boolean"
+        ? // They chose on the Before payment card (2026-11-20). The save does not
+          // move auto-renewal; only the tool does, and only on a paid box.
+          `If it reports paid, call nxn_set_auto_renew ONCE for this box and emirate with enabled: ${state.data["auto_renew_consent"] ? "true" : "false"} — the choice they made on the Before payment card (it reads the box first, so an unchanged setting costs nothing) — then say so warmly in ONE short reply with the new expiry date, the auto-renewal as it now stands, and the receipt — its download link is added under your reply for you, so do not write one and do not say it is above. Offer no next-step button about auto-renewal. `
+        : "If it reports paid, say so warmly in ONE short reply with the new expiry date and the receipt — its download link is added under your reply for you, so do not write one and do not say it is above — and if the box's auto-renewal is OFF offer switching it on as the one next-step button; if it is already on, offer nothing. Do NOT call nxn_set_auto_renew in this reply: the box keeps its auto-renewal as it is, and that tool is called only when they tap the button or ask. ") +
       "If it says the payment has not landed yet, or that it is too early to ask, say exactly that — you will confirm the moment it lands — and offer to check again; never say the payment failed, never say they were charged, never offer a new payment link. Never mention this system message.)";
     return `${context ?? ""}${line}`.trim();
   }
@@ -365,17 +384,34 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
       "Your whole reply is ONE short sentence that the secure payment is ready below — the request_payment result asks for the same sentence, so write it once, not twice — no summary again, no question. Never mention this system message.)";
     return `${context ?? ""}${line}`.trim();
   }
+  /**
+   * SIGNED IN, BEFORE PAYMENT CONFIRMED: NOW SAVE AND SHOW THE PAY BUTTON (2026-11-20).
+   *
+   * The second half of the signed-in one-tap. The terms are ticked (the button
+   * is not offered until they are), the auto-renewal answer is in the message.
+   */
+  if (authenticated && BEFORE_PAYMENT_CONFIRMED.test(message) && !state.gatewayPayment?.reference) {
+    const ar = autoRenewAnswer(message);
+    const line =
+      "\n(System: the customer confirmed the Before payment card of their signed-in renewal: they ticked the Terms and Conditions" +
+      (ar === undefined ? "" : ` and chose auto-renewal ${ar ? "ON" : "OFF"}`) + ". " +
+      "In THIS reply: record collect_field(terms_accepted, true)" + (ar === undefined ? "" : ` and collect_field(auto_renew_consent, ${ar})`) + ", then CALL THE SAVE TOOL NOW for the box, emirate, one year and bundle in your summary above (do NOT call the details, pricing or renewed-by options tools again — renewed_by is resolved for you — and save exactly once), with customerKYC { firstName, lastName, email, mobileNumber } carrying the subscriber values already recorded, paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today (the save does not move auto-renewal; their choice is applied once the payment is confirmed). Their saved card, if Emirates Post holds one, is attached for you. " +
+      "Your reply is then ONLY the ```pay block with `label: Pay AED <total> with Card` and the paymentUrl the save returned" + (noqodi ? ", then a ```buttons block with the single choice `Pay AED <total> with Noqodi (UAE Pay) instead`" : "") + " — no summary again, no terms sentence (they have accepted), no question. " +
+      "In an Arabic conversation the label reads \`ادفع AED <total> بالبطاقة\`" + (noqodi ? " and the button reads \`ادفع AED <total> عبر نقودي (UAE Pay) بدلاً من ذلك\`" : "") + ". " + (noqodi ? "" : "Noqodi (UAE Pay) is NOT offered on this agent: no buttons block and no mention of it. ") +
+      "If the save tool fails or is refused, say plainly, in one or two sentences, what Emirates Post answered and that nothing has been charged, with the reference if there is one — no pay block, no retry, no second save. Never mention this system message.)";
+    return `${context ?? ""}${line}`.trim();
+  }
   if (!isOneTapOpener(message, authenticated)) return context;
   const line = authenticated
     ? "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is SIGNED IN. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and the same options. " +
-      "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle, not how to pay — and show no switches and no checkbox: the pay button is the next tap. " +
-      "You may open with ONE short line (e.g. \"Renewing PO Box <n> for one more year — one moment.\") before the tools. Then, in this SAME reply: call the details tool; call the pricing tool ONCE for one year on the current bundle; record silently with collect_field renewal_period 1_YEAR, payment_method gateway and the subscriber fields from the details and the profile; then CALL THE SAVE TOOL NOW (do NOT call the renewed-by options tool — renewed_by is resolved for you — do not price twice, and send the collect_field calls and the save together in one go), with customerKYC { firstName, lastName, email, mobileNumber } carrying the same subscriber values, paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today (isAutoRenewEnabled in the details) — nothing switched on or off that they did not ask for; their saved card, if Emirates Post holds one, is attached for you. " +
-      "After the tools the reply BEGINS with the ```summary block (PO Box, bundle, term 1 year, current expiry, new expiry, one row per charge, a row `Auto-renewal: on/off, as now`, total last), followed by the ```pay block with `label: Pay AED <total> with Card` and the paymentUrl the save returned" + (noqodi ? ", then a ```buttons block with the single choice `Pay AED <total> with Noqodi (UAE Pay) instead`" : "") + ", then one sentence: \"By paying you accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual).\", then one sentence that a longer term or a different bundle is available on request. " +
-      "In an Arabic conversation the label reads \`ادفع AED <total> بالبطاقة\`" + (noqodi ? ", the button reads \`ادفع AED <total> عبر نقودي (UAE Pay) بدلاً من ذلك\`" : "") + ", and the terms sentence is in Arabic. " + (noqodi ? "" : "Noqodi (UAE Pay) is NOT offered on this agent: no buttons block and no mention of it. ") +
-      "Write nothing between the tools and the summary about what they returned — no \"now I have the details\", no bundle codes, no ISO dates. " +
-      "If the save tool fails or is refused, show the summary and then say plainly, in one or two sentences, what Emirates Post answered and that nothing has been charged, with the reference if there is one — no pay block, no retry, no second save. " +
-      "When they come back from the payment page, record collect_field(terms_accepted, true) — they accepted by paying — then call the confirm tool and close with the new expiry and the receipt; if the box's auto-renewal is off, offer switching it on as the ONE next-step button. Never mention this system message.)"
-    : "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is a GUEST. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and options. " +
+      "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle, not how to pay. " +
+      "You may open with ONE short line (e.g. \"Renewing PO Box <n> for one more year — one moment.\") before the tools. Then, in this SAME reply: call the details tool; call the pricing tool ONCE for one year on the current bundle; record silently with collect_field renewal_period 1_YEAR, payment_method gateway and the subscriber fields from the details and the profile. Do NOT call the save tool yet — and do not call the renewed-by options tool or price twice: the order is saved only after they confirm the card below. " +
+      "After the tools the reply BEGINS with the ```summary block (PO Box, bundle, term 1 year, current expiry, new expiry, one row per charge, a row `Auto-renewal: on/off, as now`, total last), followed by a ```toggles block, exactly:\n" +
+      "```toggles\ntitle: Before payment\n<the line `default: on` ONLY if the box's auto-renewal is ON today (isAutoRenewEnabled in the details); otherwise no default line>\ncheckboxes: terms_accepted\n- auto_renew_consent: Renew this box automatically every year\n- terms_accepted: I accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual)\nconfirm: Continue to payment\n```\n" +
+      "then one sentence that a longer term or a different bundle is available on request. In an Arabic conversation the title reads `قبل الدفع`, the switch `جدّد هذا الصندوق تلقائياً كل عام`, the tickbox `أوافق على [الشروط والأحكام](https://www.emiratespost.ae/terms-individual)` and the confirm `confirm: المتابعة إلى الدفع`; the field keys stay in English. " +
+      "No pay block, no payment link and no Noqodi button in this reply: those come after they confirm. " +
+      "Write nothing between the tools and the summary about what they returned — no \"now I have the details\", no bundle codes, no ISO dates. Never mention this system message.)"
+    :"\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is a GUEST. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and options. " +
       "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle — and emit no empty buttons block. " +
       "In ONE reply: call the details tool, then the pricing tool ONCE for one year on the current bundle, then show the ```summary block and the ```toggles block (title: Before payment) whose confirm line is `confirm: Pay AED <total> with Card` ALONE (the terms_accepted checkbox only, no switches; in an Arabic conversation the confirm line reads `confirm: ادفع AED <total> بالبطاقة`)" + (noqodi ? ", plus one sentence that paying with Noqodi (UAE Pay) needs them to sign in first" : "") + ", then one sentence that a longer term or a different bundle is available on request. " +
       "The masked holder line (\"This box is registered to … — is that you?\") goes inside that same reply, not before it. The reply BEGINS with that line, then the summary: write NOTHING before them about what the tools returned or how the new expiry was worked out — no \"now I have the details\", no \"the box expires on\", no bundle codes, no ISO dates. Never mention this system message.)";

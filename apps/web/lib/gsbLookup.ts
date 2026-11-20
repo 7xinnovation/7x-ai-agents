@@ -615,18 +615,39 @@ export async function customerPoBoxes(
       ? poBoxesByEmiratesId(agentId, env, emiratesId, callerToken).catch(() => null)
       : Promise.resolve(null),
   ]);
-  const merged = new Map<string, CustomerPoBox>();
-  for (const list of [session ?? [], byEid ?? []]) {
+  return mergeCustomerPoBoxes(session ?? [], byEid ?? []);
+}
+
+/**
+ * One list from the two lookups, a box being its NUMBER AND ITS EMIRATE.
+ *
+ * BUG-212 (2026-11-20): a customer holding 72002 in Dubai AND 72002 in Sharjah
+ * was shown one box. The merge was keyed on the number alone, so the second
+ * emirate's box was folded into the first and disappeared — from the pulse, the
+ * panel, and the list that decides what they may manage. Box numbers are only
+ * unique within an emirate.
+ *
+ * A row with no emirate cannot be told apart, so it joins a box of the same
+ * number rather than standing as a phantom third one. Exported for the test.
+ */
+export function mergeCustomerPoBoxes(...lists: CustomerPoBox[][]): CustomerPoBox[] {
+  const num = (b: CustomerPoBox) => String(b.boxNumber ?? "").replace(/\D/g, "");
+  const em = (b: CustomerPoBox) => String(b.emirateCode ?? b.emirateName ?? "").trim().toUpperCase();
+  const out: CustomerPoBox[] = [];
+  for (const list of lists) {
     for (const b of list) {
-      const key = String(b.boxNumber ?? "").replace(/\D/g, "");
-      if (!key) continue;
-      // The first source to mention a box wins its details; the second only
+      const n = num(b);
+      if (!n) continue;
+      const e = em(b);
+      const i = out.findIndex((o) => num(o) === n && (em(o) === e || !em(o) || !e));
+      if (i < 0) { out.push(b); continue; }
+      // The first source to mention a box wins its details; a later one only
       // fills in what the first left blank.
-      const had = merged.get(key);
-      merged.set(key, had ? { ...b, ...Object.fromEntries(Object.entries(had).filter(([, v]) => v !== undefined)) } : b);
+      const had = out[i]!;
+      out[i] = { ...b, ...Object.fromEntries(Object.entries(had).filter(([, v]) => v !== undefined)) };
     }
   }
-  return [...merged.values()];
+  return out;
 }
 
 /**
