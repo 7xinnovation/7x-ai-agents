@@ -5325,7 +5325,8 @@ export async function buildApiTools(
           result:
             res.result +
             `\n\nWHAT THIS TOTAL IS MADE OF — ${breakdown.map((l) => `${l.label} AED ${fmt(l.amount)}`).join(" + ")} = AED ${fmt(amount)}. ` +
-            "Whenever you quote this total, give these lines with it — one summary row per line, total last — never the total alone, and never a figure that differs from a bundle's per-year price without saying what was added.",
+            "Whenever you quote this total, give these lines with it — one summary row per line with EXACTLY these labels and figures, total last — never the total alone, and never a figure that differs from a bundle's per-year price without saying what was added. " +
+            "Add NO other money rows: no discount row (any Emirates Post offer is already inside these figures), and no row saying a charge listed here is \"Included\" or free — every line above is charged. A representative that comes with the bundle at no charge is already left out of this list.",
         };
       }
     }
