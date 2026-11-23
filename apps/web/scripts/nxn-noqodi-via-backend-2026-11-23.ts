@@ -39,7 +39,7 @@ export const FIELD = {
   label: { ar: "طريقة الدفع", en: "How to pay" },
   options: [
     { label: { ar: "الدفع بالبطاقة", en: "Pay with Card" }, value: "gateway" },
-    { label: { ar: "الدفع عبر نقودي (UAE Pay)", en: "Pay with Noqodi (UAE Pay)" }, value: "uaepay" },
+    { label: { ar: "الدفع عبر UAE PAY", en: "Pay with UAE PAY" }, value: "uaepay" },
   ],
   validation: { required: false },
 };
@@ -47,12 +47,12 @@ export const FIELD = {
 export function guidanceBlock(renewal: boolean): string {
   return [
     MARK,
-    "NOQODI (UAE PAY) IS TAKEN BY EMIRATES POST, LIKE THE CARD. This block SUPERSEDES every other instruction in this guidance about Noqodi: paying it on our secure checkout, calling request_payment for it, a \"Pay … with Noqodi (UAE Pay) instead\" button under the pay block, or ignoring the payment URL a save returns. None of that applies any more.",
-    "How it works now: the customer chooses how to pay BEFORE the save, and the save opens the payment on that way. Record collect_field(payment_method, gateway) for the card or collect_field(payment_method, uaepay) for Noqodi, THEN call the save tool — the request is set to Noqodi or the card for you from that field. The save returns a paymentUrl either way: show it as the pay block (label `Pay AED <total> with Card` or `Pay AED <total> with Noqodi (UAE Pay)`, as they chose), and when they are back confirm it with the confirm tool, exactly as for the card. NEVER call request_payment in this journey.",
-    "WHERE THEY CHOOSE: on the Before payment toggles block, for a SIGNED-IN customer the confirm line offers both — `confirm: Pay with Card | Pay with Noqodi (UAE Pay)` (Arabic: `confirm: الدفع بالبطاقة | الدفع عبر نقودي (UAE Pay)`)" +
-      (renewal ? " — on a renewal with the real total in each, `Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)`" : "") +
-      ". The tap IS the choice; never ask it as a question. With Noqodi, skip the saved-card choice (a saved card is the card gateway's) and do not attach one.",
-    "GUESTS: Emirates Post takes Noqodi for signed-in customers only. A guest's confirm line stays the card alone, with one sentence that paying with Noqodi (UAE Pay) needs them to sign in.",
+    "UAE PAY IS TAKEN BY EMIRATES POST, LIKE THE CARD. This block SUPERSEDES every other instruction in this guidance about UAE PAY: paying it on our secure checkout, calling request_payment for it, a \"Pay … with UAE PAY instead\" button under the pay block, or ignoring the payment URL a save returns. None of that applies any more.",
+    "How it works now: the customer chooses how to pay BEFORE the save, and the save opens the payment on that way. Record collect_field(payment_method, gateway) for the card or collect_field(payment_method, uaepay) for UAE PAY, THEN call the save tool — the request is set to UAE PAY or the card for you from that field. The save returns a paymentUrl either way: show it as the pay block (label `Pay AED <total> with Card` or `Pay AED <total> with UAE PAY`, as they chose), and when they are back confirm it with the confirm tool, exactly as for the card. NEVER call request_payment in this journey.",
+    "WHERE THEY CHOOSE: on the Before payment toggles block, for a SIGNED-IN customer the confirm line offers both — `confirm: Pay with Card | Pay with UAE PAY` (Arabic: `confirm: الدفع بالبطاقة | الدفع عبر UAE PAY`)" +
+      (renewal ? " — on a renewal with the real total in each, `Pay AED <total> with Card | Pay AED <total> with UAE PAY`" : "") +
+      ". The tap IS the choice; never ask it as a question. With UAE PAY, skip the saved-card choice (a saved card is the card gateway's) and do not attach one.",
+    "GUESTS: Emirates Post takes UAE PAY for signed-in customers only. A guest's confirm line stays the card alone, with one sentence that paying with UAE PAY needs them to sign in.",
     "Once the pay block is shown the way to pay is fixed: a second save would open a second order. If they ask to switch, say this order's payment is open for the way they chose and they can pick the other next time.",
     END,
   ].join("\n");
@@ -62,7 +62,7 @@ type Def = Record<string, any>;
 
 /** The Before payment card a signed-in renewal shows before anything is saved. */
 const SIGNED_IN_CARD =
-  "the Before payment ```toggles block — `title: Before payment`; the line `default: on` ONLY if the box's auto-renewal is on today (isAutoRenewEnabled in the details); `checkboxes: terms_accepted`; `- auto_renew_consent: Renew this box automatically every year`; `- terms_accepted: I accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual)`; `confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)` with the real total in both (Arabic: title `قبل الدفع`, switch `جدّد هذا الصندوق تلقائياً كل عام`, tickbox `أوافق على [الشروط والأحكام](https://www.emiratespost.ae/terms-individual)`, confirm `ادفع AED <total> بالبطاقة | ادفع AED <total> عبر نقودي (UAE Pay)`)";
+  "the Before payment ```toggles block — `title: Before payment`; the line `default: on` ONLY if the box's auto-renewal is on today (isAutoRenewEnabled in the details); `checkboxes: terms_accepted`; `- auto_renew_consent: Renew this box automatically every year`; `- terms_accepted: I accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual)`; `confirm: Pay AED <total> with Card | Pay AED <total> with UAE PAY` with the real total in both (Arabic: title `قبل الدفع`, switch `جدّد هذا الصندوق تلقائياً كل عام`, tickbox `أوافق على [الشروط والأحكام](https://www.emiratespost.ae/terms-individual)`, confirm `ادفع AED <total> بالبطاقة | ادفع AED <total> عبر UAE PAY`)";
 
 /**
  * The personal renewal's signed-in fast path predates both the Before payment
@@ -77,21 +77,21 @@ export const RENEWAL_REWRITES: { start: string; end: string; text: string }[] = 
     start: "SIGNED IN: ONE reply that calls the details tool, the pricing tool once for ONE YEAR on the current bundle, records the fields silently, CALLS THE SAVE TOOL,",
     end: "no switches, no checkbox: the pay button is the next tap.",
     text:
-      `SIGNED IN — TWO TAPS (2026-11-23): the FIRST reply calls the details tool and the pricing tool once for ONE YEAR on the current bundle, records the fields silently, does NOT call the save tool, and shows the renewal summary block, then ${SIGNED_IN_CARD}, then one sentence that a longer term or another bundle is available on request. No pay block yet. When they confirm, their confirm names the way to pay: record terms_accepted, auto_renew_consent and payment_method (gateway for the card, uaepay for Noqodi), CALL THE SAVE TOOL once, and reply with ONLY the pay block labelled the way they chose — no "instead" button.`,
+      `SIGNED IN — TWO TAPS (2026-11-23): the FIRST reply calls the details tool and the pricing tool once for ONE YEAR on the current bundle, records the fields silently, does NOT call the save tool, and shows the renewal summary block, then ${SIGNED_IN_CARD}, then one sentence that a longer term or another bundle is available on request. No pay block yet. When they confirm, their confirm names the way to pay: record terms_accepted, auto_renew_consent and payment_method (gateway for the card, uaepay for UAE PAY), CALL THE SAVE TOOL once, and reply with ONLY the pay block labelled the way they chose — no "instead" button.`,
   },
   {
     start: "— then CALL THE SAVE TOOL in this same reply (do NOT call the renewed-by options tool",
     end: "without calling nxn_set_auto_renew until they tap.",
     text:
       `— and do NOT call the save tool in this reply. Reply ONCE with the \`\`\`summary block (PO Box, bundle, term 1 year, current expiry, NEW expiry, one row per charge, a row \`Auto-renewal: on/off, as now\`, total: last), then ${SIGNED_IN_CARD}, then ONE short sentence: to renew for longer or move to a different bundle, they only have to say so. No pay block, no payment link, no question. Write nothing between the tools and the summary about what they returned. ` +
-      `WHEN THEY CONFIRM THE CARD (it ends "with Card" or "with Noqodi (UAE Pay)"): record collect_field(terms_accepted, true), collect_field(auto_renew_consent, <their switch>) and collect_field(payment_method, gateway | uaepay), then CALL THE SAVE TOOL once (do NOT call the details, pricing or renewed-by options tools again — renewed_by is resolved for you), with customerKYC { firstName, lastName, email, mobileNumber } carrying the subscriber values, paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today — which way to pay is set on the request for you from payment_method. Reply with ONLY the \`\`\`pay block (\`label: Pay AED <total> with Card\` or \`label: Pay AED <total> with Noqodi (UAE Pay)\`, \`url:\` the paymentUrl the save returned, \`amount: AED <total>\`). If the save fails or is refused, say plainly what Emirates Post answered and that nothing has been charged — no pay block, no retry, no second save. ` +
+      `WHEN THEY CONFIRM THE CARD (it ends "with Card" or "with UAE PAY"): record collect_field(terms_accepted, true), collect_field(auto_renew_consent, <their switch>) and collect_field(payment_method, gateway | uaepay), then CALL THE SAVE TOOL once (do NOT call the details, pricing or renewed-by options tools again — renewed_by is resolved for you), with customerKYC { firstName, lastName, email, mobileNumber } carrying the subscriber values, paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today — which way to pay is set on the request for you from payment_method. Reply with ONLY the \`\`\`pay block (\`label: Pay AED <total> with Card\` or \`label: Pay AED <total> with UAE PAY\`, \`url:\` the paymentUrl the save returned, \`amount: AED <total>\`). If the save fails or is refused, say plainly what Emirates Post answered and that nothing has been charged — no pay block, no retry, no second save. ` +
       `AFTER THE PAY BUTTON: when they come back from the payment page the order ALREADY EXISTS — do NOT call the save tool again (a second save opens a second order). Call the confirm tool ONCE; if it reports paid and their auto-renewal choice differs from the box's, call nxn_set_auto_renew ONCE with their choice; close with ONE line giving the new expiry date and the auto-renewal as it now stands. The receipt download link is added under your reply for you: do not write one, and do not say it is above. If they ask to pay the other way after the pay block is shown, say this order's payment is open for the way they chose — a second save would open a second order.`,
   },
   {
     start: "\"with Noqodi (UAE Pay)\": record collect_field(payment_method, uaepay), then call request_payment",
     end: "which did not take this payment).",
     text:
-      "\"with Noqodi (UAE Pay)\": record collect_field(payment_method, uaepay) and call the save tool — Emirates Post opens the payment on Noqodi for you — emit the pay block labelled `Pay AED <total> with Noqodi (UAE Pay)`, and confirm with the confirm tool when they return, exactly as for the card. NEVER call request_payment for it.",
+      "\"with UAE PAY\": record collect_field(payment_method, uaepay) and call the save tool — Emirates Post opens the payment on UAE PAY for you — emit the pay block labelled `Pay AED <total> with UAE PAY`, and confirm with the confirm tool when they return, exactly as for the card. NEVER call request_payment for it.",
   },
 ];
 

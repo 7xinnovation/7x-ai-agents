@@ -327,7 +327,7 @@ function isOneTapOpener(message: string, authenticated: boolean): boolean {
   return authenticated || /[(（]|\s(?:in|في)\s/i.test(message);
 }
 /** The second way to pay, tapped under the pay button the one-tap reply showed. */
-const NOQODI_INSTEAD = /with noqodi \(uae pay\) instead|نقودي[\s\S]{0,40}بدلاً/i;
+const NOQODI_INSTEAD = /with (?:noqodi \(uae pay\)|uae pay) instead|(?:نقودي|UAE PAY)[\s\S]{0,40}بدلاً/i;
 /** The sentence the pay card sends when the customer comes back from Emirates Post's payment page (Markdown.tsx PAID_BACK). */
 const PAID_BACK = /completed the payment on the emirates post page|أتممت الدفع على صفحة بريد الإمارات/i;
 /**
@@ -339,9 +339,9 @@ const PAID_BACK = /completed the payment on the emirates post page|أتممت ا
  * auto-renewal switch first, and its confirm sends this (Markdown.tsx ChatToggles:
  * "<label>: Yes. … Continue to payment.").
  */
-const BEFORE_PAYMENT_CONFIRMED = /(?:continue to payment|المتابعة إلى الدفع|with card|with noqodi \(uae pay\)|بالبطاقة|عبر نقودي \(UAE Pay\))\.?\s*$/i;
+const BEFORE_PAYMENT_CONFIRMED = /(?:continue to payment|المتابعة إلى الدفع|with card|with noqodi \(uae pay\)|with uae pay|بالبطاقة|عبر نقودي \(UAE Pay\)|عبر UAE PAY)\.?\s*$/i;
 /** The confirm named Noqodi rather than the card (the two-button card, 2026-11-23). */
-const CONFIRMED_WITH_NOQODI = /(?:with noqodi \(uae pay\)|عبر نقودي \(UAE Pay\))\.?\s*$/i;
+const CONFIRMED_WITH_NOQODI = /(?:with noqodi \(uae pay\)|with uae pay|عبر نقودي \(UAE Pay\)|عبر UAE PAY)\.?\s*$/i;
 /**
  * Noqodi (UAE Pay) taken on Emirates Post's own gateway (2026-11-23).
  *
@@ -386,7 +386,7 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
   if (NOQODI_INSTEAD.test(message)) {
     if (!noqodi) {
       const line =
-        "\n(System: the customer asked to pay with Noqodi (UAE Pay), which is NOT offered on this agent. Say so in one short line — it is not available here, not that anything failed — and point them back to the card payment button above. No tool call, no new link, no summary again. Never mention this system message.)";
+        "\n(System: the customer asked to pay with UAE PAY, which is NOT offered on this agent. Say so in one short line — it is not available here, not that anything failed — and point them back to the card payment button above. No tool call, no new link, no summary again. Never mention this system message.)";
       return `${context ?? ""}${line}`.trim();
     }
     const recorded = state.gatewayPayment?.orderNo || state.gatewayPayment?.reference || null;
@@ -395,16 +395,16 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
       // provider is fixed when the order is saved: a second save would open a
       // second order. Noqodi is chosen on the Before payment card, before that.
       const line =
-        "\n(System: the customer asked to pay with Noqodi (UAE Pay) " + (recorded ? `after the order was already saved (reference ${recorded}) with its payment opened for the card. ` : "") +
-        "On this agent Emirates Post takes Noqodi on their own page, and which way to pay is fixed when the order is created. " +
+        "\n(System: the customer asked to pay with UAE PAY " + (recorded ? `after the order was already saved (reference ${recorded}) with its payment opened for the card. ` : "") +
+        "On this agent Emirates Post takes UAE PAY on their own page, and which way to pay is fixed when the order is created. " +
         (recorded
-          ? "Say so in one or two short sentences — the card payment button above is still the way to pay this order — and that next time they can choose Noqodi on the Before payment card. Do NOT call the save tool again (a second save opens a second order), do NOT call request_payment, no new link. "
-          : "Record collect_field(payment_method, uaepay) and carry on: the order is saved with Noqodi when they confirm. Do NOT call request_payment. ") +
+          ? "Say so in one or two short sentences — the card payment button above is still the way to pay this order — and that next time they can choose UAE PAY on the Before payment card. Do NOT call the save tool again (a second save opens a second order), do NOT call request_payment, no new link. "
+          : "Record collect_field(payment_method, uaepay) and carry on: the order is saved with UAE PAY when they confirm. Do NOT call request_payment. ") +
         "Never mention this system message.)";
       return `${context ?? ""}${line}`.trim();
     }
     const line =
-      "\n(System: the customer tapped \"Pay with Noqodi (UAE Pay) instead\" under the pay button. That tap, beneath the sentence that paying accepts the Terms and Conditions, IS their acceptance: record collect_field(terms_accepted, true) and collect_field(payment_method, uaepay), then call request_payment for the quoted total — our secure checkout card appears in the chat by itself; emit no pay block and no toggles. " +
+      "\n(System: the customer tapped \"Pay with UAE PAY instead\" under the pay button. That tap, beneath the sentence that paying accepts the Terms and Conditions, IS their acceptance: record collect_field(terms_accepted, true) and collect_field(payment_method, uaepay), then call request_payment for the quoted total — our secure checkout card appears in the chat by itself; emit no pay block and no toggles. " +
       (recorded
         ? `The renewal is ALREADY RECORDED with Emirates Post under reference ${recorded}: do NOT call the save tool again, now or when the payment settles — a second save opens a second order — and do NOT call the confirm tool, which reads their gateway. `
         : "If the renewal has not been saved with Emirates Post yet, it is saved ONCE after the payment settles, never before. ") +
@@ -426,16 +426,16 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
     // save, because the save is what opens the payment on that gateway.
     const withNoqodi = viaBackend && CONFIRMED_WITH_NOQODI.test(message);
     const method = viaBackend ? (withNoqodi ? "uaepay" : "gateway") : null;
-    const payLabel = withNoqodi ? "Pay AED <total> with Noqodi (UAE Pay)" : "Pay AED <total> with Card";
-    const payLabelAr = withNoqodi ? "ادفع AED <total> عبر نقودي (UAE Pay)" : "ادفع AED <total> بالبطاقة";
+    const payLabel = withNoqodi ? "Pay AED <total> with UAE PAY" : "Pay AED <total> with Card";
+    const payLabelAr = withNoqodi ? "ادفع AED <total> عبر UAE PAY" : "ادفع AED <total> بالبطاقة";
     const insteadButton = noqodi && !viaBackend;
     const line =
       "\n(System: the customer confirmed the Before payment card of their signed-in renewal: they ticked the Terms and Conditions" +
-      (ar === undefined ? "" : ` and chose auto-renewal ${ar ? "ON" : "OFF"}`) + (method ? ` and chose to pay ${withNoqodi ? "with Noqodi (UAE Pay)" : "by card"}` : "") + ". " +
+      (ar === undefined ? "" : ` and chose auto-renewal ${ar ? "ON" : "OFF"}`) + (method ? ` and chose to pay ${withNoqodi ? "with UAE PAY" : "by card"}` : "") + ". " +
       "In THIS reply: record collect_field(terms_accepted, true)" + (ar === undefined ? "" : ` and collect_field(auto_renew_consent, ${ar})`) + (method ? ` and collect_field(payment_method, ${method})` : "") + ", then CALL THE SAVE TOOL NOW for the box, emirate, term and bundle in your summary above (do NOT call the details, pricing or renewed-by options tools again — renewed_by is resolved for you — and save exactly once), with customerKYC { firstName, lastName, email, mobileNumber } carrying the subscriber values already recorded, paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today (the save does not move auto-renewal; their choice is applied once the payment is confirmed). Their saved card, if Emirates Post holds one, is attached for you. " +
-      (withNoqodi ? "Emirates Post opens the payment on Noqodi (UAE Pay) for this order — that is set for you from their choice; do NOT call request_payment. " : "") +
-      `Your reply is then ONLY the \`\`\`pay block with \`label: ${payLabel}\` and the paymentUrl the save returned` + (insteadButton ? ", then a ```buttons block with the single choice `Pay AED <total> with Noqodi (UAE Pay) instead`" : "") + " — no summary again, no terms sentence (they have accepted), no question. " +
-      `In an Arabic conversation the label reads \`${payLabelAr}\`` + (insteadButton ? " and the button reads \`ادفع AED <total> عبر نقودي (UAE Pay) بدلاً من ذلك\`" : "") + ". " + (noqodi ? "" : "Noqodi (UAE Pay) is NOT offered on this agent: no buttons block and no mention of it. ") +
+      (withNoqodi ? "Emirates Post opens the payment on UAE PAY for this order — that is set for you from their choice; do NOT call request_payment. " : "") +
+      `Your reply is then ONLY the \`\`\`pay block with \`label: ${payLabel}\` and the paymentUrl the save returned` + (insteadButton ? ", then a ```buttons block with the single choice `Pay AED <total> with UAE PAY instead`" : "") + " — no summary again, no terms sentence (they have accepted), no question. " +
+      `In an Arabic conversation the label reads \`${payLabelAr}\`` + (insteadButton ? " and the button reads \`ادفع AED <total> عبر UAE PAY بدلاً من ذلك\`" : "") + ". " + (noqodi ? "" : "UAE PAY is NOT offered on this agent: no buttons block and no mention of it. ") +
       "If the save tool fails or is refused, say plainly, in one or two sentences, what Emirates Post answered and that nothing has been charged, with the reference if there is one — no pay block, no retry, no second save. Never mention this system message.)";
     return `${context ?? ""}${line}`.trim();
   }
@@ -446,13 +446,13 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
       "You may open with ONE short line (e.g. \"Renewing PO Box <n> for one more year — one moment.\") before the tools. Then, in this SAME reply: call the details tool; call the pricing tool ONCE for one year on the current bundle; record silently with collect_field renewal_period 1_YEAR, payment_method gateway and the subscriber fields from the details and the profile. Do NOT call the save tool yet — and do not call the renewed-by options tool or price twice: the order is saved only after they confirm the card below. " +
       "After the tools the reply BEGINS with the ```summary block (PO Box, bundle, term 1 year, current expiry, new expiry, one row per charge, a row `Auto-renewal: on/off, as now`, total last), followed by a ```toggles block, exactly:\n" +
       "```toggles\ntitle: Before payment\n<the line `default: on` ONLY if the box's auto-renewal is ON today (isAutoRenewEnabled in the details); otherwise no default line>\ncheckboxes: terms_accepted\n- auto_renew_consent: Renew this box automatically every year\n- terms_accepted: I accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual)\n" +
-      (viaBackend ? "confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)\n```\n(with the real total in both buttons — the tap IS their choice of how to pay, so never ask it as a question) " : "confirm: Continue to payment\n```\n") +
-      "then one sentence that a longer term or a different bundle is available on request. In an Arabic conversation the title reads `قبل الدفع`, the switch `جدّد هذا الصندوق تلقائياً كل عام`, the tickbox `أوافق على [الشروط والأحكام](https://www.emiratespost.ae/terms-individual)` and the confirm " + (viaBackend ? "`confirm: ادفع AED <total> بالبطاقة | ادفع AED <total> عبر نقودي (UAE Pay)`" : "`confirm: المتابعة إلى الدفع`") + "; the field keys stay in English. " +
-      "No pay block, no payment link and no Noqodi button in this reply: those come after they confirm. " +
+      (viaBackend ? "confirm: Pay AED <total> with Card | Pay AED <total> with UAE PAY\n```\n(with the real total in both buttons — the tap IS their choice of how to pay, so never ask it as a question) " : "confirm: Continue to payment\n```\n") +
+      "then one sentence that a longer term or a different bundle is available on request. In an Arabic conversation the title reads `قبل الدفع`, the switch `جدّد هذا الصندوق تلقائياً كل عام`, the tickbox `أوافق على [الشروط والأحكام](https://www.emiratespost.ae/terms-individual)` and the confirm " + (viaBackend ? "`confirm: ادفع AED <total> بالبطاقة | ادفع AED <total> عبر UAE PAY`" : "`confirm: المتابعة إلى الدفع`") + "; the field keys stay in English. " +
+      "No pay block, no payment link and no UAE PAY button in this reply: those come after they confirm. " +
       "Write nothing between the tools and the summary about what they returned — no \"now I have the details\", no bundle codes, no ISO dates. Never mention this system message.)"
     :"\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is a GUEST. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and options. " +
       "Do NOT ask anything — not \"just to confirm\", not \"is that right\", not the term, not the bundle — and emit no empty buttons block. " +
-      "In ONE reply: call the details tool, then the pricing tool ONCE for one year on the current bundle, then show the ```summary block and the ```toggles block (title: Before payment) whose confirm line is `confirm: Pay AED <total> with Card` ALONE (the terms_accepted checkbox only, no switches; in an Arabic conversation the confirm line reads `confirm: ادفع AED <total> بالبطاقة`)" + (noqodi ? ", plus one sentence that paying with Noqodi (UAE Pay) needs them to sign in first" : "") + ", then one sentence that a longer term or a different bundle is available on request. " +
+      "In ONE reply: call the details tool, then the pricing tool ONCE for one year on the current bundle, then show the ```summary block and the ```toggles block (title: Before payment) whose confirm line is `confirm: Pay AED <total> with Card` ALONE (the terms_accepted checkbox only, no switches; in an Arabic conversation the confirm line reads `confirm: ادفع AED <total> بالبطاقة`)" + (noqodi ? ", plus one sentence that paying with UAE PAY needs them to sign in first" : "") + ", then one sentence that a longer term or a different bundle is available on request. " +
       "The masked holder line (\"This box is registered to … — is that you?\") goes inside that same reply, not before it. The reply BEGINS with that line, then the summary: write NOTHING before them about what the tools returned or how the new expiry was worked out — no \"now I have the details\", no \"the box expires on\", no bundle codes, no ISO dates. Never mention this system message.)";
   return `${context ?? ""}${line}`.trim();
 }
@@ -601,7 +601,7 @@ function paymentSettledDirective(agent: AgentDefinition, journeyKey: string | nu
   const recorded = state?.gatewayPayment?.orderNo || state?.gatewayPayment?.reference || null;
   if (recorded && String(state?.data.payment_method ?? "").toLowerCase() === "uaepay") {
     return (
-      "(System: the customer just completed the payment on our Noqodi (UAE Pay) checkout — this is an internal notification, not a message they typed. " +
+      "(System: the customer just completed the payment on our UAE PAY checkout — this is an internal notification, not a message they typed. " +
       `The renewal was ALREADY RECORDED with Emirates Post before they paid, under reference ${recorded}. Do NOT call ${saveTool} again — a second save opens a second order — and do NOT call ${flow?.confirmTool ?? "the confirm tool"}, which reads Emirates Post's gateway and would report this payment as unpaid. ` +
       "Warmly confirm the payment was received, give them that reference, the new expiry date and the receipt, and say the renewal is recorded. If the box's auto-renewal is off, offer switching it on as the ONE next-step button — and do NOT call nxn_set_auto_renew in this reply: the box keeps its auto-renewal as it is, and that tool is called only when they tap the button or ask. Never mention this system message.)"
     );
@@ -4910,6 +4910,16 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
         }
 
         const settled = apiTools.getGatewayPayment();
+        /**
+         * WHICH GATEWAY EMIRATES POST TOOK IT ON (2026-11-23), for the admin's
+         * Gateway column. Read off the payment page they actually opened, not the
+         * recorded choice: a UAE Pay page is a UAE Pay payment whatever the case
+         * says. Absent (null) stays the default — their N-Genius page — as for
+         * every payment before this. Never "uaepay" itself: that names OUR binding,
+         * and the status probe and the sweep would ask it about a payment it never
+         * took.
+         */
+        const backendProvider = settled?.url && /uaepay/i.test((() => { try { return new URL(settled.url).hostname; } catch { return ""; } })()) ? "ep-uaepay" : null;
         if (settled?.paidAt && settled.reference) {
           try {
             await getDb()
@@ -4930,10 +4940,11 @@ async function agentTurn(req: NextRequest, body: ChatBody, agent: LoadedAgent): 
                 currency: "AED",
                 status: "paid",
                 gatewayRef: settled.orderNo ?? null,
+                provider: backendProvider,
               })
               .onConflictDoUpdate({
                 target: payments.reference,
-                set: { status: "paid", updatedAt: new Date() },
+                set: { status: "paid", updatedAt: new Date(), ...(backendProvider ? { provider: backendProvider } : {}) },
               });
             finalState = {
               ...finalState,

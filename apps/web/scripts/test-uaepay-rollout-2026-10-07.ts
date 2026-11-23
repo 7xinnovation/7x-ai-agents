@@ -1,5 +1,5 @@
 /**
- * "Pay with Card" or "Pay with Noqodi (UAE Pay)", for every agent (2026-10-07).
+ * "Pay with Card" or "Pay with UAE PAY", for every agent (2026-10-07).
  *
  * Three hardenings of the UAEPay adapter and its return path, and the rollout
  * script that puts an agent into the wanted state — exercised on a fixture
@@ -38,7 +38,7 @@ check("...and N-Genius still is", /PAY_HOSTS = \[[^\]]*"ngenius-payments\.com"/.
 console.log("\nThe admin switches carry the customer's names");
 const editor = src("../app/admin/[slug]/Editor.tsx");
 check("the card is \"Pay with Card\"", /key: "gateway", label: \{ en: "Pay with Card"/.test(editor));
-check("Noqodi is \"Pay with Noqodi \(UAE Pay\)\"", /key: "uaepay"[\s\S]{0,120}en: "Pay with Noqodi \(UAE Pay\)"/.test(editor));
+check("UAE PAY is \"Pay with UAE PAY\"", /key: "uaepay"[\s\S]{0,120}en: "Pay with UAE PAY"/.test(editor));
 check("...and still arrives switched off", /key: "uaepay", enabled: false/.test(editor));
 
 /** A definition shaped like EPGL staging's on 7 October: two journeys, the 28 September block, the 2 October paragraph. */
@@ -65,7 +65,7 @@ console.log("\nEPGL switched ON, on staging");
 {
   const { def, changes } = applyRollout(epgl(), { enable: true, host: "https://7xagents.7x-lab.com/" });
   check("the three switches, Noqodi on", JSON.stringify(def.paymentMethods.map((m: any) => [m.key, m.enabled])) === JSON.stringify([["gateway", true], ["viban", true], ["uaepay", true]]), def.paymentMethods);
-  check("...named for the customer", def.paymentMethods[0].label.en === "Pay with Card" && def.paymentMethods[2].label.en === "Pay with Noqodi (UAE Pay)");
+  check("...named for the customer", def.paymentMethods[0].label.en === "Pay with Card" && def.paymentMethods[2].label.en === "Pay with UAE PAY");
   const b = def.integrations.paymentGateways?.uaepay;
   check("the UAT binding, returning to staging", b?.provider === "uaepay" && b.settings.merchantCode === "MR123093" && b.settings.baseUrl === "https://uat-api.uaepay.ae" && b.settings.returnUrl === "https://7xagents.7x-lab.com/api/payments/return", b);
   check("...naming the secrets, not holding them", JSON.stringify(b?.secretRefs) === JSON.stringify(["UAEPAY_CLIENT_ID", "UAEPAY_CLIENT_SECRET"]));
@@ -73,8 +73,8 @@ console.log("\nEPGL switched ON, on staging");
     const f = j.steps.flatMap((s: any) => s.fields).find((f: any) => f.key === "payment_method");
     check(`${j.key}: three options, Noqodi last`, JSON.stringify(f.options.map((o: any) => o.value)) === JSON.stringify(["gateway", "viban", "uaepay"]), f.options);
     check(`${j.key}: the card relabelled on the field`, f.options[0].label.en === "Pay with Card" && f.options[0].label.ar === "الدفع بالبطاقة");
-    check(`${j.key}: the buttons sentence names three`, /exactly three choices: "Pay with Card", "Pay with Noqodi \(UAE Pay\)" and "Bank transfer \(Virtual IBAN\)"\. Record the answer with collect_field\(payment_method, gateway\), collect_field\(payment_method, uaepay\) or collect_field\(payment_method, viban\)\./.test(j.guidance), j.guidance);
-    check(`${j.key}: the Noqodi paragraph is there once, with this environment's prices`, (j.guidance.match(new RegExp(MARKER, "g")) ?? []).length === 1 && /card payment is AED 2,000/.test(j.guidance) && /Noqodi \(UAE Pay\) payment is AED 1,000/.test(j.guidance));
+    check(`${j.key}: the buttons sentence names three`, /exactly three choices: "Pay with Card", "Pay with UAE PAY" and "Bank transfer \(Virtual IBAN\)"\. Record the answer with collect_field\(payment_method, gateway\), collect_field\(payment_method, uaepay\) or collect_field\(payment_method, viban\)\./.test(j.guidance), j.guidance);
+    check(`${j.key}: the Noqodi paragraph is there once, with this environment's prices`, (j.guidance.match(new RegExp(MARKER, "g")) ?? []).length === 1 && /card payment is AED 2,000/.test(j.guidance) && /UAE PAY payment is AED 1,000/.test(j.guidance));
     check(`${j.key}: ...and the old wording is gone`, !/UAEPay adds no online payment fee/.test(j.guidance) && !/do not mention UAEPay\./.test(j.guidance));
     check(`${j.key}: ...the rest of the guidance untouched`, j.guidance.startsWith(j.key === "renewal" ? "Renewal. " : "Front matter. PAYMENT OPTIONS (2026-09-28): (2) ASK how they want to pay. ") && /Then more\.|Tail\./.test(j.guidance));
   }
@@ -135,7 +135,7 @@ console.log("\nNXN: prepared, not offered");
   const on = applyRollout(nxn, { enable: true, host: "https://7xagents.7x-lab.com" });
   check("switching it on flips the switch and keeps the binding, and writes no EPGL wording", on.def.paymentMethods[1].enabled === true && on.def.integrations.paymentGateways?.uaepay?.provider === "uaepay" && on.def.journeys[0].guidance === "Rental guidance." && !on.def.journeys[0].steps[0].fields.some((f: any) => f.key === "payment_method"), on.changes);
   check("the profile says who owns NXN's wording", PROFILES["nxn-dialog"]!.offerInChat === false && /nxn-one-tap-renew/.test(PROFILES["nxn-dialog"]!.why ?? ""));
-  check("the labels are the ones in the admin editor", LABELS.gateway!.en === "Pay with Card" && LABELS.uaepay!.en === "Pay with Noqodi (UAE Pay)");
+  check("the labels are the ones in the admin editor", LABELS.gateway!.en === "Pay with Card" && LABELS.uaepay!.en === "Pay with UAE PAY");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

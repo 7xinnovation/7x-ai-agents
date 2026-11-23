@@ -36,7 +36,18 @@ const NUMBER_KEYS = new Set([
   "eidnumber", "idnumber", "nationalid", "passport", "passportno",
   "passportnumber", "trn", "iban", "customermobile",
 ]);
-const DROP_KEYS = new Set(["dateofbirth", "dob", "birthdate", "homeaddress", "addressline1", "addressline2"]);
+const DROP_KEYS = new Set([
+  "dateofbirth", "dob", "birthdate", "homeaddress", "addressline1", "addressline2",
+  // A corporate box's trade licence (2026-11-23). Emirates Post masks the
+  // holder's name, mobile and email on a guest renewal's Details but sends
+  // tradeLicenseNo and its expiry in full, and the agent told a guest who had
+  // typed only a box number "the trade licence on file (no. 300143) expired on
+  // 01-01-2013". The company's licence is the holder's business, not the guest's.
+  "tradelicenseno", "tradelicensenumber", "tradelicenceno", "tradelicencenumber", "tradelicense", "tradelicence",
+  "licenseno", "licensenumber", "licenceno", "licencenumber",
+  "tradelicenseexpirydate", "tradelicenceexpirydate", "licenseexpirydate", "licenceexpirydate",
+  "tradelicenseissuedate", "tradelicenseissueentity", "emirateofissue", "sponsor",
+]);
 
 /**
  * Mask a person's name to the shape the client asked for in FB-1323:

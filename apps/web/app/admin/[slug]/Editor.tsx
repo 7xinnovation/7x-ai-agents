@@ -37,7 +37,7 @@ const KNOWN_METHODS: PaymentMethod[] = [
   { key: "viban", label: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي (آيبان افتراضي)" }, enabled: true },
   // Named for the customer, not the API: the platform is noqodi and the federal
   // brand on the hosted page is UAE Pay, so both appear (2026-10-07).
-  { key: "uaepay", enabled: false, label: { en: "Pay with Noqodi (UAE Pay)", ar: "الدفع عبر نقودي (UAE Pay)" } },
+  { key: "uaepay", enabled: false, label: { en: "Pay with UAE PAY", ar: "الدفع عبر UAE PAY" } },
 ];
 
 const TEMPLATE = {

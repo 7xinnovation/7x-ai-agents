@@ -9,7 +9,7 @@
  */
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { paymentDetail, statusLabel, type BoxDetails } from "@/lib/paymentDetail";
+import { paymentDetail, statusLabel, gatewayName, type BoxDetails } from "@/lib/paymentDetail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,7 +96,7 @@ export default async function PaymentDetailPage({ params }: { params: Promise<{ 
             <Row label="Last updated" value={when(p.updatedAt)} />
             <Row label="Order / application reference" value={b.orderNumber} mono />
             <Row label="Box reservation reference" value={b.holdReference} mono />
-            <Row label="Gateway" value={p.provider ?? "default"} />
+            <Row label="Gateway" value={gatewayName(p.provider)} />
             <Row label="Gateway reference" value={p.gatewayRef} mono />
             <Row label="Payment reference" value={p.reference} mono />
           </section>

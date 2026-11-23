@@ -58,7 +58,7 @@ export const UAT = { baseUrl: "https://uat-api.uaepay.ae", merchant: "MR123093" 
 export const LABELS: Record<string, { en: string; ar: string }> = {
   gateway: { en: "Pay with Card", ar: "الدفع بالبطاقة" },
   viban: { en: "Bank transfer (Virtual IBAN)", ar: "تحويل بنكي (آيبان افتراضي)" },
-  uaepay: { en: "Pay with Noqodi (UAE Pay)", ar: "الدفع عبر نقودي (UAE Pay)" },
+  uaepay: { en: "Pay with UAE PAY", ar: "الدفع عبر UAE PAY" },
 };
 
 /**
@@ -103,15 +103,15 @@ function choicesSentence(enabled: boolean): string {
 
 /** The Noqodi paragraph, in any version written since 2 October, so a re-run replaces rather than stacks. */
 export const MARKER = "UAEPAY IS THE THIRD WAY TO PAY";
-const BLOCK_RE = /\s*UAEPAY IS THE THIRD WAY TO PAY[\s\S]*?do not mention (?:UAEPay|Noqodi)(?: \(UAE Pay\))?\./;
+const BLOCK_RE = /\s*UAEPAY IS THE THIRD WAY TO PAY[\s\S]*?do not mention (?:UAEPay|Noqodi|UAE PAY)(?: \(UAE Pay\))?\./;
 
 export function noqodiGuidance(base: number, onlineFee: number): string {
   const card = base + onlineFee;
   return (
-    ` ${MARKER} — to the customer it is "${LABELS.uaepay!.en}", never "UAEPay" alone — and it costs LESS than the card: the licence fee is ${money(base)} and Noqodi adds no online payment fee, so a Noqodi (UAE Pay) payment is ${money(base)} while a card payment is ${money(card)}.` +
+    ` ${MARKER} — to the customer it is "${LABELS.uaepay!.en}", never "UAEPay" alone — and it costs LESS than the card: the licence fee is ${money(base)} and UAE PAY adds no online payment fee, so a UAE PAY payment is ${money(base)} while a card payment is ${money(card)}.` +
     ` State all three prices when you present the choice — ${LABELS.gateway!.en} ${money(card)}, ${LABELS.uaepay!.en} ${money(base)}, ${LABELS.viban!.en} ${money(base)} — rather than mentioning the fee only after they have chosen.` +
-    ` NOQODI (UAE PAY) IS TAKEN EXACTLY LIKE THE CARD: record collect_field(payment_method, uaepay), then call request_payment and the secure payment card appears in the chat by itself; it opens the UAE Pay page, where they pay with their noqodi wallet, a card or their bank. Never paste a link.` +
-    ` Noqodi (UAE Pay) is for SIGNED-IN applicants only: it requires the payer's Emirates ID, which comes from their UAE PASS sign-in and is never something to ask them for. If the applicant is not signed in, offer card and Virtual IBAN only and do not mention Noqodi.`
+    ` UAE PAY IS TAKEN EXACTLY LIKE THE CARD: record collect_field(payment_method, uaepay), then call request_payment and the secure payment card appears in the chat by itself; it opens the UAE Pay page, where they pay with their noqodi wallet, a card or their bank. Never paste a link.` +
+    ` UAE PAY is for SIGNED-IN applicants only: it requires the payer's Emirates ID, which comes from their UAE PASS sign-in and is never something to ask them for. If the applicant is not signed in, offer card and Virtual IBAN only and do not mention UAE PAY.`
   );
 }
 

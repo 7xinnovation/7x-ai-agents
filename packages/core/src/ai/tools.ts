@@ -1594,7 +1594,7 @@ export async function dispatchTool(
       if (chosenMethod === "uaepay" && offered.some((m) => m.key === "uaepay" && (m as { via?: string }).via === "backend")) {
         return {
           result:
-            "NOQODI IS TAKEN BY THE SAVE ON THIS AGENT, NOT BY request_payment: the journey's save tool opens the Noqodi (UAE Pay) payment on the backend's own page when payment_method is uaepay, exactly like the card. NOTHING has been charged. Call the save tool if it has not run yet, show the pay block it returns, and confirm with the confirm tool when they are back.",
+            "UAE PAY IS TAKEN BY THE SAVE ON THIS AGENT, NOT BY request_payment: the journey's save tool opens the UAE PAY payment on the backend's own page when payment_method is uaepay, exactly like the card. NOTHING has been charged. Call the save tool if it has not run yet, show the pay block it returns, and confirm with the confirm tool when they are back.",
           state,
           events,
           isError: true,
@@ -1615,8 +1615,8 @@ export async function dispatchTool(
       if (pay.binding?.provider === "uaepay" && !payerDetails(state).emiratesId) {
         return {
           result:
-            "NOQODI (UAE PAY) NEEDS A SIGN-IN: it requires the customer's verified Emirates ID, which only a UAE PASS sign-in provides, and this session has none. " +
-            "NOTHING has been charged. Offer them two ways forward — sign in with UAE PASS and then pay with Noqodi, or pay with the card now — and record whichever they choose with collect_field(payment_method, ...). Never say a payment failed; none was attempted.",
+            "UAE PAY NEEDS A SIGN-IN: it requires the customer's verified Emirates ID, which only a UAE PASS sign-in provides, and this session has none. " +
+            "NOTHING has been charged. Offer them two ways forward — sign in with UAE PASS and then pay with UAE PAY, or pay with the card now — and record whichever they choose with collect_field(payment_method, ...). Never say a payment failed; none was attempted.",
           state,
           events,
           isError: true,

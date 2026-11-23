@@ -16,7 +16,7 @@ import { paymentRows, paymentTotals, type Window } from "@/lib/transactions";
 import { listAgentsForFilter } from "@/lib/metrics";
 import { AgentFilter } from "../AgentFilter";
 import { currentScope, selectAgent } from "@/lib/scope";
-import { casesForConversations, purchaseKind } from "@/lib/paymentDetail";
+import { casesForConversations, purchaseKind, gatewayName } from "@/lib/paymentDetail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -168,7 +168,7 @@ export default async function PaymentsPage({
                   <span className={`sa-tag ${r.status === "paid" ? "ok" : r.status === "failed" ? "bad" : ""}`}>{r.status}</span>
                 </span>
                 <span className="sa-mono">
-                  {r.provider ?? "default"}
+                  {gatewayName(r.provider)}
                   {r.gatewayRef ? <span className="sa-muted"> · {r.gatewayRef}</span> : null}
                 </span>
                 <span className="sa-cell-actions">

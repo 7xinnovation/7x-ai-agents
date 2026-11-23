@@ -859,6 +859,28 @@ export function epglServiceRecordId(journey: unknown): string | undefined {
  * than in a prompt: the guidance has described the walk since 11 August and the
  * rows it describes have never once been created.
  */
+/**
+ * Emirates Post's renewal price lines, summed by service in the customer's words.
+ * Their list splits each service by calendar year (Dec 2038 and the rest of
+ * 2039 are two RENT lines); the customer wants one line per thing they pay for.
+ */
+export function renewalBreakdown(list: unknown): { label: string; amount: number }[] {
+  if (!Array.isArray(list)) return [];
+  const NAMES: Record<string, string> = { RENT: "Box rental", TIJARI: "Tijari licence", AGENT: "Representative" };
+  const sums = new Map<string, number>();
+  for (const l of list as Record<string, unknown>[]) {
+    const amt = Number(l?.amount);
+    if (!Number.isFinite(amt)) continue;
+    // "I" is Inclusive: the representative the bundle includes free. It is
+    // listed at its price and not charged — counting it made 3,590 read 3,690.
+    if (String(l?.serviceCriteriaDesc ?? "").trim().toUpperCase() === "I") continue;
+    const code = String(l?.service ?? "").toUpperCase();
+    const label = NAMES[code] ?? (String(l?.serviceDesc ?? "").trim() || code || "Other");
+    sums.set(label, (sums.get(label) ?? 0) + amt);
+  }
+  return [...sums].map(([label, amount]) => ({ label, amount: Math.round(amount * 100) / 100 }));
+}
+
 export function financePeriod(startQuarter: string, year: string, count = 4): { quarter: string; year: string }[] {
   const q0 = Number(/^Q([1-4])$/.exec(String(startQuarter).trim().toUpperCase())?.[1]);
   const y0 = Number(String(year).trim());
@@ -3478,7 +3500,7 @@ export async function buildApiTools(
       if (wantUaePay && !opts.authenticated) {
         return {
           result:
-            "NOQODI (UAE PAY) NEEDS A SIGN-IN: Emirates Post takes Noqodi for signed-in customers only, and this customer is not signed in. NOTHING has been saved or charged. Offer them two ways forward — sign in and then pay with Noqodi, or pay with the card now (record collect_field(payment_method, gateway) and send the save again).",
+            "UAE PAY NEEDS A SIGN-IN: Emirates Post takes UAE PAY for signed-in customers only, and this customer is not signed in. NOTHING has been saved or charged. Offer them two ways forward — sign in and then pay with UAE PAY, or pay with the card now (record collect_field(payment_method, gateway) and send the save again).",
           isError: true,
         };
       }
@@ -4716,7 +4738,7 @@ export async function buildApiTools(
                * this customer, and their confirm tool, which reads that gateway,
                * would call this renewal unpaid.
                */
-              `\n\nTHE RENEWAL IS RECORDED. The customer has ALREADY PAID on our Noqodi (UAE Pay) checkout, which has settled. This response also carries a paymentUrl Emirates Post opened on THEIR gateway: IGNORE it — do NOT show a pay block, do NOT ask them to pay again, and do NOT call the confirm tool, which reads their gateway and would report this payment as unpaid. Give the customer the order reference from this response, the new expiry date and the receipt, and say the renewal is recorded.`),
+              `\n\nTHE RENEWAL IS RECORDED. The customer has ALREADY PAID on our UAE PAY checkout, which has settled. This response also carries a paymentUrl Emirates Post opened on THEIR gateway: IGNORE it — do NOT show a pay block, do NOT ask them to pay again, and do NOT call the confirm tool, which reads their gateway and would report this payment as unpaid. Give the customer the order reference from this response, the new expiry date and the receipt, and say the renewal is recorded.`),
       };
     }
     /**
@@ -5272,14 +5294,40 @@ export async function buildApiTools(
       const bundleId = asStr(b.newBundleId ?? b.bundleId);
       const expiryDate = asStr(b.expiryDate);
       let amount: number | null = null;
+      let breakdown: { label: string; amount: number }[] = [];
       try {
         const parsed = JSON.parse(res.raw ?? res.result.slice(res.result.indexOf("\n") + 1));
-        const a = (parsed?.payload ?? parsed)?.poBoxPrice?.amount;
+        const price = (parsed?.payload ?? parsed)?.poBoxPrice;
+        const a = price?.amount;
         if (typeof a === "number") amount = a;
+        breakdown = renewalBreakdown(price?.poBoxPriceDetailsList);
       } catch {
         /* the price is a bonus here; the bundle id is the point */
       }
       if (bundleId && expiryDate) lastPriced = { bundleId, expiryDate, amount };
+      /**
+       * WHAT THE TOTAL IS MADE OF (2026-11-23).
+       *
+       * A corporate Premium Box was shown at AED 2,495 / year on its card, and
+       * the next line said "1 year on Premium Box, AED 3,590.00" — the customer
+       * asked what 3,590 was. It is rent 2,495 + Tijari licence 995 +
+       * representative 100, split by year in Emirates Post's line items, which
+       * the model added up and never itemised. Summed here, by service, so the
+       * figure it quotes always comes with its parts.
+       */
+      // Only when the parts add up to their total: a breakdown that does not is
+      // worse than none, because the customer is then shown two numbers.
+      const adds = amount !== null && Math.abs(breakdown.reduce((t, l) => t + l.amount, 0) - amount) < 0.01;
+      if (amount !== null && breakdown.length > 1 && adds) {
+        const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        res = {
+          ...res,
+          result:
+            res.result +
+            `\n\nWHAT THIS TOTAL IS MADE OF — ${breakdown.map((l) => `${l.label} AED ${fmt(l.amount)}`).join(" + ")} = AED ${fmt(amount)}. ` +
+            "Whenever you quote this total, give these lines with it — one summary row per line, total last — never the total alone, and never a figure that differs from a bundle's per-year price without saying what was added.",
+        };
+      }
     }
 
     // Which branch did they choose? Asking for the boxes at a hall IS choosing it.

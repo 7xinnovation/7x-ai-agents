@@ -504,3 +504,12 @@ export function detailCsv(d: PaymentDetail): string {
     ...d.messages.map((m) => [m.createdAt, m.role === "user" ? "Customer" : "Agent", m.content]),
   ]);
 }
+
+
+/** What the Gateway column calls each provider. "ep-uaepay": UAE Pay, opened by Emirates Post's own save (2026-11-23). */
+export function gatewayName(provider: string | null | undefined): string {
+  if (!provider) return "default";
+  if (provider === "ep-uaepay") return "UAE Pay (via Emirates Post)";
+  if (provider === "uaepay") return "UAE Pay";
+  return provider;
+}
