@@ -3114,8 +3114,10 @@ body {
   transition: transform 0.14s var(--ease-out), box-shadow 0.18s var(--ease-out);
 }
 /* Several ways to confirm (2026-10-11): one button per choice, stacked, the first leading. */
-.dlg-toggles-confirms { display: flex; flex-direction: column; gap: 8px; }
-.dlg-toggles-confirms .dlg-toggles-confirm { width: 100%; }
+/* Two ways to pay sit side by side (2026-11-23), each half the card; on a card
+   too narrow for both (a small phone) they wrap and stack as before. */
+.dlg-toggles-confirms { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.dlg-toggles-confirms .dlg-toggles-confirm { flex: 1 1 170px; min-width: 0; width: auto; white-space: normal; line-height: 1.25; }
 .dlg-toggles-confirms .dlg-toggles-confirm + .dlg-toggles-confirm { background: color-mix(in srgb, var(--c-primary) 12%, transparent); color: var(--c-primary); }
 
 .dlg-toggles-confirm:hover {

@@ -4989,7 +4989,16 @@ export async function buildApiTools(
           // A rental records it on the hold; a guest renewal has none, so the
           // gateway payment carries it instead.
           if (lastHold) lastHold = { ...lastHold, paidAt: lastHold.paidAt ?? new Date().toISOString() };
-          if (gatewayPayment) gatewayPayment = { ...gatewayPayment, paidAt: gatewayPayment.paidAt ?? new Date().toISOString() };
+          // What they actually paid, from the confirm itself (2026-11-23). The
+          // amount was read off N-Genius's niOrderResult at the save; a UAE Pay
+          // order has none, so a paid UAE Pay renewal was recorded at AED 0.00.
+          const paid = Number((p?.paymentDetails as Record<string, unknown> | undefined)?.amountPaid);
+          if (gatewayPayment)
+            gatewayPayment = {
+              ...gatewayPayment,
+              paidAt: gatewayPayment.paidAt ?? new Date().toISOString(),
+              amount: gatewayPayment.amount ?? (Number.isFinite(paid) && paid > 0 ? paid : null),
+            };
         } else if (p && p.isPaymentSuccess === false) {
           // Ask the gateway what it actually did. "paymentStatus 2" covers a
           // declined card and a payment nobody has attempted, and telling a
