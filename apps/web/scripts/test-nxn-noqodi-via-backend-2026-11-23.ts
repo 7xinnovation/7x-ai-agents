@@ -54,6 +54,14 @@ check("...and every guest and card renewal keeps the guest endpoints", !/execute
 const pathFor = (p: string) => p.replace(/\/Guest\/Renewal\//i, "/Renewal/");
 check("the rewrite maps both real paths", pathFor("/api/v1/Guest/Renewal/Save") === "/api/v1/Renewal/Save" && pathFor("/api/v1/Guest/Renewal/ConfirmPayment") === "/api/v1/Renewal/ConfirmPayment");
 
+// Rentals: the Before payment card offers both ways (staging showed "Proceed to payment" alone).
+const { RENTAL_REWRITES, rewritePassages } = await import("./nxn-noqodi-via-backend-2026-11-23");
+const oldRental = "x then `confirm: Proceed to payment`, then a closing line of three backticks. y\nconfirm: Proceed to payment\n```\nORDER OF THE PAYMENT STEP, z";
+const newRental = rewritePassages(oldRental, RENTAL_REWRITES);
+check("both rental mentions offer card and UAE PAY to a signed-in customer", newRental.done.length === 2 && (newRental.text.match(/confirm: Pay with Card \| Pay with UAE PAY/g) ?? []).length >= 2 && /A GUEST's confirm line is `confirm: Proceed to payment`/.test(newRental.text), newRental.done);
+check("...and a second run changes nothing", rewritePassages(newRental.text, RENTAL_REWRITES).done.length === 0);
+check("...the route records the rental's choice before the hold and the save", /viaBackend && authenticated && !inRenewal && RENTAL_WAY\.test\(message\)/.test(route) && /FIRST record collect_field\(payment_method, \$\{uae \? "uaepay" : "gateway"\}\)/.test(route));
+
 // The other three of Emre's 23 Nov testing round.
 const { redactGuestPII } = await import("../lib/pii");
 const guest = JSON.parse(redactGuestPII(JSON.stringify({ poBoxCustomerDetails: { tradeLicenseNo: "300143", tradeLicenseExpiryDate: "01/01/2013 00:00:00" }, poBoxSubscriptionDetails: { currentExpiryDate: "2038-12-20T00:00:00" } })));

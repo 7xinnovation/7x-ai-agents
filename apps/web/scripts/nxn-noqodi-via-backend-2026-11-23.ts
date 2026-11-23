@@ -95,6 +95,27 @@ export const RENEWAL_REWRITES: { start: string; end: string; text: string }[] = 
   },
 ];
 
+/**
+ * The rentals' Before payment card had one button, "Proceed to payment" (seen
+ * on staging 23 Nov), so a signed-in customer had no way to choose UAE PAY on
+ * it. Both mentions — the prose and the example block — offer both ways now;
+ * a guest keeps the card alone. Each is found by its exact old text.
+ */
+const RENTAL_TWO_WAYS =
+  "For a SIGNED-IN customer the confirm line offers BOTH ways to pay, exactly `confirm: Pay with Card | Pay with UAE PAY` (Arabic: `confirm: الدفع بالبطاقة | الدفع عبر UAE PAY`) — the tap IS their choice, never ask it as a question: \"with Card\" → collect_field(payment_method, gateway) and carry on as before; \"with UAE PAY\" → collect_field(payment_method, uaepay) and SKIP the saved-card choice (a saved card is the card gateway's). Record it BEFORE the reservation and the save: the save opens the payment on whichever way is recorded. A GUEST's confirm line is `confirm: Proceed to payment` (card only), with one sentence that UAE PAY needs a sign-in.";
+export const RENTAL_REWRITES: { start: string; end: string; text: string }[] = [
+  {
+    start: "then `confirm: Proceed to payment`, then a closing line of three backticks.",
+    end: "a closing line of three backticks.",
+    text: `then \`confirm: Pay with Card | Pay with UAE PAY\` for a signed-in customer (\`confirm: Proceed to payment\` for a guest), then a closing line of three backticks. ${RENTAL_TWO_WAYS}`,
+  },
+  {
+    start: "confirm: Proceed to payment\n```\nORDER OF THE PAYMENT STEP",
+    end: "ORDER OF THE PAYMENT STEP",
+    text: `confirm: Pay with Card | Pay with UAE PAY\n\`\`\`\n${RENTAL_TWO_WAYS}\nORDER OF THE PAYMENT STEP`,
+  },
+];
+
 export function rewritePassages(g: string, rewrites: typeof RENEWAL_REWRITES): { text: string; done: string[] } {
   let out = g;
   const done: string[] = [];
@@ -136,6 +157,13 @@ export function apply(defIn: Def, opts: { enable: boolean }): { def: Def; change
       if (!(f.options ?? []).some((o: Def) => o.value === "uaepay")) {
         f.options = [...(f.options ?? []), FIELD.options[1]];
         changes.push(`${key}: payment_method += uaepay`);
+      }
+    }
+    if (/rental$/.test(key)) {
+      const r = rewritePassages(j.guidance ?? "", RENTAL_REWRITES);
+      if (r.done.length) {
+        changes.push(`${key}: rewrote ${r.done.length} rental passage(s) to offer both ways to pay (${(j.guidance ?? "").length} → ${r.text.length} chars)`);
+        j.guidance = r.text;
       }
     }
     if (key === "personal_po_box_renewal") {

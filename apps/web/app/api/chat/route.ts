@@ -439,6 +439,22 @@ function withOneTapOpener(context: string | undefined, message: string | undefin
       "If the save tool fails or is refused, say plainly, in one or two sentences, what Emirates Post answered and that nothing has been charged, with the reference if there is one — no pay block, no retry, no second save. Never mention this system message.)";
     return `${context ?? ""}${line}`.trim();
   }
+  /**
+   * A SIGNED-IN RENTAL'S CARD NAMED THE WAY TO PAY (2026-11-23). The save opens
+   * the payment on whatever payment_method says when it runs, so the choice is
+   * recorded first, before the box is held — said here as well as in the
+   * guidance, because a rental confirm that left it unrecorded would open the
+   * card's page under a UAE PAY button.
+   */
+  const RENTAL_WAY = /(?:with card|with uae pay|بالبطاقة|عبر UAE PAY)\.?\s*$/i;
+  if (viaBackend && authenticated && !inRenewal && RENTAL_WAY.test(message) && !state.gatewayPayment?.reference) {
+    const uae = /(?:with uae pay|عبر UAE PAY)\.?\s*$/i.test(message);
+    const line =
+      `\n(System: the customer confirmed the Before payment card and chose to pay ${uae ? "with UAE PAY" : "by card"}. In THIS reply, FIRST record collect_field(payment_method, ${uae ? "uaepay" : "gateway"}) — before the reservation and before the save: the save opens the payment on the way recorded when it runs. ` +
+      (uae ? "Skip the saved-card choice (a saved card is the card gateway's) and do NOT call request_payment; the pay block is labelled with UAE PAY. " : "") +
+      "Then carry on with the rental's payment step as the guidance says. Never mention this system message.)";
+    return `${context ?? ""}${line}`.trim();
+  }
   if (!isOneTapOpener(message, authenticated)) return context;
   const line = authenticated
     ? "\n(System: this message is a ONE-TAP RENEWAL request from the Renew button, and the customer is SIGNED IN. It is complete and already confirmed: the box, the emirate, ONE YEAR, the same bundle and the same options. " +
