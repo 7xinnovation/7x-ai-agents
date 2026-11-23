@@ -46,6 +46,14 @@ try { apply({ ...base, tenantSlug: "epgl" }, { enable: false }); } catch { refus
 check("refuses an agent that is not NXN", refused);
 check("the renewal's block names the totals on both buttons", /Pay AED <total> with Card \| Pay AED <total> with UAE PAY/.test(guidanceBlock(true)) && !/Pay AED <total> with Card \|/.test(guidanceBlock(false)));
 
+// A signed-in UAE Pay renewal goes to the signed-in endpoints (Guest/Renewal/Save ignores paymentProvider).
+check("a signed-in UAE Pay renewal save goes to Renewal/Save", /\(\/guest_renewal_save\$\/i\.test\(toolName\) && Boolean\(opts\.backendUaePay\?\.\(\)\)\)/.test(integ) && /Boolean\(opts\.authenticated\) &&/.test(integ));
+check("...its confirm follows when the order's payment page is UAE Pay's", /\(\/guest_renewal_confirmpayment\$\/i\.test\(toolName\) && onUaePayPage\)/.test(integ));
+check("...only the path changes, for the call and its saved-card retry", /path: entry\.op\.path\.replace\(\/\\\/Guest\\\/Renewal\\\/\/i, "\/Renewal\/"\)/.test(integ) && /executeOperation\(liveSpec, runOp, input \?\? \{\}, runtimeToken\(\)/.test(integ) && /executeOperation\(liveSpec, runOp, retryInput, runtimeToken\(\)/.test(integ));
+check("...and every guest and card renewal keeps the guest endpoints", !/executeOperation\(liveSpec, entry\.op,/.test(integ) && /const runOp = signedInRenewal \? /.test(integ));
+const pathFor = (p: string) => p.replace(/\/Guest\/Renewal\//i, "/Renewal/");
+check("the rewrite maps both real paths", pathFor("/api/v1/Guest/Renewal/Save") === "/api/v1/Renewal/Save" && pathFor("/api/v1/Guest/Renewal/ConfirmPayment") === "/api/v1/Renewal/ConfirmPayment");
+
 // The other three of Emre's 23 Nov testing round.
 const { redactGuestPII } = await import("../lib/pii");
 const guest = JSON.parse(redactGuestPII(JSON.stringify({ poBoxCustomerDetails: { tradeLicenseNo: "300143", tradeLicenseExpiryDate: "01/01/2013 00:00:00" }, poBoxSubscriptionDetails: { currentExpiryDate: "2038-12-20T00:00:00" } })));

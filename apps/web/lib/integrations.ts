@@ -3848,6 +3848,35 @@ export async function buildApiTools(
     // the model sees them — a guest proving knowledge of a box number must not
     // learn the holder's name, email, phone, or ID.
     const identified = Boolean(opts.authenticated) || Boolean(runtimeToken()) || Boolean(opts.uaePassToken);
+    /**
+     * A SIGNED-IN UAE PAY RENEWAL GOES TO THE SIGNED-IN ENDPOINTS (2026-11-23).
+     *
+     * Emirates Post honours paymentProvider 1 "only for logged in journey":
+     * tested on staging, Rental/Save opened a UAE Pay page and Guest/Renewal/Save,
+     * sent the same flag, opened N-Genius. The renewal journey stays guest-shaped
+     * — the model calls the guest tools, which is what kept it off the signed-in
+     * ones for guests — and the choice of endpoint is made HERE, from the session:
+     * signed in and paying with UAE Pay, the save goes to Renewal/Save, and its
+     * confirm to Renewal/ConfirmPayment (the order's payment page is UAE Pay's).
+     * Same request models as the guest pair (SaveRenewalRequest,
+     * ProcessPaymentRequest), same credentials as Rental/Save. A card renewal and
+     * every guest keep the guest endpoints exactly as before.
+     */
+    const onUaePayPage = (() => { try { return /uaepay/i.test(new URL(gatewayPayment?.url ?? "").hostname); } catch { return false; } })();
+    const signedInRenewal =
+      Boolean(opts.authenticated) &&
+      ((/guest_renewal_save$/i.test(toolName) && Boolean(opts.backendUaePay?.())) ||
+        (/guest_renewal_confirmpayment$/i.test(toolName) && onUaePayPage));
+    const runOp = signedInRenewal ? { ...entry.op, path: entry.op.path.replace(/\/Guest\/Renewal\//i, "/Renewal/") } : entry.op;
+    if (signedInRenewal) {
+      void audit({
+        agentId,
+        conversationId: opts.conversationId,
+        actor: "system",
+        action: "renewal_signed_in_endpoint",
+        payload: { tool: toolName, from: entry.op.path, to: runOp.path, reason: "UAE Pay is honoured on the signed-in renewal endpoints only" },
+      }).catch(() => {});
+    }
     let res =
       (opts.mockSimulate
         ? await simulateNxnMockOp(
@@ -3870,7 +3899,7 @@ export async function buildApiTools(
               : undefined
           )
         : null) ??
-      (await executeOperation(liveSpec, entry.op, input ?? {}, runtimeToken(), {
+      (await executeOperation(liveSpec, runOp, input ?? {}, runtimeToken(), {
       redactPII: !identified,
       identityToken: opts.uaePassToken,
       // Already-verified customer: a backend 401 must never be reported as "sign in
@@ -3914,7 +3943,7 @@ export async function buildApiTools(
       delete pay.savedCard;
       body.paymentProperties = pay;
       const retryInput = { ...input, body };
-      const retry = await executeOperation(liveSpec, entry.op, retryInput, runtimeToken(), {
+      const retry = await executeOperation(liveSpec, runOp, retryInput, runtimeToken(), {
         redactPII: !identified,
         identityToken: opts.uaePassToken,
         customerAuthenticated: Boolean(opts.authenticated) || Boolean(opts.uaePassToken),
