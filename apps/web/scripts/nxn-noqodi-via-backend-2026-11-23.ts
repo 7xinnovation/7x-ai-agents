@@ -60,6 +60,55 @@ export function guidanceBlock(renewal: boolean): string {
 
 type Def = Record<string, any>;
 
+/** The Before payment card a signed-in renewal shows before anything is saved. */
+const SIGNED_IN_CARD =
+  "the Before payment ```toggles block — `title: Before payment`; the line `default: on` ONLY if the box's auto-renewal is on today (isAutoRenewEnabled in the details); `checkboxes: terms_accepted`; `- auto_renew_consent: Renew this box automatically every year`; `- terms_accepted: I accept the [Terms and Conditions](https://www.emiratespost.ae/terms-individual)`; `confirm: Pay AED <total> with Card | Pay AED <total> with Noqodi (UAE Pay)` with the real total in both (Arabic: title `قبل الدفع`, switch `جدّد هذا الصندوق تلقائياً كل عام`, tickbox `أوافق على [الشروط والأحكام](https://www.emiratespost.ae/terms-individual)`, confirm `ادفع AED <total> بالبطاقة | ادفع AED <total> عبر نقودي (UAE Pay)`)";
+
+/**
+ * The personal renewal's signed-in fast path predates both the Before payment
+ * card (2026-11-20) and this: it saved on the first reply with the card and
+ * offered "Noqodi instead" on our checkout. Tested 23 Nov with a real signed-in
+ * account, the model followed it over the block at the top — so the passages
+ * themselves are rewritten. Each is found by its exact start (and end), and a
+ * passage already rewritten is simply not found again.
+ */
+export const RENEWAL_REWRITES: { start: string; end: string; text: string }[] = [
+  {
+    start: "SIGNED IN: ONE reply that calls the details tool, the pricing tool once for ONE YEAR on the current bundle, records the fields silently, CALLS THE SAVE TOOL,",
+    end: "no switches, no checkbox: the pay button is the next tap.",
+    text:
+      `SIGNED IN — TWO TAPS (2026-11-23): the FIRST reply calls the details tool and the pricing tool once for ONE YEAR on the current bundle, records the fields silently, does NOT call the save tool, and shows the renewal summary block, then ${SIGNED_IN_CARD}, then one sentence that a longer term or another bundle is available on request. No pay block yet. When they confirm, their confirm names the way to pay: record terms_accepted, auto_renew_consent and payment_method (gateway for the card, uaepay for Noqodi), CALL THE SAVE TOOL once, and reply with ONLY the pay block labelled the way they chose — no "instead" button.`,
+  },
+  {
+    start: "— then CALL THE SAVE TOOL in this same reply (do NOT call the renewed-by options tool",
+    end: "without calling nxn_set_auto_renew until they tap.",
+    text:
+      `— and do NOT call the save tool in this reply. Reply ONCE with the \`\`\`summary block (PO Box, bundle, term 1 year, current expiry, NEW expiry, one row per charge, a row \`Auto-renewal: on/off, as now\`, total: last), then ${SIGNED_IN_CARD}, then ONE short sentence: to renew for longer or move to a different bundle, they only have to say so. No pay block, no payment link, no question. Write nothing between the tools and the summary about what they returned. ` +
+      `WHEN THEY CONFIRM THE CARD (it ends "with Card" or "with Noqodi (UAE Pay)"): record collect_field(terms_accepted, true), collect_field(auto_renew_consent, <their switch>) and collect_field(payment_method, gateway | uaepay), then CALL THE SAVE TOOL once (do NOT call the details, pricing or renewed-by options tools again — renewed_by is resolved for you), with customerKYC { firstName, lastName, email, mobileNumber } carrying the subscriber values, paymentProperties.saveCreditCard false and isAutomaticSubscriptionEnabled exactly as the box has it today — which way to pay is set on the request for you from payment_method. Reply with ONLY the \`\`\`pay block (\`label: Pay AED <total> with Card\` or \`label: Pay AED <total> with Noqodi (UAE Pay)\`, \`url:\` the paymentUrl the save returned, \`amount: AED <total>\`). If the save fails or is refused, say plainly what Emirates Post answered and that nothing has been charged — no pay block, no retry, no second save. ` +
+      `AFTER THE PAY BUTTON: when they come back from the payment page the order ALREADY EXISTS — do NOT call the save tool again (a second save opens a second order). Call the confirm tool ONCE; if it reports paid and their auto-renewal choice differs from the box's, call nxn_set_auto_renew ONCE with their choice; close with ONE line giving the new expiry date and the auto-renewal as it now stands. The receipt download link is added under your reply for you: do not write one, and do not say it is above. If they ask to pay the other way after the pay block is shown, say this order's payment is open for the way they chose — a second save would open a second order.`,
+  },
+  {
+    start: "\"with Noqodi (UAE Pay)\": record collect_field(payment_method, uaepay), then call request_payment",
+    end: "which did not take this payment).",
+    text:
+      "\"with Noqodi (UAE Pay)\": record collect_field(payment_method, uaepay) and call the save tool — Emirates Post opens the payment on Noqodi for you — emit the pay block labelled `Pay AED <total> with Noqodi (UAE Pay)`, and confirm with the confirm tool when they return, exactly as for the card. NEVER call request_payment for it.",
+  },
+];
+
+export function rewritePassages(g: string, rewrites: typeof RENEWAL_REWRITES): { text: string; done: string[] } {
+  let out = g;
+  const done: string[] = [];
+  for (const r of rewrites) {
+    const i = out.indexOf(r.start);
+    if (i === -1) continue;
+    const e = out.indexOf(r.end, i);
+    if (e === -1) throw new Error(`passage "${r.start.slice(0, 40)}…" has no end "${r.end.slice(0, 40)}…"`);
+    out = out.slice(0, i) + r.text + out.slice(e + r.end.length);
+    done.push(r.start.slice(0, 48));
+  }
+  return { text: out, done };
+}
+
 export function apply(defIn: Def, opts: { enable: boolean }): { def: Def; changes: string[] } {
   const def: Def = JSON.parse(JSON.stringify(defIn));
   const changes: string[] = [];
@@ -87,6 +136,13 @@ export function apply(defIn: Def, opts: { enable: boolean }): { def: Def; change
       if (!(f.options ?? []).some((o: Def) => o.value === "uaepay")) {
         f.options = [...(f.options ?? []), FIELD.options[1]];
         changes.push(`${key}: payment_method += uaepay`);
+      }
+    }
+    if (key === "personal_po_box_renewal") {
+      const r = rewritePassages(j.guidance ?? "", RENEWAL_REWRITES);
+      if (r.done.length) {
+        changes.push(`${key}: rewrote ${r.done.length} old passage(s) — ${r.done.map((d) => `"${d}…"`).join(", ")} (${(j.guidance ?? "").length} → ${r.text.length} chars)`);
+        j.guidance = r.text;
       }
     }
     const block = guidanceBlock(/renewal/.test(key));
