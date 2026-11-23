@@ -126,6 +126,14 @@ export const AgentDefinition = z.object({
         enabled: z.boolean().default(true),
         /** What the customer is told it costs or how it works, if anything. */
         note: LocalizedString.optional(),
+        /**
+         * "backend": the journey's own backend takes this method on its gateway
+         * (2026-11-23 — Emirates Post's Rental/Save and Renewal Save accept
+         * paymentProvider 1 for UAE Pay). The save opens the payment and the
+         * confirm tool reads it, exactly as for the card; our own checkout for
+         * this method is never used. Absent: we take it on our binding.
+         */
+        via: z.enum(["backend"]).optional(),
       })
     )
     .default([]),

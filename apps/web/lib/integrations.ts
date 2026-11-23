@@ -1510,6 +1510,14 @@ export async function buildApiTools(
      */
     renewalSubscriber?: () => { firstName?: string; lastName?: string; email?: string; mobile?: string };
     /**
+     * Noqodi (UAE Pay) on the BACKEND's gateway (2026-11-23): true when the
+     * customer chose it and the agent's uaepay method is `via: "backend"`. Read
+     * at call time — the choice is usually recorded in the same turn as the save.
+     * The save then carries paymentProvider 1 (Emirates Post: 0 N-Genius, 1 UAE
+     * Pay; signed-in rentals and renewals only).
+     */
+    backendUaePay?: () => boolean;
+    /**
      * The signed-in customer's Emirates ID, as Emirates Post themselves gave it.
      *
      * A rental save carries it as userProfile.idNumber and their backend answers
@@ -3451,6 +3459,35 @@ export async function buildApiTools(
         }
       }
       if (patched) {
+        body.paymentProperties = pay;
+        input = { ...input, body };
+      }
+    }
+
+    /**
+     * WHICH GATEWAY EMIRATES POST OPENS THE PAYMENT ON (2026-11-23).
+     *
+     * Their Rental/Save and renewal save take paymentProvider in
+     * paymentProperties: 0 is N-Genius (the default), 1 is UAE Pay, for signed-in
+     * customers only. Set from the customer's recorded choice, never the model's:
+     * a stray 1 would open Noqodi under a "Pay with Card" button. With UAE Pay the
+     * card on file is N-Genius's token and means nothing there, so it is dropped.
+     */
+    if (/(rental_save|renewal_save)$/i.test(toolName) && opts.backendUaePay) {
+      const wantUaePay = opts.backendUaePay();
+      if (wantUaePay && !opts.authenticated) {
+        return {
+          result:
+            "NOQODI (UAE PAY) NEEDS A SIGN-IN: Emirates Post takes Noqodi for signed-in customers only, and this customer is not signed in. NOTHING has been saved or charged. Offer them two ways forward — sign in and then pay with Noqodi, or pay with the card now (record collect_field(payment_method, gateway) and send the save again).",
+          isError: true,
+        };
+      }
+      const body = { ...((input?.body ?? {}) as Record<string, unknown>) };
+      const pay = { ...((body.paymentProperties ?? {}) as Record<string, unknown>) };
+      const before = JSON.stringify(pay);
+      pay.paymentProvider = wantUaePay ? 1 : 0;
+      if (wantUaePay) delete pay.savedCard;
+      if (JSON.stringify(pay) !== before) {
         body.paymentProperties = pay;
         input = { ...input, body };
       }

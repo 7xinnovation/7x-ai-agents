@@ -27,7 +27,7 @@ export interface SystemPrompt {
  *    the backend, then completion through the internal payment spine (reliable
  *    across turns). Use while the backend write/payment is unavailable.
  */
-function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journey["submission"]>["apiFlow"]>): string {
+function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journey["submission"]>["apiFlow"]>, noqodiViaBackend = false): string {
   const sys = f.service ? `the ${f.service} system` : "the connected backend";
 
   // Which gateway takes the money is decided by whether we can VERIFY a payment on
@@ -108,7 +108,12 @@ function renderApiFlow(f: NonNullable<NonNullable<import("@dialog/config").Journ
   );
   if (f.confirmTool)
     lines.push(`  4. ONLY if ${f.saveTool} succeeded and returned a real reference number: after the customer says they have paid, call ${f.confirmTool} with that reference to verify, and confirm success only if the tool reports the payment succeeded. Never call ${f.confirmTool} with a reference that did not come from a successful ${f.saveTool}.`);
-  if (f.confirmTool)
+  if (f.confirmTool && noqodiViaBackend)
+    lines.push(
+      // 2026-11-23: Emirates Post's saves take paymentProvider 1 for UAE Pay.
+      `  PAYING WITH NOQODI (UAE PAY): it is taken EXACTLY like the card, on ${sys}'s own payment page — steps 3 and 4 above, unchanged. The ONLY difference: record collect_field(payment_method, uaepay) BEFORE calling ${f.saveTool} (and collect_field(payment_method, gateway) for the card) — the save opens the payment on whichever way to pay is recorded when it runs (that is set on the request for you), and it cannot be changed after the order exists without a second order. So the customer chooses how to pay BEFORE the save, on the Before payment card's two buttons ("Pay AED <total> with Card" | "Pay AED <total> with Noqodi (UAE Pay)"), and the pay block's label names the way they chose. NEVER call request_payment for this journey: our own checkout is not used for Noqodi here. Noqodi is for SIGNED-IN customers only; a guest is offered the card, with one sentence that Noqodi needs them to sign in. Never offer "Noqodi instead" after the pay block is shown.`
+    );
+  else if (f.confirmTool)
     lines.push(
       `  PAYING WITH NOQODI (UAE PAY) INSTEAD: if the customer's recorded payment_method is "uaepay", the order of steps changes. Call request_payment FIRST — our secure checkout opens in the chat by itself; never a pay block — and only once it reports paid call ${f.saveTool} to RECORD the order — unless ${f.saveTool} has ALREADY returned a reference earlier in this conversation (the one-tap renewal saves before it offers the ways to pay), in which case do NOT call it again: a second save opens a second order. Ignore the paymentUrl that save returns, show no pay block for it, and do NOT call ${f.confirmTool}: it reads Emirates Post's gateway, which did not take this payment. A card payment ("gateway") keeps steps 3 and 4 above.`
     );
@@ -352,7 +357,7 @@ Rules:
 
 # The active journey
 ${journeyBlock}${journey?.submission?.apiFlow
-      ? `\n${renderApiFlow(journey.submission.apiFlow)}`
+      ? `\n${renderApiFlow(journey.submission.apiFlow, (agent.paymentMethods ?? []).some((m) => m.key === "uaepay" && m.enabled !== false && m.via === "backend"))}`
       : journey?.submission?.requiresPayment
         ? `\n- The active journey is chargeable (${journey.submission.amount ?? 0} ${journey.submission.currency ?? "AED"}). After the user confirms the summary, call request_payment — a secure payment card appears in the chat automatically, so never paste a link; WAIT for confirmation. Only call submit_case once payment status is "paid".`
         : "\n- The active journey (if any) has no payment step."}${feeDeclaration}

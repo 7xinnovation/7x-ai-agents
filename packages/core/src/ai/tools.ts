@@ -1583,6 +1583,23 @@ export async function dispatchTool(
        * binding. An agent with one gateway resolves to it whatever the method
        * says, which is every other agent.
        */
+      /**
+       * NOQODI ON THE BACKEND'S GATEWAY IS NOT OURS TO TAKE (2026-11-23).
+       *
+       * Where the uaepay method is `via: "backend"`, the journey's save opens the
+       * Noqodi payment on Emirates Post's page and their confirm reads it. A
+       * payment on our own UAE Pay binding as well would be a second charge that
+       * their order never hears of.
+       */
+      if (chosenMethod === "uaepay" && offered.some((m) => m.key === "uaepay" && (m as { via?: string }).via === "backend")) {
+        return {
+          result:
+            "NOQODI IS TAKEN BY THE SAVE ON THIS AGENT, NOT BY request_payment: the journey's save tool opens the Noqodi (UAE Pay) payment on the backend's own page when payment_method is uaepay, exactly like the card. NOTHING has been charged. Call the save tool if it has not run yet, show the pay block it returns, and confirm with the confirm tool when they are back.",
+          state,
+          events,
+          isError: true,
+        };
+      }
       const pay = adapters.paymentFor?.(chosenMethod) ?? (adapters.payment ? { adapter: adapters.payment, binding: agent.integrations.payment, method: "default" } : undefined);
       if (!pay) return { result: "No payment gateway configured.", state, events, isError: true };
       /**
