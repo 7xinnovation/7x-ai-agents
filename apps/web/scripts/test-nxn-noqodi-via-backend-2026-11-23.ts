@@ -18,7 +18,9 @@ const src = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const integ = src("../lib/integrations.ts");
 check("the save is told which provider, from the recorded choice", /if \(\/\(rental_save\|renewal_save\)\$\/i\.test\(toolName\) && opts\.backendUaePay\) \{/.test(integ) && /pay\.paymentProvider = wantUaePay \? 1 : 0;/.test(integ));
 check("...a guest choosing Noqodi is refused before anything is saved", /if \(wantUaePay && !opts\.authenticated\) \{\s*return \{\s*result:\s*"UAE PAY NEEDS A SIGN-IN/.test(integ));
-check("...and the card on file is not sent with a Noqodi payment", /if \(wantUaePay\) delete pay\.savedCard;/.test(integ));
+check("...and the card on file is not sent with a Noqodi payment", /if \(wantUaePay\) \{\s*delete pay\.savedCard;/.test(integ));
+check("...nor is 'save my card' (25 Nov: the toggle's default reached a UAE PAY order)", /delete pay\.savedCard;\s*pay\.saveCreditCard = false;/.test(integ));
+check("a rental save with a payment link on Emirates Post's gateway is the normal path, not an escalation", /THE ORDER EXISTS AND IS NOT PAID YET — this is the expected result/.test(integ) && !/escalate — this needs a decision from 7X about which gateway/.test(integ));
 
 const route = src("../app/api/chat/route.ts");
 check("the route passes the choice as it stands when the save runs", /backendUaePay: noqodiViaBackend\(agent\.definition\)\s*\? \(\) => String\(liveState\.data\.payment_method \?\? ""\)\.trim\(\)\.toLowerCase\(\) === "uaepay"/.test(route));

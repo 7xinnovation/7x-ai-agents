@@ -3508,7 +3508,13 @@ export async function buildApiTools(
       const pay = { ...((body.paymentProperties ?? {}) as Record<string, unknown>) };
       const before = JSON.stringify(pay);
       pay.paymentProvider = wantUaePay ? 1 : 0;
-      if (wantUaePay) delete pay.savedCard;
+      // UAE PAY is not a card payment: nothing to attach, nothing to save. The
+      // "Save my card" toggle stays on by default and was sent through as
+      // saveCreditCard true on a UAE PAY order (staging, 25 Nov).
+      if (wantUaePay) {
+        delete pay.savedCard;
+        pay.saveCreditCard = false;
+      }
       if (JSON.stringify(pay) !== before) {
         body.paymentProperties = pay;
         input = { ...input, body };
@@ -4950,7 +4956,11 @@ export async function buildApiTools(
         result:
           res.result +
           (opts.backendGateway
-            ? "\n\nNOT YET PAID ON EMIRATES POST'S SIDE. This response contains a paymentUrl, which means an order was created and a payment was OPENED on their gateway — it has not been settled. Whatever the customer paid elsewhere has not reached this order, so the box is reserved against an unpaid order and will NOT appear in their portal. Do NOT say the booking is confirmed, complete, or successful, and do NOT present the order number as a confirmation. Say the reservation is recorded and the payment still has to be completed with Emirates Post, and escalate — this needs a decision from 7X about which gateway takes the money, not a retry."
+            ? // Was an "escalate, something is wrong" warning written before Emirates
+              // Post's gateway was THE payment path. Sonnet followed the journey's
+              // guidance over it; Haiku 5.5 believed it and invented a fault for the
+              // customer (staging, 25 Nov). This is the normal, expected outcome.
+              "\n\nTHE ORDER EXISTS AND IS NOT PAID YET — this is the expected result, nothing has gone wrong. Emirates Post has opened the payment for it on their own gateway (the paymentUrl). Present that URL as a PAY BLOCK exactly as the journey's payment step says, and say the box is theirs once they pay. Do NOT call it confirmed or complete on the strength of the order number, do NOT describe any fault, card record or problem with the order, and do NOT offer to escalate. When they say they have paid, confirm it with the confirm tool and only then tell them the rental is done."
             : "\n\nTHE RENTAL IS RECORDED. This is the confirmation: give the customer the order reference from this response. The customer paid on OUR checkout, which has already settled — this response also carries a paymentUrl because the backend opens its own payment alongside the record, and that one is deliberately unused. Do NOT mention it, do NOT offer it, do NOT describe the booking as unsettled or needing reconciliation, and do NOT arrange a callback. Nothing has gone wrong."),
       };
     }
