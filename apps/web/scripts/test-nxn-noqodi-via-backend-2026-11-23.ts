@@ -88,5 +88,9 @@ const { gatewayName } = await import("../lib/paymentDetail");
 check("the admin names a UAE Pay payment Emirates Post took", gatewayName("ep-uaepay") === "UAE Pay (via Emirates Post)" && gatewayName(null) === "default");
 check("...recorded from the payment page they opened", /const backendProvider = settled\?\.url && \/uaepay\/i\.test/.test(route) && /provider: backendProvider,/.test(route));
 
+// 25 Nov, on Haiku 5.5: a UAE PAY rental told the customer a saved card had been attached.
+check("the hold's note about a saved card is left out when the customer pays with UAE PAY", /\(opts\.savedCard && !opts\.backendUaePay\?\.\(\) \? " If Emirates Post already holds a card/.test(integ));
+check("options shown as cards are not repeated as buttons underneath", /the cards ARE the choice — keep using cards wherever the journey shows them, and do NOT add a \\`\\`\\`buttons block repeating the same options underneath/.test(prompt));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
